@@ -1865,6 +1865,10 @@ def follow_pr(repo, t):
         pr = json.loads(p.stdout)
     except ValueError:
         return
+    # gh took a while: accept, a verdict or an event may have changed the task meanwhile
+    t = repo.task(t["id"])
+    if not followed(t):
+        return
     g = t.setdefault("gh", {})
     pr_name = pr_short(t["pr"])
     state = (pr.get("state") or "OPEN").lower()
@@ -1903,6 +1907,14 @@ def follow_pr(repo, t):
     send_back(repo, t, lines, " ".join(asks))
 
 
+def worker_idle(t):
+    """Is the worker between turns, so a message typed into it lands as a new turn?
+    Not when it needs you itself: it's blocked on a prompt (or failed mid-turn)."""
+    if t["status"] != "needs":
+        return True
+    return (t.get("why") or "").startswith(("Reviewer", "Ended its turn", "PR "))
+
+
 def send_back(repo, t, lines, ask):
     """PR feedback goes to the task's worker, which fixes it and runs ready again.
     An unfinished review is moot once the work changes: close it, giving its round back."""
@@ -1913,6 +1925,13 @@ def send_back(repo, t, lines, ask):
     elif r.get("block"):
         close_reviewer(t)
     why = lines[0].removeprefix(f"{t['id']}'s ").rstrip(".")
+    if not worker_idle(t):
+        # typing now would answer its prompt: keep the feedback for the person
+        write_json(repo.task_path(t["id"]), t)
+        for line in lines:
+            news(repo, t, "pr-feedback", f"{line.rstrip('.')}. Not sent to its worker, which "
+                 f"is waiting on you: `bullpen tell {t['id']}` it when it's free")
+        return
     if rex_alive(t.get("session"), t.get("block")):
         rex_type(t["session"], t["block"], clip(f"{ask} Then commit and run your ready command again.", 2000))
         t.update(status="working", why=None, last=None)

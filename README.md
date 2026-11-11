@@ -82,7 +82,8 @@ every 2 minutes (one `gh pr view` per PR; none when no task has one open):
   `bullpen accept` (merged) or `drop` (closed) cleans up.
 
 Each failure or comment is reported once. If the worker's pane is gone, the task
-needs you instead. The board and `show` say what GitHub last said ("checks
+needs you instead; if the worker is waiting on you (a permission prompt), the news
+says so and nothing is typed into it. The board and `show` say what GitHub last said ("checks
 failing", "1 new comment"). In local mode there's no PR, so nothing is looked at.
 
 ### Keys

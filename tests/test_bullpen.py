@@ -844,6 +844,46 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(t["why"], "PR checks failed: test, ci/build")
         self.assertIn("`bullpen resume BP-1` restarts it", self.news_lines()[-1])
 
+    def test_feedback_is_not_typed_into_a_worker_blocked_on_a_prompt(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        self.commit_and_ready(tid)
+        self.verdict(tid, "changes", "Fix the empty case.")  # back to the worker
+        self.bp("_event", worker, "blocked", "permission", "Allow rm?")
+        typed_to_worker = len([1 for b, _ in self.typed() if b == worker])
+        self.github(comments=[{"id": "c1", "author": {"login": "ann"}, "body": "Cover logout too."}])
+        self.bp("_prs")
+        self.assertEqual(len([1 for b, _ in self.typed() if b == worker]), typed_to_worker)
+        t = self.show(tid)
+        self.assertEqual(t["status"], "needs")
+        self.assertIn("Allow rm?", t["why"])
+        self.assertIn("Not sent to its worker", self.news_lines()[-1])
+        self.bp("_prs")  # recorded: not news again
+        self.assertIn("Not sent to its worker", self.news_lines()[-1])
+        self.assertEqual(len([l for l in self.news_lines() if "new comment" in l]), 1)
+
+    def test_a_task_accepted_while_gh_answers_stays_accepted(self):
+        tid = self.start_task()
+        self.bp("config", "--review", "off")
+        self.commit_and_ready_no_review(tid)
+        self.github(statusCheckRollup=self.FAILING)
+        # gh is slow: the person accepts the task while it answers
+        slow = (self.fake / "gh").read_text().replace(
+            'elif sys.argv[1:3] == ["pr", "view"]:',
+            'elif sys.argv[1:3] == ["pr", "view"]:\n'
+            '    import subprocess; subprocess.run(json.loads((d / "meanwhile").read_text()), check=True)')
+        (self.fake / "gh").write_text(slow)
+        accepted = json.loads(self.bp("show", tid, "--json").stdout)
+        accepted.update(status="done", block=None, worktree=None)
+        path = next((self.tmp / "state").rglob(f"tasks/{tid}.json"))
+        tmp = self.tmp / "accepted.json"
+        tmp.write_text(json.dumps(accepted))
+        (self.fake / "meanwhile").write_text(json.dumps(["cp", str(tmp), str(path)]))
+        self.bp("_prs")
+        t = self.show(tid)
+        self.assertEqual(t["status"], "done")
+        self.assertFalse(any("checks failed" in l for l in self.news_lines()))
+
     def test_nothing_to_follow_calls_no_gh(self):
         tid = self.start_task()
         self.bp("_prs")  # working, no PR yet
