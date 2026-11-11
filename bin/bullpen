@@ -9,6 +9,7 @@ workers' program status into news lines typed into the coordinator's pane.
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -319,6 +320,21 @@ def news(repo, task, event, text):
         (STATE / "outbox").touch()  # the watcher retries while this exists
 
 
+def from_coordinator(repo):
+    """Was this command run in the coordinator's own pane? Rex gives each pane its
+    block ID as REX_BLOCK. Unsure (no REX_BLOCK, or the stored block is out of date)
+    counts as no."""
+    block = os.environ.get("REX_BLOCK")
+    return bool(block) and block == (repo.cfg.get("coordinator") or {}).get("block")
+
+
+def tell_coordinator(repo, task, event, text):
+    """News of something the person may have done elsewhere (the board, a shell).
+    From the coordinator's own pane it would only repeat what it just ran."""
+    if not from_coordinator(repo):
+        news(repo, task, event, text)
+
+
 def has_draft(session, block):
     """Is something half-typed in the coordinator's input? Typing news there would
     send it along. (Reads Claude Code's input box: the last line starting ❯.)"""
@@ -435,9 +451,20 @@ def ensure_board(repo, session):
     print(f"board started: {block}")
 
 
+def watcher_stamp():
+    """What a watcher runs: a hash of watch.lua and of this script. A watcher started
+    from other contents is stale."""
+    return {name: hashlib.sha256(Path(path).read_bytes()).hexdigest()
+            for name, path in (("watch", WATCH_LUA), ("bullpen", SELF))}
+
+
 def ensure_watcher(session):
+    """Start the watcher unless a current one runs; one started from an older
+    watch.lua or bullpen script is closed and replaced."""
     w = read_json(STATE / "watcher.json", {})
-    if rex_alive(w.get("session"), w.get("block")):
+    stamp = watcher_stamp()
+    running = rex_alive(w.get("session"), w.get("block"))
+    if running and w.get("stamp") == stamp:
         return
     argv = [shutil.which(REX) or REX, "do", "--all", str(WATCH_LUA),
             f"bin={SELF}", f"state={STATE}"]
@@ -445,9 +472,25 @@ def ensure_watcher(session):
     r = rex_api(session, "session.new_block", {
         "flavor": TERMINAL, "label": "bullpen: watcher",
         "options": {"command": with_state(argv), "cwd": str(Path.home())}})
+    if not r or not r.get("block_id"):
+        raise Fail("couldn't start the watcher")
     block = r["block_id"]
-    write_json(STATE / "watcher.json", {"block": block, "session": session})
-    print(f"watcher started: {block}")
+    if running:  # only once the new one is up
+        rex_close(w.get("session"), w["block"])
+    write_json(STATE / "watcher.json", {"block": block, "session": session, "stamp": stamp})
+    print(f"watcher restarted (watch.lua or bullpen changed): {block}" if running
+          else f"watcher started: {block}")
+
+
+def refresh_watcher(repo):
+    """After a merge that may have changed the watcher: make sure a current one runs.
+    Never fails the command that called it."""
+    try:
+        session = session_for(repo)
+        if session:
+            ensure_watcher(session)
+    except Fail as e:
+        print(f"bullpen: {e}", file=sys.stderr)
 
 
 def cmd_add(args):
@@ -860,12 +903,19 @@ def cmd_accept(args):
     remove_worktree(repo, t, force=True)
     t.update(status="done", block=None, worktree=None)
     repo.save_task(t)
+    mode = repo.cfg.get("merge", "rebase")
     if t.get("pr"):
         print(f"{t['id']} done (merged {t['pr']})")
+        how = (f"{pr_short(t['pr'])} was merged outside bullpen" if merged_outside
+               else f"merged {pr_short(t['pr'])}, {mode}")
     elif t.get("merged"):
         print(f"{t['id']} done (merged into {t['base']}: {t['merged'][:12]})")
+        how = f"merged into {t['base']}, {mode}"
     else:
         print(f"{t['id']} done")
+        how = "nothing to merge"
+    tell_coordinator(repo, t, "accepted", f"{t['id']} accepted ({how})")
+    refresh_watcher(repo)  # the merge may have changed the watcher itself
 
 
 def checked_out_at(repo, branch):
@@ -954,6 +1004,7 @@ def cmd_drop(args):
     t.update(status="dropped", block=None, worktree=None)
     repo.save_task(t)
     print(f"{t['id']} dropped")
+    tell_coordinator(repo, t, "dropped", f"{t['id']} dropped")
 
 
 def cmd_ls(args):

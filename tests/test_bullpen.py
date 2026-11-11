@@ -355,6 +355,108 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.show(tid)["status"], "dropped")
         self.assertFalse(Path(wt).exists())
 
+    def ready_with_a_commit(self):
+        self.bp("config", "--review", "off")
+        tid = self.start_task()
+        wt = self.show(tid)["worktree"]
+        (Path(wt) / "fix.txt").write_text("fixed\n")
+        sh("git", "-C", wt, "add", ".")
+        sh("git", "-C", wt, "commit", "-qm", "Fix it")
+        self.bp("ready", tid, "--summary", "done")
+        return tid
+
+    def test_accept_from_elsewhere_is_news(self):
+        tid = self.ready_with_a_commit()
+        self.bp("accept", tid)  # REX_BLOCK is "me": the board, say, not the coordinator
+        self.assertEqual(self.typed()[-1], ("blk1", "bullpen · BP-1 accepted (merged PR #7, rebase)"))
+
+    def test_accept_from_the_coordinators_pane_is_no_news(self):
+        tid = self.ready_with_a_commit()
+        before = self.typed()
+        self.env["REX_BLOCK"] = "blk1"
+        self.bp("accept", tid)
+        self.assertEqual(self.show(tid)["status"], "done")
+        self.assertEqual(self.typed(), before)
+
+    def test_accept_without_a_pane_of_its_own_is_news(self):
+        tid = self.ready_with_a_commit()
+        del self.env["REX_BLOCK"]  # can't tell where it ran: post
+        self.bp("accept", tid)
+        self.assertIn("BP-1 accepted", self.typed()[-1][1])
+
+    def test_accept_of_a_pr_merged_outside_says_so(self):
+        tid = self.ready_with_a_commit()
+        (self.fake / "pr.json").write_text(json.dumps({"state": "MERGED"}))
+        self.bp("_prs")
+        self.bp("accept", tid)
+        self.assertEqual(self.typed()[-1][1], "bullpen · BP-1 accepted (PR #7 was merged outside bullpen)")
+
+    def test_drop_is_news_from_elsewhere_only(self):
+        self.start_task("First")
+        self.bp("add", "Second", "--brief", "x")
+        self.bp("start", "BP-2")
+        self.bp("drop", "BP-1")
+        self.assertEqual(self.typed()[-1], ("blk1", "bullpen · BP-1 dropped"))
+        before = self.typed()
+        self.env["REX_BLOCK"] = "blk1"
+        self.bp("drop", "BP-2")
+        self.assertEqual(self.show("BP-2")["status"], "dropped")
+        self.assertEqual(self.typed(), before)
+
+    def watcher(self):
+        return json.loads((self.tmp / "state" / "watcher.json").read_text())
+
+    def make_watcher_stale(self, **change):
+        w = self.watcher()
+        w["stamp"] = {**w["stamp"], **change}
+        (self.tmp / "state" / "watcher.json").write_text(json.dumps(w))
+
+    def test_up_restarts_a_stale_watcher(self):
+        self.bp("up")
+        old = self.watcher()
+        self.assertEqual(sorted(old["stamp"]), ["bullpen", "watch"])
+        self.make_watcher_stale(watch="an older watch.lua")
+        out = self.bp("up").stdout
+        new = self.watcher()
+        self.assertIn(f"watcher restarted (watch.lua or bullpen changed): {new['block']}", out)
+        self.assertNotEqual(new["block"], old["block"])
+        self.assertEqual(new["stamp"], old["stamp"])  # what runs now
+        self.assertFalse((self.fake / "alive" / old["block"]).exists())  # the old one is closed
+        self.assertTrue((self.fake / "alive" / new["block"]).exists())
+        self.assertEqual(len(self.api("session.new_block")), 2)
+        self.bp("up")  # current now: left alone
+        self.assertEqual(self.watcher(), new)
+        self.assertEqual(len(self.api("session.new_block")), 2)
+
+    def test_a_watcher_from_before_stamps_is_restarted(self):
+        self.bp("up")
+        old = self.watcher()
+        (self.tmp / "state" / "watcher.json").write_text(
+            json.dumps({"block": old["block"], "session": old["session"]}))
+        self.bp("up")
+        self.assertNotEqual(self.watcher()["block"], old["block"])
+        self.assertFalse((self.fake / "alive" / old["block"]).exists())
+
+    def test_accept_restarts_a_stale_watcher_and_leaves_a_current_one(self):
+        tid = self.ready_with_a_commit()
+        old = self.watcher()
+        self.bp("drop", tid)  # nothing merged: the watcher isn't looked at
+        self.bp("add", "Second", "--brief", "x")
+        self.bp("start", "BP-2")
+        self.bp("ready", "BP-2")
+        self.bp("accept", "BP-2")
+        self.assertEqual(self.watcher(), old)  # current: left alone
+        self.assertTrue((self.fake / "alive" / old["block"]).exists())
+        self.bp("add", "Third", "--brief", "x")
+        self.bp("start", "BP-3")
+        self.bp("ready", "BP-3")
+        self.make_watcher_stale(bullpen="an older bullpen")
+        self.bp("accept", "BP-3")
+        new = self.watcher()
+        self.assertNotEqual(new["block"], old["block"])
+        self.assertFalse((self.fake / "alive" / old["block"]).exists())
+        self.assertEqual(len(self.api("session.new_block")), 2)
+
     def commit_and_ready(self, tid, n=1):
         wt = self.show(tid)["worktree"]
         (Path(wt) / f"fix{n}.txt").write_text("fixed\n")
@@ -1095,6 +1197,27 @@ class LocalModeTest(unittest.TestCase):
         self.bp("drop", tid)
         self.assertEqual(self.show(tid)["status"], "dropped")
         self.assertFalse(Path(wt).exists())
+        self.assertEqual(self.typed()[-1], ("blk1", "bullpen · BP-1 dropped"))
+
+    def test_accept_is_news_naming_the_base_and_the_merge(self):
+        self.bp("config", "--merge", "squash")
+        tid, wt = self.ready_task()
+        self.bp("accept", tid)
+        self.assertEqual(self.typed()[-1], ("blk1", "bullpen · BP-1 accepted (merged into main, squash)"))
+
+    def test_accept_from_the_coordinators_pane_is_no_news(self):
+        tid, wt = self.ready_task()
+        before = self.typed()
+        self.env["REX_BLOCK"] = "blk1"
+        self.bp("accept", tid)
+        self.accepted(tid, wt)
+        self.assertEqual(self.typed(), before)
+
+    def test_accept_with_nothing_to_merge_says_so(self):
+        tid = self.start_task()
+        self.bp("ready", tid)
+        self.bp("accept", tid)
+        self.assertEqual(self.typed()[-1][1], "bullpen · BP-1 accepted (nothing to merge)")
 
 
 class BoardTest(unittest.TestCase):

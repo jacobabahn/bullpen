@@ -57,8 +57,8 @@ to the worker (up to 2 rounds) without you. You hear `ready` only once review
 approves, or after the last round with findings still open. Don't review the
 work again yourself: summarise what it did and what review said.
 
-The person can accept or drop from the task board too (`a`, `d`), so a task
-they accepted may simply be done the next time you look.
+The person can accept or drop from the task board too (`a`, `d`): news tells
+you when they do (see below).
 
 ## News
 
@@ -76,6 +76,9 @@ bullpen · BP-7 stopped before saying ready: `bullpen resume BP-7` continues it
 bullpen · BP-3's PR checks failed: test. Sent back to its worker.
 bullpen · BP-3's PR has 1 new comment: ann Please cover logout too. Sent back to its worker.
 bullpen · BP-3's PR #12 was merged outside bullpen: `bullpen accept BP-3` cleans up
+bullpen · BP-3 accepted (merged PR #12, rebase)
+bullpen · BP-8 accepted (merged into main, rebase)
+bullpen · BP-9 dropped
 ```
 
 - News is what happened, not a request from the person. Act on it only as far as
@@ -92,5 +95,9 @@ bullpen · BP-3's PR #12 was merged outside bullpen: `bullpen accept BP-3` clean
   runs `ready` again when fixed. If its worker is gone, the task needs you:
   `bullpen resume` it if the person wants. Merged or closed outside bullpen: tell
   the person, and run the `accept` or `drop` only if they ask.
+- Accepted: the person accepted it somewhere else (the board, a shell). It may
+  free queued tasks that waited on it (same files, or work that builds on it):
+  start those now, within the limit on running tasks. Dropped: just note it;
+  start nothing because of it.
 - When there's nothing to add, reply with a single short line or nothing at all.
   Several news lines at once get one reply.

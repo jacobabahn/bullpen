@@ -41,6 +41,12 @@ tab. `bullpen config --workers tabs` gives new workers their own tabs instead.
 After a Rex server restart, run `bullpen up` again: it finds its panes by their
 labels, marks workers whose panes are gone as stopped, and restarts the watcher.
 
+The watcher is also replaced when it is out of date. `up` and `accept` compare
+`lua/watch.lua` and `bin/bullpen` with what the running watcher was started from
+(hashes kept in `watcher.json`); if either changed, say because a merge or a
+pull brought a new version, they close the old watcher and start a new one. A
+current watcher is left alone.
+
 The task board (`bullpen board`) sits in a narrow pane beside the coordinator.
 It groups tasks by what you do next: needs you, ready to accept, in review,
 working, queued. Each task shows how long it has been there and, on a second
@@ -56,6 +62,11 @@ reviewer), `a` accepts and `d` drops (each asks y/n first), `t` tells, `p`
 peeks, `v` shows its diff, `s` starts, `r` resumes, `c` goes back to the
 coordinator, `n` selects the next task that needs you. `?` lists them all.
 `bullpen up --no-board` leaves the board out.
+
+Accepting or dropping from the board (or a shell) is news to the coordinator:
+`BP-3 accepted (merged PR #12, rebase)`, `BP-3 dropped`. That is how it learns
+it can start queued tasks that waited for the accepted one. Run from the
+coordinator's own pane, `accept` and `drop` post nothing: it already knows.
 
 ### Review
 
