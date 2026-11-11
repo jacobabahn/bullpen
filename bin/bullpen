@@ -49,6 +49,7 @@ DEFAULT_CONFIG = {
     "news": "type",       # "type": typed into the coordinator's pane; "monitor": it follows `news --follow`
     "worker_model": None,    # claude's --model for workers ("default": none; None: the command's own)
     "reviewer_model": None,  # the same for reviewers
+    "auto_accept": False,    # accept a task by itself once review approves it
 }
 
 TERMINAL = "com.superlogical.terminal.shell"
@@ -697,6 +698,7 @@ def cmd_add(args):
          "block": None, "session": None, "pr": None, "why": None, "last": None}
     if after:
         t["after"] = after
+    set_auto_accept(t, args)
     (repo.dir / "briefs").mkdir(parents=True, exist_ok=True)
     (repo.dir / "briefs" / f"{tid}.md").write_text(brief.rstrip() + "\n")
     repo.save_task(t)
@@ -938,6 +940,7 @@ def cmd_start(args):
     session = session_for(repo, args)
     if not session:
         raise Fail("no Rex session: run `bullpen up` first or pass --session")
+    set_auto_accept(t, args)
     start_task(repo, t, session, args.model)
     print(f"{t['id']} started in {t['worktree']} (branch {t['branch']}, pane {t['block']})")
 
@@ -1279,11 +1282,15 @@ def cmd_verdict(args):
     unindex_block(r["block"])
     r["block"] = None
     pr = where(t)
+    t.pop("auto_wait", None)  # a new verdict decides again
     if args.verdict == "approve":
         t.update(status="ready", why=None)
         repo.save_task(t)
-        news(repo, t, "ready", f"{t['id']} is ready ({commits(t.get('commits') or 0)}, {pr}), "
-             f"approved by review: {t['title']}")
+        if auto_accepts(repo, t):
+            auto_accept(repo, t)
+        else:
+            news(repo, t, "ready", f"{t['id']} is ready ({commits(t.get('commits') or 0)}, {pr}), "
+                 f"approved by review: {t['title']}")
     elif r["round"] < rounds:
         msg = (f"The reviewer asked for changes (review round {r['round']} of {rounds}). Read "
                f"{findings}, fix what you agree with, commit, and run your ready command again. "
@@ -1306,6 +1313,66 @@ def cmd_verdict(args):
     rex_close(*reviewer)  # last: this closes the pane we may be running in
 
 
+# ---------- auto-accept ----------
+#
+# With `config --auto-accept on`, an approve verdict runs the normal accept itself:
+# the person said in advance that an approval is enough. A task's own "auto_accept"
+# (`add`/`start --no-auto-accept`, or `--auto-accept`) wins over the config's. In PR
+# mode it waits for the PR's checks ("auto_wait"), which the PR follow-up looks at.
+
+
+def set_auto_accept(t, args):
+    if getattr(args, "auto_accept", None) is not None:
+        t["auto_accept"] = args.auto_accept
+
+
+def auto_accepts(repo, t):
+    own = t.get("auto_accept")
+    return bool(repo.cfg.get("auto_accept") if own is None else own)
+
+
+def auto_accept(repo, t):
+    """An approved task: accept it now, or, with a PR whose checks are still running,
+    once they pass. Anything that stops it leaves the task ready, with news."""
+    if t.get("pr") and not t.get("local"):
+        state = pr_checks_now(repo, t)
+        if state == "failing":
+            news(repo, t, "ready", f"{t['id']} is ready ({pr_short(t['pr'])}), approved by review, "
+                 f"but not auto-accepted: its PR's checks are failing: {t['title']}")
+            return
+        if state == "running":
+            t["auto_wait"] = True
+            write_json(repo.task_path(t["id"]), t)  # not save_task: the status didn't change
+            news(repo, t, "ready", f"{t['id']} is ready ({pr_short(t['pr'])}), approved by review; "
+                 f"it auto-accepts once its PR's checks pass: {t['title']}")
+            return
+    run_auto_accept(repo, t)
+
+
+def pr_checks_now(repo, t):
+    """"failing", "running", or "passing" (no checks counts as passing). Unsure (gh
+    failed) counts as running: the PR follow-up looks again."""
+    p = run([repo.gh(), "pr", "view", t["pr"], "--json", PR_FIELDS], cwd=repo.root, check=False)
+    try:
+        summary, _ = checks(json.loads(p.stdout)) if p.returncode == 0 else ("running", [])
+    except ValueError:
+        return "running"
+    return summary or "passing"
+
+
+def run_auto_accept(repo, t):
+    """The normal accept, as if the person ran it. A refused merge leaves the task ready."""
+    os.chdir(repo.root)  # we may be running in the worktree accept removes
+    try:
+        cmd_accept(argparse.Namespace(id=t["id"], auto=True, repo=repo))
+    except Fail as e:
+        t = repo.task(t["id"])
+        t.pop("auto_wait", None)
+        write_json(repo.task_path(t["id"]), t)
+        news(repo, t, "ready", f"{t['id']} is ready ({where(t)}), approved by review, but the "
+             f"auto-accept was refused: {e}. Send it back to rebase: {t['title']}")
+
+
 def cmd_note(args):
     """Say on the board what a task needs, in a line (cleared when its status changes)."""
     repo = Repo(repo_root())
@@ -1323,7 +1390,7 @@ def remove_worktree(repo, t, force=False):
 
 
 def cmd_accept(args):
-    repo = Repo(repo_root())
+    repo = getattr(args, "repo", None) or Repo(repo_root())
     t = repo.task(args.id)
     merged_outside = (t.get("gh") or {}).get("state") == "merged"
     if t["status"] != "ready" and not merged_outside:
@@ -1356,7 +1423,10 @@ def cmd_accept(args):
     else:
         print(f"{t['id']} done")
         how = "nothing to merge"
-    tell_coordinator(repo, t, "accepted", f"{t['id']} accepted ({how})")
+    if getattr(args, "auto", False):
+        news(repo, t, "accepted", f"{t['id']} approved by review and auto-accepted ({how})")
+    else:
+        tell_coordinator(repo, t, "accepted", f"{t['id']} accepted ({how})")
     if how != "nothing to merge":
         rebase_others(repo, t)
     start_queued(repo, t, "accepted")
@@ -1566,6 +1636,8 @@ def cmd_show(args):
             print(f"{k:>9}: none; local branch, merged into {t['base']} by accept")
     if t.get("after"):
         print(f"    after: {', '.join(t['after'])}")
+    if t.get("auto_accept") is not None:
+        print(f"     auto: {'accepts by itself once approved' if t['auto_accept'] else 'kept for you (--no-auto-accept)'}")
     if waits_phrase(repo, t):
         print(f"    waits: {waits_phrase(repo, t)}")
     if pr_phrase(t):
@@ -1691,6 +1763,8 @@ def cmd_config(args):
             repo.cfg[f"{role}_model"] = model  # "default" too: it drops the command's own --model
     if args.board_layout:
         repo.cfg["board_layout"] = args.board_layout
+    if args.auto_accept:
+        repo.cfg["auto_accept"] = args.auto_accept == "on"
     repo.save()
     reindex(repo)
     models = {role: model_phrase(repo.cfg[role], repo.cfg.get(f"{role}_model"))
@@ -2366,6 +2440,14 @@ def follow_pr(repo, t):
     new_notes = [(k, who, what) for k, who, what in feedback(pr) if k not in seen]
     g["seen"] = sorted(seen | {k for k, _, _ in new_notes})
     g["new"] = (g.get("new") or 0) + len(new_notes)
+    if t.get("auto_wait") and (failed or new_notes):
+        t.pop("auto_wait")  # the person (or the worker) has something to look at first
+        why = "its PR's checks failed" if failed else "its PR has new comments"
+        news(repo, t, "ready", f"{t['id']} not auto-accepted: {why}")
+    elif t.get("auto_wait") and summary != "running" and t["status"] == "ready":
+        write_json(repo.task_path(t["id"]), t)
+        run_auto_accept(repo, t)
+        return
     if not new_failed and not new_notes:
         write_json(repo.task_path(t["id"]), t)  # not save_task: the status didn't change
         return
@@ -2466,6 +2548,10 @@ def main(argv=None):
     p.add_argument("--base", help="branch to start from and open the PR against")
     p.add_argument("--after", action="append", metavar="ID",
                    help="a task this one waits on (repeat, or comma-separated): it starts once they're accepted")
+    p.add_argument("--auto-accept", dest="auto_accept", action="store_true", default=None,
+                   help="accept it by itself once review approves it, whatever config --auto-accept says")
+    p.add_argument("--no-auto-accept", dest="auto_accept", action="store_false",
+                   help="keep it for you to accept even with config --auto-accept on")
     p.set_defaults(fn=cmd_add)
 
     p = sub.add_parser("after", help="set the tasks a task waits on (--none: nothing)")
@@ -2480,6 +2566,10 @@ def main(argv=None):
     p.add_argument("--session")
     p.add_argument("--force", action="store_true",
                    help="start even while the usage limit is reached or what it waits on isn't done")
+    p.add_argument("--auto-accept", dest="auto_accept", action="store_true", default=None,
+                   help="accept it by itself once review approves it, whatever config --auto-accept says")
+    p.add_argument("--no-auto-accept", dest="auto_accept", action="store_false",
+                   help="keep it for you to accept even with config --auto-accept on")
     p.set_defaults(fn=cmd_start)
 
     p = sub.add_parser("resume", help="restart a stopped worker, continuing its conversation")
@@ -2561,6 +2651,8 @@ def main(argv=None):
     p.add_argument("--worker-model", metavar="MODEL", help="the same, for workers only")
     p.add_argument("--reviewer-model", metavar="MODEL", help="the same, for reviewers only")
     p.add_argument("--board-layout", choices=["grouped", "compact"], help="how the board lists tasks")
+    p.add_argument("--auto-accept", choices=["on", "off"],
+                   help="accept (merge) a task by itself once review approves it (default off)")
     p.set_defaults(fn=cmd_config)
 
     p = sub.add_parser("news", help="print news logged since the last time; --follow keeps printing")

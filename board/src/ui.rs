@@ -141,7 +141,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let area = full;
     let (w, h) = (area.width as usize, area.height as usize);
 
-    let rounds = app.cfg.review_rounds;
     let layout = app.cfg.layout;
     let groups = model::board_groups(&app.tasks, app.finished);
     let cur_id = app.current().map(|t| t.id.clone());
@@ -153,8 +152,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     // header: the repository, and how many tasks are in each state
     let name = fit(&app.repo_name, w.saturating_sub(2).min(24));
-    let count = counts(&app.tasks, w.saturating_sub(width(&name) + 5));
+    // a small marker when approved tasks accept themselves
+    let auto = if app.cfg.auto_accept { " · auto-accept" } else { "" };
+    let count = counts(&app.tasks, w.saturating_sub(width(&name) + width(auto) + 5));
     put(buf, area, 0, w.saturating_sub(2 + count.width()).max(1), count);
+    put(buf, area, 0, 1 + width(&name), span(auto, dim()));
     put(buf, area, 0, 1, span(name, bold()));
 
     let now = model::now();
@@ -171,7 +173,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             if layout == Layout::Grouped {
                 // what a task needs from you, GitHub said, or the usage limit gets two lines; anything else one
                 let lines = if t.flagged() || t.is_limited() || !model::pr_phrase(t).is_empty() { 2 } else { 1 };
-                for d in model::wrap(&model::task_detail(t, rounds, now), detail_w, lines) {
+                for d in model::wrap(&model::detail_with_auto(t, &app.cfg, now), detail_w, lines) {
                     if !d.is_empty() {
                         rows.push(Row::Detail(t, d));
                     }
@@ -256,7 +258,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         put(buf, area, yb, 1, span("─".repeat(w.saturating_sub(3)), dim()));
         put(buf, area, yb + 1, 1, span(fit(&format!("{}  {}", cur.id, cur.title), w.saturating_sub(2)), bold()));
         let stat = model::task_stat(cur);
-        let mut lines = model::wrap(&model::task_detail(cur, rounds, now), w.saturating_sub(2), if stat.is_empty() { 3 } else { 2 });
+        let mut lines = model::wrap(&model::detail_with_auto(cur, &app.cfg, now), w.saturating_sub(2), if stat.is_empty() { 3 } else { 2 });
         if !stat.is_empty() {
             lines.push(stat.into());
         }

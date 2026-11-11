@@ -91,6 +91,12 @@ pub struct Task {
     /// the tasks it waits on (`bullpen add --after`, `bullpen after`)
     #[serde(default, deserialize_with = "lenient")]
     pub after: Option<Vec<String>>,
+    /// its own say over config's auto_accept (`--auto-accept`, `--no-auto-accept`)
+    #[serde(default, deserialize_with = "lenient")]
+    pub auto_accept: Option<bool>,
+    /// approved, and auto-accepts once its PR's checks pass
+    #[serde(default, deserialize_with = "lenient")]
+    pub auto_wait: Option<bool>,
     /// those not done yet, worked out from the other tasks: "BP-8", "BP-9 (dropped)"
     #[serde(skip)]
     pub waits: Vec<String>,
@@ -152,6 +158,8 @@ pub struct Config {
     pub layout: Layout,
     pub review_rounds: u32,
     pub merge: String,
+    /// approved tasks accept themselves (`bullpen config --auto-accept on`)
+    pub auto_accept: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,6 +194,7 @@ impl Config {
             layout: if v["board_layout"].as_str() == Some("compact") { Layout::Compact } else { Layout::Grouped },
             review_rounds: v["review_rounds"].as_u64().unwrap_or(2) as u32,
             merge: v["merge"].as_str().unwrap_or("rebase").to_string(),
+            auto_accept: v["auto_accept"].as_bool().unwrap_or(false),
         }
     }
 }
@@ -362,6 +371,31 @@ pub fn task_detail(t: &Task, rounds: u32, at: DateTime<FixedOffset>) -> String {
         return text;
     }
     format!("{text} {}.", capitalize(&gh)).trim().to_string()
+}
+
+/// What auto-accept does with the task, when it isn't what the config says for all,
+/// or it's waiting: "" otherwise. `on` is the config's auto_accept.
+pub fn auto_phrase(t: &Task, on: bool) -> &'static str {
+    if t.closed() {
+        ""
+    } else if t.auto_wait == Some(true) && t.status == "ready" {
+        "Auto-accepts once its checks pass."
+    } else if on && t.auto_accept == Some(false) {
+        "Kept for you: no auto-accept."
+    } else if !on && t.auto_accept == Some(true) {
+        "Auto-accepts once approved."
+    } else {
+        ""
+    }
+}
+
+/// task_detail, then what auto-accept does with it.
+pub fn detail_with_auto(t: &Task, cfg: &Config, at: DateTime<FixedOffset>) -> String {
+    let text = task_detail(t, cfg.review_rounds, at);
+    match auto_phrase(t, cfg.auto_accept) {
+        "" => text,
+        auto => format!("{text} {auto}").trim().to_string(),
+    }
 }
 
 fn capitalize(text: &str) -> String {
@@ -599,6 +633,22 @@ mod tests {
             ]
         );
         assert_eq!(board_groups(&tasks, true).last().unwrap().0, "Finished");
+    }
+
+    #[test]
+    fn auto_accept_says_when_a_task_differs_or_waits() {
+        let cfg = |on| Config { layout: Layout::Grouped, review_rounds: 2, merge: "rebase".into(), auto_accept: on };
+        let approved = Some(Review { round: Some(1), verdict: Some("approved".into()) });
+        let t = Task { pr: Some("https://github.com/me/repo/pull/4".into()), review: approved, ..task("BP-1", "ready") };
+        assert_eq!(detail_with_auto(&t, &cfg(true), now()), "PR #4, approved by review.");
+        let held = Task { auto_accept: Some(false), ..t.clone() };
+        assert_eq!(detail_with_auto(&held, &cfg(true), now()), "PR #4, approved by review. Kept for you: no auto-accept.");
+        assert_eq!(detail_with_auto(&held, &cfg(false), now()), "PR #4, approved by review.");
+        let own = Task { auto_accept: Some(true), ..task("BP-1", "todo") };
+        assert_eq!(detail_with_auto(&own, &cfg(false), now()), "Not started. s starts it. Auto-accepts once approved.");
+        let waiting = Task { auto_wait: Some(true), ..t.clone() };
+        assert_eq!(detail_with_auto(&waiting, &cfg(true), now()), "PR #4, approved by review. Auto-accepts once its checks pass.");
+        assert_eq!(auto_phrase(&Task { status: "done".into(), ..held }, true), "");
     }
 
     #[test]

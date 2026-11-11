@@ -1413,6 +1413,115 @@ class BullpenTest(unittest.TestCase):
         self.verdict(tid, "changes", "The fix misses the empty case.")
         self.assertEqual(self.sent_back_by(tid), "review")
 
+    # ---- auto-accept ----
+
+    RUNNING = [{"__typename": "CheckRun", "name": "test", "status": "IN_PROGRESS", "conclusion": ""}]
+    PASSING = [{"__typename": "CheckRun", "name": "test", "status": "COMPLETED", "conclusion": "SUCCESS"}]
+
+    def approved_with_auto_accept(self, *flags):
+        """A task started with auto-accept on (and flags on its start), approved by review."""
+        self.bp("up")
+        self.bp("config", "--auto-accept", "on")
+        tid = self.bp("add", "Fix the thing", "--brief", "Make it work.").stdout.strip()
+        self.bp("start", tid, *flags)
+        wt = self.show(tid)["worktree"]
+        self.commit_and_ready(tid)
+        self.bp("verdict", tid, "approve", "--summary", "Looks right.", cwd=wt)  # from the reviewer's worktree
+        return tid, wt
+
+    def merges(self):
+        return [a for a in (json.loads(l)["argv"] for l in (self.fake / "gh.log").read_text().splitlines())
+                if a[:2] == ["pr", "merge"]]
+
+    def test_auto_accept_merges_an_approved_pr(self):
+        self.assertFalse(json.loads(self.bp("config").stdout)["auto_accept"])  # off by default
+        tid, wt = self.approved_with_auto_accept()
+        self.assertEqual(self.show(tid)["status"], "done")
+        self.assertFalse(Path(wt).exists())
+        self.assertEqual(len(self.merges()), 1)
+        self.assertIn("bullpen · BP-1 approved by review and auto-accepted (merged PR #7, rebase)",
+                      self.news_lines())
+
+    def test_auto_accept_waits_for_running_checks_then_merges(self):
+        self.github(statusCheckRollup=self.RUNNING)
+        tid, _ = self.approved_with_auto_accept()
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["auto_wait"]), ("ready", True))
+        self.assertIn("auto-accepts once its PR's checks pass", self.news_lines()[-1])
+        self.bp("_prs")  # still running
+        self.assertEqual(self.show(tid)["status"], "ready")
+        self.github(statusCheckRollup=self.PASSING)
+        self.bp("_prs")
+        self.assertEqual(self.show(tid)["status"], "done")
+        self.assertEqual(len(self.merges()), 1)
+        self.assertEqual(self.news_lines()[-1],
+                         "bullpen · BP-1 approved by review and auto-accepted (merged PR #7, rebase)")
+
+    def test_auto_accept_waits_for_running_checks_that_then_fail(self):
+        self.github(statusCheckRollup=self.RUNNING)
+        tid, _ = self.approved_with_auto_accept()
+        self.github(statusCheckRollup=self.FAILING)
+        self.bp("_prs")
+        t = self.show(tid)
+        self.assertNotEqual(t["status"], "done")
+        self.assertNotIn("auto_wait", t)
+        self.assertIn("bullpen · BP-1 not auto-accepted: its PR's checks failed", self.news_lines())
+        self.assertFalse(any(a[:2] == ["pr", "merge"] for a in self.merges()))
+
+    def test_auto_accept_skips_failing_checks(self):
+        self.github(statusCheckRollup=self.FAILING)
+        tid, _ = self.approved_with_auto_accept()
+        self.assertEqual(self.show(tid)["status"], "ready")
+        self.assertIn("not auto-accepted: its PR's checks are failing", self.news_lines()[-1])
+        self.assertEqual(self.merges(), [])
+
+    def test_auto_accept_refused_by_github_leaves_it_ready(self):
+        gh = self.fake / "gh"
+        gh.write_text(gh.read_text() + textwrap.dedent("""\
+            if sys.argv[1:3] == ["pr", "merge"]:
+                print("Pull request is not mergeable: the merge commit cannot be cleanly created", file=sys.stderr)
+                sys.exit(1)
+        """))
+        tid, wt = self.approved_with_auto_accept()
+        t = self.show(tid)
+        self.assertEqual(t["status"], "ready")
+        self.assertTrue(Path(wt).exists())
+        self.assertIn("auto-accept was refused: merge refused: Pull request is not mergeable",
+                      self.news_lines()[-1])
+        self.assertIn("Send it back to rebase", self.news_lines()[-1])
+
+    def test_no_auto_accept_keeps_a_task_for_the_person(self):
+        tid, _ = self.approved_with_auto_accept("--no-auto-accept")
+        self.assertEqual(self.show(tid)["status"], "ready")
+        self.assertEqual(self.news_lines()[-1],
+                         "bullpen · BP-1 is ready (1 commit, PR #7), approved by review: Fix the thing")
+        self.assertIn("kept for you", self.bp("show", tid).stdout)
+
+    def test_auto_accept_on_a_task_wins_over_the_config(self):
+        self.bp("up")
+        tid = self.bp("add", "Fix the thing", "--brief", "x", "--auto-accept").stdout.strip()
+        self.bp("start", tid)
+        self.commit_and_ready(tid)
+        self.verdict(tid, "approve")
+        self.assertEqual(self.show(tid)["status"], "done")
+
+    def test_auto_accept_off_leaves_an_approved_task_ready(self):
+        tid = self.start_task()
+        self.commit_and_ready(tid)
+        self.verdict(tid, "approve")
+        self.assertEqual(self.show(tid)["status"], "ready")
+        self.assertFalse((self.fake / "gh.log").exists() and self.merges())
+
+    def test_a_new_comment_stops_a_waiting_auto_accept(self):
+        self.github(statusCheckRollup=self.RUNNING)
+        tid, _ = self.approved_with_auto_accept()
+        self.github(statusCheckRollup=self.PASSING, comments=[
+            {"id": "c1", "author": {"login": "pat"}, "body": "Hold on, rename it."}])
+        self.bp("_prs")
+        self.assertNotEqual(self.show(tid)["status"], "done")
+        self.assertIn("bullpen · BP-1 not auto-accepted: its PR has new comments", self.news_lines())
+        self.assertEqual(self.merges(), [])
+
     def test_a_new_comment_is_forwarded_once(self):
         tid = self.start_task()
         worker = self.block(tid)
@@ -2080,6 +2189,64 @@ class LocalModeTest(unittest.TestCase):
         self.assertEqual(self.git("status", "--porcelain", cwd=wt), "")
         rebase = self.git("rev-parse", "--path-format=absolute", "--git-path", "rebase-merge", cwd=wt)
         self.assertFalse(Path(rebase).exists())  # no rebase left half done
+
+    # ---- auto-accept ----
+
+    def news_tail(self):
+        return [l for b, l in self.typed() if b == "blk1"][-1]
+
+    def test_auto_accept_merges_an_approved_branch(self):
+        self.bp("config", "--auto-accept", "on")
+        tid, wt = self.ready_task(review=True)
+        self.bp("verdict", tid, "approve", "--summary", "Fine.", cwd=wt)
+        self.accepted(tid, wt)
+        self.assertEqual(self.news_tail(),
+                         "bullpen · BP-1 approved by review and auto-accepted (merged into main, rebase)")
+
+    def test_auto_accept_off_leaves_it_ready(self):
+        tid, wt = self.ready_task(review=True)
+        self.bp("verdict", tid, "approve", "--summary", "Fine.", cwd=wt)
+        self.assertEqual(self.show(tid)["status"], "ready")
+
+    def test_no_auto_accept_holds_a_task(self):
+        self.bp("config", "--auto-accept", "on")
+        self.bp("up")
+        tid = self.bp("add", "Fix the thing", "--brief", "x", "--no-auto-accept").stdout.strip()
+        self.bp("start", tid)
+        wt = self.show(tid)["worktree"]
+        self.commit(wt, "fix.txt", "fixed\n", "Fix it")
+        self.bp("ready", tid, "--summary", "Fixed.", cwd=wt)
+        self.bp("verdict", tid, "approve", "--summary", "Fine.", cwd=wt)
+        self.assertEqual(self.show(tid)["status"], "ready")
+        self.assertIs(self.show(tid)["auto_accept"], False)
+
+    def test_auto_accept_never_takes_open_findings_after_the_last_round(self):
+        self.bp("config", "--auto-accept", "on")
+        tid, wt = self.ready_task(review=True)
+        self.bp("verdict", tid, "changes", "--summary", "Missing a case.", cwd=wt)
+        self.commit(wt, "fix2.txt", "more\n", "Fix more")
+        self.bp("ready", tid, "--summary", "Fixed.", cwd=wt)
+        self.bp("verdict", tid, "changes", "--summary", "Still missing.", cwd=wt)
+        t = self.show(tid)
+        self.assertEqual(t["status"], "ready")
+        self.assertIn("after 2 rounds", t["why"])
+        self.assertTrue(Path(wt).exists())
+
+    def test_auto_accept_never_takes_a_task_with_review_off(self):
+        self.bp("config", "--auto-accept", "on")
+        tid, wt = self.ready_task()
+        self.assertEqual(self.show(tid)["status"], "ready")
+        self.assertTrue(Path(wt).exists())
+
+    def test_a_refused_auto_accept_leaves_it_ready_with_news(self):
+        self.bp("config", "--auto-accept", "on")
+        tid, wt = self.ready_task(review=True)
+        self.commit(self.repo, "fix.txt", "fixed differently\n", "Clash")
+        main = self.git("rev-parse", "main")
+        self.bp("verdict", tid, "approve", "--summary", "Fine.", cwd=wt)
+        self.assert_untouched(tid, wt, main)
+        self.assertIn("approved by review, but the auto-accept was refused: merge refused", self.news_tail())
+        self.assertIn("Send it back to rebase", self.news_tail())
 
     def test_accept_refuses_a_conflict_and_leaves_the_task(self):
         for mode in ("rebase", "squash", "merge"):

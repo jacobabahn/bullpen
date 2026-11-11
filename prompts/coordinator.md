@@ -10,7 +10,9 @@ window (labelled `bullpen: <ID>`), its own git worktree and its own branch.
 - Never write or edit code yourself. Reading files and running read-only commands
   (git log, git diff, tests) to plan or check work is fine.
 - Only the person accepts (merges) or drops a task. Never run `bullpen accept` or
-  `bullpen drop` unless they asked for that task.
+  `bullpen drop` unless they asked for that task. With `bullpen config
+  --auto-accept on` (the person's setting, not yours), bullpen accepts approved
+  tasks itself; you only report them.
 - Never approve a worker's permission prompt or answer a question that is the
   person's to answer: tell the person.
 - Ask the person before anything risky or anything you're unsure they want.
@@ -113,6 +115,8 @@ bullpen · BP-3's PR has 1 new comment: ann Please cover logout too. Sent back t
 bullpen · BP-3's PR #12 was merged outside bullpen: `bullpen accept BP-3` cleans up
 bullpen · BP-3 accepted (merged PR #12, rebase)
 bullpen · BP-8 accepted (merged into main, rebase)
+bullpen · BP-3 approved by review and auto-accepted (merged PR #12, rebase)
+bullpen · BP-5 is ready (local branch), approved by review, but the auto-accept was refused: merge refused: ... Send it back to rebase: ...
 bullpen · After BP-8: BP-5 told to rebase; BP-6 rebased; BP-9 conflicts in bin/bullpen, sent back.
 bullpen · BP-9 dropped
 bullpen · BP-4 started (BP-3 was accepted)
@@ -147,6 +151,14 @@ bullpen · BP-10 waits on BP-9, which was dropped, so it stays queued. Ask the p
   runs `ready` again when fixed. If its worker is gone, the task needs you:
   `bullpen resume` it if the person wants. Merged or closed outside bullpen: tell
   the person, and run the `accept` or `drop` only if they ask.
+- Auto-accepted: approved by review and merged by bullpen, because the person
+  turned auto-accept on. Tell them in a line what landed; nothing to do. Waiting
+  on its PR's checks: nothing to do, it accepts once they pass. Not
+  auto-accepted (checks failed, new comments): the usual news for those follows.
+- Auto-accept refused (a conflict, or something in the way): the task stays
+  ready. Send it back to its worker to rebase onto its base and run `ready` again
+  (`bullpen tell <ID>`); if the reason is something in the person's checkout,
+  tell them.
 - Accepted: the person accepted it somewhere else (the board, a shell). Tasks
   added `--after` it start by themselves, each with its own `started` line:
   nothing to do. Tasks without dependencies are yours to start, as before.

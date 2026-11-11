@@ -138,6 +138,25 @@ to accept once review approves, or after the last round with the open findings
 listed. `bullpen config --review off` skips review; `review_rounds` and
 `reviewer` in the repo's `config.json` set the rounds and the reviewer's command.
 
+### Auto-accept
+
+Off by default: you accept each task yourself. Turn it on with `bullpen config
+--auto-accept on` when review is the check you trust, so approved work lands
+without waiting for you, and the next queued tasks start sooner. Once the reviewer
+approves, bullpen runs the normal accept itself (same merge, cleanup, rebase of the
+other tasks and start of queued ones), and the news says so: `BP-3 approved by
+review and auto-accepted (merged into main, rebase)`.
+
+It never accepts a task review didn't approve: one ready after the last round with
+findings open, or any task while review is off. With a PR, it waits for the PR's
+checks: still running, the task stays ready and accepts once they pass; failing, or
+new comments from people, it isn't accepted and the news says why. A merge that is
+refused (a conflict, an uncommitted change in the way) leaves the task ready, with
+the reason as news. `bullpen add` or `start` with `--no-auto-accept` keeps one task
+for you while it's on (and `--auto-accept` auto-accepts one task while it's off).
+The board shows `· auto-accept` beside the repo's name while it's on, and a task
+held back says "Kept for you: no auto-accept."
+
 ### After ready
 
 While a task waits in review or for you, the watcher looks at its pull request
@@ -312,7 +331,8 @@ task ready, with its worktree and branch as they were.
 - News: `news.log` beside the tasks, with `news.cursor` (how far `bullpen news` has
   read) and `outbox.txt` (typed news waiting for an empty input). See [News](#news).
 
-`bullpen config --news monitor` changes how news reaches the coordinator (`type`
+`bullpen config --auto-accept on` accepts approved tasks by themselves (off by
+default; see [Auto-accept](#auto-accept)). `bullpen config --news monitor` changes how news reaches the coordinator (`type`
 by default). `bullpen config --merge squash` changes how `accept` merges (`rebase` by default;
 `squash` or `merge`). `bullpen config --stuck-after 45` sets how many minutes a
 working agent can show no progress before you hear of it (20 by default, `0` for
