@@ -33,19 +33,23 @@ fn mark_style(status: &str) -> Style {
     }
 }
 
-fn spinner(app: &App) -> &'static str {
-    const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-    FRAMES[(app.started.elapsed().as_millis() / 100) as usize % FRAMES.len()]
+fn frame(app: &App, frames: &[&'static str], ms: u128) -> &'static str {
+    frames[(app.started.elapsed().as_millis() / ms) as usize % frames.len()]
 }
 
-/// A working task's mark types out three dots, left to right. They are braille
-/// dots, which sit evenly spaced whatever the font, and run from the mark's cell
-/// into the gap before the ID.
+/// A task with a command running (accept, drop, start, resume): a ring with a gap going round.
+fn spinner(app: &App) -> &'static str {
+    frame(app, &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"], 100)
+}
+
+/// A working task: the six-dot snake.
 fn working_mark(app: &App) -> &'static str {
-    // the third row of the braille cell, which is about on the text's baseline;
-    // the bottom row hangs below it, where descenders go
-    const FRAMES: [&str; 4] = ["  ", "⠄ ", "⠤ ", "⠤⠄"];
-    FRAMES[(app.started.elapsed().as_millis() / 400) as usize % FRAMES.len()]
+    frame(app, &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], 100)
+}
+
+/// A task in review: a quarter arc turning.
+fn review_mark(app: &App) -> &'static str {
+    frame(app, &["◜", "◝", "◞", "◟"], 150)
 }
 
 /// Write a line at (x, y), never into the last column.
@@ -222,6 +226,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 let mark = match app.job(&t.id) {
                     Some(_) => span(spinner(app), bold()),
                     None if t.status == "working" => span(working_mark(app), Style::new()),
+                    None if t.status == "review" => span(review_mark(app), mark_style("review")),
                     None => span(model::mark(&t.status), mark_style(&t.status)),
                 };
                 put(buf, area, y, 1, mark);

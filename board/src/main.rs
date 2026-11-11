@@ -403,12 +403,11 @@ impl App {
 
     /// How long the loop may wait for something to happen before redrawing.
     fn tick(&self) -> Duration {
-        if !self.running.is_empty() {
-            Duration::from_millis(100) // spinners turn
-        } else if matches!(self.mode, Mode::Overlay { peek: Some(_), .. })
-            || self.tasks.iter().any(|t| t.status == "working")
-        {
-            Duration::from_millis(200) // a peek reads again; working marks move
+        let moving = |t: &Task| matches!(t.status.as_str(), "working" | "review");
+        if !self.running.is_empty() || self.tasks.iter().any(moving) {
+            Duration::from_millis(50) // spinners and the marks of working tasks turn
+        } else if matches!(self.mode, Mode::Overlay { peek: Some(_), .. }) {
+            Duration::from_millis(250)
         } else {
             Duration::from_secs(1) // ages move on by the minute
         }
@@ -503,8 +502,14 @@ fn main() {
     };
 
     let mut term = ratatui::init();
+    // Read the tasks again when their files change, and once a second in case a
+    // change was missed; frames drawn in between only move the animations.
+    let (mut stale, mut read) = (true, Instant::now());
     'main: loop {
-        app.reload();
+        if stale || read.elapsed() >= Duration::from_secs(1) {
+            app.reload();
+            (stale, read) = (false, Instant::now());
+        }
         app.settle();
         app.peek();
         if term.draw(|f| ui::draw(f, &mut app)).is_err() {
@@ -515,6 +520,7 @@ fn main() {
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
+        stale = true; // a key may have changed a task, and a file event says one did
         if !app.handle(m) {
             break;
         }

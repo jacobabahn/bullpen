@@ -58,7 +58,7 @@ approved by review."). A task in review or ready also shows the size of its
 change ("3 files, +120 −14"), worked out once when its worker runs `ready`. A
 task that needs you gets an amber bar; its age turns red after 5 minutes. So
 does a task whose agent has shown no progress for a while (below). A
-working task's mark is an animated ellipsis. The
+working task's mark spins, and one in review turns. The
 top line counts the tasks in each state. `l` switches to a compact layout, one
 line per task with the selected task's detail at the bottom.
 
