@@ -804,12 +804,13 @@ class BullpenTest(unittest.TestCase):
         p = self.bp("config", "--news", "monitor")
         self.assertEqual(json.loads(p.stdout)["news"], "monitor")
         self.assertIn("news --follow", p.stderr)
-        (self.fake / "screen").write_text("❯ half a message\n")  # typing or not: no matter
         self.ask(tid, "Which one?")
         self.bp("_event", self.block(tid), "working", "", "")
         self.bp("_event", self.block(tid), "done", "", "")
         self.bp("_flush")
-        self.assertFalse(any(b == "blk1" for b, _ in self.typed()))
+        typed = [l for b, l in self.typed() if b == "blk1"]
+        self.assertEqual(len(typed), 1)  # only the line that said news moved to the monitor
+        self.assertIn("news now comes by monitor", typed[0])
         state = self.tmp / "state"
         self.assertFalse((state / "outbox").exists())
         self.assertEqual(list(state.rglob("outbox.txt")), [])
@@ -823,8 +824,56 @@ class BullpenTest(unittest.TestCase):
         self.bp("config", "--news", "monitor")
         self.bp("config", "--news", "type")
         self.ask(tid, "Which one?")
-        self.assertEqual([l for b, l in self.typed() if b == "blk1"],
+        self.assertEqual([l for b, l in self.typed() if b == "blk1"][1:],
                          ["bullpen · BP-1 needs you (question): Which one?"])
+
+    def test_switching_to_type_ends_a_running_follower_with_one_line(self):
+        tid = self.start_task()
+        self.bp("config", "--news", "monitor")
+        p, lines, quiet = self.follow()
+        self.ask(tid, "one")
+        self.assertEqual(len(lines(1)), 1)
+        self.bp("config", "--news", "type")
+        self.assertTrue(lines(1)[0].startswith("bullpen · news is typed into your pane now"))
+        self.assertEqual(p.wait(timeout=10), 0)
+        self.ask(tid, "two")  # typed, and not printed by a follower started again
+        self.assertIn("two", self.typed()[-1][1])
+        p, lines, quiet = self.follow()
+        self.assertEqual(len(lines(1)), 1)  # the same one line, then it's gone
+        self.assertEqual(p.wait(timeout=10), 0)
+        self.assertEqual(p.stdout.read(), b"")
+        self.bp("config", "--news", "monitor")  # switching again starts after "two": it was typed
+        self.assertEqual(self.bp("news").stdout, "")
+
+    def test_switching_to_monitor_tells_a_running_coordinator_by_one_last_typed_line(self):
+        tid = self.start_task()
+        self.bp("config", "--news", "monitor")
+        told = [l for b, l in self.typed() if b == "blk1"]
+        self.assertEqual(len(told), 1)
+        self.assertTrue(told[0].startswith("bullpen · news now comes by monitor"))
+        self.assertIn(f"{BULLPEN} news --follow", told[0])
+        self.bp("config", "--news", "monitor")  # no switch: not said again
+        self.ask(tid, "one")
+        self.assertEqual(len([l for b, l in self.typed() if b == "blk1"]), 1)
+
+    def test_the_switch_line_waits_for_an_empty_input_like_other_typed_news(self):
+        self.start_task()
+        (self.fake / "screen").write_text("❯ half a message\n")
+        self.bp("config", "--news", "monitor")
+        self.assertFalse(any(b == "blk1" for b, _ in self.typed()))
+        (self.fake / "screen").write_text("❯ \n")
+        self.bp("_flush")
+        self.assertEqual(len([l for b, l in self.typed() if b == "blk1"]), 1)
+
+    def test_switching_to_monitor_types_nothing_from_the_coordinators_pane_or_without_one(self):
+        self.bp("config", "--news", "monitor")  # no coordinator yet
+        self.bp("config", "--news", "type")
+        self.bp("up", "--here")  # this pane ("me") is the coordinator
+        p = self.bp("config", "--news", "monitor")
+        self.assertIn("news --follow", p.stderr)
+        self.assertEqual(self.typed(), [])
+        self.assertEqual(list((self.tmp / "state").rglob("outbox.txt")), [])
+        self.assertIn("News comes by monitor: start it first", self.bp("up", "--here").stdout)
 
     def test_up_says_how_news_arrives(self):
         out = self.bp("up").stdout.splitlines()

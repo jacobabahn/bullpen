@@ -335,8 +335,13 @@ def news(repo, task, event, text):
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("a") as f:
         f.write(f"{now()} {task['id']} {event}: {line}\n")
-    if repo.cfg.get("news") == "monitor":
-        return
+    if repo.cfg.get("news") != "monitor":
+        type_news(repo, line)
+
+
+def type_news(repo, line):
+    """Type a line into the coordinator's prompt, now or once its input is empty."""
+    repo.dir.mkdir(parents=True, exist_ok=True)
     outbox = repo.dir / "outbox.txt"
     with outbox.open("a") as f:
         f.write(line + "\n")
@@ -467,21 +472,37 @@ def cmd_news(args):
         offset = news_size(repo)
         set_news_cursor(repo, offset)
     try:
-        offset = print_news(repo, offset)
-        while args.follow:
-            time.sleep(args.every)
+        while True:
+            if args.follow and not news_by_monitor(repo):
+                # Typed news is logged too: following it would give every line twice.
+                print(NEWS_MARK + "news is typed into your pane now (`bullpen config --news type`): "
+                      "don't start the monitor again", flush=True)
+                return
             offset = print_news(repo, offset)
+            if not args.follow:
+                return
+            time.sleep(args.every)
     except BrokenPipeError:  # whoever was reading is gone; the cursor stays before the lost line
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
     except KeyboardInterrupt:
         pass
 
 
+def news_by_monitor(repo):
+    """Is the setting `monitor` right now? Read again: it can change while we follow."""
+    cfg = read_json(repo.dir / "config.json", {})
+    return {**DEFAULT_CONFIG, **cfg}.get("news") == "monitor"
+
+
+def follow_cmd():
+    return shlex.join(with_state([SELF, "news", "--follow"]))
+
+
 def news_mode_line(repo):
     """One line saying how news reaches the coordinator."""
     if repo.cfg.get("news") == "monitor":
-        return (f"news: by monitor. The coordinator runs the Monitor tool on "
-                f"`{shlex.join(with_state([SELF, 'news', '--follow']))}` (its guide says how).")
+        return (f"news: by monitor. Nothing is typed: the coordinator must run the Monitor "
+                f"tool on `{follow_cmd()}` (its guide says how).")
     return ("news: typed into the coordinator's pane "
             "(`bullpen config --news monitor`: by Claude Code's Monitor tool instead).")
 
@@ -489,7 +510,7 @@ def news_mode_line(repo):
 def guide_text():
     """The coordinator's guide, with this bullpen's own path in its commands."""
     text = (PROMPTS / "coordinator.md").read_text()
-    return text.replace("{{follow}}", shlex.join(with_state([SELF, "news", "--follow"])))
+    return text.replace("{{follow}}", follow_cmd())
 
 
 def guide_file(repo):
@@ -537,7 +558,9 @@ def cmd_up(args):
             unindex_block(c.get("block"))
         repo.cfg["coordinator"] = {"block": block, "session": session}
         index_block(block, repo, "coordinator")
-        print(f"coordinator: this pane ({block}). Run `{SELF} guide` to read the coordinator's guide.")
+        print(f"coordinator: this pane ({block}). Run `{SELF} guide` to read the coordinator's guide."
+              + (" News comes by monitor: start it first, as the guide says."
+                 if repo.cfg.get("news") == "monitor" else ""))
     elif c and rex_alive(c.get("session"), c.get("block")):
         print(f"coordinator already running: {c['block']}")
     else:
@@ -1274,6 +1297,11 @@ def cmd_config(args):
     if args.news:
         if args.news == "monitor" and repo.cfg.get("news") != "monitor":
             set_news_cursor(repo, news_size(repo))  # what was typed already isn't news again
+            c = repo.cfg.get("coordinator") or {}
+            if rex_alive(c.get("session"), c.get("block")) and not from_coordinator(repo):
+                # The last typed line: a running coordinator has to hear of the switch.
+                type_news(repo, NEWS_MARK + "news now comes by monitor and is no longer typed: "
+                          f"start the Monitor tool on `{follow_cmd()}` now, as your guide says")
         repo.cfg["news"] = args.news
         print(news_mode_line(repo), file=sys.stderr)
     repo.save()

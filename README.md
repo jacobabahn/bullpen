@@ -142,8 +142,16 @@ Both remember how far they got (a byte offset in `news.cursor`), so each line is
 printed once, across restarts too. Only one reads at a time: a second
 `--follow` waits for the first to end and then takes over. The first run starts
 from the end of the log, and switching to `monitor` starts from there too, so
-old news is never printed again. News logged in `monitor` mode but not yet read
-when you switch back to `type` is not typed: `bullpen news` prints it.
+old news is never printed again.
+
+You can switch while a coordinator runs. Switching to `monitor` types one last
+line into its pane telling it to start the monitor (not when you run `config`
+from the coordinator's own pane: it sees the answer). Switching to `type` makes
+a running `news --follow` print `bullpen · news is typed into your pane now` and
+exit, so the coordinator stops restarting it and no line arrives twice; in `type`
+mode `--follow` always does that, and plain `bullpen news` still works. News
+logged in `monitor` mode but not yet read when you switch back is not typed:
+`bullpen news` prints it.
 
 ### Keys
 
