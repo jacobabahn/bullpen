@@ -24,7 +24,7 @@ FAKE_REX = textwrap.dedent("""\
         f.write(json.dumps(a) + "\\n")
     alive = d / "alive"
     alive.mkdir(exist_ok=True)
-    if a[0] == "run":
+    if a[0] in ("run", "split"):
         n = len(list(d.glob("block-*"))) + 1
         (d / f"block-{n}").write_text("")
         (alive / f"blk{n}").write_text("")
@@ -103,11 +103,14 @@ class BullpenTest(unittest.TestCase):
     def show(self, tid):
         return json.loads(self.bp("show", tid, "--json").stdout)
 
-    def start_task(self):
-        self.bp("up")  # spawns the coordinator (blk1) and the watcher (blk2)
-        tid = self.bp("add", "Fix the thing", "--brief", "Make it work.").stdout.strip()
+    def start_task(self, title="Fix the thing"):
+        self.bp("up")  # spawns the coordinator (blk1), the board (blk2) and the watcher (blk3)
+        tid = self.bp("add", title, "--brief", "Make it work.").stdout.strip()
         self.bp("start", tid)
         return tid
+
+    def block(self, tid):
+        return self.show(tid)["block"]
 
     def test_up_spawns_coordinator_and_one_watcher(self):
         self.bp("up")
@@ -115,6 +118,10 @@ class BullpenTest(unittest.TestCase):
         runs = [a for a in self.rex_calls() if a[0] == "run"]
         labels = [a[a.index("--label") + 1] for a in runs]
         self.assertEqual(labels, ["bullpen: proj", "bullpen: watcher"])
+        splits = [a for a in self.rex_calls() if a[0] == "split"]
+        self.assertEqual(len(splits), 1)  # one board, beside the coordinator
+        self.assertEqual(splits[0][splits[0].index("-b") + 1], "blk1")
+        self.assertEqual(splits[0][-1], "board")
         watcher = runs[1]
         self.assertIn("--all", watcher)
         self.assertTrue(any(x.startswith("bin=") for x in watcher))
@@ -132,7 +139,7 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(t["status"], "working")
         self.assertEqual(t["branch"], "bullpen/bp-1-fix-the-thing")
         self.assertTrue(Path(t["worktree"]).is_dir())
-        self.assertEqual(t["block"], "blk3")
+        self.assertEqual(t["block"], "blk4")
         run = [a for a in self.rex_calls() if a[0] == "run"][-1]
         self.assertEqual(run[run.index("-c") + 1], t["worktree"])
         brief = (self.tmp / "state").rglob("BP-1.full.md").__next__().read_text()
@@ -172,17 +179,17 @@ class BullpenTest(unittest.TestCase):
 
     def test_events_become_news_once(self):
         tid = self.start_task()
-        self.bp("_event", "blk3", "working", "", "Reading files")
-        self.bp("_event", "blk3", "blocked", "permission", "Allow rm?")
-        self.bp("_event", "blk3", "blocked", "permission", "Allow rm?")  # repeat: no news
+        self.bp("_event", self.block(tid), "working", "", "Reading files")
+        self.bp("_event", self.block(tid), "blocked", "permission", "Allow rm?")
+        self.bp("_event", self.block(tid), "blocked", "permission", "Allow rm?")  # repeat: no news
         news = [l for b, l in self.typed() if b == "blk1"]
         self.assertEqual(len(news), 1)
         self.assertIn('event="needs-you"', news[0])
         self.assertIn("Allow rm?", news[0])
         self.assertEqual(self.show(tid)["status"], "needs")
-        self.bp("_event", "blk3", "working", "", "")
+        self.bp("_event", self.block(tid), "working", "", "")
         self.assertEqual(self.show(tid)["status"], "working")
-        self.bp("_event", "blk3", "done", "", "")
+        self.bp("_event", self.block(tid), "done", "", "")
         news = [l for b, l in self.typed() if b == "blk1"]
         self.assertIn('event="quiet"', news[-1])
 
@@ -190,13 +197,14 @@ class BullpenTest(unittest.TestCase):
         tid = self.start_task()
         self.bp("ready", tid)  # no commits: ready with nothing to merge
         before = len(self.typed())
-        self.bp("_event", "blk3", "done", "", "")
+        self.bp("_event", self.block(tid), "done", "", "")
         self.assertEqual(len(self.typed()), before)
 
     def test_exit_marks_stopped_and_resume_relaunches(self):
         tid = self.start_task()
-        (self.fake / "alive" / "blk3").unlink()
-        self.bp("_gone", "blk3")
+        blk = self.block(tid)
+        (self.fake / "alive" / blk).unlink()
+        self.bp("_gone", blk)
         t = self.show(tid)
         self.assertEqual(t["status"], "stopped")
         self.assertIn('event="stopped"', self.typed()[-1][1])
@@ -214,7 +222,7 @@ class BullpenTest(unittest.TestCase):
     def test_accept_merges_and_cleans_up(self):
         tid = self.start_task()
         t = self.show(tid)
-        wt = t["worktree"]
+        wt, blk = t["worktree"], t["block"]
         (Path(wt) / "fix.txt").write_text("fixed\n")
         sh("git", "-C", wt, "add", ".")
         sh("git", "-C", wt, "commit", "-qm", "Fix it")
@@ -226,7 +234,7 @@ class BullpenTest(unittest.TestCase):
         gh = [json.loads(l)["argv"] for l in (self.fake / "gh.log").read_text().splitlines()]
         self.assertEqual(gh[-1][:2], ["pr", "merge"])
         self.assertIn("--squash", gh[-1])
-        self.assertFalse((self.fake / "alive" / "blk3").exists())
+        self.assertFalse((self.fake / "alive" / blk).exists())
         branches = sh("git", "-C", str(self.repo), "branch")
         self.assertNotIn("bullpen/", branches)
 
@@ -243,6 +251,76 @@ class BullpenTest(unittest.TestCase):
         self.bp("drop", tid, "--force")
         self.assertEqual(self.show(tid)["status"], "dropped")
         self.assertFalse(Path(wt).exists())
+
+    def test_board_pane_events_are_ignored(self):
+        self.start_task()
+        before = len(self.typed())
+        self.bp("_event", "blk2", "done", "", "")
+        self.bp("_gone", "blk2")
+        self.assertEqual(len(self.typed()), before)
+
+    def focused(self):
+        return [a[-1] for a in self.rex_calls() if a[0] == "focus"]
+
+    def test_go_focuses_task_coordinator_and_board(self):
+        tid = self.start_task()
+        self.bp("go", tid)
+        self.bp("go")
+        self.bp("go", "--board")
+        self.assertEqual(self.focused(), [self.block(tid), "blk1", "blk2"])
+
+    def test_go_refuses_a_task_without_a_pane(self):
+        self.bp("up")
+        tid = self.bp("add", "Later", "--brief", "x").stdout.strip()
+        p = self.bp("go", tid, ok=False)
+        self.assertIn("no pane", p.stderr)
+
+    def test_go_next_cycles_through_tasks_needing_you(self):
+        a = self.start_task("First")
+        self.bp("add", "Second", "--brief", "x")
+        b = "BP-2"
+        self.bp("start", b)
+        self.start_task("Third")  # working: never a target
+        p = self.bp("go", "--next", "--from", "elsewhere", ok=False)
+        self.assertIn("nothing needs you", p.stderr)
+        self.bp("_event", self.block(b), "blocked", "permission", "Allow?")
+        self.bp("_event", self.block(a), "blocked", "question", "Which?")
+        nxt = lambda frm: json.loads(self.bp("go", "--next", "--json", "--from", frm).stdout)["block"]
+        first = nxt("elsewhere")
+        self.assertEqual(first, self.block(b))  # waiting longest comes first
+        self.assertEqual(nxt(first), self.block(a))
+        self.assertEqual(nxt(self.block(a)), self.block(b))  # wraps around
+
+    def test_go_finds_the_repo_from_any_directory(self):
+        tid = self.start_task()
+        out = self.bp("go", tid, "--json", "--from", "nowhere", cwd=self.tmp).stdout
+        self.assertEqual(json.loads(out)["block"], self.block(tid))
+
+
+class BoardTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        from importlib.machinery import SourceFileLoader
+        loader = SourceFileLoader("bullpen_cli", str(BULLPEN))
+        spec = importlib.util.spec_from_loader("bullpen_cli", loader)
+        cls.bp = importlib.util.module_from_spec(spec)
+        loader.exec_module(cls.bp)
+
+    def test_order_puts_what_needs_you_first(self):
+        tasks = [{"id": f"BP-{i}", "status": s} for i, s in
+                 enumerate(["todo", "working", "ready", "needs", "stopped", "needs"], 1)]
+        order = [t["id"] for t in self.bp.board_order(tasks)]
+        self.assertEqual(order, ["BP-4", "BP-6", "BP-5", "BP-3", "BP-2", "BP-1"])
+
+    def test_row_shows_time_in_status_and_why(self):
+        import datetime as dt
+        at = dt.datetime(2026, 1, 1, 12, 0, tzinfo=dt.timezone.utc)
+        t = {"id": "BP-3", "status": "needs", "title": "Fix login",
+             "since": "2026-01-01T11:55:00+00:00", "why": "Needs you (permission)"}
+        row = self.bp.board_row(t, 200, at)
+        self.assertEqual(row, "BP-3    needs      5m  Fix login  · Needs you (permission)")
+        self.assertEqual(len(self.bp.board_row(t, 20, at)), 19)
 
 
 if __name__ == "__main__":

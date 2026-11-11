@@ -36,6 +36,7 @@ bullpen start BP-3          # worktree + branch + a Rex window running the worke
 bullpen ls                  # open tasks: todo, working, needs, stopped, ready
 bullpen show BP-3           # its branch, worktree, PR, why it needs you
 bullpen peek BP-3           # the end of the worker's screen
+bullpen go BP-3             # show the person that worker's pane, when they ask to see it
 bullpen tell BP-3 "..."     # type a message to the worker (guidance, a fix request)
 bullpen resume BP-3 "..."   # restart a stopped worker, continuing its conversation
 bullpen accept BP-3         # only when the person asks: squash-merge its PR, clean up

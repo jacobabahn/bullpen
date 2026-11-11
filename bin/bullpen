@@ -137,6 +137,10 @@ class Repo:
 
     def save_task(self, t):
         t["updated"] = now()
+        old = read_json(self.task_path(t["id"])) or {}
+        if old.get("status") != t["status"] or not t.get("since"):
+            # when it entered its current status; fine-grained so `go --next` can order it
+            t["since"] = dt.datetime.now().astimezone().isoformat(timespec="microseconds")
         write_json(self.task_path(t["id"]), t)
 
     def tasks(self):
@@ -158,20 +162,54 @@ def unindex_block(block):
 
 
 def lookup_block(block):
-    entry = read_json(STATE / "blocks" / f"{safe(block)}.json")
+    entry = read_json(STATE / "blocks" / f"{safe(block)}.json") if block else None
     if not entry:
         return None, None
     return Repo(entry["repo"]), entry["role"]
 
 
+def find_repo(from_block=None):
+    """The repo a command is about: the one owning from_block, else the one we're in,
+    else (for key bindings, which run in the Rex server's directory) the bullpen repo
+    whose coordinator most recently started."""
+    repo, _ = lookup_block(from_block)
+    if repo:
+        return repo
+    try:
+        repo = Repo(repo_root())
+        if (repo.dir / "config.json").exists():
+            return repo
+    except Fail:
+        pass
+    best = None
+    for cfg in (STATE / "repos").glob("*/config.json"):
+        b = (read_json(cfg) or {}).get("coordinator")
+        if not b:
+            continue
+        idx = STATE / "blocks" / f"{safe(b['block'])}.json"
+        entry = read_json(idx)
+        if entry and (best is None or idx.stat().st_mtime > best[0]):
+            best = (idx.stat().st_mtime, entry["repo"])
+    if best:
+        return Repo(best[1])
+    raise Fail("no bullpen here: run `bullpen up` in a repository first")
+
+
 # ---------- Rex ----------
+
+def with_state(argv):
+    """Panes Rex starts don't inherit our environment: carry bullpen's own settings."""
+    env = [f"{k}={os.environ[k]}" for k in ("BULLPEN_STATE", "BULLPEN_GH", "BULLPEN_REX")
+           if os.environ.get(k)]
+    return ["env", *env, *argv] if env else argv
+
 
 def rex_run(session, cwd, label, argv, focus=False):
     cmd = [REX, "run", "--json", f"--focus={'true' if focus else 'false'}", "--label", label,
            "-c", str(cwd)]
     if session:
         cmd += ["-s", session]
-    p = run([*cmd, "--", *argv])
+    p = run([*cmd, "--", *with_state(argv)])
     return json.loads(p.stdout)["block_ids"][0]
 
 
@@ -187,6 +225,10 @@ def rex_type(session, block, text):
     s = ["-s", session] if session else []
     run([REX, "send", *s, "-b", block, text])
     run([REX, "send-key", *s, "-b", block, "enter"])
+
+
+def rex_focus(session, block):
+    run([REX, "focus", *(["-s", session] if session else []), block])
 
 
 def rex_close(session, block):
@@ -244,7 +286,27 @@ def cmd_up(args):
         index_block(block, repo, "coordinator")
         print(f"coordinator started: {block}")
     repo.save()
+    if not args.no_board:
+        ensure_board(repo, session)
     ensure_watcher(session)
+
+
+def ensure_board(repo, session):
+    """The task board, in a narrow pane to the right of the coordinator."""
+    b = repo.cfg.get("board")
+    if b and rex_alive(b.get("session"), b.get("block")):
+        return
+    c = repo.cfg["coordinator"]
+    p = run([REX, "split", "--json", "--focus=false", "-s", session, "-b", c["block"],
+             "--split=right", "--ratio", "35", "--label", f"bullpen: board",
+             "-c", str(repo.root), "--", *with_state([SELF, "board"])])
+    block = json.loads(p.stdout)["block_ids"][0]
+    if b:
+        unindex_block(b.get("block"))
+    repo.cfg["board"] = {"block": block, "session": session}
+    index_block(block, repo, "board")
+    repo.save()
+    print(f"board started: {block}")
 
 
 def ensure_watcher(session):
@@ -467,11 +529,192 @@ def cmd_guide(args):
     print((PROMPTS / "coordinator.md").read_text())
 
 
+# ---------- getting around: go, board, keys ----------
+
+def go_target(repo, args):
+    """(session, block, name) of the pane `go` should focus."""
+    if args.next:
+        needs = sorted((t for t in repo.tasks() if t["status"] == "needs" and t.get("block")),
+                       key=lambda t: t.get("since") or t.get("updated") or "")
+        if not needs:
+            raise Fail("nothing needs you")
+        blocks = [t["block"] for t in needs]
+        here = args.from_block
+        t = needs[(blocks.index(here) + 1) % len(needs) if here in blocks else 0]
+        return t["session"], t["block"], t["id"]
+    if args.id:
+        t = repo.task(args.id)
+        if not t.get("block"):
+            hint = f"`bullpen resume {t['id']}`" if t["status"] == "stopped" else f"it is {t['status']}"
+            raise Fail(f"{t['id']} has no pane ({hint})")
+        return t["session"], t["block"], t["id"]
+    which = "board" if args.board else "coordinator"
+    c = repo.cfg.get(which)
+    if not c:
+        raise Fail(f"no {which}: run `bullpen up`")
+    return c.get("session"), c["block"], which
+
+
+def cmd_go(args):
+    repo = find_repo(args.from_block)
+    session, block, name = go_target(repo, args)
+    if not rex_alive(session, block):
+        raise Fail(f"{name}'s pane is gone")
+    if args.json:
+        print(json.dumps({"session": session, "block": block, "name": name}))
+    else:
+        rex_focus(session, block)
+
+
+ORDER = {"needs": 0, "stopped": 1, "ready": 2, "working": 3, "todo": 4, "done": 5, "dropped": 6}
+
+
+def board_order(tasks):
+    """Tasks as the board lists them: what needs you first, then by ID."""
+    return sorted(tasks, key=lambda t: (ORDER.get(t["status"], 9), int(t["id"].rsplit("-", 1)[1])))
+
+
+def ago(stamp, at=None):
+    if not stamp:
+        return ""
+    at = at or dt.datetime.now().astimezone()
+    s = max(0, int((at - dt.datetime.fromisoformat(stamp)).total_seconds()))
+    for unit, n in (("d", 86400), ("h", 3600), ("m", 60)):
+        if s >= n:
+            return f"{s // n}{unit}"
+    return "now"
+
+
+def board_row(t, width, at=None):
+    """One task's line: ID, status, time in that status, title, and why or PR."""
+    extra = t.get("why") or t.get("pr") or ""
+    line = f"{t['id']:<7} {t['status']:<8} {ago(t.get('since') or t.get('updated'), at):>4}  {t['title']}"
+    if extra:
+        line += f"  · {extra}"
+    return line[:max(0, width - 1)]
+
+
+BOARD_HELP = "enter go · c coordinator · n next needing you · p peek · t tell · s start · r resume · a all · q quit"
+
+
+def cmd_board(args):
+    import curses
+    repo = Repo(repo_root())
+
+    def bp(*a):
+        p = run([SELF, *a], cwd=repo.root, check=False)
+        return p.returncode == 0, (p.stdout if p.returncode == 0 else p.stderr).strip()
+
+    def main(scr):
+        curses.curs_set(0)
+        colors = {"needs": 1, "stopped": 5, "ready": 2, "working": 6}
+        try:
+            curses.use_default_colors()
+            for c in colors.values():
+                curses.init_pair(c, c, -1)
+        except curses.error:
+            colors = {}
+        scr.timeout(1000)
+        sel, show_all, msg = None, False, ""
+        while True:
+            tasks = board_order(t for t in repo.tasks() if show_all or t["status"] not in CLOSED)
+            ids = [t["id"] for t in tasks]
+            if sel not in ids:
+                sel = ids[0] if ids else None
+            h, w = scr.getmaxyx()
+            scr.erase()
+            counts = {}
+            for t in tasks:
+                counts[t["status"]] = counts.get(t["status"], 0) + 1
+            head = f" bullpen: {repo.root.name}  " + "  ".join(f"{n} {s}" for s, n in counts.items())
+            scr.addnstr(0, 0, head, w - 1, curses.A_BOLD)
+            if not tasks:
+                scr.addnstr(2, 1, "no open tasks", w - 2, curses.A_DIM)
+            for i, t in enumerate(tasks[: max(0, h - 4)]):
+                attr = curses.color_pair(colors.get(t["status"], 0))
+                if t["status"] in CLOSED:
+                    attr |= curses.A_DIM
+                if t["id"] == sel:
+                    attr |= curses.A_REVERSE
+                scr.addnstr(2 + i, 0, " " + board_row(t, w - 1), w - 1, attr)
+            if h > 3:
+                scr.addnstr(h - 2, 0, " " + msg, w - 1, curses.A_BOLD)
+                scr.addnstr(h - 1, 0, " " + BOARD_HELP, w - 1, curses.A_DIM)
+            scr.refresh()
+
+            k = scr.getch()
+            if k == -1:
+                continue
+            ch = chr(k) if 0 <= k < 256 else ""
+            i = ids.index(sel) if sel in ids else 0
+            msg = ""
+            if ch == "q":
+                return
+            elif k in (curses.KEY_DOWN,) or ch == "j":
+                sel = ids[min(i + 1, len(ids) - 1)] if ids else None
+            elif k in (curses.KEY_UP,) or ch == "k":
+                sel = ids[max(i - 1, 0)] if ids else None
+            elif ch == "a":
+                show_all = not show_all
+            elif ch == "c":
+                ok, msg = bp("go")
+            elif ch == "n":
+                needs = [t["id"] for t in tasks if t["status"] == "needs"]
+                if needs:
+                    after = [x for x in needs if ids.index(x) > i]
+                    sel = (after or needs)[0]
+                else:
+                    msg = "nothing needs you"
+            elif not sel:
+                continue
+            elif k in (10, 13, curses.KEY_ENTER) or ch == "g":
+                ok, msg = bp("go", sel)
+            elif ch == "s":
+                ok, msg = bp("start", sel)
+            elif ch == "r":
+                ok, msg = bp("resume", sel)
+            elif ch == "p":
+                ok, out = bp("peek", sel, "--lines", str(max(1, h - 2)))
+                scr.erase()
+                scr.addnstr(0, 0, f" {sel} (any key returns)", w - 1, curses.A_BOLD)
+                for j, line in enumerate(out.splitlines()[: h - 2]):
+                    scr.addnstr(1 + j, 0, line, w - 1)
+                scr.refresh()
+                scr.timeout(-1)
+                scr.getch()
+                scr.timeout(1000)
+            elif ch == "t":
+                scr.addnstr(h - 2, 0, f" tell {sel}: ".ljust(w - 1), w - 1, curses.A_BOLD)
+                curses.echo()
+                curses.curs_set(1)
+                scr.timeout(-1)
+                text = scr.getstr(h - 2, len(f" tell {sel}: "), 500).decode(errors="replace").strip()
+                scr.timeout(1000)
+                curses.curs_set(0)
+                curses.noecho()
+                if text:
+                    ok, msg = bp("tell", sel, text)
+            msg = msg.splitlines()[-1] if msg else ""
+
+    curses.wrapper(main)
+
+
+def cmd_keys(args):
+    keys = HOME / "lua" / "keys.lua"
+    opts = f'bin = "{SELF}"'
+    if os.environ.get("BULLPEN_STATE"):
+        opts += f', state = "{STATE}"'
+    print(f"-- Add to your Rex config (rex config shows where), then run `rex config reload`:\n"
+          f'dofile("{keys}").setup{{ {opts} }}\n'
+          f"-- Defaults: cmd+;>n next task needing you, cmd+;>b board, cmd+;>c coordinator.\n"
+          f'-- Change them with prefix = "...", or keys = {{ next = ..., board = ..., coordinator = ... }}.')
+
+
 # ---------- watcher events (called by lua/watch.lua) ----------
 
 def cmd_event(args):
     repo, role = lookup_block(args.block)
-    if not repo or role == "coordinator":
+    if not repo or role in ("coordinator", "board"):
         return
     t = repo.task(role)
     if t["block"] != args.block or t["status"] in CLOSED:
@@ -512,7 +755,7 @@ def cmd_gone(args):
     if not repo:
         return
     unindex_block(args.block)
-    if role == "coordinator":
+    if role in ("coordinator", "board"):
         return
     t = repo.task(role)
     if t["block"] != args.block:
@@ -535,7 +778,23 @@ def main(argv=None):
     p = sub.add_parser("up", help="start (or register) this repo's coordinator and the watcher")
     p.add_argument("--here", action="store_true", help="make the agent in this pane the coordinator")
     p.add_argument("--session", help="Rex session (default: this pane's)")
+    p.add_argument("--no-board", action="store_true", help="don't open the task board")
     p.set_defaults(fn=cmd_up)
+
+    p = sub.add_parser("go", help="focus a task's pane (or the coordinator's, or the board's)")
+    p.add_argument("id", nargs="?")
+    p.add_argument("--next", action="store_true", help="the next task that needs you")
+    p.add_argument("--board", action="store_true")
+    p.add_argument("--from", dest="from_block", default=os.environ.get("REX_BLOCK"),
+                   help="the pane you're in (default: this one)")
+    p.add_argument("--json", action="store_true", help="print the target instead of focusing it")
+    p.set_defaults(fn=cmd_go)
+
+    p = sub.add_parser("board", help="a live list of tasks to switch between")
+    p.set_defaults(fn=cmd_board)
+
+    p = sub.add_parser("keys", help="print the Rex config line for bullpen's key bindings")
+    p.set_defaults(fn=cmd_keys)
 
     p = sub.add_parser("add", help="add a task; prints its ID")
     p.add_argument("title")

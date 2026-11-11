@@ -25,9 +25,28 @@ Needs Rex, git, `gh` (signed in) and Claude Code.
 In a Rex pane, inside the repository:
 
 ```sh
-bullpen up            # opens the coordinator's window and starts the watcher
+bullpen up            # opens the coordinator's window, the task board and the watcher
 bullpen up --here     # or: make the agent already in this pane the coordinator
 ```
+
+The task board (`bullpen board`) sits in a narrow pane beside the coordinator:
+one line per task, with the ones that need you on top, how long each has been
+in its status, and why it needs you or its PR. On the board, `enter` jumps to the
+selected worker's pane, `c` to the coordinator, `n` selects the next task that
+needs you, `p` peeks, `t` tells, `s` starts, `r` resumes, `a` shows finished
+tasks too. `bullpen up --no-board` leaves it out.
+
+### Keys
+
+`bullpen keys` prints a line to add to your Rex config (`init.lua`). It defines
+three actions, also in the command palette under Bullpen, and binds:
+
+- `cmd+;` then `n`: the next task that needs you. Again: the one after it.
+- `cmd+;` then `b`: the board.
+- `cmd+;` then `c`: the coordinator.
+
+`setup{ prefix = "ctrl+b" }` moves them behind another key, and
+`keys = { next = "cmd+shift+j" }` sets single ones. Run `rex config reload` after.
 
 Then tell the coordinator what you want. To drive it by hand:
 
@@ -36,6 +55,7 @@ bullpen add "Fix login redirect" --brief-file brief.md   # prints BP-1
 bullpen start BP-1    # worktree + branch + a Rex window running the worker
 bullpen ls            # todo, working, needs, stopped, ready
 bullpen peek BP-1     # the end of the worker's screen
+bullpen go BP-1       # focus its pane (`go` alone: the coordinator; --next: next needing you)
 bullpen tell BP-1 "Also cover the logout path"
 bullpen resume BP-1   # restart a stopped worker, continuing its conversation
 bullpen accept BP-1   # squash-merge its PR, close its window, remove its worktree
