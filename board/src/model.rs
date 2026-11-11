@@ -50,6 +50,21 @@ pub struct Limit {
 pub struct Review {
     pub round: Option<u32>,
     pub verdict: Option<String>,
+    /// "full", "light" or "followup"
+    #[serde(default, deserialize_with = "lenient")]
+    pub kind: Option<String>,
+}
+
+impl Review {
+    /// "light review", "follow-up review", or plain "review" from before kinds.
+    pub fn kind_words(&self) -> &'static str {
+        match self.kind.as_deref() {
+            Some("full") => "full review",
+            Some("light") => "light review",
+            Some("followup") => "follow-up review",
+            _ => "review",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -461,9 +476,9 @@ fn capitalize(text: &str) -> String {
     c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
 }
 
-fn ready_detail(pr: &str, verdict: Option<&str>) -> String {
-    match verdict {
-        Some("approved") => format!("{pr}, approved by review."),
+fn ready_detail(pr: &str, r: &Review) -> String {
+    match r.verdict.as_deref() {
+        Some("approved") => format!("{pr}, approved by {}.", r.kind_words()),
         Some("changes") => format!("{pr}. Review still asks for changes."),
         _ if !pr.is_empty() => format!("{pr}."),
         _ => "Done.".into(),
@@ -503,6 +518,9 @@ fn status_detail(t: &Task, rounds: u32, at: DateTime<FixedOffset>) -> String {
         "triage" if why.is_empty() => "Waiting for its coordinator.".into(),
         "triage" => why.into(),
         "stopped" => "Its agent exited. r resumes it.".into(),
+        "review" if r.kind.is_some() => {
+            format!("{} on round {round} of {rounds}.", capitalize(r.kind_words()))
+        }
         "review" => format!("Reviewer on round {round} of {rounds}."),
         "ready" if why.starts_with("Nothing to merge") => "Done, with nothing to merge.".into(),
         "finished" => match first_line(t.summary.as_deref()).as_str() {
@@ -510,8 +528,8 @@ fn status_detail(t: &Task, rounds: u32, at: DateTime<FixedOffset>) -> String {
             line => format!("Finished, nothing to merge: {line} c closes it."),
         },
         "ready" => match &t.rebased {
-            Some(base) => format!("{} Rebased onto {base}.", ready_detail(&pr, verdict)),
-            None => ready_detail(&pr, verdict),
+            Some(base) => format!("{} Rebased onto {base}.", ready_detail(&pr, &r)),
+            None => ready_detail(&pr, &r),
         },
         "working" if t.sent_back_by_github() => "Fixing what GitHub said.".into(),
         "working" if verdict == Some("changes") => format!("Fixing what review round {round} found."),
@@ -756,7 +774,7 @@ pub(crate) mod tests {
             worker_model: None,
             bottom_gap: 1,
         };
-        let approved = Some(Review { round: Some(1), verdict: Some("approved".into()) });
+        let approved = Some(Review { round: Some(1), verdict: Some("approved".into()), kind: None });
         let t = Task { pr: Some("https://github.com/me/repo/pull/4".into()), review: approved, ..task("BP-1", "ready") };
         assert_eq!(detail_with_auto(&t, &cfg(true), now()), "PR #4, approved by review.");
         let held = Task { auto_accept: Some(false), ..t.clone() };
@@ -794,16 +812,31 @@ pub(crate) mod tests {
         assert_eq!(task_detail(&t, 2, now()), "Asks: python3 or python?");
         let t = Task { why: ended, ..task("BP-1", "needs") };
         assert!(task_detail(&t, 2, now()).contains("probably with a question"));
-        let t = Task { review: Some(Review { round: Some(2), verdict: None }), ..task("BP-1", "review") };
+        let t = Task { review: Some(Review { round: Some(2), verdict: None, kind: None }), ..task("BP-1", "review") };
         assert_eq!(task_detail(&t, 2, now()), "Reviewer on round 2 of 2.");
         let t = Task {
             pr: Some("https://x/pull/4".into()),
-            review: Some(Review { round: None, verdict: Some("approved".into()) }),
+            review: Some(Review { round: None, verdict: Some("approved".into()), kind: None }),
             ..task("BP-1", "ready")
         };
         assert_eq!(task_detail(&t, 2, now()), "PR #4, approved by review.");
-        let t = Task { review: Some(Review { round: Some(1), verdict: Some("changes".into()) }), ..task("BP-1", "working") };
+        let t = Task { review: Some(Review { round: Some(1), verdict: Some("changes".into()), kind: None }), ..task("BP-1", "working") };
         assert_eq!(task_detail(&t, 2, now()), "Fixing what review round 1 found.");
+    }
+
+    #[test]
+    fn detail_says_which_kind_of_review() {
+        let kind = |k: &str, verdict: Option<&str>| Review {
+            round: Some(1), verdict: verdict.map(Into::into), kind: Some(k.into()),
+        };
+        let t = Task { review: Some(kind("light", None)), ..task("BP-1", "review") };
+        assert_eq!(task_detail(&t, 2, now()), "Light review on round 1 of 2.");
+        let t = Task { review: Some(kind("followup", None)), ..task("BP-1", "review") };
+        assert_eq!(task_detail(&t, 2, now()), "Follow-up review on round 1 of 2.");
+        let t = Task { pr: Some("https://x/pull/4".into()), review: Some(kind("full", Some("approved"))), ..task("BP-1", "ready") };
+        assert_eq!(task_detail(&t, 2, now()), "PR #4, approved by full review.");
+        let t = Task { pr: Some("https://x/pull/4".into()), review: Some(kind("light", Some("approved"))), ..task("BP-1", "ready") };
+        assert_eq!(task_detail(&t, 2, now()), "PR #4, approved by light review.");
     }
 
     #[test]
@@ -827,7 +860,7 @@ pub(crate) mod tests {
             local: Some(true),
             branch: Some("bullpen/bp-2-x".into()),
             base: Some("main".into()),
-            review: Some(Review { round: None, verdict: Some("approved".into()) }),
+            review: Some(Review { round: None, verdict: Some("approved".into()), kind: None }),
             ..task("BP-2", "ready")
         };
         assert_eq!(task_detail(&t, 2, now()), "Local branch bullpen/bp-2-x, approved by review.");
@@ -940,7 +973,7 @@ pub(crate) mod tests {
     }
 
     fn changes(round: u32) -> Option<Review> {
-        Some(Review { round: Some(round), verdict: Some("changes".into()) })
+        Some(Review { round: Some(round), verdict: Some("changes".into()), kind: None })
     }
 
     #[test]
@@ -973,7 +1006,7 @@ pub(crate) mod tests {
         assert_eq!(task_detail(&t, 2, now()), "No progress for 25 min. p shows its screen.");
         let noted = Task { note: Some("Hung on npm install".into()), ..t.clone() };
         assert_eq!(task_detail(&noted, 2, now()), "Hung on npm install");
-        let review = Some(Review { round: Some(1), verdict: None });
+        let review = Some(Review { round: Some(1), verdict: None, kind: None });
         let t = Task { review: review.clone(), stuck: stuck("reviewer", 190), ..task("BP-1", "review") };
         assert_eq!(task_detail(&t, 2, now()), "Reviewer has shown no progress for 3 h. ⏎ opens it.");
         // a worker's quiet spell says nothing about a task that has moved on

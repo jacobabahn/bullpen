@@ -56,7 +56,7 @@ It groups tasks by what you do next: needs you, coordinator on it (dimmed: see
 [Finish](#finish-with-nothing-to-merge)), in review, working, queued; `f` adds
 the closed ones (accepted, closed, dropped). Each task shows how long it has been there and, on a second
 line, what it needs or where it stands ("Asks: python3 or python?", "PR #4,
-approved by review."). A task in review or ready also shows the size of its
+approved by light review.", "Follow-up review on round 2 of 2."). A task in review or ready also shows the size of its
 change ("3 files, +120 −14"), worked out once when its worker runs `ready`. A
 task that needs you gets an amber bar; its age turns red after 5 minutes. A
 working task's mark spins, and one in review turns; one whose agent has shown no
@@ -160,7 +160,9 @@ on that base up to date, and they don't drift behind and conflict later:
 - Between turns (needs you, triage, stopped, ready): bullpen rebases its branch itself,
   if its worktree is clean, and pushes it to the PR (`--force-with-lease`). The
   status stays; a ready task says "Rebased onto main." on the board until its
-  next `ready`. If the rebase conflicts, it is undone, the branch stays as it was,
+  next `ready`. An approved task keeps its approval when the rebase left its patch
+  as it was (the same patch-id); if the patch changed, a reviewer checks it again
+  (a follow-up round). If the rebase conflicts, it is undone, the branch stays as it was,
   and the task goes back to its worker with the conflicting files (resumed if its
   pane is gone). Uncommitted changes: skipped.
 
@@ -178,6 +180,39 @@ which fixes them and runs `ready` again, for up to 2 rounds. The task is ready
 to accept once review approves, or after the last round with the open findings
 listed. `bullpen config --review off` skips review; `review_rounds` and
 `reviewer` in the repo's `config.json` set the rounds and the reviewer's command.
+
+Review costs only what it has to:
+
+- **The first round** is a full review on the reviewer model (`--reviewer-model`):
+  the brief, the whole diff, the tests. A small change gets a **light review**
+  instead: one round on the follow-up model, checking that it's correct and matches
+  the brief. Small means docs only (every changed file under `docs/` or `prompts/`,
+  or ending in `.md`), or at most `light_review_lines` changed lines (40 by default,
+  `config --light-review-lines`) in at most 2 files. `bullpen add --review
+  full|light|auto` or `bullpen review-mode BP-3 full|light|auto` overrides that
+  for one task; auto, the default, goes by the size.
+- **Later rounds follow up**: the reviewer gets the last round's findings and the
+  diff since the commit it reviewed (a range-diff after a rebase), with the whole
+  diff for context, and checks that each finding is fixed and that the fixes broke
+  nothing nearby. They run on `reviewer_followup_model` (`config
+  --reviewer-followup-model`, sonnet by default; `null` in `config.json` uses the
+  reviewer model).
+- **An approval is kept while the code doesn't change.** Each review records the
+  commit it looked at and a patch-id of the task's diff against its base (`git diff
+  base...HEAD | git patch-id --stable`). When the worker runs `ready` again on the
+  same commit, or on the same patch after a clean rebase, the task is ready at once
+  with its approval, and news says why: `BP-3 is ready (2 commits, PR #12), its
+  approval carried over (the same patch after a clean rebase onto origin/main)`.
+  A changed patch, or a rebase conflict bullpen sent back (resolved by hand), is
+  reviewed again. `ready` run again while a reviewer is already on that very commit
+  leaves it be.
+
+The board, `show` and the ready news say which kind of review it was ("approved by
+light review (12 lines in 1 file)").
+
+A reviewer whose turn ends while a background shell of its own still runs (the tests,
+say) is busy, not stopped, like a worker: it stays in review. Past `stuck_after`
+minutes with the shell still running, `check` counts it as stopped without a verdict.
 
 ### Finish with nothing to merge
 
@@ -250,8 +285,10 @@ With the task's coordinator (or, for a task without one, every coordinator) not
 running, it goes to you at once.
 
 A ready task whose worker starts working again (you typed to it, say) goes back to
-working: its review approval is dropped, there's a news line, and it has to run
-`ready` again.
+working, with a news line, and has to run `ready` again. Its approval is dropped
+only if the code changes: if that turn ends with the code as it was approved
+(committed, the same patch), the task is ready again with its approval, and news
+says so; `ready` keeps it too.
 
 Tasks that needed you before triage existed are sorted out once, the first time
 bullpen runs after the update: those stopped for one of the triage reasons above
@@ -438,6 +475,7 @@ bullpen add "Fix login redirect" --brief-file brief.md   # prints BP-1
 bullpen add "Cover logout" --brief-file b2.md --after BP-1 # BP-2 starts once BP-1 is accepted
 bullpen after BP-2 --none   # change (or clear) what a task waits on
 bullpen model BP-2 sonnet   # the worker model it starts and resumes with (--clear: the config's)
+bullpen review-mode BP-2 full  # its first review: full, light or auto (by the size of the change)
 bullpen start BP-1    # worktree + branch + a Rex window running the worker
 bullpen ls            # todo, working, triage, needs, stopped, review, ready, finished
 bullpen peek BP-1     # the end of the worker's screen
@@ -499,8 +537,9 @@ and the base branch (default: origin's default branch). The worker and coordinat
 commands are in that folder's `config.json` (`worker`, `coordinator_cmd`). `"rebase_others": false`
 there stops `accept` rebasing the other open tasks (see [After accept](#after-accept)).
 
-`bullpen config --model opus` sets the model for workers and reviewers;
-`--worker-model` and `--reviewer-model` set one each. It takes anything `claude --model`
+`bullpen config --model opus` sets the model for workers and reviewers (follow-up
+and light reviews too); `--worker-model`, `--reviewer-model` and
+`--reviewer-followup-model` set one each. It takes anything `claude --model`
 does (an alias like `opus`, or a full model ID), and `default` lets Claude Code pick
 again. Bullpen adds `--model` when it starts an agent, in place of any `--model` in its
 command; it leaves other agents' commands alone. (To use a `--model` written in the

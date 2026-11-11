@@ -50,7 +50,9 @@ DEFAULT_CONFIG = {
     "stuck_after": 20,    # minutes a working agent can show no progress before news; 0: off
     "news": "type",       # "type": typed into the coordinator's pane; "monitor": it follows `news --follow`
     "worker_model": None,    # claude's --model for workers ("default": none; None: the command's own)
-    "reviewer_model": None,  # the same for reviewers
+    "reviewer_model": None,  # the same for reviewers (a full first review)
+    "reviewer_followup_model": "sonnet",  # for later rounds and light reviews (None: reviewer_model)
+    "light_review_lines": 40,  # a change this small (lines, in at most 2 files) gets a light review
     "auto_accept": False,    # accept a task by itself once review approves it
     "triage_minutes": 10,    # minutes a task can wait on its coordinator before it needs the person
 }
@@ -996,6 +998,8 @@ def cmd_add(args):
         t["after"] = after
     if args.model:
         t["worker_model"] = args.model  # its own, over the config's, from its first start
+    if args.review_mode and args.review_mode != "auto":
+        t["review_mode"] = args.review_mode
     set_auto_accept(t, args)
     (repo.dir / "briefs").mkdir(parents=True, exist_ok=True)
     (repo.dir / "briefs" / f"{tid}.md").write_text(brief.rstrip() + "\n")
@@ -1507,10 +1511,9 @@ def cmd_tell(args):
 
 
 def back_to_work(t):
-    """The task's worker is at it again. A ready one has to run ready again: its review's
-    verdict was about work that is changing."""
-    if t["status"] == "ready" and t.get("review"):
-        t["review"]["verdict"] = None
+    """The task's worker is at it again, and has to run ready again. Its approval stays on
+    record: that ready keeps it if the code didn't change (approval_kept)."""
+    t.pop("from_ready", None)
     t.update(status="working", why=None)
 
 
@@ -1559,6 +1562,7 @@ def cmd_ready(args):
     if t.get("gh"):
         t["gh"].pop("sent", None)  # whatever GitHub sent it back for is answered now
     t.pop("rebased", None)  # what the board says of a rebase after an accept
+    t.pop("from_ready", None)
     local = not repo.has_origin()
     base_ref = task_base_ref(repo, t)
     ahead = int(git(wt, "rev-list", "--count", f"{base_ref}..HEAD").stdout.strip())
@@ -1574,10 +1578,9 @@ def cmd_ready(args):
         t["local"] = True
         t.update(why=None, summary=summary.strip() or t.get("summary"), commits=ahead)
         if repo.cfg.get("review", True):
-            start_review(repo, t, base_ref)
+            said = review_at_ready(repo, t, base_ref)
             print(f"local branch {t['branch']} ({commits(ahead)} ahead of {base_ref}; no remote, "
-                  f"so nothing pushed). A reviewer checks it now: end your turn, and you'll hear "
-                  f"back if it asks for changes.")
+                  f"so nothing pushed). {said}")
             return
         t["status"] = "ready"
         repo.save_task(t)
@@ -1594,9 +1597,8 @@ def cmd_ready(args):
         t["pr"] = p.stdout.strip().splitlines()[-1]
     t.update(why=None, summary=summary.strip() or t.get("summary"), commits=ahead)
     if repo.cfg.get("review", True):
-        start_review(repo, t, base_ref)
-        print(f"pushed {t['branch']}; pull request: {t['pr']}. A reviewer checks it now: "
-              f"end your turn, and you'll hear back if it asks for changes.")
+        said = review_at_ready(repo, t, base_ref)
+        print(f"pushed {t['branch']}; pull request: {t['pr']}. {said}")
         return
     t["status"] = "ready"
     repo.save_task(t)
@@ -1679,6 +1681,156 @@ def commits(n):
     return f"{n} commit{'s' if n != 1 else ''}"
 
 
+def review_at_ready(repo, t, base_ref):
+    """ready with review on: keep an approval that still covers the code, leave a reviewer
+    that is on this very commit, or start a review. Returns what to tell the worker."""
+    r = t.get("review") or {}
+    kept = approval_kept(t, base_ref)
+    if kept:
+        keep_approval(t, base_ref)
+        t.update(status="ready", why=None)
+        repo.save_task(t)
+        if auto_accepts(repo, t):
+            # not here: accepting closes the worker's pane, which this runs in
+            subprocess.Popen([SELF, "_auto_accept", t["id"]], cwd=repo.root, start_new_session=True,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            news(repo, t, "ready", f"{t['id']} is ready ({commits(t.get('commits') or 0)}, {where(t)}), "
+                 f"its approval carried over ({kept}): {t['title']}")
+        return f"Its review approval carries over ({kept}), so there's no new review: end your turn."
+    if (t["status"] == "review" and r.get("block") and r.get("commit") == head(t["worktree"])
+            and rex_alive(r.get("session"), r["block"])):
+        repo.save_task(t)
+        return ("A reviewer is already checking this commit: end your turn, and you'll hear back "
+                "if it asks for changes.")
+    start_review(repo, t, base_ref)
+    return (f"A reviewer checks it now ({review_kind(t['review'])}): end your turn, and you'll "
+            f"hear back if it asks for changes.")
+
+
+def cmd_auto_accept(args):
+    """(bullpen) the auto-accept of an approval carried over at ready, away from the worker's pane."""
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    if t["status"] == "ready" and (t.get("review") or {}).get("verdict") == "approved":
+        auto_accept(repo, t)
+
+
+# ---------- what a review covers ----------
+#
+# A review records what it looked at: the commit, the base it was on (merge-base) and
+# a patch-id of the task's diff against that base. An approval holds while the code
+# doesn't change: the same commit, or the same patch-id (reworded commits, or a rebase
+# that had no conflicts). A conflict bullpen sent back drops it whatever the patch-id.
+
+
+def head(wt):
+    return git(wt, "rev-parse", "HEAD").stdout.strip()
+
+
+def patch_id(wt, base_ref):
+    """The stable patch-id of the branch's change against its base, or None if there's none."""
+    diff = git(wt, "diff", "--binary", f"{base_ref}...HEAD").stdout
+    if not diff.strip():
+        return None
+    out = run(["git", "-C", str(wt), "patch-id", "--stable"], input=diff).stdout.split()
+    return out[0] if out else None
+
+
+def merge_base(wt, base_ref):
+    return git(wt, "merge-base", base_ref, "HEAD", check=False).stdout.strip() or None
+
+
+def approval_kept(t, base_ref):
+    """Why the task's approval still covers its code, in a few words, or None if it doesn't."""
+    r = t.get("review") or {}
+    wt = t.get("worktree")
+    if r.get("verdict") != "approved" or not r.get("patch") or r.get("conflict") or not wt:
+        return None
+    now_head = head(wt)
+    if now_head == r.get("commit"):
+        return "the same commit"
+    if patch_id(wt, base_ref) != r["patch"]:
+        return None
+    if merge_base(wt, base_ref) != r.get("base"):
+        return f"the same patch after a clean rebase onto {base_ref}"
+    return "the same patch, in other commits"
+
+
+def keep_approval(t, base_ref):
+    """The approval now covers the task's current commit."""
+    r = t["review"]
+    r.update(commit=head(t["worktree"]), base=merge_base(t["worktree"], base_ref))
+    r["kept"] = r.get("kept", 0) + 1
+
+
+def is_doc(path):
+    return path.startswith(("docs/", "prompts/")) or path.endswith(".md")
+
+
+def change_size(wt, base_ref):
+    """(files, lines, docs_only) of the branch's change; lines is None if a binary file changed."""
+    out = git(wt, "diff", "--numstat", "--no-renames", f"{base_ref}...HEAD").stdout
+    files, lines, docs = 0, 0, True
+    for row in out.splitlines():
+        added, deleted, path = row.split("\t", 2)
+        files += 1
+        lines = None if lines is None or added == "-" else lines + int(added) + int(deleted)
+        docs = docs and is_doc(path)
+    return files, lines, docs and files > 0
+
+
+def first_kind(repo, t, base_ref):
+    """("full" or "light", why) for a task's first review: its own review mode, else auto."""
+    mode = t.get("review_mode") or "auto"
+    if mode != "auto":
+        return mode, f"set for {t['id']}"
+    files, lines, docs = change_size(t["worktree"], base_ref)
+    limit = repo.cfg.get("light_review_lines", DEFAULT_CONFIG["light_review_lines"])
+    if docs:
+        return "light", "docs only"
+    if lines is not None and lines <= limit and files <= 2:
+        return "light", f"{lines} line{'s' if lines != 1 else ''} in {files} file{'s' if files != 1 else ''}"
+    return "full", None
+
+
+def review_kind(r):
+    """ "full review", "light review (docs only)", "follow-up review"."""
+    kind = r.get("kind")
+    if not kind:
+        return "review"
+    word = {"full": "full review", "light": "light review", "followup": "follow-up review"}[kind]
+    return word + (f" ({r['why']})" if r.get("why") else "")
+
+
+def review_model(repo, kind):
+    if kind == "full":
+        return repo.cfg.get("reviewer_model")
+    return repo.cfg.get("reviewer_followup_model") or repo.cfg.get("reviewer_model")
+
+
+MAX_DIFF_LINES = 800  # longer, and a follow-up's brief gives the command instead
+
+
+def since_last(wt, base_ref, prev):
+    """(command, diff) for what changed since the reviewed commit prev["commit"]: a plain
+    diff when it's still in the branch's history, else (a rebase) a range-diff."""
+    c = prev["commit"]
+    if git(wt, "merge-base", "--is-ancestor", c, "HEAD", check=False).returncode == 0:
+        args = ["diff", f"{c[:12]}..HEAD"]
+    else:
+        args = ["range-diff", f"{(prev.get('base') or c)[:12]}..{c[:12]}", f"{base_ref}..HEAD"]
+    p = git(wt, *args, check=False)
+    text = p.stdout if p.returncode == 0 else ""
+    cmd = f"git -C {wt} {' '.join(args)}"
+    if not text.strip():
+        return cmd, "(no changes)" if p.returncode == 0 else "(git couldn't show it: run the command)"
+    lines = text.rstrip("\n").split("\n")
+    if len(lines) > MAX_DIFF_LINES:
+        return cmd, f"({len(lines)} lines, too long to include: run the command)"
+    return cmd, "\n".join(lines)
+
+
 def task_base_ref(repo, t):
     """What the task's branch is compared with: origin's copy of its base branch when
     there is one, else the local base branch (local mode)."""
@@ -1703,19 +1855,40 @@ def review_label(t):
 
 
 def start_review(repo, t, base_ref):
-    """Start a reviewer agent on the task's branch, in its own capsule."""
+    """Start a reviewer agent on the task's branch, in its own capsule. The first round is
+    a full review, or a light one for a small change; later rounds follow up on the last
+    verdict: its findings and what changed since."""
     old = t.get("review") or {}
     close_reviewer(t)
     n = old.get("round", 0) + 1
     rounds = repo.cfg.get("review_rounds", 2)
     briefs = repo.dir / "briefs"
+    wt = t["worktree"]
+    # the round the next one follows up on: the last one with a verdict
+    prev = ({k: old.get(k) for k in ("round", "commit", "base", "findings", "verdict")}
+            if old.get("verdict") else old.get("prev"))
+    if prev and prev.get("commit"):
+        kind, why = "followup", None
+    else:
+        prev = None
+        kind, why = first_kind(repo, t, base_ref)
+    vals = dict(id=t["id"], title=t["title"], round=n, rounds=rounds, brief=briefs / f"{t['id']}.md",
+                worktree=wt, branch=t["branch"], base_ref=base_ref, bin=SELF,
+                summary=t.get("summary") or "(none)", rules=review_rules(repo, t), why=why or "")
+    if prev:
+        since, diff = since_last(wt, base_ref, prev)
+        f = Path(prev["findings"]) if prev.get("findings") else None
+        vals.update(prev_round=prev["round"], since=since, diff=diff, findings_file=f or "(none)",
+                    findings=(f.read_text().strip() if f and f.is_file() else "(none)"),
+                    prev_said="approved the change. Its notes" if prev["verdict"] == "approved"
+                    else "asked for changes. Its findings")
+    look = (PROMPTS / f"review-{kind}.md").read_text().format(**vals)
     prompt = briefs / f"{t['id']}.review-{n}.md"
     prompt.write_text((PROMPTS / "reviewer.md").read_text().format(
-        id=t["id"], title=t["title"], round=n, rounds=rounds, brief=briefs / f"{t['id']}.md",
-        worktree=t["worktree"], branch=t["branch"], base_ref=base_ref, bin=SELF,
-        summary=t.get("summary") or "(none)", rules=review_rules(repo, t)))
+        **vals, kind=review_kind({"kind": kind, "why": why}), look=look))
     first = f"You are the reviewer for bullpen task {t['id']}. Read {prompt} and follow it."
-    argv = resolve(with_model(repo.cfg["reviewer"], repo.cfg.get("reviewer_model"))) + ["-n", f"{t['id']} review", first]
+    model = review_model(repo, kind)
+    argv = resolve(with_model(repo.cfg["reviewer"], model)) + ["-n", f"{t['id']} review", first]
     session = t.get("session") or session_for(repo)
     if repo.cfg.get("workers") == "tabs":
         block = rex_run(session, t["worktree"], review_label(t), argv)
@@ -1723,7 +1896,9 @@ def start_review(repo, t, base_ref):
         block = float_pane(repo, session, review_label(t), t["worktree"], argv, t)
     index_block(block, repo, f"{t['id']} review")
     t.update(status="review", why=None, review={
-        "round": n, "block": block, "session": session, "verdict": None, "findings": None})
+        "round": n, "block": block, "session": session, "verdict": None, "findings": None,
+        "kind": kind, "why": why, "model": model, "prev": prev,
+        "commit": head(wt), "base": merge_base(wt, base_ref), "patch": patch_id(wt, base_ref)})
     repo.save_task(t)
 
 
@@ -1767,7 +1942,7 @@ def cmd_verdict(args):
             auto_accept(repo, t)
         else:
             news(repo, t, "ready", f"{t['id']} is ready ({commits(t.get('commits') or 0)}, {pr}), "
-                 f"approved by review: {t['title']}")
+                 f"approved by {review_kind(r)}: {t['title']}")
     elif r["round"] < rounds:
         msg = (f"The reviewer asked for changes (review round {r['round']} of {rounds}). Read "
                f"{findings}, fix what you agree with, commit, and run your ready command again. "
@@ -2051,6 +2226,15 @@ def rebase_other(repo, t, accepted):
     t["rebased"] = t["base"]
     if t["status"] == "ready" and t.get("diffstat"):
         t["diffstat"] = shortstat(wt, ref)
+    if (t.get("review") or {}).get("verdict") == "approved":
+        kept = approval_kept(t, ref)
+        if kept:
+            keep_approval(t, ref)
+            repo.save_task(t)
+            return f"{t['id']} rebased, its approval kept ({kept})"
+        if t["status"] == "ready" and repo.cfg.get("review", True):
+            start_review(repo, t, ref)
+            return f"{t['id']} rebased, but its patch changed: a reviewer checks it again"
     repo.save_task(t)  # same status: it stays where it was
     return f"{t['id']} rebased"
 
@@ -2066,6 +2250,8 @@ def rebase_conflict(repo, t, accepted, ref, files):
     """The task's branch doesn't rebase onto the moved base: it's left as it was, and
     the conflict goes to its worker, like review findings do."""
     names = ", ".join(files) or "some files"
+    if t.get("review"):
+        t["review"]["conflict"] = True  # resolved by hand: its next ready is reviewed again
     msg = (f"{t['base']} moved ({accepted['id']} was accepted) and your branch doesn't rebase "
            f"cleanly onto it: conflicts in {names}. Your branch is as it was. Now "
            f"{onto(ref)}, fix the conflicts, rerun the tests, commit, and run your ready "
@@ -2159,9 +2345,15 @@ def cmd_show(args):
     if is_stuck(t):
         print(f"    quiet: its {t['stuck']['who']} has shown {stuck_phrase(t)}")
     r = t.get("review") or {}
+    if t.get("review_mode"):
+        print(f"     mode: {t['review_mode']} first review (its own)")
     if r:
         state = r.get("verdict") or "in progress"
-        print(f"   review: round {r.get('round')}, {state}" + (f"; findings: {r['findings']}" if r.get("findings") else ""))
+        if r.get("verdict") == "approved" and r.get("kept"):
+            state += f", kept {r['kept']} time{'s' if r['kept'] != 1 else ''} as the code didn't change"
+        kind = review_kind(r) + (f" on {r['model']}" if r.get("model") else "")
+        print(f"   review: round {r.get('round')} ({kind}), {state}"
+              + (f"; findings: {r['findings']}" if r.get("findings") else ""))
     print(f"    brief: {repo.dir / 'briefs' / (t['id'] + '.md')}")
 
 
@@ -2243,6 +2435,25 @@ def diff_pane(repo, t, args):
     show_pane(repo, session, block)
 
 
+REVIEW_MODES = ("full", "light", "auto")
+
+
+def cmd_review_mode(args):
+    """Set how a task's first review goes: full, light, or auto (by the size of the change)."""
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    if t["status"] in CLOSED:
+        raise Fail(f"{t['id']} is {t['status']}")
+    if args.mode == "auto":
+        t.pop("review_mode", None)
+    else:
+        t["review_mode"] = args.mode
+    write_json(repo.task_path(t["id"]), t)  # not save_task: the status didn't change
+    r = t.get("review") or {}
+    later = " (it has had a review already: later rounds follow up on it, whatever the mode)" if r.get("round") else ""
+    print(f"{t['id']}'s first review: {args.mode}{later}")
+
+
 def cmd_config(args):
     repo = Repo(repo_root())
     if args.prefix:
@@ -2277,6 +2488,12 @@ def cmd_config(args):
                         ("reviewer", args.reviewer_model or args.model)):
         if model:
             repo.cfg[f"{role}_model"] = model  # "default" too: it drops the command's own --model
+    if args.reviewer_followup_model or args.model:
+        repo.cfg["reviewer_followup_model"] = args.reviewer_followup_model or args.model
+    if args.light_review_lines is not None:
+        if args.light_review_lines < 0:
+            raise Fail("--light-review-lines takes a number of lines, or 0 for docs-only changes alone")
+        repo.cfg["light_review_lines"] = args.light_review_lines
     if args.board_layout:
         repo.cfg["board_layout"] = args.board_layout
     if args.board_bottom_gap is not None:
@@ -2576,8 +2793,12 @@ def cmd_event(args):
             t.update(status="working", why=None)
         elif t["status"] == "ready" and not (t.get("last") or "").startswith("working|"):
             back_to_work(t)  # it had ended its turn: this is a new one
+            approved = (t.get("review") or {}).get("verdict") == "approved"
+            if approved:
+                t["from_ready"] = True  # an end of turn that changed no code makes it ready again
             news(repo, t, "working", f"{t['id']} was ready, but its worker started working again, so "
-                 f"it is working again: it has to run `ready` again, and its review approval is dropped")
+                 f"it is working again: it has to run `ready` again" +
+                 (", and its approval holds only if the code doesn't change" if approved else ""))
         elif t["status"] == "finished" and not (t.get("last") or "").startswith("working|"):
             back_to_work(t)
             news(repo, t, "working", f"{t['id']} was finished, but its worker started working again, so "
@@ -2608,6 +2829,8 @@ def cmd_event(args):
             # a background shell of its own still runs: it takes another turn when that ends
             repo.save_task(t)
             return
+        if ready_again(repo, t):
+            return
         say = triage(repo, t, "Ended its turn without saying ready")
         if shell_min is None:
             news(repo, t, "quiet", say(f"{t['id']} ended its turn without `ready`: read it with `bullpen peek {t['id']}`"))
@@ -2616,6 +2839,29 @@ def cmd_event(args):
                  f"background shell of its own still runs (a server, a watch?): read it with `bullpen peek {t['id']}`"))
     else:
         repo.save_task(t)
+
+
+def ready_again(repo, t):
+    """A ready task's worker took a turn and ended it without ready. If the code is as it
+    was approved (committed, the same patch), it is ready again with its approval. True
+    if so."""
+    if not t.pop("from_ready", None) or not worktree_clean(t):
+        return False
+    ref = task_base_ref(repo, t)
+    kept = approval_kept(t, ref)
+    if not kept:
+        return False
+    keep_approval(t, ref)
+    t.update(status="ready", why=None)
+    repo.save_task(t)
+    news(repo, t, "ready", f"{t['id']} is ready again: its worker's turn left the code as approved "
+         f"({kept}), so the approval carried over. `bullpen peek {t['id']}` if it said something: {t['title']}")
+    return True
+
+
+def worktree_clean(t):
+    wt = t.get("worktree")
+    return bool(wt) and Path(wt).is_dir() and not git(wt, "status", "--porcelain", check=False).stdout.strip()
 
 
 def stop_why(t):
@@ -2653,8 +2899,16 @@ def review_event(repo, t, args):
         repo.save_task(t)
         news(repo, t, "needs-you", f"{t['id']}'s reviewer needs the person ({kind})" + (f": {msg}" if msg else ""))
     elif state in ("done", "idle", "error") and t["status"] == "review":
+        if (state != "error" and getattr(args, "shell_min", None) is None
+                and shell_running(screen(r.get("session") or t.get("session"), r["block"]))):
+            # a background shell of its own still runs (the tests?): it takes another turn
+            if woke:
+                repo.save_task(t)
+            return
         say = triage(repo, t, "Reviewer stopped without a verdict")
-        news(repo, t, "quiet", say(f"{t['id']}'s reviewer stopped without a verdict: `bullpen go {t['id']} "
+        shell_min = getattr(args, "shell_min", None)
+        late = (f" {shell_min} min ago, and a background shell of its own still runs" if shell_min is not None else "")
+        news(repo, t, "quiet", say(f"{t['id']}'s reviewer stopped without a verdict{late}: `bullpen go {t['id']} "
                                    f"--review` shows it, `bullpen review {t['id']}` starts a new one"))
     elif woke:
         repo.save_task(t)
@@ -2868,8 +3122,11 @@ def worker_drift(t, a, limit):
 def reviewer_drift(t, a, limit):
     """The same for a task waiting on its reviewer."""
     tid, st = t["id"], t["status"]
-    if a["state"] == "shell" and shell_minutes(a, limit) is not None:
-        a = {**a, "state": "idle"}  # its shell has run too long to count as busy
+    if a["state"] == "shell":
+        if st != "review" or shell_minutes(a, limit) is None or t.get("ok"):
+            return None  # busy: it takes another turn when its shell ends
+        # its shell has run too long to count as busy
+        return f"{tid} is in review but its reviewer is idle without a verdict", "shell"
     if a["state"] == "gone":
         return f"{tid} is {'in review' if st == 'review' else 'marked ' + st} but its reviewer's pane is gone", "gone"
     if st == "review" and a["state"] in ("idle", "error") and not t.get("ok"):
@@ -3481,6 +3738,8 @@ def main(argv=None):
                    help="a task this one waits on (repeat, or comma-separated): it starts once they're accepted")
     p.add_argument("--model", help="claude's --model for this task's worker, over the config's, "
                    "whenever it starts (by itself too) or resumes")
+    p.add_argument("--review", choices=REVIEW_MODES, dest="review_mode",
+                   help="its first review: full, light, or auto (light for a small or docs-only change; the default)")
     p.add_argument("--auto-accept", dest="auto_accept", action="store_true", default=None,
                    help="accept it by itself once review approves it, whatever config --auto-accept says")
     p.add_argument("--no-auto-accept", dest="auto_accept", action="store_false",
@@ -3498,6 +3757,11 @@ def main(argv=None):
     p.add_argument("model", nargs="?", help="an alias like opus, or a model ID; default: let Claude Code pick")
     p.add_argument("--clear", action="store_true", help="use the config's worker model again")
     p.set_defaults(fn=cmd_model)
+
+    p = sub.add_parser("review-mode", help="set how a task's first review goes: full, light or auto")
+    p.add_argument("id")
+    p.add_argument("mode", choices=REVIEW_MODES)
+    p.set_defaults(fn=cmd_review_mode)
 
     p = sub.add_parser("start", help="make a task's worktree and start its worker")
     p.add_argument("id")
@@ -3608,10 +3872,14 @@ def main(argv=None):
     p.add_argument("--news", choices=["type", "monitor"],
                    help="how news reaches the coordinator: typed into its pane, or read by "
                         "its Monitor tool from `bullpen news --follow`")
-    p.add_argument("--model", help="claude's --model for workers and reviewers "
+    p.add_argument("--model", help="claude's --model for workers and reviewers, follow-up ones too "
                    "(an alias like opus, or a model ID; default: let Claude Code pick)")
     p.add_argument("--worker-model", metavar="MODEL", help="the same, for workers only")
-    p.add_argument("--reviewer-model", metavar="MODEL", help="the same, for reviewers only")
+    p.add_argument("--reviewer-model", metavar="MODEL", help="the same, for reviewers only (a full first review)")
+    p.add_argument("--reviewer-followup-model", metavar="MODEL",
+                   help="the same, for later review rounds and light reviews (default sonnet)")
+    p.add_argument("--light-review-lines", type=int, metavar="LINES",
+                   help="a change of at most this many lines in at most 2 files gets a light review (default 40)")
     p.add_argument("--board-layout", choices=["grouped", "compact"], help="how the board lists tasks")
     p.add_argument("--board-bottom-gap", type=int, metavar="ROWS",
                    help="empty rows at the board's bottom, under Rex's minimized-pane capsules (default 1; 0: none)")
@@ -3665,6 +3933,10 @@ def main(argv=None):
     p = sub.add_parser("_gone")
     p.add_argument("block")
     p.set_defaults(fn=cmd_gone)
+
+    p = sub.add_parser("_auto_accept")
+    p.add_argument("id")
+    p.set_defaults(fn=cmd_auto_accept)
 
     args = ap.parse_args(argv)
     try:

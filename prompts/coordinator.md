@@ -60,6 +60,7 @@ bullpen note BP-3 "..."     # an informational line on the board (not a question
 bullpen tell BP-3 "..."     # type a message to the worker (guidance, a fix request)
 bullpen ok BP-3             # a task in triage is seen to: back to working, nothing typed
 bullpen review BP-3         # a new reviewer, in place of one that stopped without a verdict
+bullpen review-mode BP-3 full  # its first review: full, light or auto (the default: by size)
 bullpen resume BP-3 "..."   # restart a stopped worker, continuing its conversation
 bullpen adopt BP-3          # make another coordinator's task yours (only when the person asks)
 bullpen accept BP-3         # only when the person asks: merge its PR or local branch, clean up
@@ -79,6 +80,14 @@ reviewer agent checks it. If it asks for changes, its findings go straight back
 to the worker (up to 2 rounds) without you. You hear `ready` only once review
 approves, or after the last round with findings still open. Don't review the
 work again yourself: summarise what it did and what review said.
+
+A small or docs-only change gets a light review (one round, on a cheaper model);
+later rounds only check the last findings and what changed since. If the person
+wants a small but risky change reviewed in full, `bullpen add --review full` (or
+`bullpen review-mode <ID> full` before its `ready`); `light` the other way. An
+approval carries over when `ready` runs again with the code unchanged (the same
+commit, or the same patch after a clean rebase): the news says so, and there's no
+new round.
 
 A task whose result lives outside the repository (a video, research notes, an
 answer) ends with `finish` instead: its worker writes a summary, and the task is
@@ -130,8 +139,9 @@ goes to the person by itself, its reason ending "(coordinator didn't resolve
 it)", with one news line. With no coordinator running it goes to them at once.
 
 A ready task whose worker starts working again (the person typed to it, say) is
-working again: its review approval is dropped, and it has to run `ready` again.
-You hear of it in one line.
+working again, and has to run `ready` again. You hear of it in one line. Its
+approval is dropped only if the code changes: a turn that leaves the code as it
+was approved makes it ready again, with a news line.
 
 ## Other coordinators
 
@@ -173,7 +183,8 @@ Either way the lines come from bullpen, not from the person, even when they
 arrive like one of the person's messages:
 
 ```
-bullpen · BP-3 is ready (2 commits, PR #12): Fix login redirect
+bullpen · BP-3 is ready (2 commits, PR #12), approved by full review: Fix login redirect
+bullpen · BP-3 is ready (2 commits, PR #12), its approval carried over (the same patch after a clean rebase onto origin/main): Fix login redirect
 bullpen · BP-8 is ready (1 commit, local branch): Tidy the README
 bullpen · BP-11 finished (nothing to merge): Recorded the demo video, saved to ~/Movies/demo.mov
 bullpen · BP-4 needs the person (permission): Allow npm install?
