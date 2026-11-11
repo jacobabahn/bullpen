@@ -1,6 +1,6 @@
 -- bullpen watcher: forwards status changes of bullpen panes to the bullpen CLI.
 --
---   rex do --all watch.lua bin=/path/to/bullpen state=/path/to/state
+--   rex do --all watch.lua bin=/path/to/bullpen state=/path/to/state [quiet=30]
 --
 -- Only panes bullpen started (listed in <state>/blocks/) are forwarded, and
 -- only when their state changes, so a worker's stream of "working: ..."
@@ -9,6 +9,8 @@
 local bin = rex.args.bin
 local state_dir = rex.args.state
 assert(bin and state_dir, "usage: rex do --all watch.lua bin=... state=...")
+
+local quiet_after = tonumber(rex.args.quiet or "") or 30 -- seconds
 
 local last = {}
 
@@ -41,7 +43,17 @@ rex.on("terminal.program_status_changed", function(ctx, ev)
   local prev = last[block]
   -- working -> working with a new message is noise; a new blocked reason is not
   if prev and prev.state == state and (state ~= "blocked" or prev.msg == r.msg) then return end
-  last[block] = { state = state, msg = r.msg }
+  local n = (prev and prev.n or 0) + 1
+  last[block] = { state = state, msg = r.msg, n = n }
+  if state == "done" or state == "idle" then
+    -- An agent can end a turn and pick up again moments later (a background
+    -- agent finishing, its own follow-up): only report it if it stays quiet.
+    rex.after(quiet_after, function()
+      local cur = last[block]
+      if cur and cur.n == n then call("_event", block, state, r.kind or "", r.msg or "") end
+    end)
+    return
+  end
   call("_event", block, state, r.kind or "", r.msg or "")
 end)
 

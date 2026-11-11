@@ -4,13 +4,14 @@ A coordinator agent and its workers, each in its own [Rex](https://www.superlogi
 
 You talk to the coordinator. It splits your ask into tasks and starts one worker
 agent per task: each gets its own git worktree, its own branch and its own Rex
-window labelled `bullpen: <ID>`. When a worker finishes, it pushes its branch and
+pane labelled `bullpen: <ID>`. When a worker finishes, it pushes its branch and
 opens a pull request. You accept (squash-merge) or drop it.
 
 The coordinator learns what its workers are doing from Rex itself. Rex records the
 status coding agents report (working, blocked, done) and a Lua watcher
-(`lua/watch.lua`, run with `rex do --all`) types news lines into the coordinator's
-pane when a worker needs you, goes quiet, fails or stops.
+(`lua/watch.lua`, run with `rex do --all`) types news into the coordinator's pane,
+as messages starting `bullpen · `, when a worker needs you, goes quiet, fails or
+stops.
 
 ## Install
 
@@ -18,16 +19,27 @@ pane when a worker needs you, goes quiet, fails or stops.
 ./install.sh          # links bin/bullpen into ~/.local/bin
 ```
 
-Needs Rex, git, `gh` (signed in) and Claude Code.
+Needs Rex (a server from preview.13 on, for minimized floating panes), git, `gh`
+(signed in) and Claude Code.
 
 ## Use
 
 In a Rex pane, inside the repository:
 
 ```sh
-bullpen up            # opens the coordinator's window, the task board and the watcher
+bullpen up            # opens the coordinator's tab, the task board and the watcher
 bullpen up --here     # or: make the agent already in this pane the coordinator
 ```
+
+Everything stays in one tab per repository. The coordinator is on the left and
+the board on the right. Each worker is a minimized floating pane, a capsule at
+the bottom right labelled `bullpen: BP-3`. `bullpen go BP-3` (or the board, or
+the keys below) brings one up and puts any other worker back into its capsule;
+going to the coordinator puts them all back. The watcher runs detached, with no
+tab. `bullpen config --workers tabs` gives new workers their own tabs instead.
+
+After a Rex server restart, run `bullpen up` again: it finds its panes by their
+labels, marks workers whose panes are gone as stopped, and restarts the watcher.
 
 The task board (`bullpen board`) sits in a narrow pane beside the coordinator:
 one line per task, with the ones that need you on top, how long each has been

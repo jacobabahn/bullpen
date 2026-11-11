@@ -24,17 +24,54 @@ FAKE_REX = textwrap.dedent("""\
         f.write(json.dumps(a) + "\\n")
     alive = d / "alive"
     alive.mkdir(exist_ok=True)
-    if a[0] in ("run", "split"):
-        n = len(list(d.glob("block-*"))) + 1
-        (d / f"block-{n}").write_text("")
+    reg = d / "reg.json"  # blocks: {id: {label, layer}}; layers: {id: state}
+    R = json.loads(reg.read_text()) if reg.exists() else {"blocks": {}, "layers": {}}
+
+    def new_block(label, layer=None):
+        n = len(R["blocks"]) + 1
         (alive / f"blk{n}").write_text("")
-        print(json.dumps({"window_id": "w", "block_ids": [f"blk{n}"]}))
+        R["blocks"][f"blk{n}"] = {"label": label, "layer": layer}
+        return f"blk{n}"
+
+    if a[0] in ("run", "split"):
+        b = new_block(a[a.index("--label") + 1] if "--label" in a else None)
+        print(json.dumps({"window_id": "w", "block_ids": [b]}))
     elif a[:2] == ["block", "inspect"]:
         sys.exit(0 if (alive / a[2]).exists() else 1)
     elif a[:2] == ["block", "close"]:
         (alive / a[2]).unlink(missing_ok=True)
     elif a[0] == "capture":
         print("line one\\nline two\\n\\n")
+    elif a[:2] == ["api", "call"]:
+        rest = a[2:]
+        if rest[0] == "-s":
+            rest = rest[2:]
+        method, args = rest[0], json.loads(rest[1]) if len(rest) > 1 else {}
+        if method == "session.new_layer":
+            lid = f"lyr{len(R['layers']) + 1}"
+            R["layers"][lid] = "normal"
+            b = new_block(args["layout"]["block"]["label"], lid)
+            print(json.dumps({"layer_id": lid, "block_ids": [b]}))
+        elif method == "session.new_block":
+            print(json.dumps({"block_id": new_block(args["label"], "detached")}))
+        elif method == "session.set_layer_state":
+            R["layers"][args["layer_id"]] = args["state"]
+            print("{}")
+        elif method == "session.view":
+            tiled = {"layer_id": "tiled", "kind": "tiled", "blocks": []}
+            layers = [tiled]
+            for b, info in R["blocks"].items():
+                if not (alive / b).exists() or info["layer"] == "detached":
+                    continue
+                entry = {"block_id": b, "label": info["label"]}
+                if info["layer"]:
+                    layers.append({"layer_id": info["layer"], "kind": "floating",
+                                   "state": R["layers"][info["layer"]], "blocks": [entry]})
+                else:
+                    tiled["blocks"].append(entry)
+            print(json.dumps({"session_id": "session:1", "label": "sess1",
+                              "windows": [{"window_id": "w1", "layers": layers}]}))
+    reg.write_text(json.dumps(R))
 """)
 
 FAKE_GH = textwrap.dedent("""\
@@ -92,6 +129,30 @@ class BullpenTest(unittest.TestCase):
         log = self.fake / "rex.log"
         return [json.loads(l) for l in log.read_text().splitlines()] if log.exists() else []
 
+    def api(self, method):
+        """Arguments of each `rex api call` to method."""
+        out = []
+        for a in self.rex_calls():
+            if a[:2] == ["api", "call"] and method in a:
+                out.append(json.loads(a[a.index(method) + 1]))
+        return out
+
+    def layer_states(self):
+        return json.loads((self.fake / "reg.json").read_text())["layers"]
+
+    def restart_rex(self):
+        """Rex restarts: every placed pane comes back with a new ID, detached ones don't."""
+        reg = self.fake / "reg.json"
+        R = json.loads(reg.read_text())
+        for b, info in list(R["blocks"].items()):
+            if (self.fake / "alive" / b).exists():
+                (self.fake / "alive" / b).unlink()
+                if info["layer"] != "detached":
+                    n = f"blk{len(R['blocks']) + 1}"
+                    R["blocks"][n] = dict(info)
+                    (self.fake / "alive" / n).write_text("")
+        reg.write_text(json.dumps(R))
+
     def typed(self):
         """Lines typed into panes with `rex send`, as (block, text)."""
         out = []
@@ -104,7 +165,7 @@ class BullpenTest(unittest.TestCase):
         return json.loads(self.bp("show", tid, "--json").stdout)
 
     def start_task(self, title="Fix the thing"):
-        self.bp("up")  # spawns the coordinator (blk1), the board (blk2) and the watcher (blk3)
+        self.bp("up")  # the coordinator (blk1), the board (blk2) and the detached watcher (blk3)
         tid = self.bp("add", title, "--brief", "Make it work.").stdout.strip()
         self.bp("start", tid)
         return tid
@@ -117,12 +178,15 @@ class BullpenTest(unittest.TestCase):
         self.bp("up")
         runs = [a for a in self.rex_calls() if a[0] == "run"]
         labels = [a[a.index("--label") + 1] for a in runs]
-        self.assertEqual(labels, ["bullpen: proj", "bullpen: watcher"])
+        self.assertEqual(labels, ["bullpen: proj"])
+        watchers = self.api("session.new_block")
+        self.assertEqual(len(watchers), 1)  # detached: no tab
+        self.assertEqual(watchers[0]["label"], "bullpen: watcher")
         splits = [a for a in self.rex_calls() if a[0] == "split"]
         self.assertEqual(len(splits), 1)  # one board, beside the coordinator
         self.assertEqual(splits[0][splits[0].index("-b") + 1], "blk1")
         self.assertEqual(splits[0][-1], "board")
-        watcher = runs[1]
+        watcher = watchers[0]["options"]["command"]
         self.assertIn("--all", watcher)
         self.assertTrue(any(x.startswith("bin=") for x in watcher))
 
@@ -140,8 +204,9 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(t["branch"], "bullpen/bp-1-fix-the-thing")
         self.assertTrue(Path(t["worktree"]).is_dir())
         self.assertEqual(t["block"], "blk4")
-        run = [a for a in self.rex_calls() if a[0] == "run"][-1]
-        self.assertEqual(run[run.index("-c") + 1], t["worktree"])
+        layer = self.api("session.new_layer")[-1]
+        self.assertEqual(layer["layout"]["block"]["options"]["cwd"], t["worktree"])
+        self.assertEqual(layer["layout"]["block"]["label"], "bullpen: BP-1")
         brief = (self.tmp / "state").rglob("BP-1.full.md").__next__().read_text()
         self.assertIn("Make it work.", brief)
         self.assertIn("ready BP-1 --summary-file", brief)
@@ -167,7 +232,7 @@ class BullpenTest(unittest.TestCase):
         self.assertNotIn("Claude", gh[0]["body"])
         block, line = self.typed()[-1]
         self.assertEqual(block, "blk1")
-        self.assertIn('event="ready"', line)
+        self.assertEqual(line, "bullpen · BP-1 is ready (1 commit, PR #7): Fix the thing")
 
     def test_ready_refuses_uncommitted_changes(self):
         tid = self.start_task()
@@ -184,14 +249,14 @@ class BullpenTest(unittest.TestCase):
         self.bp("_event", self.block(tid), "blocked", "permission", "Allow rm?")  # repeat: no news
         news = [l for b, l in self.typed() if b == "blk1"]
         self.assertEqual(len(news), 1)
-        self.assertIn('event="needs-you"', news[0])
+        self.assertTrue(news[0].startswith("bullpen · BP-1 needs you (permission)"))
         self.assertIn("Allow rm?", news[0])
         self.assertEqual(self.show(tid)["status"], "needs")
         self.bp("_event", self.block(tid), "working", "", "")
         self.assertEqual(self.show(tid)["status"], "working")
         self.bp("_event", self.block(tid), "done", "", "")
         news = [l for b, l in self.typed() if b == "blk1"]
-        self.assertIn('event="quiet"', news[-1])
+        self.assertIn("ended its turn without `ready`", news[-1])
 
     def test_done_after_ready_is_silent(self):
         tid = self.start_task()
@@ -207,10 +272,10 @@ class BullpenTest(unittest.TestCase):
         self.bp("_gone", blk)
         t = self.show(tid)
         self.assertEqual(t["status"], "stopped")
-        self.assertIn('event="stopped"', self.typed()[-1][1])
+        self.assertIn("stopped before saying ready", self.typed()[-1][1])
         self.bp("resume", tid)
-        run = [a for a in self.rex_calls() if a[0] == "run"][-1]
-        self.assertIn("--continue", run)
+        cmd = self.api("session.new_layer")[-1]["layout"]["block"]["options"]["command"]
+        self.assertIn("--continue", cmd)
         self.assertEqual(self.show(tid)["status"], "working")
 
     def test_unknown_block_events_are_ignored(self):
@@ -262,12 +327,70 @@ class BullpenTest(unittest.TestCase):
     def focused(self):
         return [a[-1] for a in self.rex_calls() if a[0] == "focus"]
 
-    def test_go_focuses_task_coordinator_and_board(self):
-        tid = self.start_task()
-        self.bp("go", tid)
+    def test_go_focuses_coordinator_and_board(self):
+        self.start_task()
         self.bp("go")
         self.bp("go", "--board")
-        self.assertEqual(self.focused(), [self.block(tid), "blk1", "blk2"])
+        self.assertEqual(self.focused(), ["blk1", "blk2"])
+
+    def test_workers_start_as_minimized_floating_panes(self):
+        tid = self.start_task()
+        self.assertEqual([a[0] for a in self.rex_calls()].count("run"), 1)  # only the coordinator
+        layer = self.api("session.new_layer")[0]
+        self.assertEqual(layer["window_id"], "w1")  # the coordinator's window
+        self.assertEqual(self.layer_states(), {"lyr1": "minimized"})
+
+    def test_go_brings_one_worker_up_at_a_time(self):
+        self.start_task("First")
+        self.bp("add", "Second", "--brief", "x")
+        self.bp("start", "BP-2")
+        self.bp("go", "BP-1")
+        self.assertEqual(self.layer_states(), {"lyr1": "normal", "lyr2": "minimized"})
+        self.assertTrue(self.api("session.set_layer_state")[-1].get("focus"))
+        self.bp("go", "BP-2")
+        self.assertEqual(self.layer_states(), {"lyr1": "minimized", "lyr2": "normal"})
+        self.bp("go")  # back to the coordinator: workers go back to capsules
+        self.assertEqual(self.layer_states(), {"lyr1": "minimized", "lyr2": "minimized"})
+        self.assertEqual(self.focused(), ["blk1"])
+
+    def test_workers_tabs_setting(self):
+        self.bp("up")
+        self.bp("config", "--workers", "tabs")
+        self.bp("add", "T", "--brief", "x")
+        self.bp("start", "BP-1")
+        run = [a for a in self.rex_calls() if a[0] == "run"][-1]
+        self.assertIn("bullpen: BP-1", run)
+        self.assertEqual(self.api("session.new_layer"), [])
+
+    def test_up_finds_its_panes_again_after_a_rex_restart(self):
+        a = self.start_task("First")
+        self.bp("add", "Second", "--brief", "x")
+        self.bp("start", "BP-2")
+        (self.fake / "alive" / self.block("BP-2")).unlink()  # closed while Rex was down
+        self.restart_rex()
+        runs = [x for x in self.rex_calls() if x[0] == "run"]
+        self.bp("up")
+        self.assertEqual([x for x in self.rex_calls() if x[0] == "run"], runs)  # no second coordinator
+        cfg = json.loads(self.bp("config").stdout)
+        self.assertEqual(cfg["coordinator"]["block"], "blk6")
+        self.assertEqual(cfg["board"]["block"], "blk7")
+        self.assertEqual(self.block(a), "blk8")
+        self.assertEqual(self.show("BP-2")["status"], "stopped")
+        self.assertEqual(len(self.api("session.new_block")), 2)  # the watcher, again
+        self.bp("_event", "blk8", "blocked", "permission", "ok?")  # events reach the task
+        self.assertEqual(self.show(a)["status"], "needs")
+
+    def test_go_finds_a_pane_again_after_a_rex_restart(self):
+        tid = self.start_task()
+        self.restart_rex()
+        self.bp("go", tid)
+        self.assertEqual(self.block(tid), "blk7")
+
+    def test_news_is_one_line(self):
+        tid = self.start_task()
+        self.bp("_event", self.block(tid), "blocked", "question", "Which one?\nA or B")
+        line = self.typed()[-1][1]
+        self.assertEqual(line, "bullpen · BP-1 needs you (question): Which one? A or B")
 
     def test_go_refuses_a_task_without_a_pane(self):
         self.bp("up")
@@ -320,6 +443,8 @@ class BoardTest(unittest.TestCase):
              "since": "2026-01-01T11:55:00+00:00", "why": "Needs you (permission)"}
         row = self.bp.board_row(t, 200, at)
         self.assertEqual(row, "BP-3    needs      5m  Fix login  · Needs you (permission)")
+        t.update(status="ready", why=None, pr="https://github.com/me/repo/pull/12")
+        self.assertTrue(self.bp.board_row(t, 200, at).endswith("· PR #12"))
         self.assertEqual(len(self.bp.board_row(t, 20, at)), 19)
 
 

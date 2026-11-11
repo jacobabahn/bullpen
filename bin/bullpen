@@ -33,7 +33,11 @@ DEFAULT_CONFIG = {
     "worker": ["claude", "--permission-mode", "auto"],
     "coordinator_cmd": ["claude", "--permission-mode", "auto"],
     "coordinator": None,  # {"block": ..., "session": ...}
+    "workers": "float",   # "float": minimized floating panes in the coordinator's tab; "tabs"
 }
+
+TERMINAL = "com.superlogical.terminal.shell"
+FLOAT_BOUNDS = [0.4, 0.35, 0.58, 0.62]  # bottom right of the window: x, y, w, h
 
 CLOSED = ("done", "dropped")
 
@@ -231,22 +235,68 @@ def rex_focus(session, block):
     run([REX, "focus", *(["-s", session] if session else []), block])
 
 
+def rex_api(session, method, args=None, check=True):
+    """Call a Rex server API method; -s fills in session_id."""
+    cmd = [REX, "api", "call", *(["-s", session] if session else []), method, json.dumps(args or {})]
+    p = run(cmd, check=check)
+    if p.returncode != 0 or not p.stdout.strip():
+        return None
+    return json.loads(p.stdout)
+
+
+def rex_view(session):
+    """The session's windows, layers and blocks, or None if Rex can't say."""
+    v = rex_api(session, "session.view", check=False)
+    return v if v and "windows" in v else None
+
+
+def find_pane(view, block=None, label=None):
+    """(window_id, layer, block_id) of a placed block, by ID, else by label."""
+    for w in (view or {}).get("windows", []):
+        for layer in w.get("layers", []):
+            for b in layer.get("blocks", []):
+                if (block and b.get("block_id") == block) or (not block and label and b.get("label") == label):
+                    return w["window_id"], layer, b["block_id"]
+    return None
+
+
+def set_layer(session, layer_id, state, focus=False):
+    args = {"layer_id": layer_id, "state": state}
+    if focus:
+        args["focus"] = True
+    return rex_api(session, "session.set_layer_state", args, check=False) is not None
+
+
 def rex_close(session, block):
     if block:
         run([REX, "block", "close", block] + (["-s", session] if session else []), check=False)
 
 
+def pr_short(url):
+    m = re.search(r"/pull/(\d+)", url or "")
+    return f"PR #{m.group(1)}" if m else (url or "")
+
+
 def news(repo, task, event, text):
-    line = f'<bullpen-news task="{task["id"]}" event="{event}">{text}</bullpen-news>'
+    """Type one line of news into the coordinator's prompt: `bullpen · <what happened>`."""
+    line = "bullpen · " + " ".join(text.split())  # one line: a newline would send it early
     log = repo.dir / "news.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("a") as f:
-        f.write(f"{now()} {line}\n")
+        f.write(f"{now()} {task['id']} {event}: {line}\n")
     c = repo.cfg.get("coordinator")
     if c and rex_alive(c.get("session"), c.get("block")):
         rex_type(c.get("session"), c["block"], line)
     else:
         print(f"bullpen: no live coordinator; news kept in {log}", file=sys.stderr)
+
+
+def coordinator_label(repo):
+    return f"bullpen: {repo.root.name}"
+
+
+def board_label(repo):
+    return f"bullpen: {repo.root.name} board"
 
 
 def session_for(repo, args=None):
@@ -262,6 +312,7 @@ def cmd_up(args):
     session = session_for(repo, args)
     if not session:
         raise Fail("not inside Rex: pass --session")
+    relink(repo, session)
     c = repo.cfg.get("coordinator")
     if args.here:
         block = os.environ.get("REX_BLOCK")
@@ -276,12 +327,12 @@ def cmd_up(args):
         print(f"coordinator already running: {c['block']}")
     else:
         argv = resolve(repo.cfg["coordinator_cmd"]) + [
-            "-n", f"bullpen: {repo.root.name}",
+            "-n", coordinator_label(repo),
             "--append-system-prompt-file", str(PROMPTS / "coordinator.md"),
             f"You are the bullpen coordinator for {repo.root}. The bullpen CLI is {SELF}. "
             f"Run `{SELF} ls`, then say in one short line that you are ready.",
         ]
-        block = rex_run(session, repo.root, f"bullpen: {repo.root.name}", argv, focus=True)
+        block = rex_run(session, repo.root, coordinator_label(repo), argv, focus=True)
         repo.cfg["coordinator"] = {"block": block, "session": session}
         index_block(block, repo, "coordinator")
         print(f"coordinator started: {block}")
@@ -298,7 +349,7 @@ def ensure_board(repo, session):
         return
     c = repo.cfg["coordinator"]
     p = run([REX, "split", "--json", "--focus=false", "-s", session, "-b", c["block"],
-             "--split=right", "--ratio", "35", "--label", f"bullpen: board",
+             "--split=right", "--ratio", "35", "--label", board_label(repo),
              "-c", str(repo.root), "--", *with_state([SELF, "board"])])
     block = json.loads(p.stdout)["block_ids"][0]
     if b:
@@ -315,7 +366,11 @@ def ensure_watcher(session):
         return
     argv = [shutil.which(REX) or REX, "do", "--all", str(WATCH_LUA),
             f"bin={SELF}", f"state={STATE}"]
-    block = rex_run(session, Path.home(), "bullpen: watcher", argv)
+    # Detached: it runs without a tab of its own.
+    r = rex_api(session, "session.new_block", {
+        "flavor": TERMINAL, "label": "bullpen: watcher",
+        "options": {"command": with_state(argv), "cwd": str(Path.home())}})
+    block = r["block_id"]
     write_json(STATE / "watcher.json", {"block": block, "session": session})
     print(f"watcher started: {block}")
 
@@ -375,10 +430,64 @@ def launch(repo, t, session, first, resume):
     argv = resolve(repo.cfg["worker"]) + (["--continue"] if resume else []) + \
         ["-n", f"{t['id']}: {t['title']}", first]
     unindex_block(t.get("block"))
-    block = rex_run(session, t["worktree"], f"bullpen: {t['id']}", argv)
+    label = f"bullpen: {t['id']}"
+    if repo.cfg.get("workers") == "tabs":
+        block = rex_run(session, t["worktree"], label, argv)
+    else:
+        block = float_pane(repo, session, label, t["worktree"], argv)
     index_block(block, repo, t["id"])
     t.update(block=block, session=session, status="working", why=None, last=None)
     repo.save_task(t)
+
+
+def float_pane(repo, session, label, cwd, argv):
+    """Start argv in a minimized floating pane in the coordinator's window: it shows
+    as a capsule at the bottom right until `bullpen go` brings it up."""
+    args = {"bounds": FLOAT_BOUNDS, "layout": {"block": {
+        "flavor": TERMINAL, "label": label,
+        "options": {"command": with_state(argv), "cwd": str(cwd)}}}}
+    c = repo.cfg.get("coordinator") or {}
+    where = find_pane(rex_view(session), block=c.get("block"))
+    if where:
+        args["window_id"] = where[0]
+    r = rex_api(session, "session.new_layer", args)
+    set_layer(session, r["layer_id"], "minimized")
+    return r["block_ids"][0]
+
+
+def relink(repo, session):
+    """A Rex restart brings panes back with new block IDs: find bullpen's own again
+    by their labels. Panes that are gone are forgotten (a working task is stopped)."""
+    view = rex_view(session)
+    if view is None:
+        return
+    for key, label in (("coordinator", coordinator_label(repo)), ("board", board_label(repo))):
+        c = repo.cfg.get(key)
+        if not c or find_pane(view, block=c.get("block")) or c.get("session") not in (None, session, view.get("session_id"), view.get("label")):
+            continue
+        unindex_block(c.get("block"))
+        hit = find_pane(view, label=label)
+        repo.cfg[key] = {"block": hit[2], "session": session} if hit else None
+        if hit:
+            index_block(hit[2], repo, key)
+            print(f"{key}: found again ({hit[2]})")
+    repo.save()
+    for t in repo.tasks():
+        if t["status"] in CLOSED or not t.get("block") or find_pane(view, block=t["block"]):
+            continue
+        if t.get("session") not in (None, session, view.get("session_id"), view.get("label")):
+            continue
+        unindex_block(t["block"])
+        hit = find_pane(view, label=f"bullpen: {t['id']}")
+        if hit:
+            t["block"] = hit[2]
+            index_block(hit[2], repo, t["id"])
+            print(f"{t['id']}: found again ({hit[2]})")
+        else:
+            t["block"] = None
+            if t["status"] in ("working", "needs"):
+                t.update(status="stopped", why="Its pane was gone")
+        repo.save_task(t)
 
 
 def cmd_resume(args):
@@ -443,7 +552,7 @@ def cmd_ready(args):
         t["pr"] = p.stdout.strip().splitlines()[-1]
     t.update(status="ready", why=None, summary=summary.strip() or t.get("summary"))
     repo.save_task(t)
-    news(repo, t, "ready", f"{t['id']} is ready ({ahead} commit{'s' if ahead != 1 else ''}, {t['pr']}): {t['title']}")
+    news(repo, t, "ready", f"{t['id']} is ready ({ahead} commit{'s' if ahead != 1 else ''}, {pr_short(t['pr'])}): {t['title']}")
     print(f"pushed {t['branch']}; pull request: {t['pr']}")
 
 
@@ -521,6 +630,8 @@ def cmd_config(args):
         repo.cfg["prefix"] = args.prefix
     if args.base:
         repo.cfg["base"] = args.base
+    if args.workers:
+        repo.cfg["workers"] = args.workers
     repo.save()
     print(json.dumps({"repo": str(repo.root), "state": str(repo.dir), **repo.cfg}, indent=2))
 
@@ -559,11 +670,37 @@ def cmd_go(args):
     repo = find_repo(args.from_block)
     session, block, name = go_target(repo, args)
     if not rex_alive(session, block):
-        raise Fail(f"{name}'s pane is gone")
+        relink(repo, session)  # after a Rex restart its ID changed
+        repo = Repo(repo.root)
+        session, block, name = go_target(repo, args)
+        if not rex_alive(session, block):
+            raise Fail(f"{name}'s pane is gone")
     if args.json:
         print(json.dumps({"session": session, "block": block, "name": name}))
     else:
-        rex_focus(session, block)
+        show_pane(repo, session, block)
+
+
+def show_pane(repo, session, block):
+    """Focus a pane. A worker's floating pane comes up from its capsule; any other
+    worker pane that's up goes back to being a capsule."""
+    view = rex_view(session)
+    if view is None:
+        return rex_focus(session, block)
+    mine = {t["block"] for t in repo.tasks() if t.get("block")}
+    target = find_pane(view, block=block)
+    for w in view["windows"]:
+        for layer in w.get("layers", []):
+            if layer.get("kind") != "floating" or layer.get("state") == "minimized":
+                continue
+            if target and layer["layer_id"] == target[1]["layer_id"]:
+                continue
+            if any(b.get("block_id") in mine for b in layer.get("blocks", [])):
+                set_layer(session, layer["layer_id"], "minimized")
+    if target and target[1].get("kind") == "floating":
+        if set_layer(session, target[1]["layer_id"], "normal", focus=True):
+            return
+    rex_focus(session, block)
 
 
 ORDER = {"needs": 0, "stopped": 1, "ready": 2, "working": 3, "todo": 4, "done": 5, "dropped": 6}
@@ -587,14 +724,27 @@ def ago(stamp, at=None):
 
 def board_row(t, width, at=None):
     """One task's line: ID, status, time in that status, title, and why or PR."""
-    extra = t.get("why") or t.get("pr") or ""
+    extra = t.get("why") or pr_short(t.get("pr"))
     line = f"{t['id']:<7} {t['status']:<8} {ago(t.get('since') or t.get('updated'), at):>4}  {t['title']}"
     if extra:
         line += f"  · {extra}"
     return line[:max(0, width - 1)]
 
 
-BOARD_HELP = "enter go · c coordinator · n next needing you · p peek · t tell · s start · r resume · a all · q quit"
+BOARD_HELP = [
+    "enter go · c coordinator · n next needing you · p peek · t tell · s start · r resume · a all · q quit",
+    "⏎ go · c coord · n next · p peek · t tell · s start · r resume · a all · q",
+    "⏎ go · c · n · p · t · s · r · q",
+]
+STALE = 300  # seconds a task can need you before its age turns red
+
+
+def seconds_in_status(t, at=None):
+    stamp = t.get("since") or t.get("updated")
+    if not stamp:
+        return 0
+    at = at or dt.datetime.now().astimezone()
+    return (at - dt.datetime.fromisoformat(stamp)).total_seconds()
 
 
 def cmd_board(args):
@@ -607,10 +757,11 @@ def cmd_board(args):
 
     def main(scr):
         curses.curs_set(0)
-        colors = {"needs": 1, "stopped": 5, "ready": 2, "working": 6}
+        # needs: yellow, turning red once it has waited STALE seconds
+        colors = {"needs": 3, "stopped": 5, "ready": 2, "working": 6}
         try:
             curses.use_default_colors()
-            for c in colors.values():
+            for c in (*colors.values(), 1):
                 curses.init_pair(c, c, -1)
         except curses.error:
             colors = {}
@@ -637,9 +788,14 @@ def cmd_board(args):
                 if t["id"] == sel:
                     attr |= curses.A_REVERSE
                 scr.addnstr(2 + i, 0, " " + board_row(t, w - 1), w - 1, attr)
+                if t["status"] == "needs" and seconds_in_status(t) >= STALE and w > 23:
+                    age = f"{ago(t.get('since') or t.get('updated')):>4}"
+                    red = curses.color_pair(1) if colors else 0
+                    scr.addnstr(2 + i, 18, age, 4, red | curses.A_BOLD | (attr & curses.A_REVERSE))
             if h > 3:
                 scr.addnstr(h - 2, 0, " " + msg, w - 1, curses.A_BOLD)
-                scr.addnstr(h - 1, 0, " " + BOARD_HELP, w - 1, curses.A_DIM)
+                help_ = next((x for x in BOARD_HELP if len(x) < w - 1), BOARD_HELP[-1])
+                scr.addnstr(h - 1, 0, " " + help_, w - 1, curses.A_DIM)
             scr.refresh()
 
             k = scr.getch()
@@ -852,6 +1008,8 @@ def main(argv=None):
     p = sub.add_parser("config", help="show or change this repo's settings")
     p.add_argument("--prefix")
     p.add_argument("--base")
+    p.add_argument("--workers", choices=["float", "tabs"],
+                   help="new workers as capsules in the coordinator's tab (float) or as tabs")
     p.set_defaults(fn=cmd_config)
 
     p = sub.add_parser("guide", help="print the coordinator's guide")
