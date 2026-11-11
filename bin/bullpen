@@ -1,0 +1,622 @@
+#!/usr/bin/env python3
+"""bullpen: a coordinator and its worker agents, each in its own Rex pane.
+
+Tasks live outside the repo, in $BULLPEN_STATE (default ~/.local/state/bullpen).
+Each started task gets a git worktree, a branch and a Rex window running a
+worker agent. A Lua watcher (lua/watch.lua, run with `rex do --all`) turns the
+workers' program status into news lines typed into the coordinator's pane.
+"""
+
+import argparse
+import datetime as dt
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+HOME = Path(__file__).resolve().parent.parent
+PROMPTS = HOME / "prompts"
+WATCH_LUA = HOME / "lua" / "watch.lua"
+STATE = Path(os.environ.get("BULLPEN_STATE") or Path.home() / ".local/state/bullpen")
+REX = os.environ.get("BULLPEN_REX", "rex")
+GH = os.environ.get("BULLPEN_GH", "gh")
+SELF = str(Path(__file__).resolve())
+
+DEFAULT_CONFIG = {
+    "prefix": "BP",
+    "next": 1,
+    "base": None,
+    "worker": ["claude", "--permission-mode", "auto"],
+    "coordinator_cmd": ["claude", "--permission-mode", "auto"],
+    "coordinator": None,  # {"block": ..., "session": ...}
+}
+
+CLOSED = ("done", "dropped")
+
+
+class Fail(Exception):
+    pass
+
+
+# ---------- small helpers ----------
+
+def now():
+    return dt.datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def run(cmd, cwd=None, check=True, input=None):
+    p = subprocess.run(cmd, cwd=cwd, input=input, text=True, capture_output=True)
+    if check and p.returncode != 0:
+        msg = (p.stderr or p.stdout).strip()
+        raise Fail(f"`{' '.join(map(str, cmd))}` failed: {msg}")
+    return p
+
+
+def git(repo, *args, check=True):
+    return run(["git", "-C", str(repo), *args], check=check)
+
+
+def read_json(path, default=None):
+    try:
+        return json.loads(Path(path).read_text())
+    except FileNotFoundError:
+        return default
+
+
+def write_json(path, data):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
+    with os.fdopen(fd, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, path)
+
+
+def safe(name):
+    return re.sub(r"[^A-Za-z0-9._-]", "_", name)
+
+
+def slug(title, n=40):
+    s = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    return s[:n].rstrip("-") or "task"
+
+
+def resolve(cmd):
+    """Absolute path for the program, so Rex panes don't depend on PATH."""
+    exe = shutil.which(cmd[0])
+    return [exe or cmd[0], *cmd[1:]]
+
+
+# ---------- repo, config, tasks ----------
+
+def repo_root(path=None):
+    p = run(["git", "-C", str(path or os.getcwd()), "rev-parse", "--path-format=absolute",
+             "--git-common-dir"], check=False)
+    if p.returncode != 0:
+        raise Fail("not in a git repository")
+    common = Path(p.stdout.strip())
+    return common.parent if common.name == ".git" else common
+
+
+class Repo:
+    def __init__(self, root):
+        self.root = Path(root)
+        self.dir = STATE / "repos" / safe(str(self.root).strip("/").replace("/", "-"))
+        cfg = read_json(self.dir / "config.json", {})
+        self.cfg = {**DEFAULT_CONFIG, **cfg}
+
+    def save(self):
+        write_json(self.dir / "config.json", self.cfg)
+
+    def base(self):
+        if self.cfg.get("base"):
+            return self.cfg["base"]
+        p = git(self.root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD", check=False)
+        if p.returncode == 0:
+            return p.stdout.strip().split("/", 1)[1]
+        return git(self.root, "branch", "--show-current").stdout.strip() or "main"
+
+    def task_path(self, tid):
+        return self.dir / "tasks" / f"{tid}.json"
+
+    def task(self, tid):
+        tid = self.norm(tid)
+        t = read_json(self.task_path(tid))
+        if t is None:
+            raise Fail(f"no task {tid} in {self.root}")
+        return t
+
+    def norm(self, tid):
+        tid = str(tid).upper()
+        return tid if "-" in tid else f"{self.cfg['prefix']}-{tid}"
+
+    def save_task(self, t):
+        t["updated"] = now()
+        write_json(self.task_path(t["id"]), t)
+
+    def tasks(self):
+        d = self.dir / "tasks"
+        out = [read_json(p) for p in d.glob("*.json")] if d.exists() else []
+        return sorted(out, key=lambda t: int(t["id"].rsplit("-", 1)[1]))
+
+    def worktree_dir(self, t):
+        return self.root.parent / f"{self.root.name}-bullpen" / t["id"]
+
+
+def index_block(block, repo, role):
+    write_json(STATE / "blocks" / f"{safe(block)}.json", {"repo": str(repo.root), "role": role})
+
+
+def unindex_block(block):
+    if block:
+        (STATE / "blocks" / f"{safe(block)}.json").unlink(missing_ok=True)
+
+
+def lookup_block(block):
+    entry = read_json(STATE / "blocks" / f"{safe(block)}.json")
+    if not entry:
+        return None, None
+    return Repo(entry["repo"]), entry["role"]
+
+
+# ---------- Rex ----------
+
+def rex_run(session, cwd, label, argv, focus=False):
+    cmd = [REX, "run", "--json", f"--focus={'true' if focus else 'false'}", "--label", label,
+           "-c", str(cwd)]
+    if session:
+        cmd += ["-s", session]
+    p = run([*cmd, "--", *argv])
+    return json.loads(p.stdout)["block_ids"][0]
+
+
+def rex_alive(session, block):
+    if not block:
+        return False
+    cmd = [REX, "block", "inspect", block] + (["-s", session] if session else [])
+    return run(cmd, check=False).returncode == 0
+
+
+def rex_type(session, block, text):
+    """Type one line into a terminal and press Enter."""
+    s = ["-s", session] if session else []
+    run([REX, "send", *s, "-b", block, text])
+    run([REX, "send-key", *s, "-b", block, "enter"])
+
+
+def rex_close(session, block):
+    if block:
+        run([REX, "block", "close", block] + (["-s", session] if session else []), check=False)
+
+
+def news(repo, task, event, text):
+    line = f'<bullpen-news task="{task["id"]}" event="{event}">{text}</bullpen-news>'
+    log = repo.dir / "news.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("a") as f:
+        f.write(f"{now()} {line}\n")
+    c = repo.cfg.get("coordinator")
+    if c and rex_alive(c.get("session"), c.get("block")):
+        rex_type(c.get("session"), c["block"], line)
+    else:
+        print(f"bullpen: no live coordinator; news kept in {log}", file=sys.stderr)
+
+
+def session_for(repo, args=None):
+    s = getattr(args, "session", None) if args else None
+    c = repo.cfg.get("coordinator") or {}
+    return s or c.get("session") or os.environ.get("REX_SESSION")
+
+
+# ---------- commands ----------
+
+def cmd_up(args):
+    repo = Repo(repo_root())
+    session = session_for(repo, args)
+    if not session:
+        raise Fail("not inside Rex: pass --session")
+    c = repo.cfg.get("coordinator")
+    if args.here:
+        block = os.environ.get("REX_BLOCK")
+        if not block:
+            raise Fail("--here needs REX_BLOCK (run it from the agent's own Rex pane)")
+        if c:
+            unindex_block(c.get("block"))
+        repo.cfg["coordinator"] = {"block": block, "session": session}
+        index_block(block, repo, "coordinator")
+        print(f"coordinator: this pane ({block}). Run `{SELF} guide` to read the coordinator's guide.")
+    elif c and rex_alive(c.get("session"), c.get("block")):
+        print(f"coordinator already running: {c['block']}")
+    else:
+        argv = resolve(repo.cfg["coordinator_cmd"]) + [
+            "-n", f"bullpen: {repo.root.name}",
+            "--append-system-prompt-file", str(PROMPTS / "coordinator.md"),
+            f"You are the bullpen coordinator for {repo.root}. The bullpen CLI is {SELF}. "
+            f"Run `{SELF} ls`, then say in one short line that you are ready.",
+        ]
+        block = rex_run(session, repo.root, f"bullpen: {repo.root.name}", argv, focus=True)
+        repo.cfg["coordinator"] = {"block": block, "session": session}
+        index_block(block, repo, "coordinator")
+        print(f"coordinator started: {block}")
+    repo.save()
+    ensure_watcher(session)
+
+
+def ensure_watcher(session):
+    w = read_json(STATE / "watcher.json", {})
+    if rex_alive(w.get("session"), w.get("block")):
+        return
+    argv = [shutil.which(REX) or REX, "do", "--all", str(WATCH_LUA),
+            f"bin={SELF}", f"state={STATE}"]
+    block = rex_run(session, Path.home(), "bullpen: watcher", argv)
+    write_json(STATE / "watcher.json", {"block": block, "session": session})
+    print(f"watcher started: {block}")
+
+
+def cmd_add(args):
+    repo = Repo(repo_root())
+    brief = Path(args.brief_file).read_text() if args.brief_file else args.brief
+    if not brief:
+        raise Fail("give the task's brief with --brief or --brief-file")
+    tid = f"{repo.cfg['prefix']}-{repo.cfg['next']}"
+    repo.cfg["next"] += 1
+    repo.save()
+    t = {"id": tid, "title": args.title, "status": "todo", "created": now(),
+         "base": args.base or repo.base(), "branch": None, "worktree": None,
+         "block": None, "session": None, "pr": None, "why": None, "last": None}
+    (repo.dir / "briefs").mkdir(parents=True, exist_ok=True)
+    (repo.dir / "briefs" / f"{tid}.md").write_text(brief.rstrip() + "\n")
+    repo.save_task(t)
+    print(tid)
+
+
+def footer(repo, t):
+    return (PROMPTS / "worker-footer.md").read_text().format(
+        id=t["id"], title=t["title"], worktree=t["worktree"], branch=t["branch"],
+        base=t["base"], bin=SELF)
+
+
+def cmd_start(args):
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    if t["status"] not in ("todo", "stopped"):
+        raise Fail(f"{t['id']} is {t['status']}; use `resume` or `tell`")
+    session = session_for(repo, args)
+    if not session:
+        raise Fail("no Rex session: run `bullpen up` first or pass --session")
+    if not t["worktree"]:
+        base = t["base"]
+        start_point = base
+        if git(repo.root, "remote", "get-url", "origin", check=False).returncode == 0:
+            git(repo.root, "fetch", "-q", "origin", base, check=False)
+            if git(repo.root, "rev-parse", "-q", "--verify", f"origin/{base}", check=False).returncode == 0:
+                start_point = f"origin/{base}"
+        t["branch"] = f"bullpen/{t['id'].lower()}-{slug(t['title'])}"
+        wt = repo.worktree_dir(t)
+        wt.parent.mkdir(parents=True, exist_ok=True)
+        git(repo.root, "worktree", "add", "-q", "--no-track", "-b", t["branch"], str(wt), start_point)
+        t["worktree"] = str(wt)
+    brief = (repo.dir / "briefs" / f"{t['id']}.md").read_text()
+    full = repo.dir / "briefs" / f"{t['id']}.full.md"
+    full.write_text(f"# {t['id']}: {t['title']}\n\n{brief}\n{footer(repo, t)}")
+    first = f"You are the worker for bullpen task {t['id']}. Read your brief at {full} and follow it."
+    launch(repo, t, session, first, resume=False)
+    print(f"{t['id']} started in {t['worktree']} (branch {t['branch']}, pane {t['block']})")
+
+
+def launch(repo, t, session, first, resume):
+    argv = resolve(repo.cfg["worker"]) + (["--continue"] if resume else []) + \
+        ["-n", f"{t['id']}: {t['title']}", first]
+    unindex_block(t.get("block"))
+    block = rex_run(session, t["worktree"], f"bullpen: {t['id']}", argv)
+    index_block(block, repo, t["id"])
+    t.update(block=block, session=session, status="working", why=None, last=None)
+    repo.save_task(t)
+
+
+def cmd_resume(args):
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    if rex_alive(t["session"], t["block"]):
+        raise Fail(f"{t['id']}'s agent is still running; use `tell`")
+    if not t["worktree"]:
+        raise Fail(f"{t['id']} never started; use `start`")
+    msg = args.message or "You were stopped before finishing. Check where you were and carry on with your brief."
+    launch(repo, t, session_for(repo, args) or t["session"], msg, resume=True)
+    print(f"{t['id']} resumed in pane {t['block']}")
+
+
+def cmd_tell(args):
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    if not rex_alive(t["session"], t["block"]):
+        raise Fail(f"{t['id']}'s agent isn't running; use `resume {t['id']} \"...\"`")
+    rex_type(t["session"], t["block"], " ".join(args.message))
+    if t["status"] in ("needs", "ready"):
+        t.update(status="working", why=None, last=None)
+        repo.save_task(t)
+    print(f"sent to {t['id']}")
+
+
+def cmd_peek(args):
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    if not rex_alive(t["session"], t["block"]):
+        raise Fail(f"{t['id']}'s agent isn't running")
+    s = ["-s", t["session"]] if t["session"] else []
+    out = run([REX, "capture", *s, "-b", t["block"]]).stdout
+    lines = [l for l in out.splitlines()]
+    while lines and not lines[-1].strip():
+        lines.pop()
+    print("\n".join(lines[-args.lines:]))
+
+
+def cmd_ready(args):
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    wt = t["worktree"]
+    if not wt:
+        raise Fail(f"{t['id']} has no worktree")
+    if git(wt, "status", "--porcelain").stdout.strip():
+        raise Fail("uncommitted changes: commit (or discard) them, then run ready again")
+    summary = Path(args.summary_file).read_text() if args.summary_file else (args.summary or "")
+    base_ref = f"origin/{t['base']}" if git(wt, "rev-parse", "-q", "--verify", f"origin/{t['base']}", check=False).returncode == 0 else t["base"]
+    ahead = int(git(wt, "rev-list", "--count", f"{base_ref}..HEAD").stdout.strip())
+    if ahead == 0:
+        t.update(status="ready", why="Nothing to merge (no commits)", summary=summary.strip() or None)
+        repo.save_task(t)
+        news(repo, t, "ready", f"{t['id']} is ready with nothing to merge: {t['title']}")
+        print("no commits: marked ready with nothing to merge")
+        return
+    git(wt, "push", "-q", "--force-with-lease", "-u", "origin", f"HEAD:refs/heads/{t['branch']}")
+    if not t.get("pr"):
+        body = (summary.strip() or t["title"]) + f"\n\nBullpen task {t['id']}.\n"
+        p = run([GH, "pr", "create", "--base", t["base"], "--head", t["branch"],
+                 "--title", f"{t['title']} ({t['id']})", "--body-file", "-"], cwd=wt, input=body)
+        t["pr"] = p.stdout.strip().splitlines()[-1]
+    t.update(status="ready", why=None, summary=summary.strip() or t.get("summary"))
+    repo.save_task(t)
+    news(repo, t, "ready", f"{t['id']} is ready ({ahead} commit{'s' if ahead != 1 else ''}, {t['pr']}): {t['title']}")
+    print(f"pushed {t['branch']}; pull request: {t['pr']}")
+
+
+def remove_worktree(repo, t, force=False):
+    if t.get("worktree") and Path(t["worktree"]).exists():
+        git(repo.root, "worktree", "remove", *(["--force"] if force else []), t["worktree"])
+    if t.get("branch"):
+        git(repo.root, "branch", "-D", t["branch"], check=False)
+
+
+def cmd_accept(args):
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    if t["status"] != "ready":
+        raise Fail(f"{t['id']} is {t['status']}, not ready")
+    if t.get("pr"):
+        p = run([GH, "pr", "merge", t["pr"], "--squash"], cwd=repo.root, check=False)
+        if p.returncode != 0:
+            raise Fail(f"merge refused: {(p.stderr or p.stdout).strip()}")
+        git(repo.root, "push", "-q", "origin", "--delete", t["branch"], check=False)
+    rex_close(t["session"], t["block"])
+    unindex_block(t["block"])
+    remove_worktree(repo, t, force=True)
+    t.update(status="done", block=None, worktree=None)
+    repo.save_task(t)
+    print(f"{t['id']} done" + (f" (merged {t['pr']})" if t.get("pr") else ""))
+
+
+def cmd_drop(args):
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    if t.get("worktree") and Path(t["worktree"]).exists() and not args.force:
+        if git(t["worktree"], "status", "--porcelain").stdout.strip():
+            raise Fail(f"{t['id']} has uncommitted changes in {t['worktree']}; pass --force to discard them")
+    rex_close(t["session"], t["block"])
+    unindex_block(t["block"])
+    if t.get("pr"):
+        run([GH, "pr", "close", t["pr"]], cwd=repo.root, check=False)
+    remove_worktree(repo, t, force=args.force)
+    t.update(status="dropped", block=None, worktree=None)
+    repo.save_task(t)
+    print(f"{t['id']} dropped")
+
+
+def cmd_ls(args):
+    repo = Repo(repo_root())
+    tasks = [t for t in repo.tasks() if args.all or t["status"] not in CLOSED]
+    if args.json:
+        print(json.dumps(tasks, indent=2))
+        return
+    if not tasks:
+        print("no open tasks" + ("" if args.all else " (--all shows finished ones)"))
+    for t in tasks:
+        extra = t.get("why") or t.get("pr") or ""
+        print(f"{t['id']:<7} {t['status']:<8} {t['title']}" + (f"  ({extra})" if extra else ""))
+
+
+def cmd_show(args):
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    if args.json:
+        print(json.dumps(t, indent=2))
+        return
+    for k in ("id", "title", "status", "why", "base", "branch", "worktree", "block", "pr", "summary"):
+        if t.get(k):
+            print(f"{k:>9}: {t[k]}")
+    print(f"    brief: {repo.dir / 'briefs' / (t['id'] + '.md')}")
+
+
+def cmd_config(args):
+    repo = Repo(repo_root())
+    if args.prefix:
+        if not re.fullmatch(r"[A-Z]{2,5}", args.prefix):
+            raise Fail("prefix must be 2 to 5 capital letters")
+        repo.cfg["prefix"] = args.prefix
+    if args.base:
+        repo.cfg["base"] = args.base
+    repo.save()
+    print(json.dumps({"repo": str(repo.root), "state": str(repo.dir), **repo.cfg}, indent=2))
+
+
+def cmd_guide(args):
+    print((PROMPTS / "coordinator.md").read_text())
+
+
+# ---------- watcher events (called by lua/watch.lua) ----------
+
+def cmd_event(args):
+    repo, role = lookup_block(args.block)
+    if not repo or role == "coordinator":
+        return
+    t = repo.task(role)
+    if t["block"] != args.block or t["status"] in CLOSED:
+        return
+    state, msg = args.state, (args.msg or "").strip()
+    key = f"{state}|{msg}"
+    if state == "working":
+        if t["status"] in ("needs", "stopped"):
+            t.update(status="working", why=None)
+        t["last"] = key
+        repo.save_task(t)
+        return
+    if key == t.get("last"):
+        return
+    t["last"] = key
+    if state == "blocked":
+        why = f"Needs you ({args.kind or 'input'})" + (f": {msg}" if msg else "")
+        t.update(status="needs", why=why)
+        repo.save_task(t)
+        news(repo, t, "needs-you", f"{t['id']} {why[0].lower()}{why[1:]}")
+    elif state == "error":
+        t.update(status="needs", why="Failed" + (f": {msg}" if msg else ""))
+        repo.save_task(t)
+        news(repo, t, "failed", f"{t['id']} failed" + (f": {msg}" if msg else ""))
+    elif state in ("done", "idle"):
+        if t["status"] != "working":
+            repo.save_task(t)
+            return
+        t.update(status="needs", why="Ended its turn without saying ready")
+        repo.save_task(t)
+        news(repo, t, "quiet", f"{t['id']} ended its turn without `ready`: read it with `bullpen peek {t['id']}`")
+    else:
+        repo.save_task(t)
+
+
+def cmd_gone(args):
+    repo, role = lookup_block(args.block)
+    if not repo:
+        return
+    unindex_block(args.block)
+    if role == "coordinator":
+        return
+    t = repo.task(role)
+    if t["block"] != args.block:
+        return
+    t["block"] = None
+    if t["status"] in ("working", "needs"):
+        t.update(status="stopped", why="Agent exited before saying ready")
+        repo.save_task(t)
+        news(repo, t, "stopped", f"{t['id']} stopped before saying ready: `bullpen resume {t['id']}` continues it")
+    else:
+        repo.save_task(t)
+
+
+# ---------- main ----------
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="bullpen", description=__doc__.splitlines()[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("up", help="start (or register) this repo's coordinator and the watcher")
+    p.add_argument("--here", action="store_true", help="make the agent in this pane the coordinator")
+    p.add_argument("--session", help="Rex session (default: this pane's)")
+    p.set_defaults(fn=cmd_up)
+
+    p = sub.add_parser("add", help="add a task; prints its ID")
+    p.add_argument("title")
+    p.add_argument("--brief")
+    p.add_argument("--brief-file")
+    p.add_argument("--base", help="branch to start from and open the PR against")
+    p.set_defaults(fn=cmd_add)
+
+    p = sub.add_parser("start", help="make a task's worktree and start its worker")
+    p.add_argument("id")
+    p.add_argument("--session")
+    p.set_defaults(fn=cmd_start)
+
+    p = sub.add_parser("resume", help="restart a stopped worker, continuing its conversation")
+    p.add_argument("id")
+    p.add_argument("message", nargs="?")
+    p.add_argument("--session")
+    p.set_defaults(fn=cmd_resume)
+
+    p = sub.add_parser("tell", help="type a message to a task's worker")
+    p.add_argument("id")
+    p.add_argument("message", nargs="+")
+    p.set_defaults(fn=cmd_tell)
+
+    p = sub.add_parser("peek", help="print the end of a worker's screen")
+    p.add_argument("id")
+    p.add_argument("--lines", type=int, default=40)
+    p.set_defaults(fn=cmd_peek)
+
+    p = sub.add_parser("ready", help="(worker) push the branch, open the PR, tell the coordinator")
+    p.add_argument("id")
+    p.add_argument("--summary")
+    p.add_argument("--summary-file")
+    p.set_defaults(fn=cmd_ready)
+
+    p = sub.add_parser("accept", help="(the person's call) merge a ready task's PR and clean up")
+    p.add_argument("id")
+    p.set_defaults(fn=cmd_accept)
+
+    p = sub.add_parser("drop", help="stop a task, close its PR, remove its worktree")
+    p.add_argument("id")
+    p.add_argument("--force", action="store_true")
+    p.set_defaults(fn=cmd_drop)
+
+    p = sub.add_parser("ls", help="list tasks")
+    p.add_argument("--all", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_ls)
+
+    p = sub.add_parser("show", help="one task")
+    p.add_argument("id")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_show)
+
+    p = sub.add_parser("config", help="show or change this repo's settings")
+    p.add_argument("--prefix")
+    p.add_argument("--base")
+    p.set_defaults(fn=cmd_config)
+
+    p = sub.add_parser("guide", help="print the coordinator's guide")
+    p.set_defaults(fn=cmd_guide)
+
+    p = sub.add_parser("_event")
+    p.add_argument("block")
+    p.add_argument("state")
+    p.add_argument("kind", nargs="?")
+    p.add_argument("msg", nargs="?")
+    p.set_defaults(fn=cmd_event)
+
+    p = sub.add_parser("_gone")
+    p.add_argument("block")
+    p.set_defaults(fn=cmd_gone)
+
+    args = ap.parse_args(argv)
+    try:
+        args.fn(args)
+    except Fail as e:
+        print(f"bullpen: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
