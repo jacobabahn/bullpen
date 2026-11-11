@@ -509,6 +509,20 @@ class BullpenTest(unittest.TestCase):
         news = [l for b, l in self.typed() if b == "blk1"]
         self.assertEqual([n.rsplit(" ", 1)[-1] for n in news], ["first", "second", "third"])
 
+    def test_hide_puts_a_worker_away_and_goes_to_the_board(self):
+        tid = self.start_task()
+        self.bp("go", tid)
+        self.assertEqual(self.layer_states(), {"lyr1": "normal"})
+        self.bp("hide", "--from", self.block(tid))
+        self.assertEqual(self.layer_states(), {"lyr1": "minimized"})
+        self.assertEqual(self.focused()[-1], "blk2")  # the board
+
+    def test_hide_lets_the_key_through_elsewhere(self):
+        self.start_task()
+        for pane in ("blk1", "blk2", "someone-elses"):  # coordinator, board, not ours
+            p = self.bp("hide", "--from", pane, ok=False)
+            self.assertEqual(p.returncode, 3)
+
     def test_board_pane_events_are_ignored(self):
         self.start_task()
         before = len(self.typed())

@@ -75,6 +75,10 @@ three actions, also in the command palette under Bullpen, and binds:
 - `cmd+;` then `b`: the board.
 - `cmd+;` then `c`: the coordinator.
 
+And in a worker's or reviewer's floating pane, `cmd+escape` puts it back into its
+capsule and returns you to the board (`bullpen hide`); elsewhere the key goes
+through.
+
 `setup{ prefix = "ctrl+b" }` moves them behind another key, and
 `keys = { next = "cmd+shift+j" }` sets single ones. Run `rex config reload` after.
 

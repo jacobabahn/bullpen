@@ -922,6 +922,26 @@ def cmd_go(args):
         show_pane(repo, session, block)
 
 
+def cmd_hide(args):
+    """Put the worker or reviewer pane you're in back into its capsule and go back
+    to the board. Exits 3 if that pane isn't one of bullpen's floating panes, so a
+    key binding can let the key through."""
+    repo, role = lookup_block(args.from_block)
+    if not repo or role in ("coordinator", "board"):
+        sys.exit(3)
+    t = repo.task(role.split()[0])
+    session = args.session or (t.get("review") or {}).get("session") or t.get("session")
+    where = find_pane(rex_view(session), block=args.from_block)
+    if not where or where[1].get("kind") != "floating":
+        sys.exit(3)
+    set_layer(session, where[1]["layer_id"], "minimized")
+    for key in ("board", "coordinator"):
+        c = repo.cfg.get(key) or {}
+        if rex_alive(c.get("session"), c.get("block")):
+            rex_focus(c.get("session"), c["block"])
+            break
+
+
 def show_pane(repo, session, block):
     """Focus a pane. A worker's floating pane comes up from its capsule; any other
     worker pane that's up goes back to being a capsule."""
@@ -1380,8 +1400,9 @@ def cmd_keys(args):
         opts += f', state = "{STATE}"'
     print(f"-- Add to your Rex config (rex config shows where), then run `rex config reload`:\n"
           f'dofile("{keys}").setup{{ {opts} }}\n'
-          f"-- Defaults: cmd+;>n next task needing you, cmd+;>b board, cmd+;>c coordinator.\n"
-          f'-- Change them with prefix = "...", or keys = {{ next = ..., board = ..., coordinator = ... }}.')
+          f"-- Defaults: cmd+;>n next task needing you, cmd+;>b board, cmd+;>c coordinator,\n"
+          f"-- and cmd+escape puts the worker pane you're in back into its capsule.\n"
+          f'-- Change them with prefix = "...", or keys = {{ next = ..., board = ..., coordinator = ..., hide = ... }}.')
 
 
 # ---------- watcher events (called by lua/watch.lua) ----------
@@ -1500,6 +1521,12 @@ def main(argv=None):
     p.add_argument("--session", help="the session you're in (key bindings pass it)")
     p.add_argument("--json", action="store_true", help="print the target instead of focusing it")
     p.set_defaults(fn=cmd_go)
+
+    p = sub.add_parser("hide", help="put the worker pane you're in back into its capsule")
+    p.add_argument("--from", dest="from_block", default=os.environ.get("REX_BLOCK"),
+                   help="the pane to put away (default: this one)")
+    p.add_argument("--session")
+    p.set_defaults(fn=cmd_hide)
 
     p = sub.add_parser("board", help="a live list of tasks to switch between")
     p.set_defaults(fn=cmd_board)

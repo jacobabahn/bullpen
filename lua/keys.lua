@@ -9,8 +9,11 @@
 --   bullpen_board        cmd+;>b  the task board
 --   bullpen_coordinator  cmd+;>c  the coordinator
 --
+-- and cmd+escape, in a worker's or reviewer's floating pane, puts it back into
+-- its capsule and returns to the board. Anywhere else the key goes through.
+--
 -- Options: prefix = "ctrl+b" moves all three behind another key;
--- keys = { next = "cmd+shift+j" } sets single ones (false leaves one unbound);
+-- keys = { next = "cmd+shift+j", hide = "cmd+." } sets single ones (false leaves one unbound);
 -- state = "..." when you set BULLPEN_STATE.
 
 local M = {}
@@ -55,6 +58,19 @@ function M.setup(opts)
     local key = keys[short]
     if key == nil then key = prefix .. ">" .. a.key end
     if key then rex.bind(key, a.name) end
+  end
+
+  -- A function, not an action, so the key reaches the terminal when the pane
+  -- isn't one of bullpen's (bullpen hide exits 3 then).
+  local hide = keys.hide
+  if hide == nil then hide = "cmd+escape" end
+  if hide then
+    rex.bind(hide, function(ctx)
+      if not ctx.block_id then return false end
+      local r = rex.exec({ bin, "hide", "--from", ctx.block_id, "--session", ctx.session_id or "" },
+                         { env = env, timeout = 10 })
+      return r ~= nil and r.ok
+    end)
   end
 end
 
