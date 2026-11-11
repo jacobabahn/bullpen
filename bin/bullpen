@@ -406,7 +406,7 @@ def news(repo, task, event, text, everyone=False, skip=None):
     and typed into their prompts unless they follow the log (config --news monitor).
     skip: a coordinator not to tell (the one that ran the command)."""
     line = NEWS_MARK + " ".join(text.split())  # one line: a newline would send it early
-    to = news_to(repo, task, everyone)
+    to, waits = news_to(repo, task, everyone)
     if skip and to and skip in to:
         to = [cid for cid in to if cid != skip]
         if not to:
@@ -416,24 +416,26 @@ def news(repo, task, event, text, everyone=False, skip=None):
     with log.open("a") as f:
         f.write(f"{now()}{' [' + ','.join(to) + ']' if to else ''} {task['id']} {event}: {line}\n")
     if repo.cfg.get("news") != "monitor":
-        type_news(repo, line, to)
+        # With no coordinator alive the line waits once, in the shared outbox: one copy
+        # per coordinator would reach the first to come back once for each.
+        type_news(repo, line, None if waits else to)
 
 
 def news_to(repo, task, everyone=False):
-    """The IDs of the coordinators a line of news is for: the task's owner while its
-    pane is alive; else every live coordinator; else (none alive) all of them, so it
-    waits for one. [] when the repo has no coordinator at all."""
+    """(IDs, waits): the coordinators a line of news is for, the task's owner while its
+    pane is alive, else every live coordinator; with none alive, all of them (waits is
+    True: it has to wait for one to come back). ([], True) when the repo has none."""
     cs = repo.cfg["coordinators"]
     own = None if everyone else owner(repo, task)
     if own and alive(own):
-        return [own["id"]]
+        return [own["id"]], False
     live = [c for c in cs if alive(c)]
-    return [c["id"] for c in (live or cs)]
+    return [c["id"] for c in (live or cs)], not live
 
 
 def outbox_path(repo, cid=None):
-    """Typed news waiting for coordinator cid. Without one: news from before any
-    coordinator, for the first one that can take it."""
+    """Typed news waiting for coordinator cid. Without one: news that came while no
+    coordinator was alive (or there was none), for every one alive when it's typed."""
     return repo.dir / (f"outbox-{safe(cid)}.txt" if cid else "outbox.txt")
 
 
@@ -503,9 +505,9 @@ def deliver(repo):
         cid = path.stem[len("outbox-"):] if path.stem != "outbox" else None
         if cid and any(c["id"] == cid for c in live):
             continue
-        # from before any coordinator, or for one that's gone: the live ones have it
+        # shared, or for a coordinator that's gone: the live ones have it
         lines = take_lines(path)
-        for c in ([live[0]] if cid is None else live):
+        for c in live:
             add_lines(outbox_path(repo, c["id"]), lines)
     done = True
     for c in live:

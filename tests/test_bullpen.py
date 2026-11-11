@@ -2342,6 +2342,22 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.typed(), [("blk1", "bullpen · BP-1 needs you (question): waiting")])
         self.assertEqual(list((self.tmp / "state").rglob("outbox*.txt")), [])
 
+    def test_news_while_no_coordinator_is_alive_is_typed_once(self):
+        other = self.two_coordinators()
+        third = self.new_pane()
+        self.bp_in(third, "up", "--here")
+        a = self.bp_in(other, "add", "Theirs", "--brief", "x").stdout.strip()
+        self.bp("start", a)
+        for b in ("blk1", other, third):
+            (self.fake / "alive" / b).unlink()  # every coordinator's agent is closed
+        self.ask(a, "nobody home")
+        self.assertEqual(self.typed(), [])
+        (self.fake / "alive" / "blk1").write_text("")  # one comes back
+        self.bp("_flush")
+        self.assertEqual(self.typed(), [("blk1", "bullpen · BP-1 needs you (question): nobody home")])
+        self.assertEqual(list((self.tmp / "state").rglob("outbox*.txt")), [])
+        self.assertFalse((self.tmp / "state" / "outbox").exists())
+
     def test_go_and_hide_use_the_tasks_own_coordinator(self):
         other = self.two_coordinators()
         board2 = self.coordinators()[1]["board"]["block"]
