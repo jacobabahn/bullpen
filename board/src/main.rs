@@ -405,8 +405,10 @@ impl App {
     fn tick(&self) -> Duration {
         if !self.running.is_empty() {
             Duration::from_millis(100) // spinners turn
-        } else if matches!(self.mode, Mode::Overlay { peek: Some(_), .. }) {
-            Duration::from_millis(250)
+        } else if matches!(self.mode, Mode::Overlay { peek: Some(_), .. })
+            || self.tasks.iter().any(|t| t.status == "working")
+        {
+            Duration::from_millis(250) // a peek reads again; working marks turn
         } else {
             Duration::from_secs(1) // ages move on by the minute
         }

@@ -22,8 +22,6 @@ const AMBER: Color = Color::Yellow;
 /// The selected task's row: a tint from the terminal's own palette, so status
 /// colours still show on it.
 const TINT: Color = Color::DarkGray;
-/// Rows stop here in a wide pane, so a task's age stays near its title.
-const MAX_WIDTH: u16 = 64;
 
 fn mark_style(status: &str) -> Style {
     match status {
@@ -38,6 +36,12 @@ fn mark_style(status: &str) -> Style {
 fn spinner(app: &App) -> &'static str {
     const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     FRAMES[(app.started.elapsed().as_millis() / 100) as usize % FRAMES.len()]
+}
+
+/// A working task's mark turns slowly, so the board shows it's alive.
+fn working_mark(app: &App) -> &'static str {
+    const FRAMES: [&str; 4] = ["◴", "◷", "◶", "◵"];
+    FRAMES[(app.started.elapsed().as_millis() / 250) as usize % FRAMES.len()]
 }
 
 /// Write a line at (x, y), never into the last column.
@@ -126,7 +130,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         return;
     }
 
-    let area = Rect { width: full.width.min(MAX_WIDTH), ..full };
+    let area = full;
     let (w, h) = (area.width as usize, area.height as usize);
 
     let rounds = app.cfg.review_rounds;
@@ -213,6 +217,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 // a task with a command running gets a spinner in place of its mark
                 let mark = match app.job(&t.id) {
                     Some(_) => span(spinner(app), bold()),
+                    None if t.status == "working" => span(working_mark(app), Style::new()),
                     None => span(model::mark(&t.status), mark_style(&t.status)),
                 };
                 put(buf, area, y, 1, mark);
