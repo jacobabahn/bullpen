@@ -425,6 +425,13 @@ impl App {
     }
 }
 
+/// Report this program's status to the terminal (the Program Status Protocol).
+fn status(report: &str) {
+    use std::io::Write;
+    print!("\x1b]7501;{report}\x1b\\");
+    let _ = std::io::stdout().flush();
+}
+
 fn args() -> Result<(PathBuf, PathBuf, PathBuf), String> {
     let mut it = std::env::args().skip(1);
     let (mut dir, mut root, mut bullpen) = (None, None, None);
@@ -501,6 +508,10 @@ fn main() {
         peek_due: Instant::now(),
     };
 
+    // Rex picks a pane's icon by the program in it and doesn't know this one. A
+    // program can say what it is (OSC 7501's app): "rust" gets Rust's icon.
+    // bullpen ignores status from the board's pane, and other terminals ignore this.
+    status("state=idle:app=rust");
     let mut term = ratatui::init();
     // Read the tasks again when their files change, and once a second in case a
     // change was missed; frames drawn in between only move the animations.
@@ -542,4 +553,5 @@ fn main() {
         }
     }
     ratatui::restore();
+    status("state=clear");
 }
