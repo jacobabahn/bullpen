@@ -1965,7 +1965,7 @@ def cmd_event(args):
     state, msg = args.state, (args.msg or "").strip()
     key = f"{state}|{msg}"
     woke = unstick(t, "worker")
-    if state != "working" and (limited(t, "worker") or limit_hit(repo, t, "worker", args)):
+    if state in LIMIT_STATES and (limited(t, "worker") or limit_hit(repo, t, "worker", args)):
         return
     if state == "working":
         if t["status"] in ("needs", "stopped") or limit_over(t):
@@ -2006,7 +2006,7 @@ def review_event(repo, t, args):
     state, msg = args.state, (args.msg or "").strip()
     stuck = t["status"] == "needs" and (t.get("why") or "").startswith("Reviewer")
     woke = unstick(t, "reviewer")
-    if state != "working" and (limited(t, "reviewer") or limit_hit(repo, t, "reviewer", args)):
+    if state in LIMIT_STATES and (limited(t, "reviewer") or limit_hit(repo, t, "reviewer", args)):
         return
     if state == "working":
         back = limit_over(t)
@@ -2119,6 +2119,7 @@ def cmd_gone(args):
 LIMIT_FILE = STATE / "limit.json"
 LIMIT_RE = re.compile(r"you['’]ve hit your [\w' -]*limit|usage limit reached|limit will reset"
                       r"|out of usage credits", re.I)
+LIMIT_STATES = ("error", "idle", "done")  # how a turn ends; a blocked agent waits on the person
 LIMIT_GRACE = 120          # seconds after the reset before continuing: Claude Code may do it itself
 LIMIT_FORGET = 5 * 3600    # seconds a limit with no known reset time holds `start` back
 LIMIT_CONTINUE = "The usage limit has reset. Carry on where you stopped."
@@ -2229,13 +2230,15 @@ def limit_detail(t, at=None):
 
 
 def limit_text(session, block, state, msg, seen=None):
-    """The limit message an agent stopped with, or None. It is the record's msg, or
-    (for a turn that failed or went idle, not one that finished) among the last
+    """The limit message an agent's turn ended with, or None. It is the record's msg,
+    or (for a turn that failed or went idle, not one that finished) among the last
     lines of its screen. A screen still showing the message we've already acted on
     (`seen`) says nothing new."""
+    if state not in LIMIT_STATES:
+        return None
     if LIMIT_RE.search(msg):
         return msg
-    if state not in ("error", "idle"):
+    if state == "done":
         return None
     p = run([REX, "capture", *(["-s", session] if session else []), "-b", block], check=False)
     lines = [" ".join(l.split()) for l in p.stdout.splitlines() if l.strip()][-15:]
@@ -2282,12 +2285,15 @@ def limit_hit(repo, t, who, args):
 
 
 def limit_over(t):
-    """The agent the task waits on is working again: forget its limit, and the one
-    that held `start` back. True if it was limited."""
+    """The agent the task waits on is working again: forget its limit, and let
+    `start` through. True if it was limited. limit.json stays, as a limit that has
+    reset: other tasks may still wait to be continued (`cmd_limit` removes it)."""
     if not is_limited(t):
         return False
     t["limit_seen"] = t.pop("limit")["text"]
-    LIMIT_FILE.unlink(missing_ok=True)
+    lim = read_json(LIMIT_FILE)
+    if lim:
+        write_json(LIMIT_FILE, {**lim, "resets": now()})
     return True
 
 

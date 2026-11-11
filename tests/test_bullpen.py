@@ -701,6 +701,46 @@ class BullpenTest(unittest.TestCase):
         self.bp("_limit")  # nothing left to do
         self.assertEqual(len(self.typed()), n)
 
+    def test_one_agent_working_again_leaves_the_others_to_be_continued(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        self.bp("_event", worker, "error", "", self.limit_msg())
+        tid2 = self.bp("add", "Another", "--brief", "x").stdout.strip()
+        self.bp("start", tid2, "--force")
+        worker2 = self.block(tid2)
+        self.bp("_event", worker2, "error", "", self.limit_msg())
+        self.bp("_event", worker, "working", "", "")  # before the reset: Claude Code's own continue, or a tell
+        tid3 = self.bp("add", "A third", "--brief", "x").stdout.strip()
+        self.bp("start", tid3)  # the limit no longer holds start back
+        self.bp("_limit")  # BP-2's reset time hasn't come
+        self.assertIn("limit", self.show(tid2))
+        self.assertTrue(self.limit_file().exists())
+        self.reset_passed(tid2)
+        self.bp("_limit")
+        self.assertIn((worker2, "The usage limit has reset. Carry on where you stopped."), self.typed())
+        self.assertNotIn((worker, "The usage limit has reset. Carry on where you stopped."), self.typed())
+        self.assertEqual(self.news()[-1], "bullpen · the usage limit has reset: continued BP-2")
+        self.assertNotIn("limit", self.show(tid2))
+        self.assertFalse(self.limit_file().exists())
+
+    def test_a_blocked_agent_that_mentions_the_limit_needs_you(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        (self.fake / "screen").write_text(f"  ⎿ {self.limit_msg()}\n")
+        self.bp("_event", worker, "blocked", "permission", "Bash: grep -n 'usage limit reached' bin/bullpen")
+        t = self.show(tid)
+        self.assertEqual(t["status"], "needs")
+        self.assertNotIn("limit", t)
+        self.assertIn("BP-1 needs you (permission)", self.news()[-1])
+        self.assertFalse(self.limit_file().exists())
+        reviewer_tid = self.bp("add", "Another", "--brief", "x").stdout.strip()
+        self.bp("start", reviewer_tid)
+        reviewer = self.commit_and_ready(reviewer_tid)
+        self.bp("_event", reviewer, "blocked", "permission", "Bash: grep 'usage limit reached' x")
+        t = self.show(reviewer_tid)
+        self.assertEqual((t["status"], t["why"][:18]), ("needs", "Reviewer needs you"))
+        self.assertNotIn("limit", t)
+
     def test_an_unreadable_reset_time_is_not_continued(self):
         tid = self.start_task()
         worker = self.block(tid)
