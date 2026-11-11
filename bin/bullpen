@@ -922,15 +922,14 @@ MERGE_VERB = {"rebase": "rebase-merge", "squash": "squash-merge", "merge": "merg
 
 
 def confirm_text(action, t, merge="rebase"):
-    """The question a task's row shows while the board waits for y."""
+    """The question a task's own row turns into while the board waits for y or n."""
     pr = pr_short(t.get("pr"))
     if action == "accept":
-        return (f"Press y to accept and {MERGE_VERB.get(merge, merge)} {pr}." if pr
-                else "Press y to accept and clean it up.")
+        return f"Accept and {MERGE_VERB.get(merge, merge)}?" if pr else "Accept and clean up?"
     if action == "drop":
-        return "Press y to drop it, closing its PR, pane and worktree."
+        return f"Drop it and close {pr}?" if pr else "Drop it?"
     if action == "drop-force":
-        return "It has uncommitted changes. Press y to discard them and drop it."
+        return "Discard uncommitted changes?"
     return ""
 
 
@@ -1161,11 +1160,6 @@ def cmd_board(args):
                     rows.append(("gap", None, ""))
                 for t in ts:
                     rows.append(("title", t, ""))
-                    if pending and pending[1] == t["id"]:
-                        q = confirm_text(pending[0], t, repo.cfg.get("merge", "rebase"))
-                        for line in wrap(q, detail_w(t), 2):
-                            rows.append(("confirm", t, line))
-                        continue
                     if layout == "grouped":
                         # what a task needs from you gets two lines; anything else one
                         lines = 2 if t["status"] in ("needs", "stopped") else 1
@@ -1206,6 +1200,15 @@ def cmd_board(args):
                     line = f"{left}{fit(t['title'], width - len(left) - len(age) - 2)}"
                     line = line.ljust(width - len(age)) + age
                     put(y, 1, MARKS.get(t["status"], " "), mark_attr.get(t["status"], 0))
+                    if pending and pending[1] == t["id"]:
+                        # the row becomes the question, in place: nothing below moves
+                        tone = col("green") if pending[0] == "accept" else col("red")
+                        q = confirm_text(pending[0], t, repo.cfg.get("merge", "rebase"))
+                        yn = "y / n"
+                        line = f"{left}{fit(q, width - len(left) - len(yn) - 2)}".ljust(width - len(yn)) + yn
+                        put(y, 3, line, REV | BOLD | tone)
+                        y += 1
+                        continue
                     put(y, 3, line, (REV if selected else 0) | (DIM if t["status"] in CLOSED else 0))
                     put(y, 3, t["id"], (REV if selected else DIM))
                     if t["status"] == "needs" and seconds_in_status(t) >= STALE:
@@ -1214,9 +1217,7 @@ def cmd_board(args):
                         put(y, 3 + len(line) - len(age), age, DIM)
                 elif kind == "detail":
                     put(y, 3 + len(t["id"]) + 2, fit(text, detail_w(t)), DIM)
-                elif kind == "confirm":
-                    put(y, 0, "▌", col("amber"))
-                    put(y, 3 + len(t["id"]) + 2, fit(text, detail_w(t)), col("amber") | BOLD)
+
                 y += 1
             if top + avail < len(rows):
                 put(2 + avail, w - 3, "↓", DIM)
@@ -1234,7 +1235,7 @@ def cmd_board(args):
                 put(h - 2, 1, fit(msg, w - 2), BOLD)
             if pending:
                 verb = {"accept": "accept", "drop": "drop", "drop-force": "discard and drop"}[pending[0]]
-                put(h - 1, 1, fit(f"y {verb}   any other key cancels", w - 2), col("amber") | BOLD)
+                put(h - 1, 1, fit(f"y {verb}   any other key cancels", w - 2), BOLD)
             else:
                 keys = task_keys(cur)
                 keys = (keys + "   ? keys") if keys and len(keys) + 9 < w - 2 else (keys or "? keys")
