@@ -653,7 +653,16 @@ class BullpenTest(unittest.TestCase):
             rec["kind"] = kind
         (self.fake / f"status_{blk}.json").write_text(json.dumps(rec))
 
-    def check(self, *args):
+    def settle(self):
+        """Every task entered its status 10 minutes ago: past check's settle."""
+        at = (dt.datetime.now().astimezone() - dt.timedelta(minutes=10)).isoformat()
+        for f in (self.tmp / "state").rglob("tasks/*.json"):
+            t = json.loads(f.read_text())
+            f.write_text(json.dumps({**t, "since": at}))
+
+    def check(self, *args, settle=True):
+        if settle:
+            self.settle()
         p = self.bp("check", *args, ok=False)
         self.assertIn(p.returncode, (0, 1), p.stderr)
         return p.stdout.splitlines()
@@ -661,8 +670,18 @@ class BullpenTest(unittest.TestCase):
     def test_check_prints_nothing_when_all_agree(self):
         tid = self.start_task()
         self.agent(self.block(tid), "working", msg="Reading")
+        self.settle()
         p = self.bp("check")
         self.assertEqual((p.returncode, p.stdout), (0, ""))
+
+    def test_check_leaves_a_task_bullpen_just_changed(self):
+        # `tell` (or start, resume, a verdict) marked it working a moment ago; its agent's
+        # record still says idle from before, and its working event is on the way
+        tid = self.start_task()
+        self.agent(self.block(tid), "idle", ago=600)
+        self.assertEqual(self.check(settle=False), [])
+        self.bp("check", "--fix", "--quiet")
+        self.assertEqual(self.show(tid)["status"], "working")
 
     def test_check_skips_a_task_without_a_pane(self):
         self.bp("up")
@@ -672,6 +691,7 @@ class BullpenTest(unittest.TestCase):
         (self.fake / "alive" / blk).unlink()
         self.bp("_gone", blk)  # stopped, its pane forgotten
         self.assertEqual(self.show(tid)["status"], "stopped")
+        self.settle()
         p = self.bp("check")
         self.assertEqual((p.returncode, p.stdout), (0, ""))
 
@@ -758,6 +778,34 @@ class BullpenTest(unittest.TestCase):
         self.bp("_event", blk, "idle", "", "Waiting for the tests")
         self.assertEqual(self.show(tid)["status"], "needs")
 
+    def test_a_background_shell_left_running_is_drift_after_a_while(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.bp("_event", blk, "working", "", "Starting the server")
+        (self.fake / f"screen_{blk}").write_text("❯ \n  ⏵⏵ auto mode on · 1 shell\n")
+        self.agent(blk, "idle", ago=19 * 60)  # stuck_after is 20 min
+        self.assertEqual(self.check(), [])
+        self.agent(blk, "idle", ago=25 * 60)
+        line = (f"{tid} is marked working but its agent has been idle at its prompt for 25 min, "
+                "with a background shell still running: `bullpen peek` it")
+        self.assertEqual(self.check(), [line])
+        self.assertEqual(self.check("--fix"), [line + " (fixed)"])
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("needs", "Ended its turn without saying ready"))
+        self.assertIn("background shell of its own still runs", self.news()[-1])
+        before = len(self.news())
+        self.check("--fix")
+        self.assertEqual((self.check(), len(self.news())), ([], before))
+
+    def test_a_reviewers_background_shell_left_running_is_drift_after_a_while(self):
+        tid = self.start_task()
+        reviewer = self.commit_and_ready(tid)
+        (self.fake / f"screen_{reviewer}").write_text("❯ \n  ⏵⏵ auto mode on · 1 shell\n")
+        self.agent(reviewer, "idle", ago=5 * 60)
+        self.assertEqual(self.check(), [])
+        self.agent(reviewer, "idle", ago=30 * 60)
+        self.assertEqual(self.check(), [f"{tid} is in review but its reviewer is idle without a verdict"])
+
     def test_check_goes_by_the_screen_without_a_status_record(self):
         tid = self.start_task()
         blk = self.block(tid)
@@ -794,6 +842,7 @@ class BullpenTest(unittest.TestCase):
     def test_check_all_repos_is_the_watchers(self):
         tid = self.start_task()
         self.agent(self.block(tid), "idle")
+        self.settle()
         self.bp("check", "--fix", "--quiet", "--all-repos", cwd=self.tmp)
         self.assertEqual(self.show(tid)["status"], "needs")
 

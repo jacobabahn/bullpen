@@ -254,7 +254,8 @@ It prints nothing, and exits 0, when all agree (1 when something doesn't). It
 reads the status record Rex keeps for each pane (the one the watcher's events come
 from), and goes by the screen where Rex has none: Claude Code's spinner, its
 prompt. A state that changed in the last minute is left alone, since its event may
-still be on the way. `bullpen check BP-3` checks one task.
+still be on the way, and so is a task bullpen itself moved in the last minute
+(`start`, `tell`, `ready`): its agent has yet to report. `bullpen check BP-3` checks one task.
 
 `bullpen check --fix` applies what the missed event would have done, news
 included, as if it had come; it never types into an agent or approves anything.
@@ -264,7 +265,9 @@ of it once, in the usual words.
 An agent that ended its turn while a background shell of its own still runs
 (Claude Code's footer says `1 shell`) isn't finished: it takes another turn when
 the shell ends. Bullpen counts it as busy, and holds back the "ended its turn
-without `ready`" news for that turn. `check` also hints at an idle worker with
+without `ready`" news for that turn. A shell it left running for good (a server, a
+watch) would hide it, so once it has been idle that way for `--stuck-after` minutes
+(20 by default), `check` reports it, and the news says a shell still runs. `check` also hints at an idle worker with
 commits and a clean worktree that never ran `ready`; that one it leaves to you.
 
 ### Usage limit

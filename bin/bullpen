@@ -2253,13 +2253,18 @@ def cmd_event(args):
         repo.save_task(t)
         news(repo, t, "failed", f"{t['id']} failed" + (f": {msg}" if msg else ""))
     elif state in ("done", "idle"):
-        if t["status"] != "working" or shell_running(screen(t.get("session"), t["block"])):
+        shell_min = getattr(args, "shell_min", None)  # from `check`: its shell has run this long
+        if t["status"] != "working" or (shell_min is None and shell_running(screen(t.get("session"), t["block"]))):
             # a background shell of its own still runs: it takes another turn when that ends
             repo.save_task(t)
             return
         t.update(status="needs", why="Ended its turn without saying ready")
         repo.save_task(t)
-        news(repo, t, "quiet", f"{t['id']} ended its turn without `ready`: read it with `bullpen peek {t['id']}`")
+        if shell_min is None:
+            news(repo, t, "quiet", f"{t['id']} ended its turn without `ready`: read it with `bullpen peek {t['id']}`")
+        else:
+            news(repo, t, "quiet", f"{t['id']} ended its turn without `ready` {shell_min} min ago, and a "
+                 f"background shell of its own still runs (a server, a watch?): read it with `bullpen peek {t['id']}`")
     else:
         repo.save_task(t)
 
@@ -2420,23 +2425,25 @@ def screen_state(text):
 
 
 def agent_state(session, block, at=None):
-    """What the agent in a pane is doing now: {"state", "kind", "msg"}, with state one
-    of gone, working, blocked, error, idle or shell (its turn ended, but a background
-    shell of its own runs, so it takes another). None: unsure, or it just changed."""
+    """What the agent in a pane is doing now: {"state", "kind", "msg", "age"}, with state
+    one of gone, working, blocked, error, idle or shell (its turn ended, but a background
+    shell of its own runs, so it takes another). age: seconds in that state, None if
+    unknown (the screen doesn't say). None: unsure, or it just changed."""
     if not rex_alive(session, block):
-        return {"state": "gone", "kind": "", "msg": ""}
+        return {"state": "gone", "kind": "", "msg": "", "age": None}
     r = program_status(session, block)
     if r:
-        if r.get("updated_at") and seconds_since(r["updated_at"], at) < SETTLE:
+        age = seconds_since(r["updated_at"], at) if r.get("updated_at") else None
+        if age is not None and age < SETTLE:
             return None
         state = r.get("state") or "idle"
         state = state if state in ("working", "blocked", "error") else "idle"
-        out = {"state": state, "kind": r.get("kind") or "", "msg": r.get("msg") or ""}
+        out = {"state": state, "kind": r.get("kind") or "", "msg": r.get("msg") or "", "age": age}
     else:  # no record to read: go by the screen
         state = screen_state(screen(session, block))
         if not state:
             return None
-        out = {"state": state, "kind": "", "msg": ""}
+        out = {"state": state, "kind": "", "msg": "", "age": None}
     if out["state"] == "idle" and shell_running(screen(session, block)):
         out["state"] = "shell"
     return out
@@ -2458,13 +2465,26 @@ def doing(a, who="agent"):
             "working": f"its {who} is working again"}[a["state"]]
 
 
-def worker_drift(t, a):
+def shell_minutes(a, limit):
+    """Minutes an agent has been idle with a background shell running, once that's
+    past limit (minutes): a server or a watch it left running, not a test run. Else None."""
+    if a["state"] != "shell" or a["age"] is None or a["age"] < limit * 60:
+        return None
+    return int(a["age"] // 60)
+
+
+def worker_drift(t, a, limit):
     """(line, fix) when the worker's task status disagrees with what it does, else None.
-    fix is the event the watcher missed: "gone", or the agent's state."""
+    fix is the event the watcher missed: "gone", "shell" (idle for long with a shell
+    running), or the agent's state."""
     tid, st = t["id"], t["status"]
     if a["state"] == "gone":
         return f"{tid} is marked {st} but its pane is gone", "gone"
     if a["state"] == "shell":
+        m = shell_minutes(a, limit)
+        if st == "working" and m is not None:
+            return (f"{tid} is marked working but its agent has been idle at its prompt for {m} min, "
+                    f"with a background shell still running: `bullpen peek` it"), "shell"
         return None  # busy: it takes another turn when its shell ends
     if st == "working" and a["state"] != "working":
         tail = ": `bullpen peek` it" if a["state"] == "idle" else ""
@@ -2476,9 +2496,11 @@ def worker_drift(t, a):
     return None
 
 
-def reviewer_drift(t, a):
+def reviewer_drift(t, a, limit):
     """The same for a task waiting on its reviewer."""
     tid, st = t["id"], t["status"]
+    if a["state"] == "shell" and shell_minutes(a, limit) is not None:
+        a = {**a, "state": "idle"}  # its shell has run too long to count as busy
     if a["state"] == "gone":
         return f"{tid} is {'in review' if st == 'review' else 'marked needs'} but its reviewer's pane is gone", "gone"
     if st == "review" and a["state"] in ("idle", "error"):
@@ -2525,7 +2547,10 @@ def fix_drift(repo, t, who, block, fix, a):
         t = repo.task(t["id"])
         t["last"] = None  # the event did come: don't take it for a repeat
         write_json(repo.task_path(t["id"]), t)
-    cmd_event(argparse.Namespace(block=block, state=fix, kind=a["kind"], msg=a["msg"]))
+    args = argparse.Namespace(block=block, state=fix, kind=a["kind"], msg=a["msg"])
+    if fix == "shell":
+        args.state, args.shell_min = "idle", shell_minutes(a, 0)
+    cmd_event(args)
 
 
 def check_repo(repo, ids, fix, out):
@@ -2534,6 +2559,8 @@ def check_repo(repo, ids, fix, out):
     for t in repo.tasks():
         if t["status"] in CLOSED or (ids and t["id"] not in ids):
             continue
+        if seconds_since(t.get("since") or t.get("updated") or now()) < SETTLE:
+            continue  # bullpen just changed it (start, tell, ready): its agent has yet to say
         agent = waited_on(t)
         if not agent:
             continue
@@ -2541,7 +2568,8 @@ def check_repo(repo, ids, fix, out):
         a = agent_state(session, block)
         if not a:
             continue
-        found = (worker_drift if who == "worker" else reviewer_drift)(t, a)
+        limit = repo.cfg.get("stuck_after") or DEFAULT_CONFIG["stuck_after"]
+        found = (worker_drift if who == "worker" else reviewer_drift)(t, a, limit)
         if found:
             drift += 1
             line, what = found
