@@ -355,6 +355,7 @@ def cmd_up(args):
     repo.save()
     if not args.no_board:
         ensure_board(repo, session)
+    gather(repo, session)
     ensure_watcher(session)
 
 
@@ -521,6 +522,38 @@ def relink(repo, session):
                 t.update(status="stopped", why="Its pane was gone")
         repo.save_task(t)
     relink_reviewers(repo, session, view)
+
+
+def gather(repo, session):
+    """Keep every worker and reviewer pane in the coordinator's tab, as capsules.
+    A coordinator that was restarted opens in a new tab: move the panes there and
+    close any tab that moving them left empty."""
+    if repo.cfg.get("workers") == "tabs":
+        return
+    view = rex_view(session)
+    c = repo.cfg.get("coordinator") or {}
+    home = find_pane(view, block=c.get("block"))
+    if not home:
+        return
+    emptied = set()
+    for t in repo.tasks():
+        if t["status"] in CLOSED:
+            continue
+        for b in (t.get("block"), (t.get("review") or {}).get("block")):
+            where = find_pane(view, block=b) if b else None
+            if not where or where[0] == home[0]:
+                continue
+            if rex_api(session, "session.move_block", {"block_id": b, "anchor_block_id": c["block"]},
+                       check=False) is None:
+                continue
+            r = rex_api(session, "session.float_block", {"block_id": b, "bounds": FLOAT_BOUNDS}, check=False)
+            if r:
+                set_layer(session, r["layer_id"], "minimized")
+            emptied.add(where[0])
+    if emptied:
+        for w in (rex_view(session) or {}).get("windows", []):
+            if w["window_id"] in emptied and not any(l.get("blocks") for l in w.get("layers", [])):
+                rex_api(session, "session.close_window", {"window_id": w["window_id"]}, check=False)
 
 
 def relink_reviewers(repo, session, view):
@@ -847,6 +880,7 @@ def cmd_go(args):
 def show_pane(repo, session, block):
     """Focus a pane. A worker's floating pane comes up from its capsule; any other
     worker pane that's up goes back to being a capsule."""
+    gather(repo, session)
     view = rex_view(session)
     if view is None:
         return rex_focus(session, block)

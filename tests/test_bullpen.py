@@ -24,18 +24,28 @@ FAKE_REX = textwrap.dedent("""\
         f.write(json.dumps(a) + "\\n")
     alive = d / "alive"
     alive.mkdir(exist_ok=True)
-    reg = d / "reg.json"  # blocks: {id: {label, layer}}; layers: {id: state}
-    R = json.loads(reg.read_text()) if reg.exists() else {"blocks": {}, "layers": {}}
+    reg = d / "reg.json"  # blocks: {id: {label, layer, window}}; layers: {id: state}; windows
+    R = json.loads(reg.read_text()) if reg.exists() else {"blocks": {}, "layers": {}, "windows": []}
 
-    def new_block(label, layer=None):
+    def new_block(label, layer=None, window=None):
         n = len(R["blocks"]) + 1
         (alive / f"blk{n}").write_text("")
-        R["blocks"][f"blk{n}"] = {"label": label, "layer": layer}
+        R["blocks"][f"blk{n}"] = {"label": label, "layer": layer, "window": window}
         return f"blk{n}"
 
-    if a[0] in ("run", "split"):
-        b = new_block(a[a.index("--label") + 1] if "--label" in a else None)
-        print(json.dumps({"window_id": "w", "block_ids": [b]}))
+    def new_window():
+        w = f"w{len(R['windows']) + 1}"
+        R["windows"].append(w)
+        return w
+
+    if a[0] == "run":
+        b = new_block(a[a.index("--label") + 1] if "--label" in a else None, window=new_window())
+        print(json.dumps({"window_id": R["blocks"][b]["window"], "block_ids": [b]}))
+    elif a[0] == "split":
+        anchor = R["blocks"].get(a[a.index("-b") + 1]) if "-b" in a else None
+        b = new_block(a[a.index("--label") + 1] if "--label" in a else None,
+                      window=anchor["window"] if anchor else new_window())
+        print(json.dumps({"block_ids": [b]}))
     elif a[:2] == ["block", "inspect"]:
         sys.exit(0 if (alive / a[2]).exists() else 1)
     elif a[:2] == ["block", "close"]:
@@ -53,27 +63,42 @@ FAKE_REX = textwrap.dedent("""\
         if method == "session.new_layer":
             lid = f"lyr{len(R['layers']) + 1}"
             R["layers"][lid] = "normal"
-            b = new_block(args["layout"]["block"]["label"], lid)
+            b = new_block(args["layout"]["block"]["label"], lid,
+                          args.get("window_id") or (R["windows"] or [new_window()])[0])
             print(json.dumps({"layer_id": lid, "block_ids": [b]}))
         elif method == "session.new_block":
             print(json.dumps({"block_id": new_block(args["label"], "detached")}))
+        elif method == "session.move_block":
+            blk = R["blocks"][args["block_id"]]
+            blk.update(layer=None, window=R["blocks"][args["anchor_block_id"]]["window"])
+            print("{}")
+        elif method == "session.float_block":
+            lid = f"lyr{len(R['layers']) + 1}"
+            R["layers"][lid] = "normal"
+            R["blocks"][args["block_id"]]["layer"] = lid
+            print(json.dumps({"layer_id": lid}))
+        elif method == "session.close_window":
+            R["windows"].remove(args["window_id"])
+            print("{}")
         elif method == "session.set_layer_state":
             R["layers"][args["layer_id"]] = args["state"]
             print("{}")
         elif method == "session.view":
-            tiled = {"layer_id": "tiled", "kind": "tiled", "blocks": []}
-            layers = [tiled]
-            for b, info in R["blocks"].items():
-                if not (alive / b).exists() or info["layer"] == "detached":
-                    continue
-                entry = {"block_id": b, "label": info["label"]}
-                if info["layer"]:
-                    layers.append({"layer_id": info["layer"], "kind": "floating",
-                                   "state": R["layers"][info["layer"]], "blocks": [entry]})
-                else:
-                    tiled["blocks"].append(entry)
-            print(json.dumps({"session_id": sid, "label": "main",
-                              "windows": [{"window_id": "w1", "layers": layers}]}))
+            windows = []
+            for w in R["windows"]:
+                tiled = {"layer_id": f"tiled-{w}", "kind": "tiled", "blocks": []}
+                layers = [tiled]
+                for b, info in R["blocks"].items():
+                    if not (alive / b).exists() or info["layer"] == "detached" or info["window"] != w:
+                        continue
+                    entry = {"block_id": b, "label": info["label"]}
+                    if info["layer"]:
+                        layers.append({"layer_id": info["layer"], "kind": "floating",
+                                       "state": R["layers"][info["layer"]], "blocks": [entry]})
+                    else:
+                        tiled["blocks"].append(entry)
+                windows.append({"window_id": w, "layers": layers})
+            print(json.dumps({"session_id": sid, "label": "main", "windows": windows}))
     reg.write_text(json.dumps(R))
 """)
 
@@ -436,6 +461,27 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.show(tid)["status"], "needs")
         self.bp("_event", self.block(tid), "working", "", "")
         self.assertIsNone(self.show(tid)["note"])
+
+    def windows(self):
+        """{window: [labels]} from the fake's session view."""
+        R = json.loads((self.fake / "reg.json").read_text())
+        out = {w: [] for w in R["windows"]}
+        for b, info in R["blocks"].items():
+            if (self.fake / "alive" / b).exists() and info["window"] in out:
+                out[info["window"]].append(info["label"])
+        return {w: sorted(labels) for w, labels in out.items()}
+
+    def test_a_restarted_coordinator_takes_the_workers_with_it(self):
+        tid = self.start_task()
+        self.commit_and_ready(tid)  # a reviewer capsule too
+        both = sorted(["bullpen: proj", "bullpen: proj board", "bullpen: BP-1", "bullpen: BP-1 review"])
+        self.assertEqual(self.windows(), {"w1": both})
+        for b in ("blk1", "blk2"):  # the coordinator and board are closed
+            (self.fake / "alive" / b).unlink()
+        self.bp("up")  # a new coordinator, in a new tab
+        self.assertEqual(self.windows(), {"w2": both})  # and the emptied tab is closed
+        self.assertEqual(sorted(self.layer_states().items())[-2:],
+                         [("lyr3", "minimized"), ("lyr4", "minimized")])
 
     def test_board_pane_events_are_ignored(self):
         self.start_task()
