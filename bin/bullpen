@@ -40,6 +40,7 @@ DEFAULT_CONFIG = {
     "reviewer": ["claude", "--permission-mode", "auto"],
     "board_layout": "grouped",  # or "compact"
     "merge": "rebase",    # how accept merges a PR: rebase, squash or merge
+    "stuck_after": 20,    # minutes a working agent can show no progress before news; 0: off
 }
 
 TERMINAL = "com.superlogical.terminal.shell"
@@ -161,6 +162,7 @@ class Repo:
         old = read_json(self.task_path(t["id"])) or {}
         if old.get("status") != t["status"]:
             t["note"] = None  # what it needed then, not now
+            t.pop("stuck", None)
         if old.get("status") != t["status"] or not t.get("since"):
             # when it entered its current status; fine-grained so `go --next` can order it
             t["since"] = dt.datetime.now().astimezone().isoformat(timespec="microseconds")
@@ -178,7 +180,17 @@ class Repo:
 
 
 def index_block(block, repo, role):
-    write_json(STATE / "blocks" / f"{safe(block)}.json", {"repo": str(repo.root), "role": role})
+    # stuck_after is a copy of the repo's setting, where the watcher can read it
+    write_json(STATE / "blocks" / f"{safe(block)}.json",
+               {"repo": str(repo.root), "role": role, "stuck_after": repo.cfg["stuck_after"]})
+
+
+def reindex(repo):
+    """Give the repo's panes its settings again (after `config` changed them)."""
+    for p in (STATE / "blocks").glob("*.json"):
+        entry = read_json(p) or {}
+        if entry.get("repo") == str(repo.root):
+            write_json(p, {**entry, "stuck_after": repo.cfg["stuck_after"]})
 
 
 def unindex_block(block):
@@ -1020,7 +1032,7 @@ def cmd_ls(args):
     if not tasks:
         print("no open tasks" + ("" if args.all else " (--all shows finished ones)"))
     for t in tasks:
-        extra = t.get("why") or t.get("pr") or (f"local branch {t['branch']}" if t.get("local") else "")
+        extra = stuck_phrase(t) or t.get("why") or t.get("pr") or (f"local branch {t['branch']}" if t.get("local") else "")
         print(f"{t['id']:<7} {t['status']:<8} {t['title']}" + (f"  ({extra})" if extra else ""))
 
 
@@ -1038,6 +1050,8 @@ def cmd_show(args):
             print(f"{k:>9}: none; local branch, merged into {t['base']} by accept")
     if pr_phrase(t):
         print(f"   github: {pr_phrase(t)}")
+    if is_stuck(t):
+        print(f"    quiet: its {t['stuck']['who']} has shown {stuck_phrase(t)}")
     r = t.get("review") or {}
     if r:
         state = r.get("verdict") or "in progress"
@@ -1137,7 +1151,12 @@ def cmd_config(args):
         repo.cfg["review"] = args.review == "on"
     if args.merge:
         repo.cfg["merge"] = args.merge
+    if args.stuck_after is not None:
+        if args.stuck_after < 0:
+            raise Fail("--stuck-after takes minutes, or 0 to turn it off")
+        repo.cfg["stuck_after"] = args.stuck_after
     repo.save()
+    reindex(repo)
     print(json.dumps({"repo": str(repo.root), "state": str(repo.dir), **repo.cfg}, indent=2))
 
 
@@ -1303,12 +1322,14 @@ def ago(stamp, at=None):
     return "now"
 
 
-def seconds_in_status(t, at=None):
-    stamp = t.get("since") or t.get("updated")
-    if not stamp:
-        return 0
+def seconds_since(stamp, at=None):
     at = at or dt.datetime.now().astimezone()
     return (at - dt.datetime.fromisoformat(stamp)).total_seconds()
+
+
+def seconds_in_status(t, at=None):
+    stamp = t.get("since") or t.get("updated")
+    return seconds_since(stamp, at) if stamp else 0
 
 
 def task_detail(t, rounds=2):
@@ -1327,6 +1348,11 @@ def status_detail(t, rounds=2):
         pr = f"Local branch {t.get('branch')}"
     if t.get("note"):
         return t["note"]
+    if is_stuck(t):
+        quiet = stuck_phrase(t)
+        if t["stuck"]["who"] == "reviewer":
+            return f"Reviewer has shown {quiet}. ⏎ opens it."
+        return f"{quiet[0].upper()}{quiet[1:]}. p shows its screen."
     if st == "needs":
         why = t.get("why") or ""
         if why == "Ended its turn without saying ready":
@@ -1533,7 +1559,7 @@ def cmd_board(args):
                     rows.append(("title", t, ""))
                     if layout == "grouped":
                         # what a task needs from you gets two lines; anything else one
-                        lines = 2 if t["status"] in ("needs", "stopped") else 1
+                        lines = 2 if t["status"] in ("needs", "stopped") or is_stuck(t) else 1
                         for d in wrap(task_detail(t, rounds), detail_w(t), lines):
                             if d:
                                 rows.append(("detail", t, d))
@@ -1560,9 +1586,9 @@ def cmd_board(args):
                 put(3, 1, fit("Tell the coordinator what you want done.", w - 2), DIM)
             y = 2
             for kind, t, text in rows[top: top + avail]:
-                needs = t is not None and t["status"] in ("needs", "stopped")
+                needs = t is not None and (t["status"] in ("needs", "stopped") or is_stuck(t))
                 if needs and kind in ("title", "detail"):
-                    put(y, 0, "▌", col("amber") if t["status"] == "needs" else col("red"))
+                    put(y, 0, "▌", col("red") if t["status"] == "stopped" else col("amber"))
                 if kind == "head":
                     put(y, 1, text, BOLD)
                 elif kind == "title":
@@ -1572,7 +1598,8 @@ def cmd_board(args):
                     width = w - 5  # from column 3 to the header's right edge
                     line = f"{left}{fit(t['title'], width - len(left) - len(age) - 2)}"
                     line = line.ljust(width - len(age)) + age
-                    put(y, 1, MARKS.get(t["status"], " "), mark_attr.get(t["status"], 0))
+                    put(y, 1, MARKS.get(t["status"], " "),
+                        mark_attr.get("needs" if is_stuck(t) else t["status"], 0))
                     if pending and pending[1] == t["id"]:
                         # the row becomes the question, in place: nothing below moves
                         tone = col("green") if pending[0] == "accept" else col("red")
@@ -1731,6 +1758,7 @@ def cmd_event(args):
         return
     state, msg = args.state, (args.msg or "").strip()
     key = f"{state}|{msg}"
+    woke = unstick(t, "worker")
     if state == "working":
         if t["status"] in ("needs", "stopped"):
             t.update(status="working", why=None)
@@ -1738,6 +1766,8 @@ def cmd_event(args):
         repo.save_task(t)
         return
     if key == t.get("last"):
+        if woke:
+            repo.save_task(t)
         return
     t["last"] = key
     if state == "blocked":
@@ -1767,9 +1797,11 @@ def review_event(repo, t, args):
         return
     state, msg = args.state, (args.msg or "").strip()
     stuck = t["status"] == "needs" and (t.get("why") or "").startswith("Reviewer")
+    woke = unstick(t, "reviewer")
     if state == "working":
         if stuck:
             t.update(status="review", why=None)
+        if stuck or woke:
             repo.save_task(t)
     elif state == "blocked":
         why = f"Reviewer needs you ({args.kind or 'input'})" + (f": {msg}" if msg else "")
@@ -1781,6 +1813,54 @@ def review_event(repo, t, args):
         repo.save_task(t)
         news(repo, t, "quiet", f"{t['id']}'s reviewer stopped without a verdict: "
              f"`bullpen go {t['id']} --review` shows it")
+    elif woke:
+        repo.save_task(t)
+
+
+# ---------- agents that show no progress (called by lua/watch.lua) ----------
+
+def cmd_stuck(args):
+    """(watcher) a pane has said it's working, and nothing else, for this many minutes.
+    News once per quiet spell; the task carries on as it is."""
+    repo, role = lookup_block(args.block)
+    if not repo or role in ("coordinator", "board") or not repo.cfg.get("stuck_after"):
+        return
+    who = "reviewer" if role.endswith(" review") else "worker"
+    t = repo.task(role.split()[0])
+    block = (t.get("review") or {}).get("block") if who == "reviewer" else t["block"]
+    if block != args.block or t.get("stuck") or t["status"] != ("review" if who == "reviewer" else "working"):
+        return
+    since = dt.datetime.now().astimezone() - dt.timedelta(minutes=args.minutes)
+    t["stuck"] = {"who": who, "since": since.isoformat(timespec="seconds")}
+    repo.save_task(t)
+    if who == "reviewer":
+        news(repo, t, "stuck", f"{t['id']}'s reviewer has shown no progress for {args.minutes} min: "
+             f"`bullpen go {t['id']} --review` shows it")
+    else:
+        news(repo, t, "stuck", f"{t['id']} has shown no progress for {args.minutes} min: `bullpen peek {t['id']}`")
+
+
+def unstick(t, who):
+    """The agent gave a sign of life: forget that it was quiet. True if it was."""
+    if (t.get("stuck") or {}).get("who") != who:
+        return False
+    del t["stuck"]
+    return True
+
+
+def is_stuck(t):
+    """Has the agent the task is waiting on (its worker, or its reviewer in review)
+    shown no progress for too long?"""
+    s = t.get("stuck")
+    return bool(s) and t["status"] == ("review" if s["who"] == "reviewer" else "working")
+
+
+def stuck_phrase(t, at=None):
+    """ "no progress for 25 min", or "" for a task that isn't stuck."""
+    if not is_stuck(t):
+        return ""
+    m = int(seconds_since(t["stuck"]["since"], at) // 60)
+    return f"no progress for {m} min" if m < 120 else f"no progress for {m // 60} h"
 
 
 def cmd_gone(args):
@@ -2127,6 +2207,8 @@ def main(argv=None):
                    help="new workers as capsules in the coordinator's tab (float) or as tabs")
     p.add_argument("--review", choices=["on", "off"], help="a reviewer agent checks each task")
     p.add_argument("--merge", choices=["rebase", "squash", "merge"], help="how accept merges a PR")
+    p.add_argument("--stuck-after", type=int, metavar="MINUTES",
+                   help="news when a working agent shows no progress this long (0: never)")
     p.set_defaults(fn=cmd_config)
 
     p = sub.add_parser("guide", help="print the coordinator's guide")
@@ -2138,6 +2220,11 @@ def main(argv=None):
     p.add_argument("kind", nargs="?")
     p.add_argument("msg", nargs="?")
     p.set_defaults(fn=cmd_event)
+
+    p = sub.add_parser("_stuck")
+    p.add_argument("block")
+    p.add_argument("minutes", type=int)
+    p.set_defaults(fn=cmd_stuck)
 
     p = sub.add_parser("_flush")
     p.set_defaults(fn=cmd_flush)

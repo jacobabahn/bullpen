@@ -4,7 +4,8 @@
 --
 -- Only panes bullpen started (listed in <state>/blocks/) are forwarded, and
 -- only when their state changes, so a worker's stream of "working: ..."
--- updates costs one call, not hundreds.
+-- updates costs one call, not hundreds. A pane that says it's working but sends
+-- no event for the repo's `stuck_after` minutes is reported once (stuck.lua).
 
 local bin = rex.args.bin
 local state_dir = rex.args.state
@@ -13,16 +14,33 @@ assert(bin and state_dir, "usage: rex do --all watch.lua bin=... state=...")
 local quiet_after = tonumber(rex.args.quiet or "") or 30 -- seconds
 
 local last = {}
+local here = debug.getinfo(1, "S").source:gsub("^@", ""):gsub("[^/]*$", "")
+local quiet = dofile(here .. "stuck.lua").new()
 
 local function safe(s)
   return (s:gsub("[^%w%._%-]", "_"))
 end
 
-local function tracked(block)
-  if not block then return false end
+-- A bullpen pane's index entry (JSON text), or nil for any other pane.
+local function entry(block)
+  if not block then return nil end
   local f = io.open(state_dir .. "/blocks/" .. safe(block) .. ".json", "r")
-  if f then f:close() return true end
-  return false
+  if not f then return nil end
+  local text = f:read("*a")
+  f:close()
+  return text
+end
+
+local function tracked(block)
+  return entry(block) ~= nil
+end
+
+-- Minutes a working pane may be quiet (the repo's `stuck_after`, copied into the
+-- entry); 0 is off, and so is a pane that's no longer bullpen's.
+local function stuck_after(block)
+  local e = entry(block)
+  if not e then return 0 end
+  return tonumber(e:match('"stuck_after":%s*(%d+)')) or 20
 end
 
 local function call(...)
@@ -41,8 +59,11 @@ rex.on("terminal.program_status_changed", function(ctx, ev)
   local r = ev.record or {}
   local state = r.state or ""
   local prev = last[block]
-  -- working -> working with a new message is noise; a new blocked reason is not
-  if prev and prev.state == state and (state ~= "blocked" or prev.msg == r.msg) then return end
+  -- every event counts as a sign of life, the ones dropped below too
+  local woke = quiet.event(block, state == "working", os.time())
+  -- working -> working with a new message is noise; a new blocked reason is not.
+  -- But the first event after a reported quiet spell goes through, to clear it.
+  if not woke and prev and prev.state == state and (state ~= "blocked" or prev.msg == r.msg) then return end
   local n = (prev and prev.n or 0) + 1
   last[block] = { state = state, msg = r.msg, n = n }
   if state == "done" or state == "idle" then
@@ -60,6 +81,7 @@ end)
 local function gone(ctx, ev)
   local block = ev.block_id or ctx.block_id
   last[block or ""] = nil
+  quiet.forget(block or "")
   if tracked(block) then call("_gone", block) end
 end
 
@@ -80,6 +102,14 @@ local pr_every = tonumber(rex.args.prs or "") or 120 -- seconds
 rex.every(pr_every, function()
   local f = io.open(state_dir .. "/prs", "r")
   if f then f:close() call("_prs") end
+end)
+
+-- Working panes with no event for too long: hung, in a loop, or waiting on
+-- something Rex doesn't call blocked.
+rex.every(60, function()
+  for _, p in ipairs(quiet.due(os.time(), stuck_after)) do
+    call("_stuck", p.block, string.format("%d", p.minutes))
+  end
 end)
 
 print("bullpen watcher: listening")

@@ -5,6 +5,7 @@ Run: python3 -m unittest discover -s tests
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -536,6 +537,85 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.show(tid)["why"], "Reviewer stopped without a verdict")
         self.bp("_gone", reviewer)
         self.assertEqual(self.show(tid)["status"], "needs")
+
+    def news(self):
+        return [l for b, l in self.typed() if b == "blk1"]
+
+    def test_a_quiet_worker_is_news_once_until_its_next_event(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        self.bp("_event", worker, "working", "", "Running the tests")
+        self.bp("_stuck", worker, "20")
+        self.bp("_stuck", worker, "21")  # the same quiet spell: no more news
+        self.assertEqual(self.news(), ["bullpen · BP-1 has shown no progress for 20 min: `bullpen peek BP-1`"])
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["stuck"]["who"]), ("working", "worker"))  # still working
+        self.assertIn("no progress for 20 min", self.bp("ls").stdout)
+        self.assertIn("no progress for 20 min", self.bp("show", tid).stdout)
+        self.bp("_event", worker, "working", "", "Running the tests")  # a sign of life
+        self.assertNotIn("stuck", self.show(tid))
+        self.bp("_stuck", worker, "20")  # quiet again: a new spell
+        self.assertEqual(len(self.news()), 2)
+
+    def test_any_event_ends_a_quiet_spell(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        self.bp("_event", worker, "blocked", "permission", "Allow rm?")
+        self.bp("_event", worker, "working", "", "")
+        self.bp("_stuck", worker, "20")
+        self.bp("_event", worker, "blocked", "permission", "Allow rm?")
+        t = self.show(tid)
+        self.assertEqual(t["status"], "needs")
+        self.assertNotIn("stuck", t)
+
+    def test_only_a_working_task_can_be_stuck(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        self.bp("_event", worker, "blocked", "permission", "Allow rm?")
+        self.bp("_stuck", worker, "20")  # it waits on the person: that's known
+        self.bp("_stuck", "blk1", "20")  # the coordinator
+        self.bp("_stuck", "nope", "20")  # not bullpen's
+        self.assertNotIn("stuck", self.show(tid))
+        self.assertEqual(len(self.news()), 1)  # just the permission prompt
+
+    def test_stuck_after_zero_turns_it_off(self):
+        tid = self.start_task()
+        self.assertEqual(json.loads(self.bp("config").stdout)["stuck_after"], 20)
+        cfg = json.loads(self.bp("config", "--stuck-after", "0").stdout)
+        self.assertEqual(cfg["stuck_after"], 0)
+        self.bp("_stuck", self.block(tid), "20")
+        self.assertNotIn("stuck", self.show(tid))
+        self.assertEqual(self.news(), [])
+        self.assertEqual(self.bp("config", "--stuck-after", "-1", ok=False).returncode, 1)
+
+    def test_stuck_after_reaches_the_panes_the_watcher_reads(self):
+        tid = self.start_task()
+        entry = self.tmp / "state" / "blocks" / f"{self.block(tid)}.json"
+        self.assertEqual(json.loads(entry.read_text())["stuck_after"], 20)
+        self.bp("config", "--stuck-after", "45")
+        self.assertEqual(json.loads(entry.read_text()),
+                         {"repo": str(self.repo), "role": tid, "stuck_after": 45})
+        tid2 = self.bp("add", "Another", "--brief", "x").stdout.strip()
+        self.bp("start", tid2)
+        entry2 = self.tmp / "state" / "blocks" / f"{self.block(tid2)}.json"
+        self.assertEqual(json.loads(entry2.read_text())["stuck_after"], 45)
+
+    def test_a_quiet_reviewer_is_news_in_its_own_words(self):
+        tid = self.start_task()
+        reviewer = self.commit_and_ready(tid)
+        self.bp("_stuck", self.block(tid), "20")  # the worker is done: not its turn
+        self.assertNotIn("stuck", self.show(tid))
+        self.bp("_stuck", reviewer, "25")
+        self.bp("_stuck", reviewer, "26")
+        self.assertEqual(self.news(), ["bullpen · BP-1's reviewer has shown no progress for 25 min: "
+                                       "`bullpen go BP-1 --review` shows it"])
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["stuck"]["who"]), ("review", "reviewer"))
+        self.bp("_event", reviewer, "working", "", "")
+        self.assertNotIn("stuck", self.show(tid))
+        self.bp("_stuck", reviewer, "20")
+        self.verdict(tid, "approve")  # the status changes: the quiet spell is over
+        self.assertNotIn("stuck", self.show(tid))
 
     def test_verdict_needs_a_review(self):
         tid = self.start_task()
@@ -1331,12 +1411,137 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(self.bp.task_stat({**t, "status": "working"}), "")
         self.assertEqual(self.bp.task_stat({"status": "ready"}), "")
 
+    def test_a_stuck_task_says_so(self):
+        import datetime as dt
+        ago = lambda m: (dt.datetime.now().astimezone() - dt.timedelta(minutes=m)).isoformat()
+        d = self.bp.task_detail
+        t = {"status": "working", "stuck": {"who": "worker", "since": ago(25)}}
+        self.assertTrue(self.bp.is_stuck(t))
+        self.assertEqual(d(t), "No progress for 25 min. p shows its screen.")
+        self.assertEqual(d({**t, "note": "Hung on npm install"}), "Hung on npm install")
+        self.assertEqual(d({"status": "review", "review": {"round": 1},
+                            "stuck": {"who": "reviewer", "since": ago(190)}}),
+                         "Reviewer has shown no progress for 3 h. ⏎ opens it.")
+        # a worker's quiet spell says nothing about a task that has moved on
+        moved = {"status": "review", "review": {"round": 1}, "stuck": {"who": "worker", "since": ago(25)}}
+        self.assertFalse(self.bp.is_stuck(moved))
+        self.assertEqual(d(moved), "Reviewer on round 1 of 2.")
+        self.assertFalse(self.bp.is_stuck({"status": "working"}))
+
     def test_fit_and_age(self):
         import datetime as dt
         self.assertEqual(self.bp.fit("Add a done command", 10), "Add a don…")
         at = dt.datetime(2026, 1, 1, 12, 0, tzinfo=dt.timezone.utc)
         self.assertEqual(self.bp.ago("2026-01-01T11:55:00+00:00", at), "5m")
         self.assertEqual(self.bp.ago("2026-01-01T09:55:00+00:00", at), "2h")
+
+
+# Drives lua/stuck.lua with made-up times: T counts minutes.
+STUCK_LUA = """
+local q = dofile(rex.args.lib).new()
+local limits = { a = 20, b = 20, off = 0 }
+local function limit(block) return limits[block] end
+local function due(minute)
+  local out = {}
+  for _, p in ipairs(q.due(minute * 60, limit)) do out[#out + 1] = p.block .. "=" .. p.minutes end
+  table.sort(out)
+  return table.concat(out, ",")
+end
+local got = {}
+local function check(name, value, want)
+  if value ~= want then got[#got + 1] = name .. ": " .. tostring(value) .. ", not " .. tostring(want) end
+end
+check("first event", q.event("a", true, 0), false)
+q.event("b", false, 0)       -- not working: never due
+q.event("off", true, 0)      -- its repo turned this off
+check("too early", due(19), "")
+check("due at the limit", due(20), "a=20")
+check("once per spell", due(45), "")
+check("the next event ends the spell", q.event("a", true, 46 * 60), true)
+check("and only that one", q.event("a", true, 47 * 60), false)
+check("counted from the last event", due(66), "")
+check("a new spell", due(68), "a=21")
+q.event("b", true, 60 * 60)
+q.forget("b")
+check("a pane that's gone", due(200), "")
+limits.off = 30
+check("turned on later", due(201), "off=201")
+return #got == 0 and "ok" or table.concat(got, "; ")
+"""
+
+# Runs lua/watch.lua against a stand-in for Rex's `rex` table and a clock the
+# script sets, and returns the bullpen commands it called.
+WATCH_LUA = """
+local args = rex.args
+local clock, handlers, timers, calls = 0, {}, {}, {}
+os.time = function() return clock end
+rex = {
+  args = { bin = "bullpen", state = args.state },
+  on = function(name, fn) handlers[name] = fn end,
+  every = function(seconds, fn) timers[seconds] = fn end,
+  after = function(seconds, fn) fn() end,
+  exec = function(argv)
+    calls[#calls + 1] = table.concat(argv, " ", 4)
+    return { ok = true }
+  end,
+}
+print = function() end
+dofile(args.watch)
+local function status(block, state, msg, minute)
+  clock = minute * 60
+  handlers["terminal.program_status_changed"]({ block_id = block }, { id = "", record = { state = state, msg = msg } })
+end
+local function tick(minute)
+  clock = minute * 60
+  timers[60]()
+end
+status("blk1", "working", "Reading", 0)
+status("blk1", "working", "Testing", 5)   -- dropped, but a sign of life
+status("other", "working", "", 0)         -- not bullpen's pane
+status("blk2", "blocked", "Allow?", 0)    -- waiting on the person, not stuck
+tick(24)
+tick(25)
+tick(40)
+status("blk1", "working", "Testing", 41)  -- repeats are dropped, but not this one
+status("blk1", "working", "Testing", 42)
+tick(61)
+tick(62)
+handlers["block_closed"]({}, { block_id = "blk1" })
+tick(200)
+return table.concat(calls, "|")
+"""
+
+
+@unittest.skipUnless(shutil.which("rex"), "needs Rex, to run Lua")
+class WatcherTest(unittest.TestCase):
+    def lua(self, script, **args):
+        if subprocess.run(["rex", "do", "-e", "return 1"], capture_output=True).returncode != 0:
+            self.skipTest("rex do doesn't run here")
+        path = Path(tempfile.mkdtemp()) / "test.lua"
+        path.write_text(script)
+        p = subprocess.run(["rex", "do", str(path), *(f"{k}={v}" for k, v in args.items())],
+                           text=True, capture_output=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        return json.loads(p.stdout)
+
+    def test_a_quiet_spell_is_due_once(self):
+        self.assertEqual(self.lua(STUCK_LUA, lib=ROOT / "lua" / "stuck.lua"), "ok")
+
+    def test_the_watcher_reports_and_clears_a_quiet_pane(self):
+        state = Path(tempfile.mkdtemp())
+        (state / "blocks").mkdir()
+        for block, minutes in (("blk1", 20), ("blk2", 20)):
+            (state / "blocks" / f"{block}.json").write_text(
+                json.dumps({"repo": "/r", "role": "BP-1", "stuck_after": minutes}, indent=2))
+        calls = self.lua(WATCH_LUA, watch=ROOT / "lua" / "watch.lua", state=state).split("|")
+        self.assertEqual(calls, [
+            "_event blk1 working  Reading",
+            "_event blk2 blocked  Allow?",
+            "_stuck blk1 20",              # at minute 25: 20 after its last event
+            "_event blk1 working  Testing",  # the event that ends the spell
+            "_stuck blk1 20",              # quiet again from minute 42
+            "_gone blk1",
+        ])
 
 
 if __name__ == "__main__":

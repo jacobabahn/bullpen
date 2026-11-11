@@ -10,8 +10,8 @@ opens a pull request. You accept (merge) or drop it.
 The coordinator learns what its workers are doing from Rex itself. Rex records the
 status coding agents report (working, blocked, done) and a Lua watcher
 (`lua/watch.lua`, run with `rex do --all`) types news into the coordinator's pane,
-as messages starting `bullpen · `, when a worker needs you, goes quiet, fails or
-stops.
+as messages starting `bullpen · `, when a worker needs you, ends its turn, fails,
+stops or shows no progress for a long time.
 
 ## Install
 
@@ -53,7 +53,8 @@ working, queued. Each task shows how long it has been there and, on a second
 line, what it needs or where it stands ("Asks: python3 or python?", "PR #4,
 approved by review."). A task in review or ready also shows the size of its
 change ("3 files, +120 −14"), worked out once when its worker runs `ready`. A
-task that needs you gets an amber bar; its age turns red after 5 minutes. `l`
+task that needs you gets an amber bar; its age turns red after 5 minutes. So
+does a task whose agent has shown no progress for a while (below). `l`
 switches to a compact layout, one line per task with the selected task's detail
 at the bottom.
 
@@ -97,6 +98,24 @@ needs you instead; if the worker is waiting on you (a permission prompt), the ne
 says so and nothing is typed into it. The board and `show` say what GitHub last said ("checks
 failing", "1 new comment"); while a task is working they say it only if that is what
 sent it back ("Fixing what GitHub said."), since it's about the old push. In local mode there's no PR, so nothing is looked at.
+
+### No progress
+
+A worker can say it's working and be stuck: a command that hangs, a loop, a wait
+on something Rex doesn't report as blocked. The watcher notes the time of every
+status event from each pane. Once a minute it looks for panes that say they're
+working and have sent none for 20 minutes, and reports each once: news
+(``BP-3 has shown no progress for 20 min: `bullpen peek BP-3` ``), and on the
+board the task gets the amber bar and "No progress for 20 min." It stays in its
+group and nothing is typed into its pane: a long build looks the same, so you
+(or the coordinator) decide. The pane's next status event clears it, and a new
+quiet spell is reported again. The same goes for a reviewer
+("BP-3's reviewer has shown no progress ...").
+
+`bullpen config --stuck-after 45` changes the minutes for this repository; `0`
+turns it off. The watcher only knows of events since it started, so a pane that
+was already silent when the watcher (re)started isn't noticed until its next
+event.
 
 ### Keys
 
@@ -160,7 +179,9 @@ task ready, with its worktree and branch as they were.
   so it never gets sent along with half a message.
 
 `bullpen config --merge squash` changes how `accept` merges (`rebase` by default;
-`squash` or `merge`). `bullpen config --prefix XY --base develop` changes the task prefix (default `BP`)
+`squash` or `merge`). `bullpen config --stuck-after 45` sets how many minutes a
+working agent can show no progress before you hear of it (20 by default, `0` for
+never). `bullpen config --prefix XY --base develop` changes the task prefix (default `BP`)
 and the base branch (default: origin's default branch). The worker and coordinator
 commands are in that folder's `config.json` (`worker`, `coordinator_cmd`).
 
@@ -175,4 +196,3 @@ The tests use fake `rex` and `gh` programs and a local bare repository as origin
 ## Not yet
 
 - Dependencies between tasks and a run queue: the coordinator holds tasks back itself.
-- Noticing a worker that's working but stuck for a long time.

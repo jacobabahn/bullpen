@@ -73,6 +73,8 @@ bullpen · BP-4 needs you (permission): Allow npm install?
 bullpen · BP-5 ended its turn without `ready`: read it with `bullpen peek BP-5`
 bullpen · BP-6 failed: ...
 bullpen · BP-7 stopped before saying ready: `bullpen resume BP-7` continues it
+bullpen · BP-9 has shown no progress for 20 min: `bullpen peek BP-9`
+bullpen · BP-9's reviewer has shown no progress for 20 min: `bullpen go BP-9 --review` shows it
 bullpen · BP-3's PR checks failed: test. Sent back to its worker.
 bullpen · BP-3's PR has 1 new comment: ann Please cover logout too. Sent back to its worker.
 bullpen · BP-3's PR #12 was merged outside bullpen: `bullpen accept BP-3` cleans up
@@ -88,6 +90,11 @@ bullpen · BP-9 dropped
   you can resolve: `bullpen tell` it. Finished but forgot to say ready: tell it to
   run its ready command. Anything the person must decide: ask them, in one full
   question, and put it on the board too: `bullpen note <ID> "Asks: ..."`.
+- No progress: the agent says it's working but its status hasn't changed for a
+  while. `bullpen peek <ID>` first. A long build or test run is fine: leave it.
+  Hung on a command or going in circles: `bullpen tell` it what you see. Waiting
+  on the person (a prompt): tell them. For a reviewer, tell the person; you can't
+  type to it. You hear of each quiet spell once.
 - Ready: tell the person in one or two lines what it did and what review said
   (`bullpen show <ID>` has the summary; findings are in the review files it
   names), and that it waits for their accept: `a` on the board, or ask you.
