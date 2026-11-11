@@ -188,8 +188,9 @@ it in `$EDITOR`); they aren't committed. `start` puts both, the repository's fir
 in the worker's brief under "Rules for this repository", and the reviewer gets the
 same rules and checks the work against them. No rules, no heading.
 
-The repository's file is read from the task's new worktree, so it is the copy on
-the base branch: an uncommitted edit in your checkout isn't used. `bullpen rules`
+The repository's file is read as committed on the task's base branch (`origin/<base>`,
+or the local base branch without a remote): an uncommitted edit in your checkout, or
+a task's own edit when it is started again, isn't used. `bullpen rules`
 prints the rules in effect and where each came from.
 
 ### Keys

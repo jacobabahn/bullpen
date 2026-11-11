@@ -789,8 +789,8 @@ def cmd_start(args):
         t["worktree"] = str(wt)
     brief = (repo.dir / "briefs" / f"{t['id']}.md").read_text()
     full = repo.dir / "briefs" / f"{t['id']}.full.md"
-    wt_rules = Path(t["worktree"]) / RULES_FILE
-    rules = rules_text(rule_sources(repo, wt_rules.read_text() if wt_rules.exists() else None, ""))
+    # committed on its base, not the worktree's copy: a restarted task may have edited it
+    rules = rules_text(rule_sources(repo, committed_rules_on(repo, task_base_ref(repo, t)), ""))
     saved = repo.dir / "briefs" / f"{t['id']}.rules.md"
     saved.write_text(rules + "\n" if rules else "")
     section = f"## Rules for this repository\n\n{rules}\n\n" if rules else ""

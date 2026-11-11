@@ -1582,6 +1582,20 @@ class BullpenTest(unittest.TestCase):
         self.assertIn("- Repo rule.", prompt)
         self.assertNotIn("Changed by the worker", prompt)
 
+    def test_a_restarted_task_keeps_the_base_rules(self):
+        self.commit_rules("- Repo rule.\n")
+        tid = self.start_task()
+        wt = self.show(tid)["worktree"]
+        (Path(wt) / ".bullpen" / "rules.md").write_text("- Changed by the worker.\n")
+        self.bp("_gone", self.block(tid))
+        self.assertEqual(self.show(tid)["status"], "stopped")
+        self.bp("start", tid)
+        brief = self.full_brief()
+        self.assertIn("- Repo rule.", brief)
+        self.assertNotIn("Changed by the worker", brief)
+        saved = next((self.tmp / "state").rglob("BP-1.rules.md")).read_text()
+        self.assertEqual(saved, "- Repo rule.\n")
+
     def test_rules_edit_opens_the_personal_file(self):
         self.bp("up")
         editor = self.tmp / "ed"
