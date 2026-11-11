@@ -56,11 +56,11 @@ working, queued. Each task shows how long it has been there and, on a second
 line, what it needs or where it stands ("Asks: python3 or python?", "PR #4,
 approved by review."). A task in review or ready also shows the size of its
 change ("3 files, +120 −14"), worked out once when its worker runs `ready`. A
-task that needs you gets an amber bar; its age turns red after 5 minutes. So
-does a task whose agent has shown no progress for a while (below). A
-working task's mark spins, and one in review turns. The
-top line counts the tasks in each state. `l` switches to a compact layout, one
-line per task with the selected task's detail at the bottom.
+task that needs you gets an amber bar; its age turns red after 5 minutes. A
+working task's mark spins, and one in review turns; one whose agent has shown no
+progress for a while (below) stops turning and gets the amber bar too. The top
+line counts the tasks in each state. `l` switches to a compact layout, one line
+per task with the selected task's detail at the bottom.
 
 The keys at the bottom follow the selected task: `⏎` opens its worker (or its
 reviewer), `a` accepts and `d` drops (each asks y/n first), `t` tells, `p`
@@ -112,9 +112,9 @@ on something Rex doesn't report as blocked. The watcher notes the time of every
 status event from each pane. Once a minute it looks for panes that say they're
 working and have sent none for 20 minutes, and reports each once: news
 (``BP-3 has shown no progress for 20 min: `bullpen peek BP-3` ``), and on the
-board the task gets the amber bar and "No progress for 20 min." It stays in its
-group and nothing is typed into its pane: a long build looks the same, so you
-(or the coordinator) decide. The pane's next status event clears it, and a new
+board the task gets the amber bar, a still amber mark and "No progress for 20
+min." It stays in its group and nothing is typed into its pane: a long build
+looks the same, so you (or the coordinator) decide. The pane's next status event clears it, and a new
 quiet spell is reported again. The same goes for a reviewer
 ("BP-3's reviewer has shown no progress ...").
 

@@ -157,6 +157,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     put(buf, area, 0, w.saturating_sub(2 + count.width()).max(1), count);
     put(buf, area, 0, 1, span(name, bold()));
 
+    let now = model::now();
     let mut rows: Vec<Row> = Vec::new();
     for (gi, (heading, ts)) in groups.iter().enumerate() {
         if gi > 0 {
@@ -169,8 +170,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             rows.push(Row::Title(t));
             if layout == Layout::Grouped {
                 // what a task needs from you, or GitHub said, gets two lines; anything else one
-                let lines = if t.needs_you() || !model::pr_phrase(t).is_empty() { 2 } else { 1 };
-                for d in model::wrap(&model::task_detail(t, rounds), detail_w, lines) {
+                let lines = if t.flagged() || !model::pr_phrase(t).is_empty() { 2 } else { 1 };
+                for d in model::wrap(&model::task_detail(t, rounds, now), detail_w, lines) {
                     if !d.is_empty() {
                         rows.push(Row::Detail(t, d));
                     }
@@ -210,12 +211,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         put(buf, area, 3, 1, span(fit("Tell the coordinator what you want done.", w.saturating_sub(2)), dim()));
     }
 
-    let now = model::now();
     for (j, row) in rows.iter().skip(top).take(avail).enumerate() {
         let y = 2 + j;
         if let Row::Title(t) | Row::Detail(t, _) = row {
-            if t.needs_you() {
-                let c = if t.status == "needs" { AMBER } else { Color::Red };
+            if t.flagged() {
+                let c = if t.status == "stopped" { Color::Red } else { AMBER };
                 put(buf, area, y, 0, span("▌", Style::new().fg(c)));
             }
         }
@@ -225,6 +225,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 // a task with a command running gets a spinner in place of its mark
                 let mark = match app.job(&t.id) {
                     Some(_) => span(spinner(app), bold()),
+                    // an agent that has gone quiet: a still mark, in the colour of one that needs you
+                    None if t.is_stuck() => span(model::mark(&t.status), mark_style("needs")),
                     None if t.status == "working" => span(working_mark(app), Style::new()),
                     None if t.status == "review" => span(review_mark(app), mark_style("review")),
                     None => span(model::mark(&t.status), mark_style(&t.status)),
@@ -252,7 +254,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         put(buf, area, yb, 1, span("─".repeat(w.saturating_sub(3)), dim()));
         put(buf, area, yb + 1, 1, span(fit(&format!("{}  {}", cur.id, cur.title), w.saturating_sub(2)), bold()));
         let stat = model::task_stat(cur);
-        let mut lines = model::wrap(&model::task_detail(cur, rounds), w.saturating_sub(2), if stat.is_empty() { 3 } else { 2 });
+        let mut lines = model::wrap(&model::task_detail(cur, rounds, now), w.saturating_sub(2), if stat.is_empty() { 3 } else { 2 });
         if !stat.is_empty() {
             lines.push(stat.into());
         }
