@@ -2986,6 +2986,130 @@ class BullpenTest(unittest.TestCase):
         self.assertIn("nothing needs you", p.stderr)
 
 
+    # ---------- finish and close: nothing to merge ----------
+
+    def finish(self, tid, text="Recorded the demo video\n\nSaved to ~/Movies/demo.mov.", ok=True):
+        f = self.tmp / "finish.md"
+        f.write_text(text)
+        wt = self.show(tid)["worktree"]
+        return self.bp("finish", tid, "--summary-file", str(f), cwd=wt, ok=ok)
+
+    def test_finish_refuses_a_branch_with_a_net_diff(self):
+        tid = self.start_task()
+        wt = self.show(tid)["worktree"]
+        (Path(wt) / "notes.txt").write_text("notes\n")
+        sh("git", "-C", wt, "add", ".")
+        sh("git", "-C", wt, "commit", "-qm", "Notes")
+        p = self.finish(tid, ok=False)
+        self.assertIn("run `ready` instead", p.stderr)
+        self.assertIn("1 file, +1 −0", p.stderr)
+        self.assertEqual(self.show(tid)["status"], "working")
+        (Path(wt) / "dirty.txt").write_text("x\n")
+        self.assertIn("uncommitted", self.finish(tid, ok=False).stderr)
+
+    def test_finish_with_commits_that_cancel_out(self):
+        tid = self.start_task()
+        wt = self.show(tid)["worktree"]
+        (Path(wt) / "scratch.txt").write_text("tmp\n")
+        sh("git", "-C", wt, "add", ".")
+        sh("git", "-C", wt, "commit", "-qm", "Scratch")
+        sh("git", "-C", wt, "rm", "-q", "scratch.txt")
+        sh("git", "-C", wt, "commit", "-qm", "Remove scratch")
+        self.bp("_event", self.block(tid), "working", "", "Recording")
+        p = self.finish(tid)
+        self.assertIn("The person closes it", p.stdout)
+        t = self.show(tid)
+        self.assertEqual(t["status"], "finished")
+        self.assertIn("Saved to ~/Movies/demo.mov.", t["summary"])
+        self.assertIsNone(t.get("review"))  # no review
+        self.assertTrue((self.fake / "alive" / t["block"]).exists())  # the person closes it
+        self.assertFalse((self.fake / "gh.log").exists())  # no push, no PR
+        self.assertEqual(self.news()[-1], "bullpen · BP-1 finished (nothing to merge): Recorded the demo video")
+        # its turn ends cleanly: no triage, no news
+        before = len(self.typed())
+        self.bp("_event", self.block(tid), "idle", "", "")
+        self.assertEqual(self.show(tid)["status"], "finished")
+        self.assertEqual(len(self.typed()), before)
+        self.assertEqual(self.check(), [])
+        self.assertIn("finished Fix the thing  (nothing to merge: Recorded the demo video)", self.bp("ls").stdout)
+
+    def test_finish_needs_a_summary(self):
+        tid = self.start_task()
+        self.assertIn("--summary-file", self.bp("finish", tid, ok=False).stderr)
+        self.assertIn("is empty", self.finish(tid, text="", ok=False).stderr)
+
+    def test_close_removes_the_worktree_branch_and_pane(self):
+        tid = self.start_task()
+        t = self.show(tid)
+        wt, blk = t["worktree"], t["block"]
+        self.assertIn("not finished", self.bp("close", tid, ok=False).stderr)
+        self.finish(tid)
+        (Path(wt) / "late.txt").write_text("x\n")  # left over: no warning, it goes
+        self.bp("close", tid)
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["closed"], t["worktree"], t["block"]), ("done", True, None, None))
+        self.assertFalse(Path(wt).exists())
+        self.assertFalse((self.fake / "alive" / blk).exists())
+        self.assertNotIn("bullpen/", sh("git", "-C", str(self.repo), "branch"))
+        self.assertEqual(self.news()[-1], "bullpen · BP-1 closed (finished, nothing to merge)")
+        self.assertIn("not finished", self.bp("close", tid, ok=False).stderr)
+
+    def test_close_starts_what_waited_on_it(self):
+        tid = self.start_task("First")
+        self.bp("add", "Second", "--brief", "x", "--after", tid)
+        self.finish(tid)
+        self.bp("close", tid)
+        self.assertEqual(self.show("BP-2")["status"], "working")
+        self.assertIn("bullpen · BP-2 started (BP-1 was closed)", self.news())
+        self.assertIn("### BP-1: First (finished with nothing to merge, closed)", self.full_brief("BP-2"))
+
+    def test_auto_accept_closes_a_finished_task(self):
+        self.bp("up")
+        self.bp("config", "--auto-accept", "on")
+        tid = self.bp("add", "Record the demo", "--brief", "x").stdout.strip()
+        self.bp("start", tid)
+        t = self.show(tid)
+        p = self.finish(tid)
+        self.assertIn("auto-accept closes it now", p.stdout)
+        self.assertEqual((self.show(tid)["status"], self.show(tid)["closed"]), ("done", True))
+        self.assertFalse(Path(t["worktree"]).exists())
+        self.assertFalse((self.fake / "alive" / t["block"]).exists())
+        self.assertEqual(self.news()[-1], "bullpen · BP-1 finished (nothing to merge) and was closed "
+                         "by auto-accept: Recorded the demo video")
+
+    def test_a_tasks_own_auto_accept_closes_it_and_no_auto_accept_keeps_it(self):
+        self.bp("up")
+        self.bp("add", "One", "--brief", "x", "--auto-accept")
+        self.bp("start", "BP-1")
+        self.finish("BP-1")
+        self.assertEqual(self.show("BP-1")["status"], "done")
+        self.bp("config", "--auto-accept", "on")
+        self.bp("add", "Two", "--brief", "x", "--no-auto-accept")
+        self.bp("start", "BP-2")
+        self.finish("BP-2")
+        self.assertEqual(self.show("BP-2")["status"], "finished")
+
+    def test_a_finished_task_whose_worker_works_again_is_working_again(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.bp("_event", blk, "working", "", "Writing notes")
+        self.finish(tid)
+        self.bp("_event", blk, "working", "", "Still in the turn that ran finish")
+        self.assertEqual(self.show(tid)["status"], "finished")
+        self.bp("_event", blk, "idle", "", "")
+        self.bp("_event", blk, "working", "", "The person asked for more")
+        self.assertEqual(self.show(tid)["status"], "working")
+        self.assertIn("BP-1 was finished, but its worker started working again", self.news()[-1])
+        self.assertIn("run `finish` (or `ready`) again", self.news()[-1])
+        self.assertIn("not finished", self.bp("close", tid, ok=False).stderr)
+
+    def test_the_workers_instructions_say_when_to_finish(self):
+        tid = self.start_task()
+        brief = self.full_brief(tid)
+        self.assertIn(f"finish {tid} --summary-file", brief)
+        self.assertIn(f"ready {tid} --summary-file", brief)
+
+
 class LocalModeTest(unittest.TestCase):
     """A repository without an origin remote: no push, no gh; accept merges locally."""
 
@@ -3023,6 +3147,19 @@ class LocalModeTest(unittest.TestCase):
         self.commit(self.repo, "other.txt", "other\n", "Other work on main")
         self.bp("ready", tid, "--summary", "Fixed the thing.", cwd=wt)
         return tid, wt
+
+    def test_finish_and_close_without_a_remote(self):
+        tid = self.start_task()
+        wt = self.show(tid)["worktree"]
+        self.commit(self.repo, "other.txt", "other\n", "Other work on main")
+        f = self.tmp / "f.md"
+        f.write_text("Answered the question.")
+        self.bp("finish", tid, "--summary-file", str(f), cwd=wt)
+        self.assertEqual(self.show(tid)["status"], "finished")
+        self.bp("close", tid)
+        self.assertEqual(self.show(tid)["status"], "done")
+        self.assertFalse(Path(wt).exists())
+        self.assertEqual(self.git("log", "-1", "--format=%s", "main"), "Other work on main")  # nothing merged
 
     def test_start_uses_the_local_base(self):
         tid = self.start_task()

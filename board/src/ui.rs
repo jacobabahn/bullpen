@@ -27,7 +27,7 @@ fn mark_style(status: &str) -> Style {
     match status {
         "needs" => bold().fg(AMBER),
         "stopped" => bold().fg(Color::Red),
-        "ready" => bold().fg(Color::Green),
+        "ready" | "finished" => bold().fg(Color::Green),
         "review" => bold().fg(Color::Blue),
         _ => dim(),
     }
@@ -87,6 +87,7 @@ fn counts(tasks: &[Task], room: usize) -> Line<'static> {
         (n(&["needs"]), "needs"),
         (n(&["stopped"]), "stopped"),
         (n(&["ready"]), "ready"),
+        (n(&["finished"]), "finished"),
         (n(&["triage"]), "triage"),
         (n(&["review"]), "review"),
         (n(&["working"]), "working"),
@@ -179,7 +180,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             rows.push(Row::Title(t));
             if layout == Layout::Grouped {
                 // what a task needs from you, GitHub said, or the usage limit gets two lines; anything else one
-                let lines = if t.flagged() || t.is_limited() || !model::pr_phrase(t).is_empty() { 2 } else { 1 };
+                let lines = if t.flagged() || t.is_limited() || t.status == "finished" || !model::pr_phrase(t).is_empty() { 2 } else { 1 };
                 for d in model::wrap(&model::detail_with_auto(t, &app.cfg, now), detail_w, lines) {
                     if !d.is_empty() {
                         rows.push(Row::Detail(t, d));
@@ -302,6 +303,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     } else if let Some((action, _)) = &app.pending {
         let verb = match action {
             Action::Accept => "accept",
+            Action::Close => "close",
             Action::Drop => "drop",
             Action::DropForce => "discard and drop",
         };
@@ -331,7 +333,7 @@ fn title_line(app: &App, t: &Task, selected: bool, w: usize, idw: usize, now: ch
     if let Some((action, tid)) = &app.pending {
         if *tid == t.id {
             // the row becomes the question, in place: nothing below moves
-            let tone = if *action == Action::Accept { Color::Green } else { Color::Red };
+            let tone = if matches!(action, Action::Accept | Action::Close) { Color::Green } else { Color::Red };
             let q = model::confirm_text(*action, t, &app.cfg.merge);
             let yn = "y / n";
             let line = format!("{left}{}", fit(&q, width_all.saturating_sub(width(&left) + width(yn) + 2)));

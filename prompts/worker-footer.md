@@ -14,9 +14,17 @@ repo has no remote, your local branch).
   Bullpen publishes your work for you.
 - If you need a decision only the person can make, ask it plainly in your chat and end
   your turn. The coordinator sees that you stopped and reads your question.
-- Saying you're done in the chat doesn't finish the task; only `ready` does. Run it
-  whenever you're finished, even with nothing to change (it handles a task with no
-  commits), and when the person tells you you're done.
+- Saying you're done in the chat doesn't finish the task; only `ready` or `finish`
+  does. Run one whenever you're finished, and when the person tells you you're done.
+- `ready` is for work that changes the repository: it publishes your branch for
+  review and merging. `finish` is for a task whose result lives outside the repository
+  (a video, research notes, an answer) and leaves nothing to merge: write what you did
+  and where the result is to a file, and run
+
+      {bin} finish {id} --summary-file <that file>
+
+  It refuses if your branch changes anything against `{base}`; use `ready` then.
+  There is no review; the person closes the task. End your turn.
 - When the work is done and checked: commit everything, write the pull request
   description to a file (what changed, why, and how you checked it), and run
 

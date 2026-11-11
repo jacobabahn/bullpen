@@ -103,6 +103,12 @@ pub struct Task {
     /// its own worker model, over the config's (`add --model`, `start --model`, `model`)
     #[serde(default, deserialize_with = "lenient")]
     pub worker_model: Option<String>,
+    /// what its worker said it did (`ready`, `finish`)
+    #[serde(default, deserialize_with = "lenient")]
+    pub summary: Option<String>,
+    /// done by `close`: it finished with nothing to merge
+    #[serde(default, deserialize_with = "lenient")]
+    pub closed: Option<bool>,
     /// those not done yet, worked out from the other tasks: "BP-8", "BP-9 (dropped)"
     #[serde(skip)]
     pub waits: Vec<String>,
@@ -277,10 +283,11 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ("Needs you", &["needs", "stopped"]),
     ("Coordinator on it", &["triage"]),
     ("Ready to accept", &["ready"]),
+    ("Finished", &["finished"]),
     ("In review", &["review"]),
     ("Working", &["working"]),
     ("Queued", &["todo"]),
-    ("Finished", &["done", "dropped"]),
+    ("Closed", &["done", "dropped"]),
 ];
 
 /// Seconds a task can need you before its age turns red.
@@ -292,6 +299,7 @@ pub fn mark(status: &str) -> &'static str {
         "stopped" => "■",
         "triage" => "◎",
         "ready" => "✔",
+        "finished" => "◆",
         "done" => "✓",
         "review" => "◐",
         "working" => "○",
@@ -301,11 +309,11 @@ pub fn mark(status: &str) -> &'static str {
     }
 }
 
-/// The groups that have tasks, each sorted by ID.
-pub fn board_groups(tasks: &[Task], finished: bool) -> Vec<(&'static str, Vec<&Task>)> {
+/// The groups that have tasks, each sorted by ID; the closed ones only with `closed`.
+pub fn board_groups(tasks: &[Task], closed: bool) -> Vec<(&'static str, Vec<&Task>)> {
     GROUPS
         .iter()
-        .filter(|(heading, _)| finished || *heading != "Finished")
+        .filter(|(heading, _)| closed || *heading != "Closed")
         .filter_map(|(heading, statuses)| {
             let mut ts: Vec<&Task> = tasks.iter().filter(|t| statuses.contains(&t.status.as_str())).collect();
             ts.sort_by_key(|t| t.num());
@@ -493,6 +501,10 @@ fn status_detail(t: &Task, rounds: u32, at: DateTime<FixedOffset>) -> String {
         "stopped" => "Its agent exited. r resumes it.".into(),
         "review" => format!("Reviewer on round {round} of {rounds}."),
         "ready" if why.starts_with("Nothing to merge") => "Done, with nothing to merge.".into(),
+        "finished" => match first_line(t.summary.as_deref()).as_str() {
+            "" => "Finished, nothing to merge. c closes it.".into(),
+            line => format!("Finished, nothing to merge: {line} c closes it."),
+        },
         "ready" => match &t.rebased {
             Some(base) => format!("{} Rebased onto {base}.", ready_detail(&pr, verdict)),
             None => ready_detail(&pr, verdict),
@@ -505,10 +517,22 @@ fn status_detail(t: &Task, rounds: u32, at: DateTime<FixedOffset>) -> String {
             (Some(_), Some(base)) => format!("Accepted. Merged into {base}."),
             _ => "Accepted.".into(),
         },
+        "done" if t.closed == Some(true) => "Closed, nothing to merge.".into(),
         "done" if !pr.is_empty() => format!("Accepted. {pr} merged."),
         "done" => "Accepted.".into(),
         "dropped" => "Dropped.".into(),
         _ => String::new(),
+    }
+}
+
+/// The first line of a summary as a sentence: "Recorded the demo." from "# Recorded
+/// the demo", or "" when there's none.
+fn first_line(summary: Option<&str>) -> String {
+    let line = summary.unwrap_or("").lines().map(|l| l.trim().trim_start_matches('#').trim()).find(|l| !l.is_empty());
+    match line {
+        Some(l) if l.ends_with(['.', '!', '?']) => l.to_string(),
+        Some(l) => format!("{l}."),
+        None => String::new(),
     }
 }
 
@@ -529,6 +553,7 @@ pub fn task_keys(t: Option<&Task>) -> Vec<(&'static str, &'static str)> {
         "stopped" => vec![("r", "resume"), ("p", "peek"), ("d", "drop")],
         "review" => vec![("⏎", "reviewer"), ("p", "peek")],
         "ready" => vec![("a", "accept"), ("d", "drop"), ("⏎", "open")],
+        "finished" => vec![("c", "close"), ("d", "drop"), ("⏎", "open")],
         "working" => vec![("⏎", "open"), ("t", "tell"), ("p", "peek")],
         "todo" => vec![("s", "start"), ("d", "drop")],
         _ => Vec::new(),
@@ -542,6 +567,7 @@ pub fn task_keys(t: Option<&Task>) -> Vec<(&'static str, &'static str)> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Accept,
+    Close,
     Drop,
     DropForce,
 }
@@ -561,6 +587,7 @@ pub fn confirm_text(action: Action, t: &Task, merge: &str) -> String {
         }
         Action::Accept if pr.is_empty() => "Accept and clean up?".into(),
         Action::Accept => format!("Accept and {verb}?"),
+        Action::Close => "Close it and remove its worktree?".into(),
         Action::Drop if pr.is_empty() => "Drop it?".into(),
         Action::Drop => format!("Drop it and close {pr}?"),
         Action::DropForce => "Discard uncommitted changes?".into(),
@@ -710,7 +737,7 @@ mod tests {
                 ("Queued", vec!["BP-1"]),
             ]
         );
-        assert_eq!(board_groups(&tasks, true).last().unwrap().0, "Finished");
+        assert_eq!(board_groups(&tasks, true).last().unwrap().0, "Closed");
     }
 
     #[test]
@@ -835,6 +862,31 @@ mod tests {
         let late = Task { why: Some("Failed (coordinator didn't resolve it)".into()), ..task("BP-1", "needs") };
         assert!(late.needs_you() && late.flagged());
         assert_eq!(task_detail(&late, 2, now()), "Failed (coordinator didn't resolve it)");
+    }
+
+    #[test]
+    fn a_finished_task_shows_its_summary_and_closes_with_c() {
+        let summary = Some("# Recorded the demo video\n\nSaved to ~/Movies/demo.mov".to_string());
+        let t = Task { summary, worktree: Some("/w".into()), ..task("BP-3", "finished") };
+        let tasks = vec![task("BP-1", "ready"), t.clone(), task("BP-2", "working")];
+        let heads: Vec<&str> = board_groups(&tasks, false).iter().map(|(h, _)| *h).collect();
+        assert_eq!(heads, vec!["Ready to accept", "Finished", "Working"]);
+        assert_eq!(mark("finished"), "◆");
+        assert!(!t.needs_you() && !t.flagged() && !t.closed());
+        assert_eq!(task_detail(&t, 2, now()), "Finished, nothing to merge: Recorded the demo video. c closes it.");
+        assert_eq!(task_detail(&task("BP-3", "finished"), 2, now()), "Finished, nothing to merge. c closes it.");
+        assert_eq!(task_keys(Some(&t))[0], ("c", "close"));
+        assert!(task_keys(Some(&t)).contains(&("v", "diff")));
+        assert_eq!(confirm_text(Action::Close, &t, "rebase"), "Close it and remove its worktree?");
+        assert_eq!(task_stat(&t), "");
+        // once closed it is done, under Closed, and counts as done for what waits on it
+        let closed = Task { status: "done".into(), closed: Some(true), worktree: None, ..t };
+        assert_eq!(task_detail(&closed, 2, now()), "Closed, nothing to merge.");
+        let mut ts = vec![closed, Task { after: Some(vec!["BP-3".into()]), ..task("BP-4", "todo") }];
+        link_waits(&mut ts);
+        assert!(ts[1].waits.is_empty());
+        let t: Task = serde_json::from_str(r#"{"id":"BP-3","status":"finished","summary":"Notes in ~/n.md"}"#).unwrap();
+        assert_eq!(task_detail(&t, 2, now()), "Finished, nothing to merge: Notes in ~/n.md. c closes it.");
     }
 
     #[test]

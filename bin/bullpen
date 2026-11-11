@@ -1138,7 +1138,7 @@ def running_count(repo):
 
 
 def start_queued(repo, by, how):
-    """After `by` was accepted or dropped (how): start each queued task, one with
+    """After `by` was accepted, closed or dropped (how): start each queued task, one with
     dependencies all done, in ID order, while fewer than max_running work or are in
     review. One news line per start. Plain todo tasks wait for the coordinator."""
     tasks = {t["id"]: t for t in repo.tasks()}
@@ -1146,7 +1146,8 @@ def start_queued(repo, by, how):
               and not open_deps(repo, t, tasks)]
     if not queued:
         return
-    why = f"{by['id']} was accepted" if how == "accepted" else f"{by['id']} was dropped, freeing a slot"
+    why = {"accepted": f"{by['id']} was accepted", "closed": f"{by['id']} was closed"}.get(
+        how, f"{by['id']} was dropped, freeing a slot")
     lim = limit_active()
     if lim:
         ids = ", ".join(t["id"] for t in queued)
@@ -1191,7 +1192,9 @@ def deps_section(repo, t):
         o = tasks.get(d)
         if not o:
             continue
-        state = "accepted" if o["status"] == "done" else f"{o['status']}, not accepted yet"
+        state = f"{o['status']}, not accepted yet"
+        if o["status"] == "done":
+            state = "finished with nothing to merge, closed" if o.get("closed") else "accepted"
         where = pr_short(o.get("pr")) if o.get("pr") else (f"merged into {o['base']}" if o.get("merged") else "")
         lines = [f"### {d}: {o['title']} ({state}{', ' + where if where else ''})", ""]
         lines.append((o.get("summary") or "No summary.").strip())
@@ -1495,7 +1498,7 @@ def cmd_tell(args):
     if not rex_alive(t["session"], t["block"]):
         raise Fail(f"{t['id']}'s agent isn't running; use `resume {t['id']} \"...\"`")
     rex_type(t["session"], t["block"], " ".join(args.message))
-    if t["status"] in (*WAITING, "ready"):
+    if t["status"] in (*WAITING, "ready", "finished"):
         back_to_work(t)
         t["last"] = None
         repo.save_task(t)
@@ -1598,6 +1601,77 @@ def cmd_ready(args):
     repo.save_task(t)
     news(repo, t, "ready", f"{t['id']} is ready ({commits(ahead)}, {pr_short(t['pr'])}): {t['title']}")
     print(f"pushed {t['branch']}; pull request: {t['pr']}")
+
+
+# ---------- finish and close: a task with nothing to merge ----------
+#
+# Some tasks leave nothing in the repo (a video, research notes). Their worker runs
+# `finish` instead of `ready`: no PR and no review. The person closes the task, or
+# auto-accept does it at once.
+
+def cmd_finish(args):
+    """(worker) the task is done and leaves nothing to merge."""
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    if t["status"] in CLOSED:
+        raise Fail(f"{t['id']} is {t['status']}")
+    wt = t["worktree"]
+    if not wt:
+        raise Fail(f"{t['id']} has no worktree")
+    if git(wt, "status", "--porcelain").stdout.strip():
+        raise Fail("uncommitted changes: commit them and run `ready`, or discard them and run finish again")
+    base_ref = task_base_ref(repo, t)
+    if git(wt, "diff", "--quiet", f"{base_ref}...HEAD", check=False).returncode != 0:
+        raise Fail(f"your branch changes {shortstat(wt, base_ref) or 'files'} against {base_ref}, so "
+                   f"there is something to merge: run `ready` instead")
+    summary = summary_text(args, "summary")
+    close_reviewer(t)
+    if t.get("gh"):
+        t["gh"].pop("sent", None)
+    t.pop("rebased", None)
+    t.update(status="finished", why=None, summary=summary, diffstat=None)
+    repo.save_task(t)
+    first = summary.splitlines()[0].strip().lstrip("#").strip()  # a Markdown title is fine
+    if auto_accepts(repo, t):
+        print(f"{t['id']} finished, with nothing to merge; auto-accept closes it now. End your turn.")
+        sys.stdout.flush()
+        close_task(repo, t, auto=True, first=first)  # last: this closes the pane we run in
+        return
+    news(repo, t, "finished", f"{t['id']} finished (nothing to merge): {first}")
+    print(f"{t['id']} finished, with nothing to merge. The person closes it: end your turn.")
+
+
+def cmd_close(args):
+    """(the person's call) close a finished task: its worktree, branch and pane go."""
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    if t["status"] != "finished":
+        hint = ": `accept` a ready one" if t["status"] == "ready" else ""
+        raise Fail(f"{t['id']} is {t['status']}, not finished{hint}")
+    close_task(repo, t)
+
+
+def close_task(repo, t, auto=False, first=None):
+    """Remove a finished task's worktree and branch (no warning: it has nothing to
+    merge), close its panes and any PR, and mark it done."""
+    os.chdir(repo.root)  # we may be running in the worktree this removes
+    worker = (t.get("session"), t.get("block"))
+    unindex_block(t.get("block"))
+    close_reviewer(t)
+    if t.get("pr"):
+        run([repo.gh(), "pr", "close", t["pr"]], cwd=repo.root, check=False)
+        git(repo.root, "push", "-q", "origin", "--delete", t["branch"], check=False)
+    remove_worktree(repo, t, force=True)
+    t.update(status="done", closed=True, block=None, worktree=None)
+    repo.save_task(t)
+    if auto:
+        news(repo, t, "closed", f"{t['id']} finished (nothing to merge) and was closed by auto-accept: {first}")
+    else:
+        print(f"{t['id']} closed")
+        tell_coordinator(repo, t, "closed", f"{t['id']} closed (finished, nothing to merge)")
+    start_queued(repo, t, "closed")
+    sys.stdout.flush()
+    rex_close(*worker)  # last: this may close the pane we run in
 
 
 def commits(n):
@@ -1926,7 +2000,7 @@ def rebase_others(repo, accepted):
     if not repo.cfg.get("rebase_others", True):
         return
     base = accepted["base"]
-    others = [o for o in repo.tasks() if o["id"] != accepted["id"] and o["status"] not in CLOSED
+    others = [o for o in repo.tasks() if o["id"] != accepted["id"] and o["status"] not in (*CLOSED, "finished")
               and o.get("base") == base and o.get("worktree") and Path(o["worktree"]).is_dir()]
     if not others:
         return
@@ -2038,7 +2112,8 @@ def cmd_ls(args):
         print("no open tasks" + ("" if args.all else " (--all shows finished ones)"))
     every = {t["id"]: t for t in repo.tasks()}
     for t in tasks:
-        extra = waits_phrase(repo, t, every) or stuck_phrase(t) or t.get("why") or t.get("pr") or (f"local branch {t['branch']}" if t.get("local") else "")
+        done = t["status"] == "finished" and "nothing to merge: " + ((t.get("summary") or "").splitlines() or [""])[0]
+        extra = done or waits_phrase(repo, t, every) or stuck_phrase(t) or t.get("why") or t.get("pr") or (f"local branch {t['branch']}" if t.get("local") else "")
         model = own_model(repo, t)
         print(f"{t['id']:<7} {t['status']:<8} {t['title']}" + (f"  ({extra})" if extra else "")
               + (f"  [model {model}]" if model else ""))
@@ -2498,6 +2573,10 @@ def cmd_event(args):
             back_to_work(t)  # it had ended its turn: this is a new one
             news(repo, t, "working", f"{t['id']} was ready, but its worker started working again, so "
                  f"it is working again: it has to run `ready` again, and its review approval is dropped")
+        elif t["status"] == "finished" and not (t.get("last") or "").startswith("working|"):
+            back_to_work(t)
+            news(repo, t, "working", f"{t['id']} was finished, but its worker started working again, so "
+                 f"it is working again: it has to run `finish` (or `ready`) again")
         t.pop("ok", None)
         t["last"] = key
         repo.save_task(t)
@@ -3450,6 +3529,12 @@ def main(argv=None):
     p.add_argument("--summary-file")
     p.set_defaults(fn=cmd_ready)
 
+    p = sub.add_parser("finish", help="(worker) the task is done with nothing to merge: no PR, no review")
+    p.add_argument("id")
+    p.add_argument("--summary")
+    p.add_argument("--summary-file")
+    p.set_defaults(fn=cmd_finish)
+
     p = sub.add_parser("verdict", help="(reviewer) approve a task or send it back with findings")
     p.add_argument("id")
     p.add_argument("verdict", choices=["approve", "changes"])
@@ -3478,6 +3563,10 @@ def main(argv=None):
     p = sub.add_parser("accept", help="(the person's call) merge a ready task's PR, or its local branch without a remote (config --merge), and clean up")
     p.add_argument("id")
     p.set_defaults(fn=cmd_accept)
+
+    p = sub.add_parser("close", help="(the person's call) close a finished task: remove its worktree, branch and pane")
+    p.add_argument("id")
+    p.set_defaults(fn=cmd_close)
 
     p = sub.add_parser("drop", help="stop a task, close its PR, remove its worktree")
     p.add_argument("id")

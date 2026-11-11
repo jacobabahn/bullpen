@@ -25,9 +25,12 @@ Moving
   n            select the next task that needs you
   ⏎            open the worker's pane (the reviewer's, in review)
   c            back to the coordinator, panes put away
+               (on a finished task: close it, below)
 
 Acting on the selected task
   a            accept: merge its PR (or local branch) and clean up
+  c            close a finished task (nothing to merge): remove its
+               worktree, branch and pane
   d            drop: close its PR, pane and worktree
   t            tell its worker something
   p            peek at the end of its worker's screen (live)
@@ -37,7 +40,7 @@ Acting on the selected task
 
 The board
   l            switch layout (grouped, compact)
-  f            show finished tasks too
+  f            show closed tasks too (accepted, closed, dropped)
   ?            this list
   q            quit the board";
 
@@ -57,6 +60,7 @@ pub enum Mode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Job {
     Accept,
+    Close,
     Drop,
     DropForce,
     Start,
@@ -67,6 +71,7 @@ impl Job {
     fn args(self, id: &str) -> Vec<String> {
         let a: &[&str] = match self {
             Job::Accept => &["accept", id],
+            Job::Close => &["close", id],
             Job::Drop => &["drop", id],
             Job::DropForce => &["drop", id, "--force"],
             Job::Start => &["start", id],
@@ -79,6 +84,7 @@ impl Job {
     pub fn doing(self) -> &'static str {
         match self {
             Job::Accept => "Accepting",
+            Job::Close => "Closing",
             Job::Drop | Job::DropForce => "Dropping",
             Job::Start => "Starting",
             Job::Resume => "Resuming",
@@ -89,6 +95,7 @@ impl Job {
     fn done(self) -> &'static str {
         match self {
             Job::Accept => "Accepted",
+            Job::Close => "Closed",
             Job::Drop | Job::DropForce => "Dropped",
             Job::Start => "Started",
             Job::Resume => "Resumed",
@@ -300,6 +307,7 @@ impl App {
             }
             let job = match action {
                 Action::Accept => Job::Accept,
+                Action::Close => Job::Close,
                 Action::Drop => Job::Drop,
                 Action::DropForce => Job::DropForce,
             };
@@ -334,6 +342,12 @@ impl App {
                 }
             }
             (_, Some('f')) => self.finished = !self.finished,
+            (_, Some('c')) if self.current().is_some_and(|t| t.status == "finished") => {
+                let id = self.current().map(|t| t.id.clone()).unwrap_or_default();
+                if !self.still(&id) {
+                    self.pending = Some((Action::Close, id));
+                }
+            }
             (_, Some('c')) => {
                 let (ok, out) = self.bp(&["go"]);
                 self.msg = if ok { "Opened the coordinator.".into() } else { out };
@@ -374,7 +388,9 @@ impl App {
                 };
             }
             (_, Some('a')) => {
-                if cur.status != "ready" {
+                if cur.status == "finished" {
+                    self.msg = "It has nothing to merge: c closes it.".into();
+                } else if cur.status != "ready" {
                     self.msg = "Only a task that's ready to accept can be accepted.".into();
                 } else if !self.still(sel) {
                     self.pending = Some((Action::Accept, sel.into()));
@@ -559,4 +575,79 @@ fn main() {
     }
     ratatui::restore();
     status("state=clear");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn app(tasks: Vec<Task>) -> App {
+        let (tx, _rx) = mpsc::channel();
+        let dir = PathBuf::from("/nonexistent/bullpen-board-test");
+        App {
+            cfg: Config::load(&dir),
+            tasks,
+            root: dir.clone(),
+            bullpen: dir.join("no-bullpen"),
+            dir,
+            me: None,
+            repo_name: "repo".into(),
+            sel: None,
+            finished: false,
+            msg: String::new(),
+            top: 0,
+            pending: None,
+            running: Vec::new(),
+            mode: Mode::Normal,
+            height: 0,
+            started: Instant::now(),
+            tx,
+            peeking: false,
+            peek_due: Instant::now(),
+        }
+    }
+
+    fn task(id: &str, status: &str) -> Task {
+        Task { id: id.into(), status: status.into(), ..Default::default() }
+    }
+
+    fn press(a: &mut App, c: char) {
+        a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+    }
+
+    #[test]
+    fn c_closes_a_finished_task_after_y() {
+        let mut a = app(vec![task("BP-1", "finished")]);
+        a.settle();
+        press(&mut a, 'c');
+        assert_eq!(a.pending, Some((Action::Close, "BP-1".into())));
+        press(&mut a, 'y');
+        assert_eq!(a.job("BP-1"), Some(Job::Close));
+        assert_eq!(Job::Close.args("BP-1"), vec!["close", "BP-1"]);
+        // n cancels
+        let mut a = app(vec![task("BP-1", "finished")]);
+        a.settle();
+        press(&mut a, 'c');
+        press(&mut a, 'n');
+        assert!(a.running.is_empty() && a.pending.is_none());
+        assert_eq!(a.msg, "Cancelled.");
+    }
+
+    #[test]
+    fn c_on_any_other_task_goes_to_the_coordinator() {
+        let mut a = app(vec![task("BP-1", "ready")]);
+        a.settle();
+        press(&mut a, 'c');
+        assert!(a.pending.is_none());
+        assert!(a.msg.contains("can't run"), "{}", a.msg); // it tried `bullpen go`
+    }
+
+    #[test]
+    fn a_on_a_finished_task_points_at_c() {
+        let mut a = app(vec![task("BP-1", "finished")]);
+        a.settle();
+        press(&mut a, 'a');
+        assert!(a.pending.is_none());
+        assert_eq!(a.msg, "It has nothing to merge: c closes it.");
+    }
 }

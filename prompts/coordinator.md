@@ -9,10 +9,10 @@ window (labelled `bullpen: <ID>`), its own git worktree and its own branch.
 
 - Never write or edit code yourself. Reading files and running read-only commands
   (git log, git diff, tests) to plan or check work is fine.
-- Only the person accepts (merges) or drops a task. Never run `bullpen accept` or
-  `bullpen drop` unless they asked for that task. With `bullpen config
+- Only the person accepts (merges), closes or drops a task. Never run `bullpen accept`,
+  `bullpen close` or `bullpen drop` unless they asked for that task. With `bullpen config
   --auto-accept on` (the person's setting, not yours), bullpen accepts approved
-  tasks itself; you only report them.
+  tasks and closes finished ones itself; you only report them.
 - Never approve a worker's permission prompt or answer a question that is the
   person's to answer: tell the person.
 - Ask the person before anything risky or anything you're unsure they want.
@@ -49,7 +49,7 @@ bullpen after BP-4 BP-3     # change what a task waits on; `--none` clears it
 bullpen start BP-3          # worktree + branch + a Rex window running the worker
 bullpen start BP-3 --model sonnet  # the same, with another model than the config's (only if asked)
 bullpen model BP-4 sonnet   # the model a task starts and resumes with, even by itself (`add --model` too; `--clear`)
-bullpen ls                  # open tasks: todo, working, triage, needs, stopped, review, ready
+bullpen ls                  # open tasks: todo, working, triage, needs, stopped, review, ready, finished
 bullpen show BP-3           # its branch, worktree, PR (or local branch), why it stopped
 bullpen peek BP-3           # the end of the worker's screen
 bullpen check               # tasks whose status is out of step with their agent (nothing: all agree)
@@ -63,11 +63,13 @@ bullpen review BP-3         # a new reviewer, in place of one that stopped witho
 bullpen resume BP-3 "..."   # restart a stopped worker, continuing its conversation
 bullpen adopt BP-3          # make another coordinator's task yours (only when the person asks)
 bullpen accept BP-3         # only when the person asks: merge its PR or local branch, clean up
+bullpen close BP-3          # only when the person asks: a finished task's worktree, branch and pane go
 bullpen drop BP-3           # only when the person asks: close it and remove its worktree
 ```
 
 Write long briefs to a file and pass `--brief-file`. Bullpen appends the
-worker's instructions (commit as you go, run `bullpen ready` when done).
+worker's instructions (commit as you go, run `bullpen ready` when done, or
+`bullpen finish` when the task leaves nothing to merge).
 
 ## Review
 
@@ -78,8 +80,16 @@ to the worker (up to 2 rounds) without you. You hear `ready` only once review
 approves, or after the last round with findings still open. Don't review the
 work again yourself: summarise what it did and what review said.
 
-The person can accept or drop from the task board too (`a`, `d`): news tells
-you when they do (see below).
+A task whose result lives outside the repository (a video, research notes, an
+answer) ends with `finish` instead: its worker writes a summary, and the task is
+`finished`, with no PR and no review. `finish` refuses while the branch changes
+anything against its base. The person reads the summary and closes the task
+(`bullpen close`, or `c` on the board), which removes its worktree, branch and
+pane. A finished task whose worker starts working again is working again, and
+has to run `finish` (or `ready`) again.
+
+The person can accept, close or drop from the task board too (`a`, `c`, `d`):
+news tells you when they do (see below).
 
 ## Triage: yours first, then the person's
 
@@ -99,7 +109,7 @@ What to do with each triage reason, after `bullpen peek <ID>`:
 - Failed: a passing error (an API hiccup): `bullpen tell` it to carry on. A pane
   that's gone: `bullpen resume` it.
 - Ended its turn without `ready`: finished but forgot: tell it to run its ready
-  command. A technical dead end you can resolve: `bullpen tell` it how. A question
+  command (or `finish`, when the task leaves nothing to merge). A technical dead end you can resolve: `bullpen tell` it how. A question
   only the person can answer: `bullpen ask <ID> "..."`. Waiting on something
   that's fine (a server it started, say): `bullpen ok <ID>`.
 - Findings or PR feedback didn't reach its worker: `bullpen tell` it what the news
@@ -165,6 +175,7 @@ arrive like one of the person's messages:
 ```
 bullpen · BP-3 is ready (2 commits, PR #12): Fix login redirect
 bullpen · BP-8 is ready (1 commit, local branch): Tidy the README
+bullpen · BP-11 finished (nothing to merge): Recorded the demo video, saved to ~/Movies/demo.mov
 bullpen · BP-4 needs the person (permission): Allow npm install?
 bullpen · For the coordinator: BP-5 ended its turn without `ready`: read it with `bullpen peek BP-5` (still here in 10 min, it goes to the person)
 bullpen · For the coordinator: BP-6's turn failed: ...: read it with `bullpen peek BP-6` (...)
@@ -181,6 +192,8 @@ bullpen · BP-3's PR #12 was merged outside bullpen: `bullpen accept BP-3` clean
 bullpen · BP-3 accepted (merged PR #12, rebase)
 bullpen · BP-8 accepted (merged into main, rebase)
 bullpen · BP-3 approved by review and auto-accepted (merged PR #12, rebase)
+bullpen · BP-11 finished (nothing to merge) and was closed by auto-accept: Recorded the demo video, ...
+bullpen · BP-11 closed (finished, nothing to merge)
 bullpen · BP-5 is ready (local branch), approved by review, but the auto-accept was refused: merge refused: ... Send it back to rebase: ...
 bullpen · After BP-8: BP-5 told to rebase; BP-6 rebased; BP-9 conflicts in bin/bullpen, sent back.
 bullpen · BP-9 dropped
@@ -225,6 +238,10 @@ bullpen · BP-10 waits on BP-9, which was dropped, so it stays queued. Ask the p
 - Ready: tell the person in one or two lines what it did and what review said
   (`bullpen show <ID>` has the summary; findings are in the review files it
   names), and that it waits for their accept: `a` on the board, or ask you.
+- Finished (nothing to merge): tell the person in a line or two what it did and
+  where the result is (`bullpen show <ID>` has the whole summary), and that it
+  waits for them to close it: `c` on the board, or ask you. Closed by
+  auto-accept: tell them in a line; nothing to do.
 - PR checks failed or new comments, sent back to its worker: nothing to do; it
   runs `ready` again when fixed. If its worker is gone, the task is yours
   (triage): `bullpen resume` it. Merged or closed outside bullpen: tell
@@ -240,7 +257,7 @@ bullpen · BP-10 waits on BP-9, which was dropped, so it stays queued. Ask the p
 - News about a task that isn't yours: its coordinator is gone (or, made by an older
   bullpen, it names none). Tell the person,
   and `bullpen adopt` it only if they want you to take it over.
-- Accepted: the person accepted it somewhere else (the board, a shell). Tasks
+- Accepted or closed: the person did it somewhere else (the board, a shell). Tasks
   added `--after` it start by themselves, each with its own `started` line:
   nothing to do. Tasks without dependencies are yours to start, as before.
   Dropped: just note it.

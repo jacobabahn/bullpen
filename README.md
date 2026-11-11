@@ -52,7 +52,9 @@ current watcher is left alone.
 The task board (`bullpen board`, a Rust program in `board/`) sits in a narrow
 pane beside the coordinator and updates as soon as a task changes.
 It groups tasks by what you do next: needs you, coordinator on it (dimmed: see
-[Triage](#triage)), ready to accept, in review, working, queued. Each task shows how long it has been there and, on a second
+[Triage](#triage)), ready to accept, finished (nothing to merge, see
+[Finish](#finish-with-nothing-to-merge)), in review, working, queued; `f` adds
+the closed ones (accepted, closed, dropped). Each task shows how long it has been there and, on a second
 line, what it needs or where it stands ("Asks: python3 or python?", "PR #4,
 approved by review."). A task in review or ready also shows the size of its
 change ("3 files, +120 −14"), worked out once when its worker runs `ready`. A
@@ -65,7 +67,8 @@ per task with the selected task's detail at the bottom.
 The keys at the bottom follow the selected task: `⏎` opens its worker (or its
 reviewer), `a` accepts and `d` drops (each asks y/n first), `t` tells, `p`
 peeks, `v` shows its diff, `s` starts, `r` resumes, `c` goes back to the
-coordinator, `n` selects the next task that needs you. `?` lists them all.
+coordinator (on a finished task, `c` closes it, after y/n), `n` selects the next
+task that needs you. `?` lists them all.
 `bullpen up --no-board` leaves the board out. Accept, drop, start and resume
 run in the background, with a spinner on the task, so the board stays usable
 meanwhile; a peek keeps the worker's colours and updates until you press a key.
@@ -171,6 +174,23 @@ to accept once review approves, or after the last round with the open findings
 listed. `bullpen config --review off` skips review; `review_rounds` and
 `reviewer` in the repo's `config.json` set the rounds and the reviewer's command.
 
+### Finish with nothing to merge
+
+Some tasks leave nothing in the repository: a video, research notes, an answer.
+Their worker ends with `bullpen finish BP-3 --summary-file <file>` instead of
+`ready`. It refuses while the branch changes anything against its base (commits
+that cancel each other out count as no change), and says to run `ready` instead.
+Otherwise the task is `finished`, with the summary kept as `ready` keeps it: no PR,
+no review. The news says `BP-3 finished (nothing to merge): <first line of the
+summary>`, and the board lists it under "Finished" with that line.
+
+You close it with `c` on the board or `bullpen close BP-3`: its worktree, branch
+and worker pane go, with no warning about losing work (there is nothing to merge),
+and it counts as done, so tasks added `--after` it start. With auto-accept on (or
+the task's `--auto-accept`), a finished task closes by itself, with a news line.
+A finished task whose worker starts working again goes back to working and has to
+run `finish` (or `ready`) again. Every worker's instructions say when to use which.
+
 A task goes back to `working` only once its worker has the message: review
 findings, a rebase conflict or PR feedback. If typing it into the worker's pane
 fails, it goes to the coordinator instead (triage, as "Review findings didn't
@@ -186,7 +206,8 @@ Off by default: you accept each task yourself. Turn it on with `bullpen config
 without waiting for you, and the next queued tasks start sooner. Once the reviewer
 approves, bullpen runs the normal accept itself (same merge, cleanup, rebase of the
 other tasks and start of queued ones), and the news says so: `BP-3 approved by
-review and auto-accepted (merged into main, rebase)`.
+review and auto-accepted (merged into main, rebase)`. A finished task, with nothing
+to merge, closes as soon as its worker runs `finish`.
 
 It never accepts a task review didn't approve: one ready after the last round with
 findings open, or any task while review is off. With a PR, it waits for the PR's
@@ -413,7 +434,7 @@ bullpen add "Cover logout" --brief-file b2.md --after BP-1 # BP-2 starts once BP
 bullpen after BP-2 --none   # change (or clear) what a task waits on
 bullpen model BP-2 sonnet   # the worker model it starts and resumes with (--clear: the config's)
 bullpen start BP-1    # worktree + branch + a Rex window running the worker
-bullpen ls            # todo, working, triage, needs, stopped, review, ready
+bullpen ls            # todo, working, triage, needs, stopped, review, ready, finished
 bullpen peek BP-1     # the end of the worker's screen
 bullpen diff BP-1     # its changes against its base, in a pager (--stat: just the files)
 bullpen check         # tasks whose status is out of step with their agent; --fix catches up
@@ -425,6 +446,7 @@ bullpen ok BP-1       # (coordinator) a task in triage is seen to: back to work,
 bullpen review BP-1   # (coordinator) a new reviewer for one that stopped without a verdict
 bullpen note BP-1 "..."   # an informational line on the board
 bullpen accept BP-1   # merge its PR (or local branch; rebase), close its pane, remove its worktree
+bullpen close BP-1    # a finished task (nothing to merge): remove its worktree, branch and pane
 bullpen drop BP-1     # close its PR, window and worktree without merging
 ```
 
@@ -435,7 +457,8 @@ isn't. On the board, `v` opens the same view in a floating pane; `q` closes it a
 takes you back to the board.
 
 A worker finishes with `bullpen ready <ID> --summary-file <file>`, which refuses
-uncommitted changes, pushes the branch and opens (or updates) the pull request.
+uncommitted changes, pushes the branch and opens (or updates) the pull request, or,
+when the task leaves nothing to merge, with `bullpen finish <ID> --summary-file <file>`.
 
 ### Local mode
 
