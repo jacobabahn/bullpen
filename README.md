@@ -93,12 +93,24 @@ bullpen go BP-1       # focus its pane (`go` alone: the coordinator; --next: nex
 bullpen tell BP-1 "Also cover the logout path"
 bullpen resume BP-1   # restart a stopped worker, continuing its conversation
 bullpen note BP-1 "Asks: ..."   # say on the board what it needs from you
-bullpen accept BP-1   # merge its PR (rebase), close its pane, remove its worktree
+bullpen accept BP-1   # merge its PR (or local branch; rebase), close its pane, remove its worktree
 bullpen drop BP-1     # close its PR, window and worktree without merging
 ```
 
 A worker finishes with `bullpen ready <ID> --summary-file <file>`, which refuses
 uncommitted changes, pushes the branch and opens (or updates) the pull request.
+
+### Local mode
+
+In a repository with no `origin` remote, bullpen works locally. `ready` pushes
+nothing and opens no pull request: it checks the branch against the local base
+branch and starts the reviewer as usual, and news says "local branch" where it
+would name a PR. `accept` merges the task's branch into the local base branch
+itself (rebase, squash or merge, as `config --merge` says). Where the base branch
+is checked out, it is fast-forwarded with `git merge --ff-only`, so uncommitted
+changes to other files survive. If anything stands in the way (a conflict, or an
+uncommitted change to a file the task touches), `accept` says why and leaves the
+task ready, with its worktree and branch as they were.
 
 ## Where things live
 

@@ -647,6 +647,187 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(json.loads(out)["block"], self.block(tid))
 
 
+class LocalModeTest(unittest.TestCase):
+    """A repository without an origin remote: no push, no gh; accept merges locally."""
+
+    setUp_with_origin = BullpenTest.setUp
+    bp = BullpenTest.bp
+    rex_calls = BullpenTest.rex_calls
+    api = BullpenTest.api
+    typed = BullpenTest.typed
+    show = BullpenTest.show
+    start_task = BullpenTest.start_task
+
+    def setUp(self):
+        self.setUp_with_origin()
+        sh("git", "-C", str(self.repo), "remote", "remove", "origin")
+
+    def tearDown(self):
+        self.assertFalse((self.fake / "gh.log").exists(), "gh was called in local mode")
+
+    def git(self, *args, cwd=None):
+        return sh("git", "-C", str(cwd or self.repo), *args).strip()
+
+    def commit(self, where, name, text, msg):
+        (Path(where) / name).write_text(text)
+        self.git("add", ".", cwd=where)
+        self.git("commit", "-qm", msg, cwd=where)
+
+    def ready_task(self, review=False):
+        """A started task with one commit (fix.txt), and an unrelated commit on main
+        made since it started, then run ready."""
+        if not review:
+            self.bp("config", "--review", "off")
+        tid = self.start_task()
+        wt = self.show(tid)["worktree"]
+        self.commit(wt, "fix.txt", "fixed\n", "Fix it")
+        self.commit(self.repo, "other.txt", "other\n", "Other work on main")
+        self.bp("ready", tid, "--summary", "Fixed the thing.", cwd=wt)
+        return tid, wt
+
+    def test_start_uses_the_local_base(self):
+        tid = self.start_task()
+        t = self.show(tid)
+        self.assertEqual(t["base"], "main")
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=t["worktree"]), self.git("rev-parse", "main"))
+
+    def test_ready_marks_the_local_branch_ready_without_push_or_gh(self):
+        tid, wt = self.ready_task()
+        t = self.show(tid)
+        self.assertEqual(t["status"], "ready")
+        self.assertIsNone(t["pr"])
+        self.assertTrue(t["local"])
+        self.assertEqual(t["commits"], 1)
+        self.assertEqual(self.typed()[-1], ("blk1", "bullpen · BP-1 is ready (1 commit, local branch): Fix the thing"))
+        ls = self.bp("ls").stdout
+        self.assertIn("local branch bullpen/bp-1-fix-the-thing", ls)
+        self.assertNotIn("None", ls)
+        show = self.bp("show", tid).stdout
+        self.assertIn("local branch", show)
+        self.assertNotIn("None", show)
+
+    def test_ready_still_refuses_uncommitted_changes_and_handles_no_commits(self):
+        tid = self.start_task()
+        wt = self.show(tid)["worktree"]
+        (Path(wt) / "dirty.txt").write_text("x\n")
+        self.assertIn("uncommitted", self.bp("ready", tid, cwd=wt, ok=False).stderr)
+        (Path(wt) / "dirty.txt").unlink()
+        self.bp("ready", tid, cwd=wt)
+        self.assertEqual(self.show(tid)["why"], "Nothing to merge (no commits)")
+
+    def test_ready_starts_the_reviewer(self):
+        tid, wt = self.ready_task(review=True)
+        t = self.show(tid)
+        self.assertEqual(t["status"], "review")
+        layer = self.api("session.new_layer")[-1]
+        self.assertEqual(layer["layout"]["block"]["label"], "bullpen: BP-1 review")
+        prompt = next((self.tmp / "state").rglob("BP-1.review-1.md")).read_text()
+        self.assertIn(f"log --oneline main..HEAD", prompt)
+        self.bp("verdict", tid, "approve", "--summary", "Fine.")
+        self.assertEqual(self.typed()[-1][1],
+                         "bullpen · BP-1 is ready (1 commit, local branch), approved by review: Fix the thing")
+
+    def accepted(self, tid, wt):
+        t = self.show(tid)
+        self.assertEqual(t["status"], "done")
+        self.assertFalse(Path(wt).exists())
+        self.assertNotIn("bullpen/", self.git("branch"))
+        self.assertEqual(self.git("show", "main:fix.txt"), "fixed")
+        self.assertEqual(self.git("show", "main:other.txt"), "other")
+        self.assertEqual(self.git("status", "--porcelain"), "")  # the checkout moved along
+
+    def test_accept_rebase(self):
+        tid, wt = self.ready_task()
+        self.bp("accept", tid)
+        self.accepted(tid, wt)
+        self.assertEqual(self.git("log", "--format=%s", "main"), "Fix it\nOther work on main\ninit")
+        self.assertEqual(self.git("rev-list", "--merges", "main"), "")
+
+    def test_accept_squash(self):
+        self.bp("config", "--merge", "squash")
+        tid, wt = self.ready_task()
+        self.commit(wt, "more.txt", "more\n", "More")  # two commits become one
+        self.bp("ready", tid, "--summary", "Fixed the thing.", cwd=wt)
+        self.bp("accept", tid)
+        self.accepted(tid, wt)
+        self.assertEqual(self.git("log", "--format=%s", "main"), "Fix the thing (BP-1)\nOther work on main\ninit")
+        self.assertEqual(self.git("log", "-1", "--format=%b", "main"), "Fixed the thing.")
+        self.assertEqual(self.git("show", "main:more.txt"), "more")
+
+    def test_accept_merge(self):
+        self.bp("config", "--merge", "merge")
+        tid, wt = self.ready_task()
+        self.bp("accept", tid)
+        self.accepted(tid, wt)
+        parents = self.git("log", "-1", "--format=%P", "main").split()
+        self.assertEqual(len(parents), 2)
+        self.assertIn("BP-1", self.git("log", "-1", "--format=%s", "main"))
+
+    def test_accept_keeps_unrelated_uncommitted_changes_in_the_main_checkout(self):
+        tid, wt = self.ready_task()
+        (self.repo / "README").write_text("edited, not committed\n")
+        self.bp("accept", tid)
+        self.assertEqual(self.show(tid)["status"], "done")
+        self.assertEqual((self.repo / "README").read_text(), "edited, not committed\n")
+        self.assertEqual(self.git("show", "main:fix.txt"), "fixed")
+        self.assertEqual(self.git("status", "--porcelain"), "M README")
+
+    def assert_untouched(self, tid, wt, main):
+        t = self.show(tid)
+        self.assertEqual(t["status"], "ready")
+        self.assertTrue(Path(wt).is_dir())
+        self.assertEqual(t["worktree"], wt)
+        self.assertIn("bullpen/bp-1-fix-the-thing", self.git("branch"))
+        self.assertEqual(self.git("rev-parse", "main"), main)
+        self.assertEqual(self.git("status", "--porcelain", cwd=wt), "")
+        rebase = self.git("rev-parse", "--path-format=absolute", "--git-path", "rebase-merge", cwd=wt)
+        self.assertFalse(Path(rebase).exists())  # no rebase left half done
+
+    def test_accept_refuses_a_conflict_and_leaves_the_task(self):
+        for mode in ("rebase", "squash", "merge"):
+            with self.subTest(mode=mode):
+                self.setUp()
+                self.bp("config", "--merge", mode)
+                tid, wt = self.ready_task()
+                self.commit(self.repo, "fix.txt", "fixed differently\n", "Clash")
+                main = self.git("rev-parse", "main")
+                p = self.bp("accept", tid, ok=False)
+                self.assertNotEqual(p.returncode, 0)
+                self.assertIn("merge refused", p.stderr)
+                self.assert_untouched(tid, wt, main)
+
+    def test_accept_refuses_when_a_dirty_file_in_the_main_checkout_would_be_overwritten(self):
+        tid, wt = self.ready_task()
+        (self.repo / "fix.txt").write_text("mine\n")  # untracked, in the way
+        main = self.git("rev-parse", "main")
+        p = self.bp("accept", tid, ok=False)
+        self.assertIn("can't fast-forward main", p.stderr)
+        self.assert_untouched(tid, wt, main)
+        self.assertEqual((self.repo / "fix.txt").read_text(), "mine\n")
+
+    def test_accept_when_the_base_is_not_checked_out(self):
+        tid, wt = self.ready_task()
+        self.git("switch", "-q", "-c", "elsewhere")
+        self.bp("accept", tid)
+        self.assertEqual(self.show(tid)["status"], "done")
+        self.assertEqual(self.git("show", "main:fix.txt"), "fixed")
+        self.assertEqual(self.git("branch", "--show-current"), "elsewhere")
+
+    def test_accept_with_nothing_to_merge(self):
+        tid = self.start_task()
+        self.bp("ready", tid)
+        main = self.git("rev-parse", "main")
+        self.bp("accept", tid)
+        self.assertEqual(self.show(tid)["status"], "done")
+        self.assertEqual(self.git("rev-parse", "main"), main)
+
+    def test_drop_closes_no_pr(self):
+        tid, wt = self.ready_task()
+        self.bp("drop", tid)
+        self.assertEqual(self.show(tid)["status"], "dropped")
+        self.assertFalse(Path(wt).exists())
+
+
 class BoardTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -675,6 +856,17 @@ class BoardTest(unittest.TestCase):
                          "PR #4, approved by review.")
         self.assertEqual(d({"status": "working", "review": {"verdict": "changes", "round": 1}}),
                          "Fixing what review round 1 found.")
+
+    def test_local_tasks_show_their_branch(self):
+        d = self.bp.task_detail
+        t = {"status": "ready", "pr": None, "local": True, "branch": "bullpen/bp-2-x", "base": "main",
+             "review": {"verdict": "approved"}}
+        self.assertEqual(d(t), "Local branch bullpen/bp-2-x, approved by review.")
+        self.assertEqual(d({**t, "review": None}), "Local branch bullpen/bp-2-x.")
+        self.assertEqual(d({**t, "status": "done", "merged": "abc"}), "Accepted. Merged into main.")
+        self.assertEqual(self.bp.confirm_text("accept", t, "squash"), "Accept and squash-merge into main?")
+        self.assertEqual(self.bp.confirm_text("drop", t), "Drop it?")
+        self.assertEqual(self.bp.where(t), "local branch")
 
     def test_keys_fit_the_task(self):
         self.assertTrue(self.bp.task_keys({"status": "ready"}).startswith("a accept"))

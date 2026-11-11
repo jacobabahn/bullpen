@@ -129,6 +129,10 @@ class Repo:
     def gh(self):
         return os.environ.get("BULLPEN_GH") or self.cfg.get("gh") or "gh"
 
+    def has_origin(self):
+        """No origin remote means local mode: tasks merge into the local base branch."""
+        return git(self.root, "remote", "get-url", "origin", check=False).returncode == 0
+
     def base(self):
         if self.cfg.get("base"):
             return self.cfg["base"]
@@ -289,6 +293,14 @@ def rex_close(session, block):
 def pr_short(url):
     m = re.search(r"/pull/(\d+)", url or "")
     return f"PR #{m.group(1)}" if m else (url or "")
+
+
+def where(t):
+    """What to call the task's work in news and on the board: its PR, or its local
+    branch when the repo has no remote (local mode), else ""."""
+    if t.get("pr"):
+        return pr_short(t["pr"])
+    return "local branch" if t.get("local") else ""
 
 
 def news(repo, task, event, text):
@@ -659,13 +671,31 @@ def cmd_ready(args):
     if git(wt, "status", "--porcelain").stdout.strip():
         raise Fail("uncommitted changes: commit (or discard) them, then run ready again")
     summary = Path(args.summary_file).read_text() if args.summary_file else (args.summary or "")
-    base_ref = f"origin/{t['base']}" if git(wt, "rev-parse", "-q", "--verify", f"origin/{t['base']}", check=False).returncode == 0 else t["base"]
+    local = not repo.has_origin()
+    if local or git(wt, "rev-parse", "-q", "--verify", f"origin/{t['base']}", check=False).returncode != 0:
+        base_ref = t["base"]
+    else:
+        base_ref = f"origin/{t['base']}"
     ahead = int(git(wt, "rev-list", "--count", f"{base_ref}..HEAD").stdout.strip())
     if ahead == 0:
         t.update(status="ready", why="Nothing to merge (no commits)", summary=summary.strip() or None)
         repo.save_task(t)
         news(repo, t, "ready", f"{t['id']} is ready with nothing to merge: {t['title']}")
         print("no commits: marked ready with nothing to merge")
+        return
+    if local:
+        t["local"] = True
+        t.update(why=None, summary=summary.strip() or t.get("summary"), commits=ahead)
+        if repo.cfg.get("review", True):
+            start_review(repo, t, base_ref)
+            print(f"local branch {t['branch']} ({commits(ahead)} ahead of {base_ref}; no remote, "
+                  f"so nothing pushed). A reviewer checks it now: end your turn, and you'll hear "
+                  f"back if it asks for changes.")
+            return
+        t["status"] = "ready"
+        repo.save_task(t)
+        news(repo, t, "ready", f"{t['id']} is ready ({commits(ahead)}, local branch): {t['title']}")
+        print(f"local branch {t['branch']} is ready ({commits(ahead)} ahead of {base_ref})")
         return
     git(wt, "push", "-q", "--force-with-lease", "-u", "origin", f"HEAD:refs/heads/{t['branch']}")
     if not t.get("pr"):
@@ -743,7 +773,7 @@ def cmd_verdict(args):
     reviewer = (r.get("session"), r.get("block"))
     unindex_block(r["block"])
     r["block"] = None
-    pr = pr_short(t.get("pr"))
+    pr = where(t)
     if args.verdict == "approve":
         t.update(status="ready", why=None)
         repo.save_task(t)
@@ -797,13 +827,91 @@ def cmd_accept(args):
             raise Fail(f"merge refused: {(p.stderr or p.stdout).strip()}")
         if t.get("branch"):
             git(repo.root, "push", "-q", "origin", "--delete", t["branch"], check=False)
+    elif not repo.has_origin() and t.get("branch"):
+        merge_locally(repo, t)  # raises, leaving the task as it was, if it can't
     rex_close(t["session"], t["block"])
     unindex_block(t["block"])
     close_reviewer(t)
     remove_worktree(repo, t, force=True)
     t.update(status="done", block=None, worktree=None)
     repo.save_task(t)
-    print(f"{t['id']} done" + (f" (merged {t['pr']})" if t.get("pr") else ""))
+    if t.get("pr"):
+        print(f"{t['id']} done (merged {t['pr']})")
+    elif t.get("merged"):
+        print(f"{t['id']} done (merged into {t['base']}: {t['merged'][:12]})")
+    else:
+        print(f"{t['id']} done")
+
+
+def checked_out_at(repo, branch):
+    """The worktree (the main checkout or another) that has branch checked out, or None."""
+    p = git(repo.root, "worktree", "list", "--porcelain")
+    path = None
+    for line in p.stdout.splitlines():
+        if line.startswith("worktree "):
+            path = line[len("worktree "):]
+        elif line == f"branch refs/heads/{branch}":
+            return path
+    return None
+
+
+def merge_locally(repo, t):
+    """Local mode: merge the task's branch into its local base branch, as config --merge
+    says. On any failure, raise with the reason and leave the task, its worktree and its
+    branch as they were (a rebase that went through stays: the branch is still intact)."""
+    base, branch, wt = t["base"], t["branch"], t.get("worktree")
+    mode = repo.cfg.get("merge", "rebase")
+    if git(repo.root, "rev-parse", "-q", "--verify", f"refs/heads/{branch}", check=False).returncode != 0:
+        raise Fail(f"merge refused: {t['id']}'s branch {branch} is gone")
+    old = git(repo.root, "rev-parse", f"refs/heads/{base}").stdout.strip()
+    if int(git(repo.root, "rev-list", "--count", f"{old}..refs/heads/{branch}").stdout.strip()) == 0:
+        return  # nothing to merge
+    if mode == "rebase":
+        if not wt or not Path(wt).exists():
+            raise Fail(f"merge refused: {t['id']} has no worktree to rebase in")
+        if git(wt, "status", "--porcelain").stdout.strip():
+            raise Fail(f"merge refused: {t['id']} has uncommitted changes in {wt}")
+        p = git(wt, "rebase", "-q", old, check=False)
+        if p.returncode != 0:
+            git(wt, "rebase", "--abort", check=False)
+            raise Fail(f"merge refused: {branch} doesn't rebase cleanly onto {base}; "
+                       f"rebase it by hand in {wt}, then accept again")
+        new = git(repo.root, "rev-parse", f"refs/heads/{branch}").stdout.strip()
+    else:
+        p = git(repo.root, "merge-tree", "--write-tree", "--no-messages", old, f"refs/heads/{branch}",
+                check=False)
+        if p.returncode != 0:
+            raise Fail(f"merge refused: {branch} conflicts with {base}; "
+                       f"rebase it onto {base} in {wt}, then accept again")
+        tree = p.stdout.split()[0]
+        if mode == "squash":
+            msg = f"{t['title']} ({t['id']})"
+            if t.get("summary"):
+                msg += "\n\n" + t["summary"].strip()
+            parents = ["-p", old]
+        else:
+            msg = f"Merge {branch}: {t['title']} ({t['id']})"
+            parents = ["-p", old, "-p", f"refs/heads/{branch}"]
+        new = run(["git", "-C", str(repo.root), "commit-tree", tree, *parents, "-F", "-"],
+                  input=msg + "\n").stdout.strip()
+    move_base(repo, base, old, new)
+    t["merged"] = new
+
+
+def move_base(repo, base, old, new):
+    """Fast-forward the local base branch from old to new. Where it's checked out, do it
+    with `merge --ff-only` there, which keeps uncommitted changes to other files and
+    refuses if the incoming commits touch one of them."""
+    at = checked_out_at(repo, base)
+    if at:
+        p = git(at, "merge", "-q", "--ff-only", new, check=False)
+        if p.returncode != 0:
+            msg = " ".join((p.stderr or p.stdout).split())
+            raise Fail(f"merge refused: can't fast-forward {base} in {at}: {msg}")
+        return
+    if git(repo.root, "merge-base", "--is-ancestor", old, new, check=False).returncode != 0:
+        raise Fail(f"merge refused: {base} can't be fast-forwarded")
+    git(repo.root, "update-ref", "-m", "bullpen accept", f"refs/heads/{base}", new, old)
 
 
 def cmd_drop(args):
@@ -832,7 +940,7 @@ def cmd_ls(args):
     if not tasks:
         print("no open tasks" + ("" if args.all else " (--all shows finished ones)"))
     for t in tasks:
-        extra = t.get("why") or t.get("pr") or ""
+        extra = t.get("why") or t.get("pr") or (f"local branch {t['branch']}" if t.get("local") else "")
         print(f"{t['id']:<7} {t['status']:<8} {t['title']}" + (f"  ({extra})" if extra else ""))
 
 
@@ -845,6 +953,8 @@ def cmd_show(args):
     for k in ("id", "title", "status", "why", "note", "base", "branch", "worktree", "block", "pr", "summary"):
         if t.get(k):
             print(f"{k:>9}: {t[k]}")
+        elif k == "pr" and t.get("local"):
+            print(f"{k:>9}: none; local branch, merged into {t['base']} by accept")
     r = t.get("review") or {}
     if r:
         state = r.get("verdict") or "in progress"
@@ -994,6 +1104,8 @@ def confirm_text(action, t, merge="rebase"):
     """The question a task's own row turns into while the board waits for y or n."""
     pr = pr_short(t.get("pr"))
     if action == "accept":
+        if t.get("local") and not pr and not (t.get("why") or "").startswith("Nothing to merge"):
+            return f"Accept and {MERGE_VERB.get(merge, merge)} into {t.get('base')}?"
         return f"Accept and {MERGE_VERB.get(merge, merge)}?" if pr else "Accept and clean up?"
     if action == "drop":
         return f"Drop it and close {pr}?" if pr else "Drop it?"
@@ -1041,6 +1153,8 @@ def seconds_in_status(t, at=None):
 def task_detail(t, rounds=2):
     """What the task needs or where it stands, as a plain sentence."""
     st, r, pr = t["status"], t.get("review") or {}, pr_short(t.get("pr"))
+    if not pr and t.get("local"):
+        pr = f"Local branch {t.get('branch')}"
     if t.get("note"):
         return t["note"]
     if st == "needs":
@@ -1065,6 +1179,8 @@ def task_detail(t, rounds=2):
     if st == "todo":
         return "Not started. s starts it."
     if st == "done":
+        if t.get("local") and not t.get("pr"):
+            return f"Accepted. Merged into {t.get('base')}." if t.get("merged") else "Accepted."
         return f"Accepted. {pr} merged." if pr else "Accepted."
     if st == "dropped":
         return "Dropped."
@@ -1107,7 +1223,7 @@ Moving
   c            back to the coordinator, panes put away
 
 Acting on the selected task
-  a            accept: merge its PR and clean up
+  a            accept: merge its PR (or local branch) and clean up
   d            drop: close its PR, pane and worktree
   t            tell its worker something
   p            peek at the end of its worker's screen
@@ -1570,7 +1686,7 @@ def main(argv=None):
     p.add_argument("--lines", type=int, default=40)
     p.set_defaults(fn=cmd_peek)
 
-    p = sub.add_parser("ready", help="(worker) push the branch, open the PR, tell the coordinator")
+    p = sub.add_parser("ready", help="(worker) push the branch, open the PR (none without a remote), tell the coordinator")
     p.add_argument("id")
     p.add_argument("--summary")
     p.add_argument("--summary-file")
@@ -1588,7 +1704,7 @@ def main(argv=None):
     p.add_argument("text", nargs="+")
     p.set_defaults(fn=cmd_note)
 
-    p = sub.add_parser("accept", help="(the person's call) merge a ready task's PR (config --merge) and clean up")
+    p = sub.add_parser("accept", help="(the person's call) merge a ready task's PR, or its local branch without a remote (config --merge), and clean up")
     p.add_argument("id")
     p.set_defaults(fn=cmd_accept)
 

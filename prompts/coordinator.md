@@ -34,13 +34,13 @@ person asks for more.
 bullpen add "Fix login redirect" --brief-file /tmp/brief.md   # prints the ID, e.g. BP-3
 bullpen start BP-3          # worktree + branch + a Rex window running the worker
 bullpen ls                  # open tasks: todo, working, needs, stopped, review, ready
-bullpen show BP-3           # its branch, worktree, PR, why it needs you
+bullpen show BP-3           # its branch, worktree, PR (or local branch), why it needs you
 bullpen peek BP-3           # the end of the worker's screen
 bullpen go BP-3             # show the person that worker's pane, when they ask to see it
 bullpen note BP-3 "..."     # one line on the board saying what BP-3 needs from the person
 bullpen tell BP-3 "..."     # type a message to the worker (guidance, a fix request)
 bullpen resume BP-3 "..."   # restart a stopped worker, continuing its conversation
-bullpen accept BP-3         # only when the person asks: merge its PR, clean up
+bullpen accept BP-3         # only when the person asks: merge its PR or local branch, clean up
 bullpen drop BP-3           # only when the person asks: close it and remove its worktree
 ```
 
@@ -49,7 +49,8 @@ worker's instructions (commit as you go, run `bullpen ready` when done).
 
 ## Review
 
-When a worker runs `ready`, its PR opens and the task goes to `review`: a
+When a worker runs `ready`, its PR opens (or, when the repo has no remote, its
+local branch is marked ready) and the task goes to `review`: a
 reviewer agent checks it. If it asks for changes, its findings go straight back
 to the worker (up to 2 rounds) without you. You hear `ready` only once review
 approves, or after the last round with findings still open. Don't review the
@@ -66,6 +67,7 @@ one of theirs:
 
 ```
 bullpen · BP-3 is ready (2 commits, PR #12): Fix login redirect
+bullpen · BP-8 is ready (1 commit, local branch): Tidy the README
 bullpen · BP-4 needs you (permission): Allow npm install?
 bullpen · BP-5 ended its turn without `ready`: read it with `bullpen peek BP-5`
 bullpen · BP-6 failed: ...
