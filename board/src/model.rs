@@ -88,6 +88,12 @@ pub struct Task {
     /// the base it was rebased onto after another task's accept, until its next ready
     #[serde(default, deserialize_with = "lenient")]
     pub rebased: Option<String>,
+    /// the tasks it waits on (`bullpen add --after`, `bullpen after`)
+    #[serde(default, deserialize_with = "lenient")]
+    pub after: Option<Vec<String>>,
+    /// those not done yet, worked out from the other tasks: "BP-8", "BP-9 (dropped)"
+    #[serde(skip)]
+    pub waits: Vec<String>,
 }
 
 impl Task {
@@ -195,7 +201,27 @@ pub fn load_tasks(dir: &Path) -> Vec<Task> {
         .filter_map(|p| serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok())
         .collect();
     out.sort_by_key(Task::num);
+    link_waits(&mut out);
     out
+}
+
+/// Fill in what each task waits on: the tasks in its `after` that aren't done.
+pub fn link_waits(tasks: &mut [Task]) {
+    let status: std::collections::HashMap<String, String> =
+        tasks.iter().map(|t| (t.id.clone(), t.status.clone())).collect();
+    for t in tasks.iter_mut() {
+        t.waits = t
+            .after
+            .iter()
+            .flatten()
+            .filter_map(|d| match status.get(d).map(String::as_str) {
+                Some("done") => None,
+                Some("dropped") => Some(format!("{d} (dropped)")),
+                Some(_) => Some(d.clone()),
+                None => Some(format!("{d} (missing)")),
+            })
+            .collect();
+    }
 }
 
 // The board groups tasks by what the person does next. Colour only marks status;
@@ -390,6 +416,7 @@ fn status_detail(t: &Task, rounds: u32, at: DateTime<FixedOffset>) -> String {
         },
         "working" if t.sent_back_by_github() => "Fixing what GitHub said.".into(),
         "working" if verdict == Some("changes") => format!("Fixing what review round {round} found."),
+        "todo" if !t.waits.is_empty() => format!("Waits on {}.", t.waits.join(", ")),
         "todo" => "Not started. s starts it.".into(),
         "done" if t.is_local() && !has_pr => match (&t.merged, &t.base) {
             (Some(_), Some(base)) => format!("Accepted. Merged into {base}."),
@@ -761,6 +788,29 @@ mod tests {
         assert_eq!(clock(local(11, 15, 0), at), "3:00 PM");
         assert_eq!(clock(local(16, 0, 0), at), "Mon 12:00 AM");
         assert_eq!(clock(local(30, 9, 5), at), "Nov 30 9:05 AM");
+    }
+
+    #[test]
+    fn a_queued_task_says_what_it_waits_on() {
+        let after = |ids: &[&str]| Some(ids.iter().map(|s| s.to_string()).collect());
+        let mut tasks: Vec<Task> = vec![
+            task("BP-1", "done"),
+            task("BP-2", "working"),
+            task("BP-3", "dropped"),
+            Task { after: after(&["BP-1", "BP-2"]), ..task("BP-4", "todo") },
+            Task { after: after(&["BP-1"]), ..task("BP-5", "todo") },
+            Task { after: after(&["BP-3", "BP-9"]), ..task("BP-6", "todo") },
+            Task { after: after(&["BP-2"]), ..task("BP-7", "working") },
+        ];
+        link_waits(&mut tasks);
+        let detail = |i: usize| task_detail(&tasks[i], 2, now());
+        assert_eq!(detail(3), "Waits on BP-2.");
+        assert_eq!(detail(4), "Not started. s starts it.");
+        assert_eq!(detail(5), "Waits on BP-3 (dropped), BP-9 (missing).");
+        assert_eq!(detail(6), ""); // started anyway (--force): it waits on nothing now
+        // read from the task's JSON, as bullpen writes it
+        let t: Task = serde_json::from_str(r#"{"id":"BP-4","status":"todo","after":["BP-1"]}"#).unwrap();
+        assert_eq!(t.after, after(&["BP-1"]));
     }
 
     #[test]

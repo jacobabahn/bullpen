@@ -71,9 +71,38 @@ run in the background, with a spinner on the task, so the board stays usable
 meanwhile; a peek keeps the worker's colours and updates until you press a key.
 
 Accepting or dropping from the board (or a shell) is news to the coordinator:
-`BP-3 accepted (merged PR #12, rebase)`, `BP-3 dropped`. That is how it learns
-it can start queued tasks that waited for the accepted one. Run from the
+`BP-3 accepted (merged PR #12, rebase)`, `BP-3 dropped`. Run from the
 coordinator's own pane, `accept` and `drop` post nothing: it already knows.
+Tasks that waited on the accepted one start by themselves (see
+[Dependencies](#dependencies)).
+
+### Dependencies
+
+A task can wait on others: `bullpen add "..." --brief-file f --after BP-8`
+(repeat `--after`, or give several as `BP-8,BP-9`). `bullpen after BP-9 BP-8`
+sets or changes what an existing task waits on, and `bullpen after BP-9 --none`
+clears it. Both refuse an unknown task, a dropped one, and a cycle (BP-8 waiting
+on BP-9 while BP-9 waits on BP-8).
+
+`start` refuses a task whose dependencies aren't all accepted, naming them;
+`--force` starts it anyway. The board, `ls` and `show` say "Waits on BP-8" for it.
+
+When a task is accepted, bullpen starts each queued task whose dependencies are
+now all accepted, in ID order, as long as fewer than `max_running` tasks are
+working or in review (3 by default; set `"max_running"` in the repo's
+`config.json`). When an accept or a drop frees a slot, the next queued task starts
+too. Only tasks with dependencies are queued like this: a plain todo task waits
+for the coordinator (or you) to start it. Each start is one news line, `BP-9
+started (BP-8 was accepted)`. While the usage limit is reached nothing starts;
+the news says which tasks could.
+
+If a dependency is dropped, the tasks waiting on it stay todo and one news line
+asks what to do: `bullpen after BP-9 --none` (or other tasks) and `start` it, or
+drop it.
+
+A task with dependencies gets one more section in its brief when it starts, "What
+this builds on": each dependency's title, its summary (the PR description its
+worker wrote) and where its review findings are, so it knows what just landed.
 
 ### After accept
 
@@ -241,6 +270,8 @@ Then tell the coordinator what you want. To drive it by hand:
 
 ```sh
 bullpen add "Fix login redirect" --brief-file brief.md   # prints BP-1
+bullpen add "Cover logout" --brief-file b2.md --after BP-1 # BP-2 starts once BP-1 is accepted
+bullpen after BP-2 --none   # change (or clear) what a task waits on
 bullpen start BP-1    # worktree + branch + a Rex window running the worker
 bullpen ls            # todo, working, needs, stopped, ready
 bullpen peek BP-1     # the end of the worker's screen
@@ -306,7 +337,3 @@ python3 -m unittest discover -s tests
 ```
 
 The tests use fake `rex` and `gh` programs and a local bare repository as origin.
-
-## Not yet
-
-- Dependencies between tasks and a run queue: the coordinator holds tasks back itself.

@@ -689,15 +689,174 @@ def cmd_add(args):
     if not brief:
         raise Fail("give the task's brief with --brief or --brief-file")
     tid = f"{repo.cfg['prefix']}-{repo.cfg['next']}"
+    after = check_after(repo, tid, dep_ids(repo, args.after))
     repo.cfg["next"] += 1
     repo.save()
     t = {"id": tid, "title": args.title, "status": "todo", "created": now(),
          "base": args.base or repo.base(), "branch": None, "worktree": None,
          "block": None, "session": None, "pr": None, "why": None, "last": None}
+    if after:
+        t["after"] = after
     (repo.dir / "briefs").mkdir(parents=True, exist_ok=True)
     (repo.dir / "briefs" / f"{tid}.md").write_text(brief.rstrip() + "\n")
     repo.save_task(t)
     print(tid)
+
+
+# ---------- dependencies and the run queue ----------
+#
+# A task can wait on others (`add --after`, `after`): its "after" is a list of IDs.
+# `start` refuses it until they're all done. When a task is accepted or dropped, the
+# queue starts each todo task that has dependencies, all done, within max_running.
+
+
+def dep_ids(repo, values):
+    """IDs from --after values, each one or several: "BP-8", "8,9", "BP-8 BP-9"."""
+    out = []
+    for v in values or []:
+        for part in re.split(r"[,\s]+", v.strip()):
+            if part and repo.norm(part) not in out:
+                out.append(repo.norm(part))
+    return out
+
+
+def check_after(repo, tid, after):
+    """after, if the task tid can wait on those tasks: each exists, isn't tid itself
+    or dropped, and none of them waits on tid already (a cycle)."""
+    tasks = {t["id"]: t for t in repo.tasks()}
+    for d in after:
+        if d == tid:
+            raise Fail(f"{tid} can't wait on itself")
+        if d not in tasks:
+            raise Fail(f"no task {d} in {repo.root}")
+        if tasks[d]["status"] == "dropped":
+            raise Fail(f"{d} was dropped: {tid} would wait on it forever")
+        path = dep_path(tasks, d, tid)
+        if path:
+            raise Fail(f"{d} already waits on {tid} ({' → '.join(path)}): that would be a cycle")
+    return after
+
+
+def dep_path(tasks, start, goal, seen=None):
+    """[start, ..., goal] if start waits on goal, directly or through others, else None."""
+    seen = seen if seen is not None else set()
+    if start == goal:
+        return [goal]
+    if start in seen:
+        return None
+    seen.add(start)
+    for d in (tasks.get(start) or {}).get("after") or []:
+        rest = dep_path(tasks, d, goal, seen)
+        if rest:
+            return [start, *rest]
+    return None
+
+
+def open_deps(repo, t, tasks=None):
+    """The tasks t waits on that aren't done, as (id, status); status None: no such task."""
+    tasks = tasks if tasks is not None else {o["id"]: o for o in repo.tasks()}
+    return [(d, (tasks.get(d) or {}).get("status")) for d in t.get("after") or []
+            if (tasks.get(d) or {}).get("status") != "done"]
+
+
+def waits_phrase(repo, t, tasks=None):
+    """ "Waits on BP-8, BP-9 (dropped)" for a todo task with open dependencies, else "". """
+    if t["status"] != "todo":
+        return ""
+    deps = open_deps(repo, t, tasks)
+    if not deps:
+        return ""
+    return "Waits on " + ", ".join(d + {"dropped": " (dropped)", None: " (missing)"}.get(st, "") for d, st in deps)
+
+
+def cmd_after(args):
+    """Set what a task waits on, or clear it with --none."""
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    if args.none == bool(args.deps):
+        raise Fail("give the tasks it waits on, or --none")
+    if t["status"] in CLOSED:
+        raise Fail(f"{t['id']} is {t['status']}")
+    after = [] if args.none else check_after(repo, t["id"], dep_ids(repo, args.deps))
+    if after:
+        t["after"] = after
+    else:
+        t.pop("after", None)
+    write_json(repo.task_path(t["id"]), t)  # not save_task: the status didn't change
+    print(f"{t['id']} waits on {', '.join(after)}" if after else f"{t['id']} waits on nothing")
+
+
+def running_count(repo):
+    return sum(1 for t in repo.tasks() if t["status"] in ("working", "review"))
+
+
+def start_queued(repo, by, how):
+    """After `by` was accepted or dropped (how): start each queued task, one with
+    dependencies all done, in ID order, while fewer than max_running work or are in
+    review. One news line per start. Plain todo tasks wait for the coordinator."""
+    tasks = {t["id"]: t for t in repo.tasks()}
+    queued = [t for t in tasks.values() if t["status"] == "todo" and t.get("after")
+              and not open_deps(repo, t, tasks)]
+    if not queued:
+        return
+    why = f"{by['id']} was accepted" if how == "accepted" else f"{by['id']} was dropped, freeing a slot"
+    lim = limit_active()
+    if lim:
+        ids = ", ".join(t["id"] for t in queued)
+        news(repo, by, "queue", f"{ids} can start ({why}), but the usage limit is reached "
+             f"({limit_phrase(lim.get('resets'))}): `bullpen start` them after the reset")
+        return
+    room = repo.cfg.get("max_running", 3) - running_count(repo)
+    session = session_for(repo)
+    for t in sorted(queued, key=lambda t: int(t["id"].rsplit("-", 1)[1]))[:max(room, 0)]:
+        try:
+            if not session:
+                raise Fail("no Rex session: run `bullpen up`")
+            start_task(repo, t, session)
+        except Fail as e:
+            news(repo, t, "queue", f"{t['id']} couldn't start ({why}): {clip(str(e), 200)}")
+            continue
+        news(repo, t, "started", f"{t['id']} started ({why})")
+
+
+def dropped_dep(repo, t):
+    """t was dropped: the tasks waiting on it stay todo, with one news line."""
+    waiting = [o["id"] for o in repo.tasks() if o["status"] == "todo" and t["id"] in (o.get("after") or [])]
+    if not waiting:
+        return
+    names = ", ".join(waiting)
+    one = waiting[0]
+    verb = "waits" if len(waiting) == 1 else "wait"
+    stays = "it stays" if len(waiting) == 1 else "they stay"
+    news(repo, t, "dropped-dependency",
+         f"{names} {verb} on {t['id']}, which was dropped, so {stays} queued. Ask the person what to do: "
+         f"`bullpen after {one} --none` (or other tasks) to go ahead without it, then "
+         f"`bullpen start {one}`; or drop {'it' if len(waiting) == 1 else 'them'}")
+
+
+def deps_section(repo, t):
+    """For the brief of a task with dependencies: what each one landed."""
+    if not t.get("after"):
+        return ""
+    tasks = {o["id"]: o for o in repo.tasks()}
+    parts = []
+    for d in t["after"]:
+        o = tasks.get(d)
+        if not o:
+            continue
+        state = "accepted" if o["status"] == "done" else f"{o['status']}, not accepted yet"
+        where = pr_short(o.get("pr")) if o.get("pr") else (f"merged into {o['base']}" if o.get("merged") else "")
+        lines = [f"### {d}: {o['title']} ({state}{', ' + where if where else ''})", ""]
+        lines.append((o.get("summary") or "No summary.").strip())
+        findings = sorted((repo.dir / "briefs").glob(f"{d}.review-*.findings.md"))
+        if findings:
+            lines += ["", "Review findings: " + ", ".join(str(f) for f in findings)]
+        parts.append("\n".join(lines))
+    if not parts:
+        return ""
+    return ("## What this builds on\n\nThis task waited on these tasks. Their work is on your base "
+            "branch now (unless marked otherwise): read it before you start.\n\n"
+            + "\n\n".join(parts) + "\n\n")
 
 
 def footer(repo, t):
@@ -767,6 +926,10 @@ def cmd_start(args):
     t = repo.task(args.id)
     if t["status"] not in ("todo", "stopped"):
         raise Fail(f"{t['id']} is {t['status']}; use `resume` or `tell`")
+    deps = [] if args.force or t["status"] != "todo" else open_deps(repo, t)
+    if deps:
+        raise Fail(f"{t['id']} waits on " + ", ".join(f"{d} ({st or 'no such task'})" for d, st in deps)
+                   + f": it starts by itself once they're accepted; `start {t['id']} --force` starts it now")
     lim = None if args.force else limit_active()
     if lim:
         raise Fail(f"the usage limit is reached ({limit_phrase(lim.get('resets'))}): a worker started "
@@ -775,6 +938,12 @@ def cmd_start(args):
     session = session_for(repo, args)
     if not session:
         raise Fail("no Rex session: run `bullpen up` first or pass --session")
+    start_task(repo, t, session, args.model)
+    print(f"{t['id']} started in {t['worktree']} (branch {t['branch']}, pane {t['block']})")
+
+
+def start_task(repo, t, session, model=None):
+    """Make the task's worktree and brief, and start its worker."""
     if not t["worktree"]:
         base = t["base"]
         start_point = base
@@ -794,12 +963,11 @@ def cmd_start(args):
     saved = repo.dir / "briefs" / f"{t['id']}.rules.md"
     saved.write_text(rules + "\n" if rules else "")
     section = f"## Rules for this repository\n\n{rules}\n\n" if rules else ""
-    full.write_text(f"# {t['id']}: {t['title']}\n\n{brief}\n{section}{footer(repo, t)}")
+    full.write_text(f"# {t['id']}: {t['title']}\n\n{brief}\n{deps_section(repo, t)}{section}{footer(repo, t)}")
     first = f"You are the worker for bullpen task {t['id']}. Read your brief at {full} and follow it."
-    if args.model:
-        t["worker_model"] = args.model  # this task's own, over the config's
+    if model:
+        t["worker_model"] = model  # this task's own, over the config's
     launch(repo, t, session, first, resume=False)
-    print(f"{t['id']} started in {t['worktree']} (branch {t['branch']}, pane {t['block']})")
 
 
 def launch(repo, t, session, first, resume):
@@ -1191,6 +1359,7 @@ def cmd_accept(args):
     tell_coordinator(repo, t, "accepted", f"{t['id']} accepted ({how})")
     if how != "nothing to merge":
         rebase_others(repo, t)
+    start_queued(repo, t, "accepted")
     refresh_watcher(repo)  # the merge may have changed the watcher itself
 
 
@@ -1365,6 +1534,8 @@ def cmd_drop(args):
     repo.save_task(t)
     print(f"{t['id']} dropped")
     tell_coordinator(repo, t, "dropped", f"{t['id']} dropped")
+    dropped_dep(repo, t)
+    start_queued(repo, t, "dropped")
 
 
 def cmd_ls(args):
@@ -1375,8 +1546,9 @@ def cmd_ls(args):
         return
     if not tasks:
         print("no open tasks" + ("" if args.all else " (--all shows finished ones)"))
+    every = {t["id"]: t for t in repo.tasks()}
     for t in tasks:
-        extra = stuck_phrase(t) or t.get("why") or t.get("pr") or (f"local branch {t['branch']}" if t.get("local") else "")
+        extra = waits_phrase(repo, t, every) or stuck_phrase(t) or t.get("why") or t.get("pr") or (f"local branch {t['branch']}" if t.get("local") else "")
         print(f"{t['id']:<7} {t['status']:<8} {t['title']}" + (f"  ({extra})" if extra else ""))
 
 
@@ -1392,6 +1564,10 @@ def cmd_show(args):
             print(f"{k:>9}: {t[k]}")
         elif k == "pr" and t.get("local"):
             print(f"{k:>9}: none; local branch, merged into {t['base']} by accept")
+    if t.get("after"):
+        print(f"    after: {', '.join(t['after'])}")
+    if waits_phrase(repo, t):
+        print(f"    waits: {waits_phrase(repo, t)}")
     if pr_phrase(t):
         print(f"   github: {pr_phrase(t)}")
     if is_stuck(t):
@@ -2288,13 +2464,22 @@ def main(argv=None):
     p.add_argument("--brief")
     p.add_argument("--brief-file")
     p.add_argument("--base", help="branch to start from and open the PR against")
+    p.add_argument("--after", action="append", metavar="ID",
+                   help="a task this one waits on (repeat, or comma-separated): it starts once they're accepted")
     p.set_defaults(fn=cmd_add)
+
+    p = sub.add_parser("after", help="set the tasks a task waits on (--none: nothing)")
+    p.add_argument("id")
+    p.add_argument("deps", nargs="*", metavar="ID")
+    p.add_argument("--none", action="store_true", help="it waits on nothing")
+    p.set_defaults(fn=cmd_after)
 
     p = sub.add_parser("start", help="make a task's worktree and start its worker")
     p.add_argument("id")
     p.add_argument("--model", help="claude's --model for this task's worker, over the config's")
     p.add_argument("--session")
-    p.add_argument("--force", action="store_true", help="start even while the usage limit is reached")
+    p.add_argument("--force", action="store_true",
+                   help="start even while the usage limit is reached or what it waits on isn't done")
     p.set_defaults(fn=cmd_start)
 
     p = sub.add_parser("resume", help="restart a stopped worker, continuing its conversation")

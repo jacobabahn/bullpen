@@ -30,15 +30,20 @@ the same rule into brief after brief, suggest it to the person as a standing rul
 or, if they agree, start a task to add it to `.bullpen/rules.md` (you don't edit
 files yourself).
 
-Tasks that touch the same files must not run at once: start the second only after
-the first is accepted. Tasks on different files can run in parallel. If the split
-isn't obvious, show the person the plan first. Keep at most 3 running unless the
-person asks for more.
+Tasks that touch the same files must not run at once, and a task that builds on
+another must wait for it: add the second with `--after` the first. Don't start it,
+and don't hold it back yourself: it starts by itself once the first is accepted,
+and you hear `BP-4 started (BP-3 was accepted)`. Tasks on different files can run
+in parallel: start them. If the split isn't obvious, show the person the plan
+first. Keep at most 3 running unless the person asks for more (queued tasks start
+only while fewer than 3, or the repo's `max_running`, are working or in review).
 
 ## Commands
 
 ```sh
 bullpen add "Fix login redirect" --brief-file /tmp/brief.md   # prints the ID, e.g. BP-3
+bullpen add "Cover logout" --brief-file /tmp/b.md --after BP-3   # waits on BP-3 (repeat, or BP-3,BP-5)
+bullpen after BP-4 BP-3     # change what a task waits on; `--none` clears it
 bullpen start BP-3          # worktree + branch + a Rex window running the worker
 bullpen start BP-3 --model sonnet  # the same, with another model than the config's (only if asked)
 bullpen ls                  # open tasks: todo, working, needs, stopped, review, ready
@@ -110,6 +115,9 @@ bullpen · BP-3 accepted (merged PR #12, rebase)
 bullpen · BP-8 accepted (merged into main, rebase)
 bullpen · After BP-8: BP-5 told to rebase; BP-6 rebased; BP-9 conflicts in bin/bullpen, sent back.
 bullpen · BP-9 dropped
+bullpen · BP-4 started (BP-3 was accepted)
+bullpen · BP-6 started (BP-9 was dropped, freeing a slot)
+bullpen · BP-10 waits on BP-9, which was dropped, so it stays queued. Ask the person what to do: ...
 ```
 
 - News is what happened, not a request from the person. Act on it only as far as
@@ -139,10 +147,14 @@ bullpen · BP-9 dropped
   runs `ready` again when fixed. If its worker is gone, the task needs you:
   `bullpen resume` it if the person wants. Merged or closed outside bullpen: tell
   the person, and run the `accept` or `drop` only if they ask.
-- Accepted: the person accepted it somewhere else (the board, a shell). It may
-  free queued tasks that waited on it (same files, or work that builds on it):
-  start those now, within the limit on running tasks. Dropped: just note it;
-  start nothing because of it.
+- Accepted: the person accepted it somewhere else (the board, a shell). Tasks
+  added `--after` it start by themselves, each with its own `started` line:
+  nothing to do. Tasks without dependencies are yours to start, as before.
+  Dropped: just note it.
+- Started: a queued task started by itself. Nothing to do; watch it like any other.
+- A dependency was dropped: its dependents stay queued. Ask the person whether
+  to go ahead without it (`bullpen after <ID> --none`, or other tasks, then
+  `bullpen start <ID>`) or drop them too.
 - After an accept, the other open tasks are brought up to date: told to rebase
   (working), rebased (between turns), or sent back with conflicts. Nothing to do:
   the workers handle it. A task skipped for uncommitted changes, or not rebased
