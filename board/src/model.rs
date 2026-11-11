@@ -163,7 +163,8 @@ pub fn mark(status: &str) -> &'static str {
     match status {
         "needs" => "●",
         "stopped" => "■",
-        "ready" | "done" => "✓",
+        "ready" => "✔",
+        "done" => "✓",
         "review" => "◐",
         "working" => "○",
         "todo" => "◌", // a dotted circle: not started yet
