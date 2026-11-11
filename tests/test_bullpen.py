@@ -227,6 +227,7 @@ class BullpenTest(unittest.TestCase):
         sh("git", "-C", wt, "commit", "-qm", "Fix it")
         summary = self.tmp / "s.md"
         summary.write_text("Fixed the thing. Checked by hand.\n")
+        self.bp("config", "--review", "off")
         self.bp("ready", tid, "--summary-file", str(summary), cwd=wt)
         t = self.show(tid)
         self.assertEqual(t["status"], "ready")
@@ -298,6 +299,7 @@ class BullpenTest(unittest.TestCase):
         (Path(wt) / "fix.txt").write_text("fixed\n")
         sh("git", "-C", wt, "add", ".")
         sh("git", "-C", wt, "commit", "-qm", "Fix it")
+        self.bp("config", "--review", "off")
         self.bp("ready", tid, "--summary", "done")
         self.bp("accept", tid)
         t = self.show(tid)
@@ -323,6 +325,117 @@ class BullpenTest(unittest.TestCase):
         self.bp("drop", tid, "--force")
         self.assertEqual(self.show(tid)["status"], "dropped")
         self.assertFalse(Path(wt).exists())
+
+    def commit_and_ready(self, tid, n=1):
+        wt = self.show(tid)["worktree"]
+        (Path(wt) / f"fix{n}.txt").write_text("fixed\n")
+        sh("git", "-C", wt, "add", ".")
+        sh("git", "-C", wt, "commit", "-qm", f"Fix {n}")
+        self.bp("ready", tid, "--summary", "Did it.", cwd=wt)
+        return self.show(tid)["review"]["block"]
+
+    def verdict(self, tid, v, text="Looks right."):
+        return self.bp("verdict", tid, v, "--summary", text)
+
+    def test_ready_starts_a_reviewer(self):
+        tid = self.start_task()
+        reviewer = self.commit_and_ready(tid)
+        t = self.show(tid)
+        self.assertEqual(t["status"], "review")
+        self.assertEqual(t["pr"], "https://github.com/me/repo/pull/7")  # pushed and opened first
+        layer = self.api("session.new_layer")[-1]
+        self.assertEqual(layer["layout"]["block"]["label"], "bullpen: BP-1 review")
+        self.assertEqual(self.layer_states()["lyr2"], "minimized")
+        prompt = next((self.tmp / "state").rglob("BP-1.review-1.md")).read_text()
+        self.assertIn("verdict BP-1 approve", prompt)
+        self.assertIn("Did it.", prompt)
+        self.assertFalse(any("is ready" in l for _, l in self.typed()))  # not ready yet
+        self.assertTrue((self.fake / "alive" / reviewer).exists())
+
+    def test_approval_makes_it_ready_and_closes_the_reviewer(self):
+        tid = self.start_task()
+        reviewer = self.commit_and_ready(tid)
+        self.verdict(tid, "approve")
+        t = self.show(tid)
+        self.assertEqual(t["status"], "ready")
+        self.assertEqual(t["review"]["verdict"], "approved")
+        self.assertFalse((self.fake / "alive" / reviewer).exists())
+        self.assertEqual(self.typed()[-1], ("blk1",
+            "bullpen · BP-1 is ready (1 commit, PR #7), approved by review: Fix the thing"))
+
+    def test_changes_go_back_to_the_worker_then_ready_after_the_last_round(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        self.commit_and_ready(tid)
+        self.verdict(tid, "changes", "The fix misses the empty case.")
+        t = self.show(tid)
+        self.assertEqual(t["status"], "working")
+        block, line = self.typed()[-1]
+        self.assertEqual(block, worker)  # the findings go to the worker, not the coordinator
+        self.assertIn("BP-1.review-1.findings.md", line)
+        self.commit_and_ready(tid, 2)
+        self.assertEqual(self.show(tid)["review"]["round"], 2)
+        self.verdict(tid, "changes", "Still misses it.")
+        t = self.show(tid)
+        self.assertEqual(t["status"], "ready")
+        self.assertIn("after 2 rounds", t["why"])
+        block, line = self.typed()[-1]
+        self.assertEqual(block, "blk1")
+        self.assertIn("still asks for changes", line)
+
+    def test_changes_resume_a_worker_that_exited(self):
+        tid = self.start_task()
+        self.commit_and_ready(tid)
+        (self.fake / "alive" / self.block(tid)).unlink()
+        self.verdict(tid, "changes", "Fix it.")
+        cmd = self.api("session.new_layer")[-1]["layout"]["block"]["options"]["command"]
+        self.assertIn("--continue", cmd)
+        self.assertTrue(any("findings" in x for x in cmd))
+
+    def test_a_stuck_reviewer_needs_you(self):
+        tid = self.start_task()
+        reviewer = self.commit_and_ready(tid)
+        self.bp("_event", reviewer, "blocked", "permission", "Allow curl?")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("needs", "Reviewer needs you (permission): Allow curl?"))
+        self.assertIn("reviewer needs you", self.typed()[-1][1])
+        self.bp("_event", reviewer, "working", "", "")
+        self.assertEqual(self.show(tid)["status"], "review")
+        self.bp("_event", reviewer, "done", "", "")
+        self.assertEqual(self.show(tid)["why"], "Reviewer stopped without a verdict")
+        self.bp("_gone", reviewer)
+        self.assertEqual(self.show(tid)["status"], "needs")
+
+    def test_verdict_needs_a_review(self):
+        tid = self.start_task()
+        p = self.bp("verdict", tid, "approve", "--summary", "x", ok=False)
+        self.assertIn("isn't in review", p.stderr)
+
+    def test_review_off_goes_straight_to_ready(self):
+        tid = self.start_task()
+        self.bp("config", "--review", "off")
+        wt = self.show(tid)["worktree"]
+        (Path(wt) / "f.txt").write_text("x\n")
+        sh("git", "-C", wt, "add", ".")
+        sh("git", "-C", wt, "commit", "-qm", "x")
+        self.bp("ready", tid, cwd=wt)
+        self.assertEqual(self.show(tid)["status"], "ready")
+        self.assertEqual(len(self.api("session.new_layer")), 1)  # no reviewer
+
+    def test_go_review_brings_up_the_reviewer(self):
+        tid = self.start_task()
+        self.commit_and_ready(tid)
+        self.bp("go", tid, "--review")
+        self.assertEqual(self.layer_states(), {"lyr1": "minimized", "lyr2": "normal"})
+
+    def test_note_shows_until_the_status_changes(self):
+        tid = self.start_task()
+        self.bp("_event", self.block(tid), "done", "", "")
+        self.bp("note", tid, "Asks:", "python3 or python?")
+        self.assertEqual(self.show(tid)["note"], "Asks: python3 or python?")
+        self.assertEqual(self.show(tid)["status"], "needs")
+        self.bp("_event", self.block(tid), "working", "", "")
+        self.assertIsNone(self.show(tid)["note"])
 
     def test_board_pane_events_are_ignored(self):
         self.start_task()
@@ -457,22 +570,36 @@ class BoardTest(unittest.TestCase):
         cls.bp = importlib.util.module_from_spec(spec)
         loader.exec_module(cls.bp)
 
-    def test_order_puts_what_needs_you_first(self):
-        tasks = [{"id": f"BP-{i}", "status": s} for i, s in
-                 enumerate(["todo", "working", "ready", "needs", "stopped", "needs"], 1)]
-        order = [t["id"] for t in self.bp.board_order(tasks)]
-        self.assertEqual(order, ["BP-4", "BP-6", "BP-5", "BP-3", "BP-2", "BP-1"])
+    def test_groups_follow_what_you_do_next(self):
+        tasks = [{"id": f"BP-{i}", "status": st} for i, st in enumerate(
+            ["todo", "working", "ready", "needs", "stopped", "review", "done"], 1)]
+        groups = [(h, [t["id"] for t in ts]) for h, ts in self.bp.board_groups(tasks)]
+        self.assertEqual(groups, [("Needs you", ["BP-4", "BP-5"]), ("Ready to accept", ["BP-3"]),
+                                  ("In review", ["BP-6"]), ("Working", ["BP-2"]), ("Queued", ["BP-1"])])
+        self.assertEqual(self.bp.board_groups(tasks, finished=True)[-1][0], "Finished")
 
-    def test_row_shows_time_in_status_and_why(self):
+    def test_detail_says_what_a_task_needs(self):
+        d = self.bp.task_detail
+        self.assertEqual(d({"status": "needs", "why": "Ended its turn without saying ready",
+                            "note": "Asks: python3 or python?"}), "Asks: python3 or python?")
+        self.assertIn("probably with a question", d({"status": "needs", "why": "Ended its turn without saying ready"}))
+        self.assertEqual(d({"status": "review", "review": {"round": 2}}), "Reviewer on round 2 of 2.")
+        self.assertEqual(d({"status": "ready", "pr": "https://x/pull/4", "review": {"verdict": "approved"}}),
+                         "PR #4, approved by review.")
+        self.assertEqual(d({"status": "working", "review": {"verdict": "changes", "round": 1}}),
+                         "Fixing what review round 1 found.")
+
+    def test_keys_fit_the_task(self):
+        self.assertTrue(self.bp.task_keys({"status": "ready"}).startswith("a accept"))
+        self.assertTrue(self.bp.task_keys({"status": "needs"}).startswith("⏎ answer"))
+        self.assertEqual(self.bp.task_keys(None), "")
+
+    def test_fit_and_age(self):
         import datetime as dt
+        self.assertEqual(self.bp.fit("Add a done command", 10), "Add a don…")
         at = dt.datetime(2026, 1, 1, 12, 0, tzinfo=dt.timezone.utc)
-        t = {"id": "BP-3", "status": "needs", "title": "Fix login",
-             "since": "2026-01-01T11:55:00+00:00", "why": "Needs you (permission)"}
-        row = self.bp.board_row(t, 200, at)
-        self.assertEqual(row, "BP-3    needs      5m  Fix login  · Needs you (permission)")
-        t.update(status="ready", why=None, pr="https://github.com/me/repo/pull/12")
-        self.assertTrue(self.bp.board_row(t, 200, at).endswith("· PR #12"))
-        self.assertEqual(len(self.bp.board_row(t, 20, at)), 19)
+        self.assertEqual(self.bp.ago("2026-01-01T11:55:00+00:00", at), "5m")
+        self.assertEqual(self.bp.ago("2026-01-01T09:55:00+00:00", at), "2h")
 
 
 if __name__ == "__main__":

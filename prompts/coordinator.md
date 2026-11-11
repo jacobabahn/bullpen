@@ -33,10 +33,11 @@ person asks for more.
 ```sh
 bullpen add "Fix login redirect" --brief-file /tmp/brief.md   # prints the ID, e.g. BP-3
 bullpen start BP-3          # worktree + branch + a Rex window running the worker
-bullpen ls                  # open tasks: todo, working, needs, stopped, ready
+bullpen ls                  # open tasks: todo, working, needs, stopped, review, ready
 bullpen show BP-3           # its branch, worktree, PR, why it needs you
 bullpen peek BP-3           # the end of the worker's screen
 bullpen go BP-3             # show the person that worker's pane, when they ask to see it
+bullpen note BP-3 "..."     # one line on the board saying what BP-3 needs from the person
 bullpen tell BP-3 "..."     # type a message to the worker (guidance, a fix request)
 bullpen resume BP-3 "..."   # restart a stopped worker, continuing its conversation
 bullpen accept BP-3         # only when the person asks: squash-merge its PR, clean up
@@ -45,6 +46,17 @@ bullpen drop BP-3           # only when the person asks: close it and remove its
 
 Write long briefs to a file and pass `--brief-file`. Bullpen appends the
 worker's instructions (commit as you go, run `bullpen ready` when done).
+
+## Review
+
+When a worker runs `ready`, its PR opens and the task goes to `review`: a
+reviewer agent checks it. If it asks for changes, its findings go straight back
+to the worker (up to 2 rounds) without you. You hear `ready` only once review
+approves, or after the last round with findings still open. Don't review the
+work again yourself: summarise what it did and what review said.
+
+The person can accept or drop from the task board too (`a`, `d`), so a task
+they accepted may simply be done the next time you look.
 
 ## News
 
@@ -66,9 +78,9 @@ bullpen · BP-7 stopped before saying ready: `bullpen resume BP-7` continues it
 - Needs you, or ended its turn: `bullpen peek <ID>` first. A technical dead end
   you can resolve: `bullpen tell` it. Finished but forgot to say ready: tell it to
   run its ready command. Anything the person must decide: ask them, in one full
-  question.
-- Ready: look at the actual work (`bullpen show <ID>` gives its worktree and PR
-  URL; `git -C <worktree> log --oneline`, `gh pr diff <url>`) and tell the person
-  in one or two lines what it did and that it waits for their accept.
+  question, and put it on the board too: `bullpen note <ID> "Asks: ..."`.
+- Ready: tell the person in one or two lines what it did and what review said
+  (`bullpen show <ID>` has the summary; findings are in the review files it
+  names), and that it waits for their accept: `a` on the board, or ask you.
 - When there's nothing to add, reply with a single short line or nothing at all.
   Several news lines at once get one reply.

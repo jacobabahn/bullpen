@@ -34,6 +34,10 @@ DEFAULT_CONFIG = {
     "coordinator": None,  # {"block": ..., "session": ...}
     "workers": "float",   # "float": minimized floating panes in the coordinator's tab; "tabs"
     "gh": None,           # the gh program, if not the one on PATH (BULLPEN_GH wins)
+    "review": True,       # a reviewer agent checks each task before it's ready
+    "review_rounds": 2,   # reviews before a task is ready anyway, findings listed
+    "reviewer": ["claude", "--permission-mode", "auto"],
+    "board_layout": "grouped",  # or "compact"
 }
 
 TERMINAL = "com.superlogical.terminal.shell"
@@ -145,6 +149,8 @@ class Repo:
     def save_task(self, t):
         t["updated"] = now()
         old = read_json(self.task_path(t["id"])) or {}
+        if old.get("status") != t["status"]:
+            t["note"] = None  # what it needed then, not now
         if old.get("status") != t["status"] or not t.get("since"):
             # when it entered its current status; fine-grained so `go --next` can order it
             t["since"] = dt.datetime.now().astimezone().isoformat(timespec="microseconds")
@@ -513,6 +519,20 @@ def relink(repo, session):
             if t["status"] in ("working", "needs"):
                 t.update(status="stopped", why="Its pane was gone")
         repo.save_task(t)
+    relink_reviewers(repo, session, view)
+
+
+def relink_reviewers(repo, session, view):
+    for t in repo.tasks():
+        r = t.get("review") or {}
+        if t["status"] in CLOSED or not r.get("block") or find_pane(view, block=r["block"]):
+            continue
+        unindex_block(r["block"])
+        hit = find_pane(view, label=review_label(t))
+        r.update(block=hit[2] if hit else None, session=session)
+        if hit:
+            index_block(hit[2], repo, f"{t['id']} review")
+        repo.save_task(t)
 
 
 def cmd_resume(args):
@@ -575,10 +595,109 @@ def cmd_ready(args):
         p = run([repo.gh(), "pr", "create", "--base", t["base"], "--head", t["branch"],
                  "--title", f"{t['title']} ({t['id']})", "--body-file", "-"], cwd=wt, input=body)
         t["pr"] = p.stdout.strip().splitlines()[-1]
-    t.update(status="ready", why=None, summary=summary.strip() or t.get("summary"))
+    t.update(why=None, summary=summary.strip() or t.get("summary"), commits=ahead)
+    if repo.cfg.get("review", True):
+        start_review(repo, t, base_ref)
+        print(f"pushed {t['branch']}; pull request: {t['pr']}. A reviewer checks it now: "
+              f"end your turn, and you'll hear back if it asks for changes.")
+        return
+    t["status"] = "ready"
     repo.save_task(t)
-    news(repo, t, "ready", f"{t['id']} is ready ({ahead} commit{'s' if ahead != 1 else ''}, {pr_short(t['pr'])}): {t['title']}")
+    news(repo, t, "ready", f"{t['id']} is ready ({commits(ahead)}, {pr_short(t['pr'])}): {t['title']}")
     print(f"pushed {t['branch']}; pull request: {t['pr']}")
+
+
+def commits(n):
+    return f"{n} commit{'s' if n != 1 else ''}"
+
+
+def review_label(t):
+    return f"bullpen: {t['id']} review"
+
+
+def start_review(repo, t, base_ref):
+    """Start a reviewer agent on the task's branch, in its own capsule."""
+    old = t.get("review") or {}
+    close_reviewer(t)
+    n = old.get("round", 0) + 1
+    rounds = repo.cfg.get("review_rounds", 2)
+    briefs = repo.dir / "briefs"
+    prompt = briefs / f"{t['id']}.review-{n}.md"
+    prompt.write_text((PROMPTS / "reviewer.md").read_text().format(
+        id=t["id"], title=t["title"], round=n, rounds=rounds, brief=briefs / f"{t['id']}.md",
+        worktree=t["worktree"], branch=t["branch"], base_ref=base_ref, bin=SELF,
+        summary=t.get("summary") or "(none)"))
+    first = f"You are the reviewer for bullpen task {t['id']}. Read {prompt} and follow it."
+    argv = resolve(repo.cfg["reviewer"]) + ["-n", f"{t['id']} review", first]
+    session = t.get("session") or session_for(repo)
+    if repo.cfg.get("workers") == "tabs":
+        block = rex_run(session, t["worktree"], review_label(t), argv)
+    else:
+        block = float_pane(repo, session, review_label(t), t["worktree"], argv)
+    index_block(block, repo, f"{t['id']} review")
+    t.update(status="review", why=None, review={
+        "round": n, "block": block, "session": session, "verdict": None, "findings": None})
+    repo.save_task(t)
+
+
+def close_reviewer(t):
+    r = t.get("review") or {}
+    if r.get("block"):
+        unindex_block(r["block"])
+        rex_close(r.get("session"), r["block"])
+        r["block"] = None
+
+
+def cmd_verdict(args):
+    """(reviewer) approve the task, or send findings back to its worker."""
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    r = t.get("review") or {}
+    if t["status"] not in ("review", "needs") or not r.get("block"):
+        raise Fail(f"{t['id']} isn't in review")
+    text = (Path(args.summary_file).read_text() if args.summary_file else (args.summary or "")).strip()
+    if not text:
+        raise Fail("give your findings with --summary-file (or --summary)")
+    findings = repo.dir / "briefs" / f"{t['id']}.review-{r['round']}.findings.md"
+    findings.write_text(text + "\n")
+    rounds = repo.cfg.get("review_rounds", 2)
+    r.update(verdict="approved" if args.verdict == "approve" else "changes", findings=str(findings))
+    reviewer = (r.get("session"), r.get("block"))
+    unindex_block(r["block"])
+    r["block"] = None
+    pr = pr_short(t.get("pr"))
+    if args.verdict == "approve":
+        t.update(status="ready", why=None)
+        repo.save_task(t)
+        news(repo, t, "ready", f"{t['id']} is ready ({commits(t.get('commits') or 0)}, {pr}), "
+             f"approved by review: {t['title']}")
+    elif r["round"] < rounds:
+        msg = (f"The reviewer asked for changes (review round {r['round']} of {rounds}). Read "
+               f"{findings}, fix what you agree with, commit, and run your ready command again. "
+               f"If you disagree with a finding, say why in your ready summary.")
+        t.update(status="working", why=None, last=None)
+        repo.save_task(t)
+        if rex_alive(t.get("session"), t.get("block")):
+            rex_type(t["session"], t["block"], msg)
+        else:
+            launch(repo, t, session_for(repo), msg, resume=True)
+    else:
+        t.update(status="ready", why=f"Review still asks for changes after {rounds} rounds")
+        repo.save_task(t)
+        news(repo, t, "ready", f"{t['id']} is ready ({pr}), but review still asks for changes "
+             f"after {rounds} rounds: findings in {findings}: {t['title']}")
+    print(f"verdict recorded: {args.verdict}")
+    sys.stdout.flush()
+    rex_close(*reviewer)  # last: this closes the pane we may be running in
+
+
+def cmd_note(args):
+    """Say on the board what a task needs, in a line (cleared when its status changes)."""
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    t["note"] = " ".join(" ".join(args.text).split())
+    write_json(repo.task_path(t["id"]), t)  # not save_task: the status didn't change
+    print(f"noted on {t['id']}")
 
 
 def remove_worktree(repo, t, force=False):
@@ -600,6 +719,7 @@ def cmd_accept(args):
         git(repo.root, "push", "-q", "origin", "--delete", t["branch"], check=False)
     rex_close(t["session"], t["block"])
     unindex_block(t["block"])
+    close_reviewer(t)
     remove_worktree(repo, t, force=True)
     t.update(status="done", block=None, worktree=None)
     repo.save_task(t)
@@ -614,6 +734,7 @@ def cmd_drop(args):
             raise Fail(f"{t['id']} has uncommitted changes in {t['worktree']}; pass --force to discard them")
     rex_close(t["session"], t["block"])
     unindex_block(t["block"])
+    close_reviewer(t)
     if t.get("pr"):
         run([repo.gh(), "pr", "close", t["pr"]], cwd=repo.root, check=False)
     remove_worktree(repo, t, force=args.force)
@@ -641,9 +762,13 @@ def cmd_show(args):
     if args.json:
         print(json.dumps(t, indent=2))
         return
-    for k in ("id", "title", "status", "why", "base", "branch", "worktree", "block", "pr", "summary"):
+    for k in ("id", "title", "status", "why", "note", "base", "branch", "worktree", "block", "pr", "summary"):
         if t.get(k):
             print(f"{k:>9}: {t[k]}")
+    r = t.get("review") or {}
+    if r:
+        state = r.get("verdict") or "in progress"
+        print(f"   review: round {r.get('round')}, {state}" + (f"; findings: {r['findings']}" if r.get("findings") else ""))
     print(f"    brief: {repo.dir / 'briefs' / (t['id'] + '.md')}")
 
 
@@ -657,6 +782,8 @@ def cmd_config(args):
         repo.cfg["base"] = args.base
     if args.workers:
         repo.cfg["workers"] = args.workers
+    if args.review:
+        repo.cfg["review"] = args.review == "on"
     repo.save()
     print(json.dumps({"repo": str(repo.root), "state": str(repo.dir), **repo.cfg}, indent=2))
 
@@ -678,6 +805,12 @@ def go_target(repo, args):
         here = args.from_block
         t = needs[(blocks.index(here) + 1) % len(needs) if here in blocks else 0]
         return t["session"], t["block"], t["id"]
+    if args.id and args.review:
+        t = repo.task(args.id)
+        r = t.get("review") or {}
+        if not r.get("block"):
+            raise Fail(f"{t['id']} has no reviewer running")
+        return r.get("session") or t["session"], r["block"], f"{t['id']}'s reviewer"
     if args.id:
         t = repo.task(args.id)
         if not t.get("block"):
@@ -713,7 +846,7 @@ def show_pane(repo, session, block):
     view = rex_view(session)
     if view is None:
         return rex_focus(session, block)
-    mine = {t["block"] for t in repo.tasks() if t.get("block")}
+    mine = {b for t in repo.tasks() for b in (t.get("block"), (t.get("review") or {}).get("block")) if b}
     target = find_pane(view, block=block)
     for w in view["windows"]:
         for layer in w.get("layers", []):
@@ -729,12 +862,37 @@ def show_pane(repo, session, block):
     rex_focus(session, block)
 
 
-ORDER = {"needs": 0, "stopped": 1, "ready": 2, "working": 3, "todo": 4, "done": 5, "dropped": 6}
+# The board groups tasks by what the person does next. Colour only marks status;
+# the one loud thing is the amber bar beside a task that needs you.
+
+GROUPS = [  # (heading, statuses), in the order the board shows them
+    ("Needs you", ("needs", "stopped")),
+    ("Ready to accept", ("ready",)),
+    ("In review", ("review",)),
+    ("Working", ("working",)),
+    ("Queued", ("todo",)),
+    ("Finished", ("done", "dropped")),
+]
+MARKS = {"needs": "●", "stopped": "■", "ready": "✓", "review": "◐", "working": "○",
+         "todo": "·", "done": "✓", "dropped": "–"}
+STALE = 300  # seconds a task can need you before its age turns red
 
 
-def board_order(tasks):
-    """Tasks as the board lists them: what needs you first, then by ID."""
-    return sorted(tasks, key=lambda t: (ORDER.get(t["status"], 9), int(t["id"].rsplit("-", 1)[1])))
+def board_groups(tasks, finished=False):
+    """[(heading, [tasks])] for the groups that have tasks, each sorted by ID."""
+    out = []
+    for heading, statuses in GROUPS:
+        if heading == "Finished" and not finished:
+            continue
+        ts = sorted((t for t in tasks if t["status"] in statuses),
+                    key=lambda t: int(t["id"].rsplit("-", 1)[1]))
+        if ts:
+            out.append((heading, ts))
+    return out
+
+
+def board_order(tasks, finished=True):
+    return [t for _, ts in board_groups(tasks, finished) for t in ts]
 
 
 def ago(stamp, at=None):
@@ -748,23 +906,6 @@ def ago(stamp, at=None):
     return "now"
 
 
-def board_row(t, width, at=None):
-    """One task's line: ID, status, time in that status, title, and why or PR."""
-    extra = t.get("why") or pr_short(t.get("pr"))
-    line = f"{t['id']:<7} {t['status']:<8} {ago(t.get('since') or t.get('updated'), at):>4}  {t['title']}"
-    if extra:
-        line += f"  · {extra}"
-    return line[:max(0, width - 1)]
-
-
-BOARD_HELP = [
-    "enter go · c coordinator · n next needing you · p peek · t tell · s start · r resume · a all · q quit",
-    "⏎ go · c coord · n next · p peek · t tell · s start · r resume · a all · q",
-    "⏎ go · c · n · p · t · s · r · q",
-]
-STALE = 300  # seconds a task can need you before its age turns red
-
-
 def seconds_in_status(t, at=None):
     stamp = t.get("since") or t.get("updated")
     if not stamp:
@@ -773,55 +914,266 @@ def seconds_in_status(t, at=None):
     return (at - dt.datetime.fromisoformat(stamp)).total_seconds()
 
 
+def task_detail(t, rounds=2):
+    """What the task needs or where it stands, as a plain sentence."""
+    st, r, pr = t["status"], t.get("review") or {}, pr_short(t.get("pr"))
+    if t.get("note"):
+        return t["note"]
+    if st == "needs":
+        why = t.get("why") or ""
+        if why == "Ended its turn without saying ready":
+            return "Stopped mid-task, probably with a question. p shows its screen."
+        return why or "Waiting for you."
+    if st == "stopped":
+        return "Its agent exited. r resumes it."
+    if st == "review":
+        return f"Reviewer on round {r.get('round', 1)} of {rounds}."
+    if st == "ready":
+        if (t.get("why") or "").startswith("Nothing to merge"):
+            return "Done, with nothing to merge."
+        if r.get("verdict") == "approved":
+            return f"{pr}, approved by review."
+        if r.get("verdict") == "changes":
+            return f"{pr}. Review still asks for changes."
+        return f"{pr}." if pr else "Done."
+    if st == "working" and r.get("verdict") == "changes":
+        return f"Fixing what review round {r.get('round', 1)} found."
+    if st == "todo":
+        return "Not started. s starts it."
+    if st == "done":
+        return f"Accepted. {pr} merged." if pr else "Accepted."
+    if st == "dropped":
+        return "Dropped."
+    return ""
+
+
+def task_keys(t):
+    """The keys that make sense for this task, for the footer."""
+    return {
+        "needs": "⏎ answer  t tell  p peek",
+        "stopped": "r resume  p peek  d drop",
+        "review": "⏎ reviewer  p peek",
+        "ready": "a accept  d drop  ⏎ open",
+        "working": "⏎ open  t tell  p peek",
+        "todo": "s start  d drop",
+    }.get(t["status"], "") if t else ""
+
+
+def fit(text, width):
+    """Cut text to width, with an ellipsis when it doesn't fit."""
+    if width <= 0:
+        return ""
+    return text if len(text) <= width else text[: max(0, width - 1)] + "…"
+
+
+def wrap(text, width, lines):
+    import textwrap
+    out = textwrap.wrap(text, max(1, width)) or [""]
+    if len(out) > lines:
+        out = out[:lines]
+        out[-1] = fit(out[-1] + " …", width) if len(out[-1]) + 2 > width else out[-1] + " …"
+    return out
+
+
+BOARD_KEYS = """\
+Moving
+  j k  ↑ ↓     select a task
+  n            select the next task that needs you
+  ⏎            open the worker's pane (the reviewer's, in review)
+  c            back to the coordinator, panes put away
+
+Acting on the selected task
+  a            accept: squash-merge its PR and clean up
+  d            drop: close its PR, pane and worktree
+  t            tell its worker something
+  p            peek at the end of its worker's screen
+  s            start it
+  r            resume a stopped worker
+
+The board
+  l            switch layout (grouped, compact)
+  f            show finished tasks too
+  ?            this list
+  q            quit the board
+"""
+
+
 def cmd_board(args):
     import curses
-    repo = Repo(repo_root())
+    root = repo_root()
 
     def bp(*a):
-        p = run([SELF, *a], cwd=repo.root, check=False)
-        return p.returncode == 0, (p.stdout if p.returncode == 0 else p.stderr).strip()
+        p = run([SELF, *a], cwd=root, check=False)
+        out = (p.stdout if p.returncode == 0 else p.stderr).strip()
+        return p.returncode == 0, (out.splitlines() or [""])[-1].removeprefix("bullpen: ")
 
     def main(scr):
         curses.curs_set(0)
-        # needs: yellow, turning red once it has waited STALE seconds
-        colors = {"needs": 3, "stopped": 5, "ready": 2, "working": 6}
+        C = {}
         try:
             curses.use_default_colors()
-            for c in (*colors.values(), 1):
-                curses.init_pair(c, c, -1)
+            for name, n in (("amber", 3), ("green", 2), ("blue", 4), ("red", 1), ("magenta", 5)):
+                curses.init_pair(n, n, -1)
+                C[name] = curses.color_pair(n)
         except curses.error:
-            colors = {}
+            pass
+        col = lambda name: C.get(name, 0)
+        mark_attr = {"needs": col("amber") | curses.A_BOLD, "stopped": col("red") | curses.A_BOLD,
+                     "ready": col("green") | curses.A_BOLD, "review": col("blue") | curses.A_BOLD,
+                     "working": curses.A_DIM, "todo": curses.A_DIM, "done": curses.A_DIM,
+                     "dropped": curses.A_DIM}
+        DIM, BOLD, REV = curses.A_DIM, curses.A_BOLD, curses.A_REVERSE
+
         scr.timeout(1000)
-        sel, show_all, msg = None, False, ""
+        sel, finished, msg, top = None, False, "", 0
+
+        def put(y, x, text, attr=0):
+            h, w = scr.getmaxyx()
+            if 0 <= y < h and x < w - 1:
+                try:
+                    scr.addnstr(y, x, text, w - 1 - x, attr)
+                except curses.error:
+                    pass
+
+        def ask(question):
+            """A y/n question on the footer line."""
+            h, w = scr.getmaxyx()
+            scr.move(h - 1, 0)
+            scr.clrtoeol()
+            put(h - 1, 1, fit(question + "  y / n", w - 2), BOLD)
+            scr.refresh()
+            scr.timeout(-1)
+            k = scr.getch()
+            scr.timeout(1000)
+            return k in (ord("y"), ord("Y"))
+
+        def prompt(label):
+            h, w = scr.getmaxyx()
+            scr.move(h - 1, 0)
+            scr.clrtoeol()
+            put(h - 1, 1, label, BOLD)
+            curses.echo()
+            curses.curs_set(1)
+            scr.timeout(-1)
+            try:
+                text = scr.getstr(h - 1, min(len(label) + 2, w - 2), 500).decode(errors="replace").strip()
+            except curses.error:
+                text = ""
+            scr.timeout(1000)
+            curses.curs_set(0)
+            curses.noecho()
+            return text
+
+        def overlay(title, lines):
+            scr.erase()
+            h, w = scr.getmaxyx()
+            put(0, 1, fit(title, w - 2), BOLD)
+            for j, line in enumerate(lines[: h - 3]):
+                put(2 + j, 1, fit(line, w - 2))
+            put(h - 1, 1, "any key returns", DIM)
+            scr.refresh()
+            scr.timeout(-1)
+            scr.getch()
+            scr.timeout(1000)
+
         while True:
-            tasks = board_order(t for t in repo.tasks() if show_all or t["status"] not in CLOSED)
-            ids = [t["id"] for t in tasks]
+            repo = Repo(root)
+            layout = repo.cfg.get("board_layout", "grouped")
+            rounds = repo.cfg.get("review_rounds", 2)
+            tasks = repo.tasks()
+            groups = board_groups(tasks, finished)
+            order = [t for _, ts in groups for t in ts]
+            ids = [t["id"] for t in order]
             if sel not in ids:
                 sel = ids[0] if ids else None
+            cur = next((t for t in order if t["id"] == sel), None)
             h, w = scr.getmaxyx()
+            detail_w = lambda t: w - 5 - len(t["id"]) - 2  # under the title, to the right edge
             scr.erase()
-            counts = {}
-            for t in tasks:
-                counts[t["status"]] = counts.get(t["status"], 0) + 1
-            head = f" bullpen: {repo.root.name}  " + "  ".join(f"{n} {s}" for s, n in counts.items())
-            scr.addnstr(0, 0, head, w - 1, curses.A_BOLD)
+
+            # header: the repository, and how many tasks are open
+            n_open = sum(1 for t in tasks if t["status"] not in CLOSED)
+            put(0, 1, fit(repo.root.name, w - 12), BOLD)
+            count = f"{n_open} open" if n_open else ""
+            put(0, max(1, w - 2 - len(count)), count, DIM)
+
+            # rows: (kind, task, text) where kind is head, title, detail or gap
+            rows = []
+            for gi, (heading, ts) in enumerate(groups):
+                if layout == "grouped":
+                    if gi:
+                        rows.append(("gap", None, ""))
+                    rows.append(("head", None, f"{heading}  {len(ts)}"))
+                elif gi:
+                    rows.append(("gap", None, ""))
+                for t in ts:
+                    rows.append(("title", t, ""))
+                    if layout == "grouped":
+                        # what a task needs from you gets two lines; anything else one
+                        lines = 2 if t["status"] in ("needs", "stopped") else 1
+                        for d in wrap(task_detail(t, rounds), detail_w(t), lines):
+                            if d:
+                                rows.append(("detail", t, d))
+
+            footer = 3 if layout == "grouped" else 7  # lines kept at the bottom
+            avail = max(1, h - 3 - footer)  # one line spare for the scroll mark
+            sel_rows = [i for i, r in enumerate(rows) if r[1] is cur and r[0] == "title"]
+            if sel_rows:
+                i = sel_rows[0]
+                if i < top:
+                    top = i - (1 if i and rows[i - 1][0] == "head" else 0)
+                elif i + 1 >= top + avail:
+                    top = i + 2 - avail
+            top = max(0, min(top, max(0, len(rows) - avail)))
+            while 0 < top < len(rows) and rows[top][0] in ("detail", "gap"):
+                top += 1  # start at a heading or a task, never halfway through one
+            if sel_rows and sel_rows[0] >= top + avail:
+                top = sel_rows[0]
+
             if not tasks:
-                scr.addnstr(2, 1, "no open tasks", w - 2, curses.A_DIM)
-            for i, t in enumerate(tasks[: max(0, h - 4)]):
-                attr = curses.color_pair(colors.get(t["status"], 0))
-                if t["status"] in CLOSED:
-                    attr |= curses.A_DIM
-                if t["id"] == sel:
-                    attr |= curses.A_REVERSE
-                scr.addnstr(2 + i, 0, " " + board_row(t, w - 1), w - 1, attr)
-                if t["status"] == "needs" and seconds_in_status(t) >= STALE and w > 23:
-                    age = f"{ago(t.get('since') or t.get('updated')):>4}"
-                    red = curses.color_pair(1) if colors else 0
-                    scr.addnstr(2 + i, 18, age, 4, red | curses.A_BOLD | (attr & curses.A_REVERSE))
-            if h > 3:
-                scr.addnstr(h - 2, 0, " " + msg, w - 1, curses.A_BOLD)
-                help_ = next((x for x in BOARD_HELP if len(x) < w - 1), BOARD_HELP[-1])
-                scr.addnstr(h - 1, 0, " " + help_, w - 1, curses.A_DIM)
+                put(2, 1, "No tasks yet.", BOLD)
+                put(3, 1, fit("Tell the coordinator what you want done.", w - 2), DIM)
+            y = 2
+            for kind, t, text in rows[top: top + avail]:
+                needs = t is not None and t["status"] in ("needs", "stopped")
+                if needs and kind in ("title", "detail"):
+                    put(y, 0, "▌", col("amber") if t["status"] == "needs" else col("red"))
+                if kind == "head":
+                    put(y, 1, text, BOLD)
+                elif kind == "title":
+                    selected = t is cur
+                    age = ago(t.get("since") or t.get("updated"))
+                    left = f"{t['id']}  "
+                    width = w - 5  # from column 3 to the header's right edge
+                    line = f"{left}{fit(t['title'], width - len(left) - len(age) - 2)}"
+                    line = line.ljust(width - len(age)) + age
+                    put(y, 1, MARKS.get(t["status"], " "), mark_attr.get(t["status"], 0))
+                    put(y, 3, line, (REV if selected else 0) | (DIM if t["status"] in CLOSED else 0))
+                    put(y, 3, t["id"], (REV if selected else DIM))
+                    if t["status"] == "needs" and seconds_in_status(t) >= STALE:
+                        put(y, 3 + len(line) - len(age), age, col("red") | BOLD | (REV if selected else 0))
+                    elif not selected:
+                        put(y, 3 + len(line) - len(age), age, DIM)
+                elif kind == "detail":
+                    put(y, 3 + len(t["id"]) + 2, fit(text, detail_w(t)), DIM)
+                y += 1
+            if top + avail < len(rows):
+                put(2 + avail, w - 3, "↓", DIM)
+            if top:
+                put(1, w - 3, "↑", DIM)
+
+            # bottom: the compact layout's detail panel, a message line, the keys
+            if layout == "compact" and cur:
+                yb = h - footer
+                put(yb, 1, "─" * (w - 3), DIM)
+                put(yb + 1, 1, fit(f"{cur['id']}  {cur['title']}", w - 2), BOLD)
+                for j, line in enumerate(wrap(task_detail(cur, rounds), w - 2, 3)):
+                    put(yb + 2 + j, 1, line, DIM)
+            if msg:
+                put(h - 2, 1, fit(msg, w - 2), BOLD)
+            keys = task_keys(cur)
+            keys = (keys + "   ? keys") if keys and len(keys) + 9 < w - 2 else (keys or "? keys")
+            put(h - 1, 1, fit(keys, w - 2), DIM)
             scr.refresh()
 
             k = scr.getch()
@@ -832,51 +1184,67 @@ def cmd_board(args):
             msg = ""
             if ch == "q":
                 return
-            elif k in (curses.KEY_DOWN,) or ch == "j":
+            elif k == curses.KEY_DOWN or ch == "j":
                 sel = ids[min(i + 1, len(ids) - 1)] if ids else None
-            elif k in (curses.KEY_UP,) or ch == "k":
+            elif k == curses.KEY_UP or ch == "k":
                 sel = ids[max(i - 1, 0)] if ids else None
-            elif ch == "a":
-                show_all = not show_all
+            elif ch == "?":
+                overlay("Board keys", BOARD_KEYS.splitlines())
+            elif ch == "l":
+                repo.cfg["board_layout"] = "compact" if layout == "grouped" else "grouped"
+                repo.save()
+                top = 0
+            elif ch == "f":
+                finished = not finished
             elif ch == "c":
                 ok, msg = bp("go")
             elif ch == "n":
-                needs = [t["id"] for t in tasks if t["status"] == "needs"]
+                needs = [t["id"] for t in order if t["status"] in ("needs", "stopped")]
+                after = [x for x in needs if ids.index(x) > i]
                 if needs:
-                    after = [x for x in needs if ids.index(x) > i]
                     sel = (after or needs)[0]
                 else:
-                    msg = "nothing needs you"
-            elif not sel:
+                    msg = "Nothing needs you."
+            elif not cur:
                 continue
-            elif k in (10, 13, curses.KEY_ENTER) or ch == "g":
-                ok, msg = bp("go", sel)
+            elif k in (10, 13, curses.KEY_ENTER):
+                if cur["status"] == "review" or (cur["status"] == "needs" and (cur.get("why") or "").startswith("Reviewer")):
+                    ok, msg = bp("go", sel, "--review")
+                elif cur.get("block"):
+                    ok, msg = bp("go", sel)
+                else:
+                    msg = {"todo": "Not started yet: s starts it.", "stopped": "Its agent exited: r resumes it."}.get(
+                        cur["status"], f"{sel} has no pane open.")
+            elif ch == "a":
+                if cur["status"] != "ready":
+                    msg = f"Only a task that's ready to accept can be accepted."
+                elif ask(f"Accept {sel}? " + (f"Squash-merges {pr_short(cur['pr'])}." if cur.get("pr") else "Cleans it up.")):
+                    msg = "Accepting…"
+                    ok, out = bp("accept", sel)
+                    msg = f"Accepted {sel}." if ok else out
+            elif ch == "d":
+                if cur["status"] in CLOSED:
+                    continue
+                if ask(f"Drop {sel}? Closes its PR, pane and worktree."):
+                    ok, out = bp("drop", sel)
+                    if not ok and "uncommitted" in out and ask(f"{sel} has uncommitted changes. Discard them?"):
+                        ok, out = bp("drop", sel, "--force")
+                    msg = f"Dropped {sel}." if ok else out
             elif ch == "s":
-                ok, msg = bp("start", sel)
+                ok, out = bp("start", sel)
+                msg = f"Started {sel}." if ok else out
             elif ch == "r":
-                ok, msg = bp("resume", sel)
+                ok, out = bp("resume", sel)
+                msg = f"Resumed {sel}." if ok else out
             elif ch == "p":
-                ok, out = bp("peek", sel, "--lines", str(max(1, h - 2)))
-                scr.erase()
-                scr.addnstr(0, 0, f" {sel} (any key returns)", w - 1, curses.A_BOLD)
-                for j, line in enumerate(out.splitlines()[: h - 2]):
-                    scr.addnstr(1 + j, 0, line, w - 1)
-                scr.refresh()
-                scr.timeout(-1)
-                scr.getch()
-                scr.timeout(1000)
+                out = run([SELF, "peek", sel, "--lines", str(max(1, h - 4))], cwd=root, check=False)
+                text = out.stdout if out.returncode == 0 else out.stderr
+                overlay(f"{sel}  {cur['title']}", text.splitlines())
             elif ch == "t":
-                scr.addnstr(h - 2, 0, f" tell {sel}: ".ljust(w - 1), w - 1, curses.A_BOLD)
-                curses.echo()
-                curses.curs_set(1)
-                scr.timeout(-1)
-                text = scr.getstr(h - 2, len(f" tell {sel}: "), 500).decode(errors="replace").strip()
-                scr.timeout(1000)
-                curses.curs_set(0)
-                curses.noecho()
+                text = prompt(f"Tell {sel}:")
                 if text:
-                    ok, msg = bp("tell", sel, text)
-            msg = msg.splitlines()[-1] if msg else ""
+                    ok, out = bp("tell", sel, text)
+                    msg = f"Sent to {sel}." if ok else out
 
     curses.wrapper(main)
 
@@ -898,6 +1266,8 @@ def cmd_event(args):
     repo, role = lookup_block(args.block)
     if not repo or role in ("coordinator", "board"):
         return
+    if role.endswith(" review"):
+        return review_event(repo, repo.task(role.split()[0]), args)
     t = repo.task(role)
     if t["block"] != args.block or t["status"] in CLOSED:
         return
@@ -932,12 +1302,45 @@ def cmd_event(args):
         repo.save_task(t)
 
 
+def review_event(repo, t, args):
+    """A reviewer's status: it only needs the person if it gets stuck."""
+    r = t.get("review") or {}
+    if r.get("block") != args.block or t["status"] not in ("review", "needs"):
+        return
+    state, msg = args.state, (args.msg or "").strip()
+    stuck = t["status"] == "needs" and (t.get("why") or "").startswith("Reviewer")
+    if state == "working":
+        if stuck:
+            t.update(status="review", why=None)
+            repo.save_task(t)
+    elif state == "blocked":
+        why = f"Reviewer needs you ({args.kind or 'input'})" + (f": {msg}" if msg else "")
+        t.update(status="needs", why=why)
+        repo.save_task(t)
+        news(repo, t, "needs-you", f"{t['id']}'s reviewer needs you ({args.kind or 'input'})" + (f": {msg}" if msg else ""))
+    elif state in ("done", "idle", "error") and t["status"] == "review":
+        t.update(status="needs", why="Reviewer stopped without a verdict")
+        repo.save_task(t)
+        news(repo, t, "quiet", f"{t['id']}'s reviewer stopped without a verdict: "
+             f"`bullpen go {t['id']} --review` shows it")
+
+
 def cmd_gone(args):
     repo, role = lookup_block(args.block)
     if not repo:
         return
     unindex_block(args.block)
     if role in ("coordinator", "board"):
+        return
+    if role.endswith(" review"):
+        t = repo.task(role.split()[0])
+        r = t.get("review") or {}
+        if r.get("block") == args.block:
+            r["block"] = None
+            if t["status"] in ("review", "needs") and not r.get("verdict"):
+                t.update(status="needs", why="Reviewer exited without a verdict")
+                news(repo, t, "stopped", f"{t['id']}'s reviewer exited without a verdict")
+            repo.save_task(t)
         return
     t = repo.task(role)
     if t["block"] != args.block:
@@ -967,6 +1370,7 @@ def main(argv=None):
     p.add_argument("id", nargs="?")
     p.add_argument("--next", action="store_true", help="the next task that needs you")
     p.add_argument("--board", action="store_true")
+    p.add_argument("--review", action="store_true", help="the task's reviewer, not its worker")
     p.add_argument("--from", dest="from_block", default=os.environ.get("REX_BLOCK"),
                    help="the pane you're in (default: this one)")
     p.add_argument("--session", help="the session you're in (key bindings pass it)")
@@ -1013,6 +1417,18 @@ def main(argv=None):
     p.add_argument("--summary-file")
     p.set_defaults(fn=cmd_ready)
 
+    p = sub.add_parser("verdict", help="(reviewer) approve a task or send it back with findings")
+    p.add_argument("id")
+    p.add_argument("verdict", choices=["approve", "changes"])
+    p.add_argument("--summary")
+    p.add_argument("--summary-file")
+    p.set_defaults(fn=cmd_verdict)
+
+    p = sub.add_parser("note", help="say on the board what a task needs, in one line")
+    p.add_argument("id")
+    p.add_argument("text", nargs="+")
+    p.set_defaults(fn=cmd_note)
+
     p = sub.add_parser("accept", help="(the person's call) merge a ready task's PR and clean up")
     p.add_argument("id")
     p.set_defaults(fn=cmd_accept)
@@ -1037,6 +1453,7 @@ def main(argv=None):
     p.add_argument("--base")
     p.add_argument("--workers", choices=["float", "tabs"],
                    help="new workers as capsules in the coordinator's tab (float) or as tabs")
+    p.add_argument("--review", choices=["on", "off"], help="a reviewer agent checks each task")
     p.set_defaults(fn=cmd_config)
 
     p = sub.add_parser("guide", help="print the coordinator's guide")

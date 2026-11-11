@@ -41,12 +41,30 @@ tab. `bullpen config --workers tabs` gives new workers their own tabs instead.
 After a Rex server restart, run `bullpen up` again: it finds its panes by their
 labels, marks workers whose panes are gone as stopped, and restarts the watcher.
 
-The task board (`bullpen board`) sits in a narrow pane beside the coordinator:
-one line per task, with the ones that need you on top, how long each has been
-in its status, and why it needs you or its PR. On the board, `enter` jumps to the
-selected worker's pane, `c` to the coordinator, `n` selects the next task that
-needs you, `p` peeks, `t` tells, `s` starts, `r` resumes, `a` shows finished
-tasks too. `bullpen up --no-board` leaves it out.
+The task board (`bullpen board`) sits in a narrow pane beside the coordinator.
+It groups tasks by what you do next: needs you, ready to accept, in review,
+working, queued. Each task shows how long it has been there and, on a second
+line, what it needs or where it stands ("Asks: python3 or python?", "PR #4,
+approved by review."). A task that needs you gets an amber bar; its age turns
+red after 5 minutes. `l` switches to a compact layout, one line per task with
+the selected task's detail at the bottom.
+
+The keys at the bottom follow the selected task: `⏎` opens its worker (or its
+reviewer), `a` accepts and `d` drops (each asks y/n first), `t` tells, `p`
+peeks, `s` starts, `r` resumes, `c` goes back to the coordinator, `n` selects
+the next task that needs you. `?` lists them all. `bullpen up --no-board`
+leaves the board out.
+
+### Review
+
+When a worker runs `ready`, bullpen pushes its branch, opens the PR and starts a
+reviewer agent on it, in its own capsule (`bullpen: BP-3 review`). The reviewer
+reads the brief and the diff, runs the tests, changes nothing, and ends with
+`bullpen verdict BP-3 approve` or `changes`. Changes go back to the worker,
+which fixes them and runs `ready` again, for up to 2 rounds. The task is ready
+to accept once review approves, or after the last round with the open findings
+listed. `bullpen config --review off` skips review; `review_rounds` and
+`reviewer` in the repo's `config.json` set the rounds and the reviewer's command.
 
 ### Keys
 
@@ -70,6 +88,7 @@ bullpen peek BP-1     # the end of the worker's screen
 bullpen go BP-1       # focus its pane (`go` alone: the coordinator; --next: next needing you)
 bullpen tell BP-1 "Also cover the logout path"
 bullpen resume BP-1   # restart a stopped worker, continuing its conversation
+bullpen note BP-1 "Asks: ..."   # say on the board what it needs from you
 bullpen accept BP-1   # squash-merge its PR, close its window, remove its worktree
 bullpen drop BP-1     # close its PR, window and worktree without merging
 ```

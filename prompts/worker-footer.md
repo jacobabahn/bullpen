@@ -18,6 +18,9 @@ watches your status; the person reviews and merges your pull request.
 
       {bin} ready {id} --summary-file <that file>
 
-  It pushes your branch and opens the pull request. Then end your turn.
-- If you're asked for changes later, make them, commit, and run the same `ready`
-  command again: it pushes the new commits to the same pull request.
+  It pushes your branch and opens the pull request, and a reviewer agent then
+  checks your work. End your turn.
+- If the reviewer (or anyone) asks for changes, you'll get a message pointing at
+  their findings. Fix what you agree with, commit, and run the same `ready`
+  command again: it pushes the new commits to the same pull request. If you
+  disagree with a finding, say why in your summary instead of changing it.
