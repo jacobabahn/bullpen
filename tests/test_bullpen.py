@@ -2091,6 +2091,36 @@ class LocalModeTest(unittest.TestCase):
         self.assertEqual(self.news_lines()[-1], "bullpen · After BP-1: BP-2 conflicts in fix.txt, "
                          "sent back; BP-3 told to rebase.")
 
+    def test_after_accept_a_worker_waiting_on_a_prompt_is_not_rebased(self):
+        tid, _ = self.ready_task()
+        self.bp("add", "Second", "--brief", "x")
+        self.bp("start", "BP-2")
+        t = self.show("BP-2")
+        self.commit(t["worktree"], "two.txt", "two\n", "Second")
+        head = self.git("rev-parse", "HEAD", cwd=t["worktree"])
+        self.bp("_event", t["block"], "blocked", "permission", "Allow rm?")
+        self.bp("accept", tid)
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=t["worktree"]), head)
+        self.assertEqual(self.show("BP-2")["status"], "needs")
+        self.assertEqual(self.news_lines()[-1],
+                         "bullpen · After BP-1: BP-2 waiting on you, not rebased.")
+
+    def test_after_accept_a_task_whose_reviewer_is_stuck_is_left_alone(self):
+        tid, _ = self.ready_task()
+        self.bp("config", "--review", "on")
+        wt = self.second_ready("fix.txt", "fixed differently\n")  # would conflict
+        head = self.git("rev-parse", "HEAD", cwd=wt)
+        reviewer = self.show("BP-2")["review"]["block"]
+        self.bp("_event", reviewer, "blocked", "permission", "Allow rm?")
+        self.assertEqual(self.show("BP-2")["status"], "needs")
+        self.bp("accept", tid)
+        t = self.show("BP-2")
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=wt), head)
+        self.assertEqual(t["status"], "needs")
+        self.assertEqual(t["review"]["block"], reviewer)
+        self.assertTrue((self.fake / "alive" / reviewer).exists())
+        self.assertEqual(self.news_lines()[-1], "bullpen · After BP-1: BP-2 left in review.")
+
     def test_rebase_others_off(self):
         tid, _ = self.ready_task()
         wt = self.second_ready("two.txt", "two\n")

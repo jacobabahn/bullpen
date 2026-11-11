@@ -83,7 +83,10 @@ on that base up to date, and they don't drift behind and conflict later:
 - Working: its worker is told the base moved and to rebase onto it at a good
   point (after `git fetch origin`, with a remote), fix conflicts and rerun the
   tests. Its worktree isn't touched under it.
-- In review: left alone. Its next `ready` brings it up to date.
+- In review, or with its reviewer waiting on you: left alone. Its next `ready`
+  brings it up to date.
+- Waiting on you mid-turn (a permission prompt, a failure): not rebased, and the
+  news says so.
 - Between turns (needs you, stopped, ready): bullpen rebases its branch itself,
   if its worktree is clean, and pushes it to the PR (`--force-with-lease`). The
   status stays; a ready task says "Rebased onto main." on the board until its

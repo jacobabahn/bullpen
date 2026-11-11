@@ -1296,13 +1296,16 @@ def rebase_other(repo, t, accepted):
     wt, ref = t["worktree"], task_base_ref(repo, t)
     if git(wt, "merge-base", "--is-ancestor", ref, "HEAD", check=False).returncode == 0:
         return None  # already on top of it
-    if t["status"] == "review":
-        return f"{t['id']} left in review"  # its next ready rebases it
+    r = t.get("review") or {}
+    if t["status"] == "review" or (r.get("block") and not r.get("verdict")):
+        return f"{t['id']} left in review"  # a reviewer is on it; its next ready rebases it
     if t["status"] == "working" and rex_alive(t.get("session"), t.get("block")):
         rex_type(t["session"], t["block"],
                  f"{t['base']} moved: {accepted['id']} was just accepted. At a good point, "
                  f"{onto(ref)}, fix any conflicts, and rerun the tests.")
         return f"{t['id']} told to rebase"
+    if not worker_idle(t):
+        return f"{t['id']} waiting on you, not rebased"  # mid-turn, on a prompt
     if git(wt, "status", "--porcelain").stdout.strip():
         return f"{t['id']} has uncommitted changes, not rebased"
     p = git(wt, "rebase", "-q", ref, check=False)
@@ -1337,8 +1340,6 @@ def rebase_conflict(repo, t, accepted, ref, files):
            f"cleanly onto it: conflicts in {names}. Your branch is as it was. Now "
            f"{onto(ref)}, fix the conflicts, rerun the tests, commit, and run your ready "
            f"command again.")
-    if not worker_idle(t):
-        return f"{t['id']} conflicts in {names}, not sent to its worker, which is waiting on you"
     if rex_alive(t.get("session"), t.get("block")):
         rex_type(t["session"], t["block"], msg)
         t.update(status="working", why=None, last=None)

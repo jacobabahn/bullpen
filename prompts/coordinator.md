@@ -145,7 +145,7 @@ bullpen · BP-9 dropped
   start nothing because of it.
 - After an accept, the other open tasks are brought up to date: told to rebase
   (working), rebased (between turns), or sent back with conflicts. Nothing to do:
-  the workers handle it. A task skipped for uncommitted changes, or whose worker is
-  waiting on the person: mention it to them.
+  the workers handle it. A task skipped for uncommitted changes, or not rebased
+  because it waits on the person: mention it to them.
 - When there's nothing to add, reply with a single short line or nothing at all.
   Several news lines at once get one reply.
