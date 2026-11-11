@@ -13,7 +13,8 @@
 -- its capsule and returns to the board. Anywhere else the key goes through.
 --
 -- Options: prefix = "ctrl+b" moves all three behind another key;
--- keys = { next = "cmd+shift+j", hide = "cmd+." } sets single ones (false leaves one unbound);
+-- keys = { next = "cmd+shift+j", hide = "cmd+." } sets single ones (false leaves one unbound;
+-- hide also takes a list of keys);
 -- state = "..." when you set BULLPEN_STATE.
 
 local M = {}
@@ -64,8 +65,9 @@ function M.setup(opts)
   -- isn't one of bullpen's (bullpen hide exits 3 then).
   local hide = keys.hide
   if hide == nil then hide = "cmd+escape" end
-  if hide then
-    rex.bind(hide, function(ctx)
+  if type(hide) == "string" then hide = { hide } end
+  for _, key in ipairs(hide or {}) do
+    rex.bind(key, function(ctx)
       if not ctx.block_id then return false end
       local r = rex.exec({ bin, "hide", "--from", ctx.block_id, "--session", ctx.session_id or "" },
                          { env = env, timeout = 10 })
