@@ -6,6 +6,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use ansi_to_tui::IntoText;
 use ratatui::Frame;
 
 fn dim() -> Style {
@@ -18,6 +19,11 @@ fn rev() -> Style {
     Style::new().add_modifier(Modifier::REVERSED)
 }
 const AMBER: Color = Color::Yellow;
+/// The selected task's row: a tint from the terminal's own palette, so status
+/// colours still show on it.
+const TINT: Color = Color::DarkGray;
+/// Rows stop here in a wide pane, so a task's age stays near its title.
+const MAX_WIDTH: u16 = 64;
 
 fn mark_style(status: &str) -> Style {
     match status {
@@ -53,35 +59,91 @@ enum Row<'a> {
     Gap,
 }
 
+/// A line of a worker's screen, with the colours its escape codes give it.
+fn screen_line(raw: &str) -> Line<'static> {
+    match raw.into_text() {
+        Ok(text) => text.lines.into_iter().next().unwrap_or_default(),
+        Err(_) => Line::from(raw.to_string()),
+    }
+}
+
+/// The header's right side: how many tasks are in each state, in the marks'
+/// colours, dropping the least urgent until it fits.
+fn counts(tasks: &[Task], room: usize) -> Line<'static> {
+    let n = |sts: &[&str]| tasks.iter().filter(|t| sts.contains(&t.status.as_str())).count();
+    let mut parts: Vec<(String, Style)> = [
+        (n(&["needs"]), "needs"),
+        (n(&["stopped"]), "stopped"),
+        (n(&["ready"]), "ready"),
+        (n(&["review"]), "review"),
+        (n(&["working"]), "working"),
+        (n(&["todo"]), "todo"),
+    ]
+    .into_iter()
+    .filter(|(n, _)| *n > 0)
+    .map(|(n, st)| (format!("{} {n}", model::mark(st)), mark_style(st)))
+    .collect();
+    let total = |p: &[(String, Style)]| p.iter().map(|(s, _)| width(s)).sum::<usize>() + 2 * p.len().saturating_sub(1);
+    while !parts.is_empty() && total(&parts) > room {
+        parts.pop();
+    }
+    let mut spans = Vec::new();
+    for (i, (text, style)) in parts.into_iter().enumerate() {
+        if i > 0 {
+            spans.push(span("  ", Style::new()));
+        }
+        spans.push(span(text, style));
+    }
+    Line::from(spans)
+}
+
+/// The footer's keys: each key bold, what it does dim.
+fn key_line(keys: &[(&str, &str)]) -> Line<'static> {
+    let mut spans = Vec::new();
+    for (i, (key, what)) in keys.iter().enumerate() {
+        if i > 0 {
+            spans.push(span("  ", Style::new()));
+        }
+        spans.push(span(*key, bold()));
+        spans.push(span(format!(" {what}"), dim()));
+    }
+    Line::from(spans)
+}
+
 pub fn draw(f: &mut Frame, app: &mut App) {
-    let area = f.area();
-    app.height = area.height;
-    let (w, h) = (area.width as usize, area.height as usize);
+    let full = f.area();
+    app.height = full.height;
     let buf = f.buffer_mut();
 
     if let Mode::Overlay { title, lines, peek } = &app.mode {
+        let (area, w, h) = (full, full.width as usize, full.height as usize);
         put(buf, area, 0, 1, span(fit(title, w.saturating_sub(2)), bold()));
         for (j, line) in lines.iter().take(h.saturating_sub(3)).enumerate() {
-            put(buf, area, 2 + j, 1, fit(line, w.saturating_sub(2)));
+            put(buf, area, 2 + j, 1, screen_line(line));
         }
         let foot = if peek.is_some() { "live · any key returns" } else { "any key returns" };
         put(buf, area, h.saturating_sub(1), 1, span(foot, dim()));
         return;
     }
 
+    let area = Rect { width: full.width.min(MAX_WIDTH), ..full };
+    let (w, h) = (area.width as usize, area.height as usize);
+
     let rounds = app.cfg.review_rounds;
     let layout = app.cfg.layout;
     let groups = model::board_groups(&app.tasks, app.finished);
     let cur_id = app.current().map(|t| t.id.clone());
     let is_cur = |t: &Task| Some(&t.id) == cur_id.as_ref();
+    // IDs share a column as wide as the longest, so titles and details line up
+    let idw = groups.iter().flat_map(|(_, ts)| ts).map(|t| width(&t.id)).max().unwrap_or(0);
     // under the title, to the right edge
-    let detail_w = |t: &Task| w.saturating_sub(5 + width(&t.id) + 2);
+    let detail_w = w.saturating_sub(5 + idw + 2);
 
-    // header: the repository, and how many tasks are open
-    let open = app.tasks.iter().filter(|t| !t.closed()).count();
-    put(buf, area, 0, 1, span(fit(&app.repo_name, w.saturating_sub(12)), bold()));
-    let count = if open > 0 { format!("{open} open") } else { String::new() };
-    put(buf, area, 0, w.saturating_sub(2 + width(&count)).max(1), span(count, dim()));
+    // header: the repository, and how many tasks are in each state
+    let name = fit(&app.repo_name, w.saturating_sub(2).min(24));
+    let count = counts(&app.tasks, w.saturating_sub(width(&name) + 5));
+    put(buf, area, 0, w.saturating_sub(2 + count.width()).max(1), count);
+    put(buf, area, 0, 1, span(name, bold()));
 
     let mut rows: Vec<Row> = Vec::new();
     for (gi, (heading, ts)) in groups.iter().enumerate() {
@@ -94,12 +156,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         for t in ts {
             rows.push(Row::Title(t));
             if layout == Layout::Grouped {
-                // what a task needs from you gets two lines; anything else one
-                let lines = if t.needs_you() { 2 } else { 1 };
-                for d in model::wrap(&model::task_detail(t, rounds), detail_w(t), lines) {
+                // what a task needs from you, or GitHub said, gets two lines; anything else one
+                let lines = if t.needs_you() || !model::pr_phrase(t).is_empty() { 2 } else { 1 };
+                for d in model::wrap(&model::task_detail(t, rounds), detail_w, lines) {
                     if !d.is_empty() {
                         rows.push(Row::Detail(t, d));
                     }
+                }
+                if !model::task_stat(t).is_empty() {
+                    rows.push(Row::Detail(t, model::task_stat(t).into()));
                 }
             }
         }
@@ -151,10 +216,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                     None => span(model::mark(&t.status), mark_style(&t.status)),
                 };
                 put(buf, area, y, 1, mark);
-                put(buf, area, y, 3, title_line(app, t, is_cur(t), w, now));
+                put(buf, area, y, 3, title_line(app, t, is_cur(t), w, idw, now));
             }
-            Row::Detail(t, text) => {
-                put(buf, area, y, 3 + width(&t.id) + 2, span(fit(text, detail_w(t)), dim()));
+            Row::Detail(_, text) => {
+                put(buf, area, y, 3 + idw + 2, span(fit(text, detail_w), dim()));
             }
             Row::Gap => {}
         }
@@ -172,8 +237,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         let yb = h.saturating_sub(footer);
         put(buf, area, yb, 1, span("─".repeat(w.saturating_sub(3)), dim()));
         put(buf, area, yb + 1, 1, span(fit(&format!("{}  {}", cur.id, cur.title), w.saturating_sub(2)), bold()));
-        for (j, line) in model::wrap(&model::task_detail(cur, rounds), w.saturating_sub(2), 3).into_iter().enumerate() {
-            put(buf, area, yb + 2 + j, 1, span(line, dim()));
+        let stat = model::task_stat(cur);
+        let mut lines = model::wrap(&model::task_detail(cur, rounds), w.saturating_sub(2), if stat.is_empty() { 3 } else { 2 });
+        if !stat.is_empty() {
+            lines.push(stat.into());
+        }
+        for (j, line) in lines.into_iter().enumerate() {
+            put(buf, area, yb + 2 + j, 1, span(fit(&line, w.saturating_sub(2)), dim()));
         }
     }
     let last = h.saturating_sub(1);
@@ -210,21 +280,25 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         };
         put(buf, area, last, 1, span(fit(&format!("y {verb}   any other key cancels"), w.saturating_sub(2)), bold()));
     } else {
-        let keys = model::task_keys(cur);
-        let keys = if !keys.is_empty() && keys.chars().count() + 9 < w.saturating_sub(2) {
-            format!("{keys}   ? keys")
-        } else if keys.is_empty() {
-            "? keys".into()
+        // the task's keys on the left; "? keys" at the right edge when there's room
+        let keys = key_line(&model::task_keys(cur));
+        let help = key_line(&[("?", "keys")]);
+        let x = w.saturating_sub(2 + help.width());
+        if keys.width() == 0 {
+            put(buf, area, last, 1, help);
         } else {
-            keys.into()
-        };
-        put(buf, area, last, 1, span(fit(&keys, w.saturating_sub(2)), dim()));
+            if 1 + keys.width() + 3 <= x {
+                put(buf, area, last, x, help);
+            }
+            put(buf, area, last, 1, keys);
+        }
     }
 }
 
 /// A task's line: its ID, title and age, or the y/n question it's waiting on.
-fn title_line(app: &App, t: &Task, selected: bool, w: usize, now: chrono::DateTime<chrono::FixedOffset>) -> Line<'static> {
-    let left = format!("{}  ", t.id);
+fn title_line(app: &App, t: &Task, selected: bool, w: usize, idw: usize, now: chrono::DateTime<chrono::FixedOffset>) -> Line<'static> {
+    let id = pad(&t.id, idw);
+    let left = format!("{id}  ");
     let width_all = w.saturating_sub(5); // from column 3 to the header's right edge
 
     if let Some((action, tid)) = &app.pending {
@@ -241,22 +315,15 @@ fn title_line(app: &App, t: &Task, selected: bool, w: usize, now: chrono::DateTi
 
     let age = model::ago(t.stamp(), now);
     let title = fit(&t.title, width_all.saturating_sub(width(&left) + width(&age) + 2));
-    let middle = pad(&format!("  {title}"), width_all.saturating_sub(width(&t.id) + width(&age)));
-    let mut base = Style::new();
-    if selected {
-        base = base.patch(rev());
-    }
-    if t.closed() {
-        base = base.patch(dim());
-    }
-    let id_style = if selected { rev() } else { dim() };
-    let age_style = if t.status == "needs" && model::seconds_in_status(t, now) >= STALE {
-        let s = bold().fg(Color::Red);
-        if selected { s.patch(rev()) } else { s }
-    } else if selected {
-        base
+    let middle = pad(&format!("  {title}"), width_all.saturating_sub(idw + width(&age)));
+    let stale = t.status == "needs" && model::seconds_in_status(t, now) >= STALE;
+    // dim text is hard to read on the tint, so the selected row drops it
+    let (id_style, title_style, age_style) = if selected {
+        let on = Style::new().bg(TINT);
+        (on.add_modifier(Modifier::BOLD), on, if stale { on.fg(Color::Red).add_modifier(Modifier::BOLD) } else { on })
     } else {
-        dim()
+        let title = if t.closed() { dim() } else { Style::new() };
+        (dim(), title, if stale { bold().fg(Color::Red) } else { dim() })
     };
-    Line::from(vec![span(t.id.clone(), id_style), span(middle, base), span(age, age_style)])
+    Line::from(vec![span(id, id_style), span(middle, title_style), span(age, age_style)])
 }

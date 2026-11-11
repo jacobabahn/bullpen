@@ -960,9 +960,10 @@ def cmd_peek(args):
     if not rex_alive(t["session"], t["block"]):
         raise Fail(f"{t['id']}'s agent isn't running")
     s = ["-s", t["session"]] if t["session"] else []
-    out = run([REX, "capture", *s, "-b", t["block"]]).stdout
-    lines = [l for l in out.splitlines()]
-    while lines and not lines[-1].strip():
+    fmt = ["--format=vt"] if args.vt else []  # vt keeps the screen's colours
+    out = run([REX, "capture", *fmt, *s, "-b", t["block"]]).stdout
+    lines = [l.rstrip("\r") for l in out.split("\n")]
+    while lines and not re.sub(r"\x1b\[[0-9;:]*m", "", lines[-1]).strip():
         lines.pop()
     print("\n".join(lines[-args.lines:]))
 
@@ -2223,6 +2224,7 @@ def main(argv=None):
     p = sub.add_parser("peek", help="print the end of a worker's screen")
     p.add_argument("id")
     p.add_argument("--lines", type=int, default=40)
+    p.add_argument("--vt", action="store_true", help="keep the screen's colours, as terminal escape codes")
     p.set_defaults(fn=cmd_peek)
 
     p = sub.add_parser("ready", help="(worker) push the branch, open the PR (none without a remote), tell the coordinator")

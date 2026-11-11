@@ -1321,6 +1321,13 @@ class BullpenTest(unittest.TestCase):
         self.bp("config", "--board-layout", "compact")
         self.assertEqual(json.loads(self.bp("config").stdout)["board_layout"], "compact")
 
+    def test_peek_vt_keeps_colours_and_drops_blank_coloured_lines(self):
+        tid = self.start_task()
+        (self.fake / "screen").write_text("\x1b[0m\x1b[31mred\x1b[0m\r\n\x1b[0mplain\n\x1b[0m\r\n\n")
+        out = self.bp("peek", tid, "--vt").stdout
+        self.assertEqual(out, "\x1b[0m\x1b[31mred\x1b[0m\n\x1b[0mplain\n")
+        self.assertIn("--format=vt", [a for a in self.rex_calls() if a[0] == "capture"][-1])
+
     def test_go_finds_the_repo_from_any_directory(self):
         tid = self.start_task()
         out = self.bp("go", tid, "--json", "--from", "nowhere", cwd=self.tmp).stdout

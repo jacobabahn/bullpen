@@ -57,9 +57,9 @@ line, what it needs or where it stands ("Asks: python3 or python?", "PR #4,
 approved by review."). A task in review or ready also shows the size of its
 change ("3 files, +120 −14"), worked out once when its worker runs `ready`. A
 task that needs you gets an amber bar; its age turns red after 5 minutes. So
-does a task whose agent has shown no progress for a while (below). `l`
-switches to a compact layout, one line per task with the selected task's detail
-at the bottom.
+does a task whose agent has shown no progress for a while (below). The top line
+counts the tasks in each state. `l` switches to a compact layout, one line per
+task with the selected task's detail at the bottom.
 
 The keys at the bottom follow the selected task: `⏎` opens its worker (or its
 reviewer), `a` accepts and `d` drops (each asks y/n first), `t` tells, `p`
@@ -67,7 +67,7 @@ peeks, `v` shows its diff, `s` starts, `r` resumes, `c` goes back to the
 coordinator, `n` selects the next task that needs you. `?` lists them all.
 `bullpen up --no-board` leaves the board out. Accept, drop, start and resume
 run in the background, with a spinner on the task, so the board stays usable
-meanwhile; a peek keeps updating until you press a key.
+meanwhile; a peek keeps the worker's colours and updates until you press a key.
 
 Accepting or dropping from the board (or a shell) is news to the coordinator:
 `BP-3 accepted (merged PR #12, rebase)`, `BP-3 dropped`. That is how it learns

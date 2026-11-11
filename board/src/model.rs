@@ -2,9 +2,28 @@
 //! stores them, the groups, and the sentences and keys each task gets.
 
 use chrono::{DateTime, FixedOffset, Local};
-use serde::Deserialize;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Deserializer};
 use std::path::Path;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
+/// A field the board can do without: a value of a shape it doesn't expect reads
+/// as missing, so the task still shows.
+fn lenient<'de, D: Deserializer<'de>, T: DeserializeOwned>(d: D) -> Result<Option<T>, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(v).ok())
+}
+
+/// What GitHub last said about the task's PR.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Gh {
+    #[serde(default, deserialize_with = "lenient")]
+    pub state: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
+    pub checks: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
+    pub new: Option<u64>,
+}
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Review {
@@ -25,6 +44,22 @@ pub struct Task {
     pub since: Option<String>,
     pub updated: Option<String>,
     pub block: Option<String>,
+    /// no PR: its branch is merged locally
+    #[serde(default, deserialize_with = "lenient")]
+    pub local: Option<bool>,
+    #[serde(default, deserialize_with = "lenient")]
+    pub branch: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
+    pub base: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
+    pub merged: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
+    pub worktree: Option<String>,
+    /// the size of its change: "3 files, +120 −14"
+    #[serde(default, deserialize_with = "lenient")]
+    pub diffstat: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
+    pub gh: Option<Gh>,
 }
 
 impl Task {
@@ -39,6 +74,10 @@ impl Task {
 
     pub fn closed(&self) -> bool {
         matches!(self.status.as_str(), "done" | "dropped")
+    }
+
+    pub fn is_local(&self) -> bool {
+        self.local == Some(true)
     }
 
     /// When it entered its current status.
@@ -180,13 +219,45 @@ pub fn now() -> DateTime<FixedOffset> {
     Local::now().fixed_offset()
 }
 
-/// What the task needs or where it stands, as a plain sentence.
+/// The PR's latest state in a few words, or "".
+pub fn pr_phrase(t: &Task) -> String {
+    let Some(g) = &t.gh else { return String::new() };
+    if let Some(state) = g.state.as_deref().filter(|s| matches!(*s, "merged" | "closed")) {
+        return format!("{state} on GitHub");
+    }
+    let mut parts = Vec::new();
+    if let Some(c) = g.checks.as_deref().filter(|c| !c.is_empty()) {
+        parts.push(format!("checks {c}"));
+    }
+    if let Some(n) = g.new.filter(|n| *n > 0) {
+        parts.push(format!("{n} new comment{}", if n == 1 { "" } else { "s" }));
+    }
+    parts.join(", ")
+}
+
+/// What the task needs or where it stands, as a plain sentence, then what GitHub
+/// last said about its PR.
 pub fn task_detail(t: &Task, rounds: u32) -> String {
+    let text = status_detail(t, rounds);
+    let gh = if t.closed() { String::new() } else { pr_phrase(t) };
+    if gh.is_empty() || t.note.as_deref().is_some_and(|n| !n.is_empty()) {
+        return text;
+    }
+    let mut c = gh.chars();
+    let gh: String = c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default();
+    format!("{text} {gh}.").trim().to_string()
+}
+
+fn status_detail(t: &Task, rounds: u32) -> String {
     let r = t.review.clone().unwrap_or_default();
     let round = r.round.unwrap_or(1);
     let verdict = r.verdict.as_deref();
     let why = t.why.as_deref().unwrap_or("");
-    let pr = pr_short(t.pr.as_deref());
+    let has_pr = t.pr.as_deref().is_some_and(|p| !p.is_empty());
+    let mut pr = pr_short(t.pr.as_deref());
+    if pr.is_empty() && t.is_local() {
+        pr = format!("Local branch {}", t.branch.as_deref().unwrap_or(""));
+    }
     if let Some(note) = t.note.as_deref().filter(|n| !n.is_empty()) {
         return note.into();
     }
@@ -203,8 +274,13 @@ pub fn task_detail(t: &Task, rounds: u32) -> String {
         "ready" if verdict == Some("changes") => format!("{pr}. Review still asks for changes."),
         "ready" if !pr.is_empty() => format!("{pr}."),
         "ready" => "Done.".into(),
+        "working" if !pr_phrase(t).is_empty() => "Fixing what GitHub said.".into(),
         "working" if verdict == Some("changes") => format!("Fixing what review round {round} found."),
         "todo" => "Not started. s starts it.".into(),
+        "done" if t.is_local() && !has_pr => match (&t.merged, &t.base) {
+            (Some(_), Some(base)) => format!("Accepted. Merged into {base}."),
+            _ => "Accepted.".into(),
+        },
         "done" if !pr.is_empty() => format!("Accepted. {pr} merged."),
         "done" => "Accepted.".into(),
         "dropped" => "Dropped.".into(),
@@ -212,17 +288,30 @@ pub fn task_detail(t: &Task, rounds: u32) -> String {
     }
 }
 
-/// The keys that make sense for this task, for the footer.
-pub fn task_keys(t: Option<&Task>) -> &'static str {
-    match t.map(|t| t.status.as_str()) {
-        Some("needs") => "⏎ answer  t tell  p peek",
-        Some("stopped") => "r resume  p peek  d drop",
-        Some("review") => "⏎ reviewer  p peek",
-        Some("ready") => "a accept  d drop  ⏎ open",
-        Some("working") => "⏎ open  t tell  p peek",
-        Some("todo") => "s start  d drop",
+/// The size of a task's change, for one in review or ready: "3 files, +120 −14".
+pub fn task_stat(t: &Task) -> &str {
+    match t.status.as_str() {
+        "review" | "ready" => t.diffstat.as_deref().unwrap_or(""),
         _ => "",
     }
+}
+
+/// The keys that make sense for this task, for the footer: (key, what it does).
+pub fn task_keys(t: Option<&Task>) -> Vec<(&'static str, &'static str)> {
+    let Some(t) = t else { return Vec::new() };
+    let mut keys: Vec<(&str, &str)> = match t.status.as_str() {
+        "needs" => vec![("⏎", "answer"), ("t", "tell"), ("p", "peek")],
+        "stopped" => vec![("r", "resume"), ("p", "peek"), ("d", "drop")],
+        "review" => vec![("⏎", "reviewer"), ("p", "peek")],
+        "ready" => vec![("a", "accept"), ("d", "drop"), ("⏎", "open")],
+        "working" => vec![("⏎", "open"), ("t", "tell"), ("p", "peek")],
+        "todo" => vec![("s", "start"), ("d", "drop")],
+        _ => Vec::new(),
+    };
+    if t.worktree.as_deref().is_some_and(|w| !w.is_empty()) && !t.closed() {
+        keys.push(("v", "diff"));
+    }
+    keys
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -235,16 +324,18 @@ pub enum Action {
 /// The question a task's own row turns into while the board waits for y or n.
 pub fn confirm_text(action: Action, t: &Task, merge: &str) -> String {
     let pr = pr_short(t.pr.as_deref());
+    let verb = match merge {
+        "rebase" => "rebase-merge",
+        "squash" => "squash-merge",
+        other => other,
+    };
+    let nothing = t.why.as_deref().unwrap_or("").starts_with("Nothing to merge");
     match action {
-        Action::Accept if pr.is_empty() => "Accept and clean up?".into(),
-        Action::Accept => {
-            let verb = match merge {
-                "rebase" => "rebase-merge",
-                "squash" => "squash-merge",
-                other => other,
-            };
-            format!("Accept and {verb}?")
+        Action::Accept if pr.is_empty() && t.is_local() && !nothing => {
+            format!("Accept and {verb} into {}?", t.base.as_deref().unwrap_or("its base"))
         }
+        Action::Accept if pr.is_empty() => "Accept and clean up?".into(),
+        Action::Accept => format!("Accept and {verb}?"),
         Action::Drop if pr.is_empty() => "Drop it?".into(),
         Action::Drop => format!("Drop it and close {pr}?"),
         Action::DropForce => "Discard uncommitted changes?".into(),
@@ -396,10 +487,60 @@ mod tests {
     }
 
     #[test]
+    fn detail_ends_with_what_github_said() {
+        let pr = Some("https://x/pull/4".to_string());
+        let gh = |state: Option<&str>, checks: Option<&str>, new| {
+            Some(Gh { state: state.map(String::from), checks: checks.map(String::from), new })
+        };
+        let t = Task { pr: pr.clone(), gh: gh(None, Some("failing"), Some(1)), ..task("BP-1", "ready") };
+        assert_eq!(task_detail(&t, 2), "PR #4. Checks failing, 1 new comment.");
+        let t = Task { gh: gh(None, Some("failing"), None), ..task("BP-1", "working") };
+        assert_eq!(task_detail(&t, 2), "Fixing what GitHub said. Checks failing.");
+        let t = Task { pr, gh: gh(Some("merged"), None, None), ..task("BP-1", "ready") };
+        assert_eq!(task_detail(&t, 2), "PR #4. Merged on GitHub.");
+    }
+
+    #[test]
+    fn local_tasks_show_their_branch() {
+        let t = Task {
+            local: Some(true),
+            branch: Some("bullpen/bp-2-x".into()),
+            base: Some("main".into()),
+            review: Some(Review { round: None, verdict: Some("approved".into()) }),
+            ..task("BP-2", "ready")
+        };
+        assert_eq!(task_detail(&t, 2), "Local branch bullpen/bp-2-x, approved by review.");
+        assert_eq!(task_detail(&Task { review: None, ..t.clone() }, 2), "Local branch bullpen/bp-2-x.");
+        let done = Task { status: "done".into(), merged: Some("abc".into()), ..t.clone() };
+        assert_eq!(task_detail(&done, 2), "Accepted. Merged into main.");
+        assert_eq!(confirm_text(Action::Accept, &t, "squash"), "Accept and squash-merge into main?");
+        assert_eq!(confirm_text(Action::Drop, &t, "rebase"), "Drop it?");
+    }
+
+    #[test]
+    fn stat_shows_for_review_and_ready() {
+        let t = Task { diffstat: Some("3 files, +120 −14".into()), ..task("BP-1", "ready") };
+        assert_eq!(task_stat(&t), "3 files, +120 −14");
+        assert_eq!(task_stat(&Task { status: "review".into(), ..t.clone() }), "3 files, +120 −14");
+        assert_eq!(task_stat(&Task { status: "working".into(), ..t }), "");
+        assert_eq!(task_stat(&task("BP-1", "ready")), "");
+    }
+
+    #[test]
+    fn a_field_of_the_wrong_shape_reads_as_missing() {
+        let t: Task = serde_json::from_str(r#"{"id":"BP-1","status":"ready","merged":true,"gh":"?","diffstat":3}"#).unwrap();
+        assert_eq!((t.merged, t.diffstat, t.gh.is_none()), (None, None, true));
+    }
+
+    #[test]
     fn keys_fit_the_task() {
-        assert!(task_keys(Some(&task("BP-1", "ready"))).starts_with("a accept"));
-        assert!(task_keys(Some(&task("BP-1", "needs"))).starts_with("⏎ answer"));
-        assert_eq!(task_keys(None), "");
+        assert_eq!(task_keys(Some(&task("BP-1", "ready")))[0], ("a", "accept"));
+        assert_eq!(task_keys(Some(&task("BP-1", "needs")))[0], ("⏎", "answer"));
+        assert!(task_keys(None).is_empty());
+        let wt = |st: &str| Task { worktree: Some("/w".into()), ..task("BP-1", st) };
+        assert_eq!(task_keys(Some(&wt("working"))).last(), Some(&("v", "diff")));
+        assert!(!task_keys(Some(&task("BP-1", "todo"))).contains(&("v", "diff")));
+        assert!(!task_keys(Some(&wt("done"))).contains(&("v", "diff")));
     }
 
     #[test]

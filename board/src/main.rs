@@ -27,10 +27,11 @@ Moving
   c            back to the coordinator, panes put away
 
 Acting on the selected task
-  a            accept: merge its PR and clean up
+  a            accept: merge its PR (or local branch) and clean up
   d            drop: close its PR, pane and worktree
   t            tell its worker something
   p            peek at the end of its worker's screen (live)
+  v            view its diff against its base (q closes it)
   s            start it
   r            resume a stopped worker
 
@@ -234,7 +235,7 @@ impl App {
         }
         self.peeking = true;
         let lines = self.height.saturating_sub(4).max(1).to_string();
-        let args = vec!["peek".into(), id.clone(), "--lines".into(), lines];
+        let args = vec!["peek".into(), id.clone(), "--lines".into(), lines, "--vt".into()];
         let (bullpen, root, tx, id) = (self.bullpen.clone(), self.root.clone(), self.tx.clone(), id.clone());
         std::thread::spawn(move || {
             let (_, text) = run(&bullpen, &root, &args);
@@ -331,7 +332,10 @@ impl App {
                 }
             }
             (_, Some('f')) => self.finished = !self.finished,
-            (_, Some('c')) => self.msg = self.bp(&["go"]).1,
+            (_, Some('c')) => {
+                let (ok, out) = self.bp(&["go"]);
+                self.msg = if ok { "Opened the coordinator.".into() } else { out };
+            }
             (_, Some('n')) => {
                 let order = self.order();
                 let needs: Vec<usize> = (0..order.len()).filter(|&j| order[j].needs_you()).collect();
@@ -353,10 +357,13 @@ impl App {
             (KeyCode::Enter, _) => {
                 let reviewer = cur.status == "review"
                     || (cur.status == "needs" && cur.why.as_deref().unwrap_or("").starts_with("Reviewer"));
+                // a pane that opens in another tab shows nothing here: say it worked
                 self.msg = if reviewer {
-                    self.bp(&["go", sel, "--review"]).1
+                    let (ok, out) = self.bp(&["go", sel, "--review"]);
+                    if ok { format!("Opened {sel}'s reviewer.") } else { out }
                 } else if cur.block.is_some() {
-                    self.bp(&["go", sel]).1
+                    let (ok, out) = self.bp(&["go", sel]);
+                    if ok { format!("Opened {sel}.") } else { out }
                 } else {
                     match cur.status.as_str() {
                         "todo" => "Not started yet: s starts it.".into(),
@@ -388,6 +395,7 @@ impl App {
                 self.peek_due = Instant::now();
                 self.peek();
             }
+            (_, Some('v')) => self.msg = self.bp(&["diff", sel, "--pane"]).1,
             (_, Some('t')) => self.mode = Mode::Tell { id: sel.into(), text: String::new() },
             _ => {}
         }
