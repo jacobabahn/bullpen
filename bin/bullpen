@@ -47,7 +47,7 @@ DEFAULT_CONFIG = {
     "merge": "rebase",    # how accept merges a PR: rebase, squash or merge
     "stuck_after": 20,    # minutes a working agent can show no progress before news; 0: off
     "news": "type",       # "type": typed into the coordinator's pane; "monitor": it follows `news --follow`
-    "worker_model": None,    # claude's --model for workers (None: the command's own, else Claude Code's)
+    "worker_model": None,    # claude's --model for workers ("default": none; None: the command's own)
     "reviewer_model": None,  # the same for reviewers
 }
 
@@ -1350,7 +1350,7 @@ def cmd_config(args):
     for role, model in (("worker", args.worker_model or args.model),
                         ("reviewer", args.reviewer_model or args.model)):
         if model:
-            repo.cfg[f"{role}_model"] = None if model == "default" else model
+            repo.cfg[f"{role}_model"] = model  # "default" too: it drops the command's own --model
     repo.save()
     reindex(repo)
     models = {role: model_phrase(repo.cfg[role], repo.cfg.get(f"{role}_model"))

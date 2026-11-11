@@ -1342,7 +1342,7 @@ class BullpenTest(unittest.TestCase):
         cfg = json.loads(self.bp("config", "--worker-model", "claude-opus-4-1").stdout)
         self.assertEqual((cfg["worker_model"], cfg["reviewer_model"]), ("claude-opus-4-1", "sonnet"))
         cfg = json.loads(self.bp("config", "--model", "default").stdout)
-        self.assertEqual((cfg["worker_model"], cfg["reviewer_model"]), (None, None))
+        self.assertEqual((cfg["worker_model"], cfg["reviewer_model"]), ("default", "default"))
 
     def test_model_is_passed_at_start_resume_and_review(self):
         self.bp("config", "--worker-model", "opus", "--reviewer-model", "sonnet")
@@ -1374,13 +1374,19 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.models(cmd), ["sonnet"])
         self.assertFalse(any(a.startswith("--model=") for a in cmd))
 
-    def test_model_default_keeps_the_commands_own(self):
-        self.set_commands(worker=["claude", "--permission-mode", "auto", "--model", "opus"])
-        self.bp("config", "--model", "sonnet")
-        self.bp("config", "--model", "default")
+    def test_model_default_drops_the_commands_own(self):
+        self.set_commands(worker=["claude", "--permission-mode", "auto", "--model", "opus"],
+                          reviewer=["claude", "--permission-mode", "auto", "--model=opus"])
+        cfg = json.loads(self.bp("config", "--model", "default").stdout)
+        self.assertEqual(cfg["models"], {"worker": "default (Claude Code picks)",
+                                         "reviewer": "default (Claude Code picks)"})
         tid = self.start_task()
-        self.assertEqual(self.models(self.last_command()), ["opus"])
-        self.assertEqual(self.show(tid)["model"], "opus")
+        self.assertEqual(self.models(self.last_command()), [])
+        self.assertIsNone(self.show(tid).get("model"))
+        self.commit_and_ready(tid)
+        cmd = self.last_command()
+        self.assertEqual(self.models(cmd), [])
+        self.assertFalse(any(a.startswith("--model") for a in cmd))
 
     def test_start_model_is_for_that_task_and_stays_on_resume(self):
         self.bp("config", "--model", "opus")

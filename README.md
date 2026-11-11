@@ -225,7 +225,8 @@ commands are in that folder's `config.json` (`worker`, `coordinator_cmd`).
 `--worker-model` and `--reviewer-model` set one each. It takes anything `claude --model`
 does (an alias like `opus`, or a full model ID), and `default` lets Claude Code pick
 again. Bullpen adds `--model` when it starts an agent, in place of any `--model` in its
-command; it leaves other agents' commands alone. `bullpen config` shows the models in
+command; it leaves other agents' commands alone. (To use a `--model` written in the
+command instead, set `worker_model` or `reviewer_model` back to `null` in `config.json`.) `bullpen config` shows the models in
 use, `bullpen show BP-3` the one a worker was started with, and `bullpen start BP-3
 --model sonnet` picks one for a single task.
 
