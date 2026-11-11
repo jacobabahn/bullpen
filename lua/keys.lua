@@ -58,7 +58,8 @@ function M.setup(opts)
     local short = a.name:gsub("^bullpen_", "")
     local key = keys[short]
     if key == nil then key = prefix .. ">" .. a.key end
-    if key then rex.bind(key, a.name) end
+    -- Bound as a function: the Mac app ignored keys bound to these actions by name.
+    if key then rex.bind(key, function(ctx) go(ctx, a.flag) return true end) end
   end
 
   -- A function, not an action, so the key reaches the terminal when the pane
