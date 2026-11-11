@@ -4,19 +4,24 @@
 Tasks live outside the repo, in $BULLPEN_STATE (default ~/.local/state/bullpen).
 Each started task gets a git worktree, a branch and a Rex window running a
 worker agent. A Lua watcher (lua/watch.lua, run with `rex do --all`) turns the
-workers' program status into news lines typed into the coordinator's pane.
+workers' program status into news lines for the coordinator: typed into its pane,
+or logged for it to follow with `bullpen news --follow`.
 """
 
 import argparse
 import datetime as dt
+import fcntl
 import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 HOME = Path(__file__).resolve().parent.parent
@@ -41,6 +46,7 @@ DEFAULT_CONFIG = {
     "board_layout": "grouped",  # or "compact"
     "merge": "rebase",    # how accept merges a PR: rebase, squash or merge
     "stuck_after": 20,    # minutes a working agent can show no progress before news; 0: off
+    "news": "type",       # "type": typed into the coordinator's pane; "monitor": it follows `news --follow`
 }
 
 TERMINAL = "com.superlogical.terminal.shell"
@@ -318,13 +324,19 @@ def where(t):
     return "local branch" if t.get("local") else ""
 
 
+NEWS_MARK = "bullpen · "
+
+
 def news(repo, task, event, text):
-    """Type one line of news into the coordinator's prompt: `bullpen · <what happened>`."""
-    line = "bullpen · " + " ".join(text.split())  # one line: a newline would send it early
+    """One line of news for the coordinator, `bullpen · <what happened>`: logged, and
+    typed into its prompt unless it follows the log itself (config --news monitor)."""
+    line = NEWS_MARK + " ".join(text.split())  # one line: a newline would send it early
     log = repo.dir / "news.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("a") as f:
         f.write(f"{now()} {task['id']} {event}: {line}\n")
+    if repo.cfg.get("news") == "monitor":
+        return
     outbox = repo.dir / "outbox.txt"
     with outbox.open("a") as f:
         f.write(line + "\n")
@@ -387,6 +399,107 @@ def cmd_flush(args):
         (STATE / "outbox").unlink(missing_ok=True)
 
 
+# ---------- news by monitor: `bullpen news [--follow]` ----------
+
+def news_cursor(repo):
+    """How far into news.log (in bytes) `bullpen news` has printed, or None: never run."""
+    try:
+        return int((repo.dir / "news.cursor").read_text())
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def set_news_cursor(repo, offset):
+    repo.dir.mkdir(parents=True, exist_ok=True)
+    tmp = repo.dir / ".news.cursor.tmp"
+    tmp.write_text(f"{offset}\n")
+    os.replace(tmp, repo.dir / "news.cursor")
+
+
+def news_size(repo):
+    try:
+        return (repo.dir / "news.log").stat().st_size
+    except FileNotFoundError:
+        return 0
+
+
+def print_news(repo, offset):
+    """Print the whole lines logged after offset, moving the cursor past each once
+    it is out. Returns the new offset. A line still being written waits."""
+    size = news_size(repo)
+    if offset > size:  # the log was removed or cut short: what's there now is new
+        offset = 0
+        set_news_cursor(repo, 0)
+    if offset == size:
+        return offset
+    with (repo.dir / "news.log").open("rb") as f:
+        f.seek(offset)
+        for raw in f:
+            if not raw.endswith(b"\n"):
+                break
+            text = raw.decode(errors="replace").rstrip("\n")
+            at = text.find(NEWS_MARK)
+            # Printing and moving the cursor go together: being stopped in between
+            # (a monitor expiring) would print the line again next time.
+            held = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGINT, signal.SIGHUP})
+            try:
+                print(text[at:] if at >= 0 else text, flush=True)
+                offset += len(raw)
+                set_news_cursor(repo, offset)  # after printing: if nobody was reading, it comes again
+            finally:
+                signal.pthread_sigmask(signal.SIG_SETMASK, held)
+    return offset
+
+
+def cmd_news(args):
+    """Print the news logged since the last time, once each; --follow keeps going."""
+    repo = Repo(repo_root())
+    repo.dir.mkdir(parents=True, exist_ok=True)
+    lock = (repo.dir / "news.lock").open("w")
+    try:
+        # One reader at a time, or lines would come twice. A second follower waits
+        # for the first to go (a monitor being replaced); a one-off read doesn't.
+        fcntl.flock(lock, fcntl.LOCK_EX if args.follow else fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise Fail("news is being followed already (`bullpen news --follow` is running)")
+    offset = news_cursor(repo)
+    if offset is None:  # first time: old news stays old
+        offset = news_size(repo)
+        set_news_cursor(repo, offset)
+    try:
+        offset = print_news(repo, offset)
+        while args.follow:
+            time.sleep(args.every)
+            offset = print_news(repo, offset)
+    except BrokenPipeError:  # whoever was reading is gone; the cursor stays before the lost line
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+    except KeyboardInterrupt:
+        pass
+
+
+def news_mode_line(repo):
+    """One line saying how news reaches the coordinator."""
+    if repo.cfg.get("news") == "monitor":
+        return (f"news: by monitor. The coordinator runs the Monitor tool on "
+                f"`{shlex.join(with_state([SELF, 'news', '--follow']))}` (its guide says how).")
+    return ("news: typed into the coordinator's pane "
+            "(`bullpen config --news monitor`: by Claude Code's Monitor tool instead).")
+
+
+def guide_text():
+    """The coordinator's guide, with this bullpen's own path in its commands."""
+    text = (PROMPTS / "coordinator.md").read_text()
+    return text.replace("{{follow}}", shlex.join(with_state([SELF, "news", "--follow"])))
+
+
+def guide_file(repo):
+    """The guide as a file, for the coordinator's system prompt."""
+    path = repo.dir / "coordinator.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(guide_text())
+    return path
+
+
 def coordinator_label(repo):
     return f"bullpen: {repo.root.name}"
 
@@ -430,9 +543,11 @@ def cmd_up(args):
     else:
         argv = resolve(repo.cfg["coordinator_cmd"]) + [
             "-n", coordinator_label(repo),
-            "--append-system-prompt-file", str(PROMPTS / "coordinator.md"),
+            "--append-system-prompt-file", str(guide_file(repo)),
             f"You are the bullpen coordinator for {repo.root}. The bullpen CLI is {SELF}. "
-            f"Run `{SELF} ls`, then say in one short line that you are ready.",
+            + ("News comes by monitor: start it first, as your guide says. "
+               if repo.cfg.get("news") == "monitor" else "")
+            + f"Run `{SELF} ls`, then say in one short line that you are ready.",
         ]
         block = rex_run(session, repo.root, coordinator_label(repo), argv, focus=True)
         repo.cfg["coordinator"] = {"block": block, "session": session}
@@ -443,6 +558,7 @@ def cmd_up(args):
         ensure_board(repo, session)
     gather(repo, session)
     ensure_watcher(session)
+    print(news_mode_line(repo))
 
 
 def ensure_board(repo, session):
@@ -1155,13 +1271,18 @@ def cmd_config(args):
         if args.stuck_after < 0:
             raise Fail("--stuck-after takes minutes, or 0 to turn it off")
         repo.cfg["stuck_after"] = args.stuck_after
+    if args.news:
+        if args.news == "monitor" and repo.cfg.get("news") != "monitor":
+            set_news_cursor(repo, news_size(repo))  # what was typed already isn't news again
+        repo.cfg["news"] = args.news
+        print(news_mode_line(repo), file=sys.stderr)
     repo.save()
     reindex(repo)
     print(json.dumps({"repo": str(repo.root), "state": str(repo.dir), **repo.cfg}, indent=2))
 
 
 def cmd_guide(args):
-    print((PROMPTS / "coordinator.md").read_text())
+    print(guide_text())
 
 
 # ---------- getting around: go, board, keys ----------
@@ -2209,7 +2330,15 @@ def main(argv=None):
     p.add_argument("--merge", choices=["rebase", "squash", "merge"], help="how accept merges a PR")
     p.add_argument("--stuck-after", type=int, metavar="MINUTES",
                    help="news when a working agent shows no progress this long (0: never)")
+    p.add_argument("--news", choices=["type", "monitor"],
+                   help="how news reaches the coordinator: typed into its pane, or read by "
+                        "its Monitor tool from `bullpen news --follow`")
     p.set_defaults(fn=cmd_config)
+
+    p = sub.add_parser("news", help="print news logged since the last time; --follow keeps printing")
+    p.add_argument("--follow", action="store_true", help="keep running and print each line as it is logged")
+    p.add_argument("--every", type=float, default=0.5, help=argparse.SUPPRESS)  # seconds between looks
+    p.set_defaults(fn=cmd_news)
 
     p = sub.add_parser("guide", help="print the coordinator's guide")
     p.set_defaults(fn=cmd_guide)

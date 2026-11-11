@@ -5,10 +5,12 @@ Run: python3 -m unittest discover -s tests
 
 import json
 import os
+import select
 import shutil
 import subprocess
 import tempfile
 import textwrap
+import time
 import unittest
 from pathlib import Path
 
@@ -693,6 +695,156 @@ class BullpenTest(unittest.TestCase):
         self.bp("_event", self.block(tid), "blocked", "permission", "third")  # delivers all three
         news = [l for b, l in self.typed() if b == "blk1"]
         self.assertEqual([n.rsplit(" ", 1)[-1] for n in news], ["first", "second", "third"])
+
+    # ---------- news by monitor ----------
+
+    def ask(self, tid, msg):
+        """One news line: the worker asks something."""
+        self.bp("_event", self.block(tid), "blocked", "question", msg)
+
+    def follow(self):
+        """Start `bullpen news --follow`; returns it and a function reading its next n lines."""
+        p = subprocess.Popen([str(BULLPEN), "news", "--follow", "--every", "0.05"], cwd=self.repo,
+                             env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.addCleanup(lambda: (p.kill(), p.wait(), p.stdout.close(), p.stderr.close()))
+        buf = b""
+
+        def lines(n, wait=10):
+            nonlocal buf
+            end = time.time() + wait
+            while buf.count(b"\n") < n:
+                ready, _, _ = select.select([p.stdout], [], [], max(0, end - time.time()))
+                if not ready:
+                    self.fail(f"follow printed {buf!r}, wanted {n} lines")
+                buf += os.read(p.stdout.fileno(), 4096)
+            out, buf = buf.split(b"\n")[:n], b"\n".join(buf.split(b"\n")[n:])
+            return [l.decode() for l in out]
+
+        def quiet(wait=0.4):
+            ready, _, _ = select.select([p.stdout], [], [], wait)
+            return not buf and not ready
+
+        return p, lines, quiet
+
+    def stop(self, p):
+        p.terminate()
+        p.wait()
+
+    def test_follow_prints_each_new_line_as_it_is_logged(self):
+        tid = self.start_task()
+        self.bp("config", "--news", "monitor")
+        p, lines, quiet = self.follow()
+        self.assertTrue(quiet())  # nothing logged yet (and no news.log): nothing printed
+        self.ask(tid, "first")
+        self.assertEqual(lines(1), ["bullpen · BP-1 needs you (question): first"])
+        self.ask(tid, "second")
+        self.ask(tid, "third")
+        self.assertEqual([l.rsplit(" ", 1)[-1] for l in lines(2)], ["second", "third"])
+        self.assertIsNone(p.poll())  # still running
+
+    def test_a_restarted_follower_prints_what_it_missed_once(self):
+        tid = self.start_task()
+        self.bp("config", "--news", "monitor")
+        p, lines, _ = self.follow()
+        self.ask(tid, "one")
+        self.assertEqual(len(lines(1)), 1)
+        self.stop(p)
+        self.ask(tid, "two")  # logged while no follower runs
+        self.ask(tid, "three")
+        p, lines, quiet = self.follow()
+        self.assertEqual([l.rsplit(" ", 1)[-1] for l in lines(2)], ["two", "three"])
+        self.ask(tid, "four")
+        self.assertEqual([l.rsplit(" ", 1)[-1] for l in lines(1)], ["four"])
+        self.stop(p)
+        p, lines, quiet = self.follow()
+        self.assertTrue(quiet())  # nothing new: nothing again
+
+    def test_a_second_follower_waits_and_takes_over(self):
+        tid = self.start_task()
+        self.bp("config", "--news", "monitor")
+        first, lines1, _ = self.follow()
+        self.ask(tid, "one")
+        self.assertEqual(len(lines1(1)), 1)
+        second, lines2, quiet2 = self.follow()
+        self.ask(tid, "two")
+        self.assertEqual([l.rsplit(" ", 1)[-1] for l in lines1(1)], ["two"])
+        self.assertTrue(quiet2())  # not printed twice
+        p = self.bp("news", ok=False)  # a one-off read doesn't wait
+        self.assertIn("followed already", p.stderr)
+        self.stop(first)
+        self.ask(tid, "three")
+        self.assertEqual([l.rsplit(" ", 1)[-1] for l in lines2(1)], ["three"])
+
+    def test_news_prints_the_lines_since_last_time_and_exits(self):
+        self.assertEqual(self.bp("news").stdout, "")  # no news.log yet
+        tid = self.start_task()
+        self.ask(tid, "one")
+        self.ask(tid, "two")
+        out = self.bp("news").stdout.splitlines()
+        self.assertEqual(out, ["bullpen · BP-1 needs you (question): one",
+                               "bullpen · BP-1 needs you (question): two"])
+        self.assertEqual(self.bp("news").stdout, "")
+        self.ask(tid, "three")
+        self.assertEqual(self.bp("news").stdout, "bullpen · BP-1 needs you (question): three\n")
+
+    def test_news_never_replays_what_was_logged_before_it_first_ran(self):
+        tid = self.start_task()
+        self.ask(tid, "old")  # typed, in the default mode
+        self.assertEqual(self.bp("news").stdout, "")
+        self.ask(tid, "older still")
+        self.bp("news")
+        self.ask(tid, "typed too")
+        self.bp("config", "--news", "monitor")  # switching starts from here
+        self.assertEqual(self.bp("news").stdout, "")
+        self.ask(tid, "new")
+        self.assertEqual(self.bp("news").stdout, "bullpen · BP-1 needs you (question): new\n")
+
+    def test_monitor_mode_types_nothing_and_keeps_no_outbox(self):
+        tid = self.start_task()
+        p = self.bp("config", "--news", "monitor")
+        self.assertEqual(json.loads(p.stdout)["news"], "monitor")
+        self.assertIn("news --follow", p.stderr)
+        (self.fake / "screen").write_text("❯ half a message\n")  # typing or not: no matter
+        self.ask(tid, "Which one?")
+        self.bp("_event", self.block(tid), "working", "", "")
+        self.bp("_event", self.block(tid), "done", "", "")
+        self.bp("_flush")
+        self.assertFalse(any(b == "blk1" for b, _ in self.typed()))
+        state = self.tmp / "state"
+        self.assertFalse((state / "outbox").exists())
+        self.assertEqual(list(state.rglob("outbox.txt")), [])
+        log = next(state.rglob("news.log")).read_text().splitlines()
+        self.assertEqual(len(log), 2)
+        self.assertIn("BP-1 needs-you: bullpen · BP-1 needs you (question): Which one?", log[0])
+
+    def test_type_is_the_default_and_can_be_set_back(self):
+        tid = self.start_task()
+        self.assertEqual(json.loads(self.bp("config").stdout)["news"], "type")
+        self.bp("config", "--news", "monitor")
+        self.bp("config", "--news", "type")
+        self.ask(tid, "Which one?")
+        self.assertEqual([l for b, l in self.typed() if b == "blk1"],
+                         ["bullpen · BP-1 needs you (question): Which one?"])
+
+    def test_up_says_how_news_arrives(self):
+        out = self.bp("up").stdout.splitlines()
+        self.assertTrue(out[-1].startswith("news: typed into the coordinator's pane"))
+        self.bp("config", "--news", "monitor")
+        for args in (["up"], ["up", "--here"]):
+            last = self.bp(*args).stdout.splitlines()[-1]
+            self.assertTrue(last.startswith("news: by monitor"))
+            self.assertIn(f"{BULLPEN} news --follow", last)
+
+    def test_the_guide_names_the_follow_command_in_full(self):
+        guide = self.bp("guide").stdout
+        self.assertIn(f"{BULLPEN} news --follow`", guide)
+        self.assertNotIn("{{", guide)
+        self.bp("config", "--news", "monitor")
+        self.bp("up")
+        run = next(a for a in self.rex_calls() if a[0] == "run")
+        prompt = Path(run[run.index("--append-system-prompt-file") + 1]).read_text()
+        self.assertEqual(prompt.strip(), guide.strip())
+        self.assertIn("News comes by monitor", run[-1])
 
     def test_hide_puts_a_worker_away_and_goes_to_the_board(self):
         tid = self.start_task()

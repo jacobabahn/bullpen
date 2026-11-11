@@ -9,9 +9,10 @@ opens a pull request. You accept (merge) or drop it.
 
 The coordinator learns what its workers are doing from Rex itself. Rex records the
 status coding agents report (working, blocked, done) and a Lua watcher
-(`lua/watch.lua`, run with `rex do --all`) types news into the coordinator's pane,
-as messages starting `bullpen · `, when a worker needs you, ends its turn, fails,
-stops or shows no progress for a long time.
+(`lua/watch.lua`, run with `rex do --all`) turns that into news for the coordinator,
+lines starting `bullpen · `, when a worker needs you, ends its turn, fails,
+stops or shows no progress for a long time. News is typed into the coordinator's
+pane, or the coordinator follows it with Claude Code's Monitor tool (see [News](#news)).
 
 ## Install
 
@@ -117,6 +118,33 @@ turns it off. The watcher only knows of events since it started, so a pane that
 was already silent when the watcher (re)started isn't noticed until its next
 event.
 
+### News
+
+Every news line is logged in `news.log` beside the tasks. `bullpen config --news`
+sets how it reaches the coordinator, and `bullpen up` says which is in use:
+
+- `type` (the default): bullpen types each line into the coordinator's pane. It
+  works with any coordinator agent, and goes on working when the coordinator's
+  session is restarted, since nothing has to be running inside it. But news that
+  arrives while you're typing there waits (in `outbox.txt`) until the input is
+  empty, so it never gets sent along with half a message: it comes late, after
+  you send your own.
+- `monitor`: nothing is typed. The coordinator runs Claude Code's Monitor tool on
+  `bullpen news --follow`, and each line shows up in its chat as a notification
+  without touching the input, so news never waits on your typing. It needs a
+  coordinator with that tool (Claude Code), and the coordinator has to start the
+  monitor and start it again every 30 minutes, when it expires; its guide tells
+  it to. News logged while no monitor runs is not lost: the next one prints it.
+
+`bullpen news` prints the lines logged since the last time and exits;
+`bullpen news --follow` keeps running and prints each new line as it is logged.
+Both remember how far they got (a byte offset in `news.cursor`), so each line is
+printed once, across restarts too. Only one reads at a time: a second
+`--follow` waits for the first to end and then takes over. The first run starts
+from the end of the log, and switching to `monitor` starts from there too, so
+old news is never printed again. News logged in `monitor` mode but not yet read
+when you switch back to `type` is not typed: `bullpen news` prints it.
+
 ### Keys
 
 `bullpen keys` prints a line to add to your Rex config (`init.lua`). It defines
@@ -174,11 +202,11 @@ task ready, with its worktree and branch as they were.
 
 - Tasks, briefs and settings: `~/.local/state/bullpen/repos/<repo>/` (`BULLPEN_STATE` moves it).
 - Worktrees: `<repo>-bullpen/<ID>` next to the repository.
-- News: every line is logged in `news.log` beside the tasks. News that arrives while
-  you're typing in the coordinator waits (in `outbox.txt`) until its input is empty,
-  so it never gets sent along with half a message.
+- News: `news.log` beside the tasks, with `news.cursor` (how far `bullpen news` has
+  read) and `outbox.txt` (typed news waiting for an empty input). See [News](#news).
 
-`bullpen config --merge squash` changes how `accept` merges (`rebase` by default;
+`bullpen config --news monitor` changes how news reaches the coordinator (`type`
+by default). `bullpen config --merge squash` changes how `accept` merges (`rebase` by default;
 `squash` or `merge`). `bullpen config --stuck-after 45` sets how many minutes a
 working agent can show no progress before you hear of it (20 by default, `0` for
 never). `bullpen config --prefix XY --base develop` changes the task prefix (default `BP`)
