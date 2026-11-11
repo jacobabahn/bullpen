@@ -126,9 +126,30 @@ def sh(*cmd, cwd=None):
     return subprocess.run(cmd, cwd=cwd, check=True, text=True, capture_output=True).stdout
 
 
+def setUpModule():
+    """Run the suite in a temp folder of its own, so a test that leaves files behind fails it."""
+    global SUITE_TMP, OUTER_TMPDIR
+    OUTER_TMPDIR = os.environ.get("TMPDIR")
+    SUITE_TMP = tempfile.mkdtemp(prefix="bullpen-tests-")
+    os.environ["TMPDIR"] = tempfile.tempdir = SUITE_TMP
+
+
+def tearDownModule():
+    left = sorted(os.listdir(SUITE_TMP))
+    shutil.rmtree(SUITE_TMP, ignore_errors=True)
+    tempfile.tempdir = None
+    if OUTER_TMPDIR is None:
+        os.environ.pop("TMPDIR", None)
+    else:
+        os.environ["TMPDIR"] = OUTER_TMPDIR
+    if left:
+        raise AssertionError(f"tests left {len(left)} files in TMPDIR: {', '.join(left[:5])}")
+
+
 class BullpenTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         fake = self.tmp / "fake"
         fake.mkdir()
         for name, src in (("rex", FAKE_REX), ("gh", FAKE_GH)):
@@ -2599,7 +2620,9 @@ class WatcherTest(unittest.TestCase):
     def lua(self, script, **args):
         if subprocess.run(["rex", "do", "-e", "return 1"], capture_output=True).returncode != 0:
             self.skipTest("rex do doesn't run here")
-        path = Path(tempfile.mkdtemp()) / "test.lua"
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        path = Path(tmp) / "test.lua"
         path.write_text(script)
         p = subprocess.run(["rex", "do", str(path), *(f"{k}={v}" for k, v in args.items())],
                            text=True, capture_output=True)
@@ -2611,6 +2634,7 @@ class WatcherTest(unittest.TestCase):
 
     def test_the_watcher_reports_and_clears_a_quiet_pane(self):
         state = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, state, ignore_errors=True)
         (state / "blocks").mkdir()
         for block, minutes in (("blk1", 20), ("blk2", 20)):
             (state / "blocks" / f"{block}.json").write_text(

@@ -357,3 +357,5 @@ python3 -m unittest discover -s tests
 ```
 
 The tests use fake `rex` and `gh` programs and a local bare repository as origin.
+Each test removes its temp folder when it ends. The suite runs inside a temp folder
+of its own and fails if anything is left in it afterwards.
