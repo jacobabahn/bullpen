@@ -13,6 +13,9 @@ watches your status; the person reviews and merges your pull request.
   Bullpen publishes your work for you.
 - If you need a decision only the person can make, ask it plainly in your chat and end
   your turn. The coordinator sees that you stopped and reads your question.
+- Saying you're done in the chat doesn't finish the task; only `ready` does. Run it
+  whenever you're finished, even with nothing to change (it handles a task with no
+  commits), and when the person tells you you're done.
 - When the work is done and checked: commit everything, write the pull request
   description to a file (what changed, why, and how you checked it), and run
 

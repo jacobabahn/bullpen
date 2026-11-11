@@ -123,6 +123,7 @@ class Repo:
         self.cfg = {**DEFAULT_CONFIG, **cfg}
 
     def save(self):
+        self.cfg["root"] = str(self.root)
         write_json(self.dir / "config.json", self.cfg)
 
     def gh(self):
@@ -297,11 +298,51 @@ def news(repo, task, event, text):
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("a") as f:
         f.write(f"{now()} {task['id']} {event}: {line}\n")
-    c = repo.cfg.get("coordinator")
-    if c and rex_alive(c.get("session"), c.get("block")):
+    outbox = repo.dir / "outbox.txt"
+    with outbox.open("a") as f:
+        f.write(line + "\n")
+    if not deliver(repo):
+        (STATE / "outbox").touch()  # the watcher retries while this exists
+
+
+def has_draft(session, block):
+    """Is something half-typed in the coordinator's input? Typing news there would
+    send it along. (Reads Claude Code's input box: the last line starting ❯.)"""
+    p = run([REX, "capture", *(["-s", session] if session else []), "-b", block], check=False)
+    lines = [l.strip() for l in p.stdout.splitlines() if l.strip()]
+    for line in reversed(lines[-10:]):
+        if line.startswith("❯"):
+            return bool(line[1:].strip())
+    return False
+
+
+def deliver(repo):
+    """Type the repo's waiting news into the coordinator, oldest first. False if it
+    has to wait: no live coordinator, or the person is typing there."""
+    outbox = repo.dir / "outbox.txt"
+    lines = outbox.read_text().splitlines() if outbox.exists() else []
+    if not lines:
+        return True
+    c = repo.cfg.get("coordinator") or {}
+    if not rex_alive(c.get("session"), c.get("block")) or has_draft(c.get("session"), c["block"]):
+        return False
+    outbox.unlink()
+    for line in lines:
         rex_type(c.get("session"), c["block"], line)
-    else:
-        print(f"bullpen: no live coordinator; news kept in {log}", file=sys.stderr)
+    return True
+
+
+def cmd_flush(args):
+    """(watcher) deliver news that had to wait."""
+    waiting = False
+    for cfg in (STATE / "repos").glob("*/outbox.txt"):
+        repo = Repo(read_json(cfg.parent / "config.json", {}).get("root") or "/")
+        repo.dir = cfg.parent
+        repo.cfg = {**DEFAULT_CONFIG, **read_json(cfg.parent / "config.json", {})}
+        if not deliver(repo):
+            waiting = True
+    if not waiting:
+        (STATE / "outbox").unlink(missing_ok=True)
 
 
 def coordinator_label(repo):
@@ -1549,6 +1590,9 @@ def main(argv=None):
     p.add_argument("kind", nargs="?")
     p.add_argument("msg", nargs="?")
     p.set_defaults(fn=cmd_event)
+
+    p = sub.add_parser("_flush")
+    p.set_defaults(fn=cmd_flush)
 
     p = sub.add_parser("_gone")
     p.add_argument("block")

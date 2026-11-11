@@ -66,4 +66,11 @@ end
 rex.on("terminal.child_exited", gone)
 rex.on("block_closed", gone)
 
+-- News that couldn't be typed (the person was typing in the coordinator's
+-- input) waits in an outbox; <state>/outbox exists while any does.
+rex.every(3, function()
+  local f = io.open(state_dir .. "/outbox", "r")
+  if f then f:close() call("_flush") end
+end)
+
 print("bullpen watcher: listening")

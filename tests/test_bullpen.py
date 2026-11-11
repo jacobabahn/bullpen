@@ -51,7 +51,8 @@ FAKE_REX = textwrap.dedent("""\
     elif a[:2] == ["block", "close"]:
         (alive / a[2]).unlink(missing_ok=True)
     elif a[0] == "capture":
-        print("line one\\nline two\\n\\n")
+        screen = d / "screen"  # what the tests put on screen, else two lines
+        print(screen.read_text() if screen.exists() else "line one\\nline two\\n\\n")
     elif a[:2] == ["api", "call"]:
         rest = a[2:]
         sid = R.get("session", "session:1")
@@ -482,6 +483,31 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.windows(), {"w2": both})  # and the emptied tab is closed
         self.assertEqual(sorted(self.layer_states().items())[-2:],
                          [("lyr3", "minimized"), ("lyr4", "minimized")])
+
+    def test_news_waits_while_the_person_is_typing_to_the_coordinator(self):
+        tid = self.start_task()
+        (self.fake / "screen").write_text("● Ready.\n────\n❯ drop BP-\n────\n  auto mode on\n")
+        self.bp("_event", self.block(tid), "done", "", "")
+        self.assertFalse(any(b == "blk1" for b, _ in self.typed()))  # not typed into the draft
+        self.assertTrue((self.tmp / "state" / "outbox").exists())
+        self.bp("_flush")  # still typing: still waiting
+        self.assertFalse(any(b == "blk1" for b, _ in self.typed()))
+        (self.fake / "screen").write_text("● Ready.\n────\n❯ \n────\n  auto mode on\n")
+        self.bp("_flush")
+        news = [l for b, l in self.typed() if b == "blk1"]
+        self.assertEqual(len(news), 1)
+        self.assertIn("BP-1 ended its turn", news[0])
+        self.assertFalse((self.tmp / "state" / "outbox").exists())
+
+    def test_waiting_news_goes_out_in_order(self):
+        tid = self.start_task()
+        (self.fake / "screen").write_text("❯ hmm\n")
+        self.bp("_event", self.block(tid), "blocked", "permission", "first")
+        self.bp("_event", self.block(tid), "blocked", "permission", "second")
+        (self.fake / "screen").write_text("❯ \n")
+        self.bp("_event", self.block(tid), "blocked", "permission", "third")  # delivers all three
+        news = [l for b, l in self.typed() if b == "blk1"]
+        self.assertEqual([n.rsplit(" ", 1)[-1] for n in news], ["first", "second", "third"])
 
     def test_board_pane_events_are_ignored(self):
         self.start_task()

@@ -100,7 +100,9 @@ uncommitted changes, pushes the branch and opens (or updates) the pull request.
 
 - Tasks, briefs and settings: `~/.local/state/bullpen/repos/<repo>/` (`BULLPEN_STATE` moves it).
 - Worktrees: `<repo>-bullpen/<ID>` next to the repository.
-- News that couldn't be delivered: `news.log` beside the tasks.
+- News: every line is logged in `news.log` beside the tasks. News that arrives while
+  you're typing in the coordinator waits (in `outbox.txt`) until its input is empty,
+  so it never gets sent along with half a message.
 
 `bullpen config --merge squash` changes how `accept` merges (`rebase` by default;
 `squash` or `merge`). `bullpen config --prefix XY --base develop` changes the task prefix (default `BP`)
