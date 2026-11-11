@@ -918,7 +918,20 @@ GROUPS = [  # (heading, statuses), in the order the board shows them
 MARKS = {"needs": "●", "stopped": "■", "ready": "✓", "review": "◐", "working": "○",
          "todo": "·", "done": "✓", "dropped": "–"}
 STALE = 300  # seconds a task can need you before its age turns red
-MERGE_VERB = {"rebase": "Rebase-merges", "squash": "Squash-merges", "merge": "Merges"}
+MERGE_VERB = {"rebase": "rebase-merge", "squash": "squash-merge", "merge": "merge"}
+
+
+def confirm_text(action, t, merge="rebase"):
+    """The question a task's row shows while the board waits for y."""
+    pr = pr_short(t.get("pr"))
+    if action == "accept":
+        return (f"Press y to accept and {MERGE_VERB.get(merge, merge)} {pr}." if pr
+                else "Press y to accept and clean it up.")
+    if action == "drop":
+        return "Press y to drop it, closing its PR, pane and worktree."
+    if action == "drop-force":
+        return "It has uncommitted changes. Press y to discard them and drop it."
+    return ""
 
 
 def board_groups(tasks, finished=False):
@@ -1069,6 +1082,7 @@ def cmd_board(args):
 
         scr.timeout(1000)
         sel, finished, msg, top = None, False, "", 0
+        pending = None  # (action, task id): a y/n question shown on the task's row
 
         def put(y, x, text, attr=0):
             h, w = scr.getmaxyx()
@@ -1085,18 +1099,6 @@ def cmd_board(args):
             scr.clrtoeol()
             put(h - 1, 1, fit(text, w - 2), BOLD)
             scr.refresh()
-
-        def ask(question):
-            """A y/n question on the footer line."""
-            h, w = scr.getmaxyx()
-            scr.move(h - 1, 0)
-            scr.clrtoeol()
-            put(h - 1, 1, fit(question + "  y / n", w - 2), BOLD)
-            scr.refresh()
-            scr.timeout(-1)
-            k = scr.getch()
-            scr.timeout(1000)
-            return k in (ord("y"), ord("Y"))
 
         def prompt(label):
             h, w = scr.getmaxyx()
@@ -1159,6 +1161,11 @@ def cmd_board(args):
                     rows.append(("gap", None, ""))
                 for t in ts:
                     rows.append(("title", t, ""))
+                    if pending and pending[1] == t["id"]:
+                        q = confirm_text(pending[0], t, repo.cfg.get("merge", "rebase"))
+                        for line in wrap(q, detail_w(t), 2):
+                            rows.append(("confirm", t, line))
+                        continue
                     if layout == "grouped":
                         # what a task needs from you gets two lines; anything else one
                         lines = 2 if t["status"] in ("needs", "stopped") else 1
@@ -1207,6 +1214,9 @@ def cmd_board(args):
                         put(y, 3 + len(line) - len(age), age, DIM)
                 elif kind == "detail":
                     put(y, 3 + len(t["id"]) + 2, fit(text, detail_w(t)), DIM)
+                elif kind == "confirm":
+                    put(y, 0, "▌", col("amber"))
+                    put(y, 3 + len(t["id"]) + 2, fit(text, detail_w(t)), col("amber") | BOLD)
                 y += 1
             if top + avail < len(rows):
                 put(2 + avail, w - 3, "↓", DIM)
@@ -1222,9 +1232,13 @@ def cmd_board(args):
                     put(yb + 2 + j, 1, line, DIM)
             if msg:
                 put(h - 2, 1, fit(msg, w - 2), BOLD)
-            keys = task_keys(cur)
-            keys = (keys + "   ? keys") if keys and len(keys) + 9 < w - 2 else (keys or "? keys")
-            put(h - 1, 1, fit(keys, w - 2), DIM)
+            if pending:
+                verb = {"accept": "accept", "drop": "drop", "drop-force": "discard and drop"}[pending[0]]
+                put(h - 1, 1, fit(f"y {verb}   any other key cancels", w - 2), col("amber") | BOLD)
+            else:
+                keys = task_keys(cur)
+                keys = (keys + "   ? keys") if keys and len(keys) + 9 < w - 2 else (keys or "? keys")
+                put(h - 1, 1, fit(keys, w - 2), DIM)
             scr.refresh()
 
             k = scr.getch()
@@ -1233,6 +1247,24 @@ def cmd_board(args):
             ch = chr(k) if 0 <= k < 256 else ""
             i = ids.index(sel) if sel in ids else 0
             msg = ""
+            if pending:
+                action, tid = pending
+                pending = None
+                if ch not in ("y", "Y"):
+                    msg = "Cancelled."
+                    continue
+                if action == "accept":
+                    busy(f"Accepting {tid}…")
+                    ok, out = bp("accept", tid)
+                    msg = f"Accepted {tid}." if ok else out
+                else:
+                    busy(f"Dropping {tid}…")
+                    ok, out = bp("drop", tid, *(["--force"] if action == "drop-force" else []))
+                    if not ok and "uncommitted" in out:
+                        pending, msg = ("drop-force", tid), ""
+                    else:
+                        msg = f"Dropped {tid}." if ok else out
+                continue
             if ch == "q":
                 return
             elif k == curses.KEY_DOWN or ch == "j":
@@ -1269,20 +1301,12 @@ def cmd_board(args):
             elif ch == "a":
                 if cur["status"] != "ready":
                     msg = f"Only a task that's ready to accept can be accepted."
-                elif ask(f"Accept {sel}? " + (f"{MERGE_VERB[repo.cfg.get('merge', 'rebase')]} {pr_short(cur['pr'])}."
-                                               if cur.get("pr") else "Cleans it up.")):
-                    busy(f"Accepting {sel}…")
-                    ok, out = bp("accept", sel)
-                    msg = f"Accepted {sel}." if ok else out
+                else:
+                    pending = ("accept", sel)
             elif ch == "d":
                 if cur["status"] in CLOSED:
                     continue
-                if ask(f"Drop {sel}? Closes its PR, pane and worktree."):
-                    busy(f"Dropping {sel}…")
-                    ok, out = bp("drop", sel)
-                    if not ok and "uncommitted" in out and ask(f"{sel} has uncommitted changes. Discard them?"):
-                        ok, out = bp("drop", sel, "--force")
-                    msg = f"Dropped {sel}." if ok else out
+                pending = ("drop", sel)
             elif ch == "s":
                 busy(f"Starting {sel}…")
                 ok, out = bp("start", sel)
