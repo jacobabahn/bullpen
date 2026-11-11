@@ -47,6 +47,8 @@ DEFAULT_CONFIG = {
     "merge": "rebase",    # how accept merges a PR: rebase, squash or merge
     "stuck_after": 20,    # minutes a working agent can show no progress before news; 0: off
     "news": "type",       # "type": typed into the coordinator's pane; "monitor": it follows `news --follow`
+    "worker_model": None,    # claude's --model for workers (None: the command's own, else Claude Code's)
+    "reviewer_model": None,  # the same for reviewers
 }
 
 TERMINAL = "com.superlogical.terminal.shell"
@@ -110,6 +112,43 @@ def resolve(cmd):
     """Absolute path for the program, so Rex panes don't depend on PATH."""
     exe = shutil.which(cmd[0])
     return [exe or cmd[0], *cmd[1:]]
+
+
+def is_claude(cmd):
+    return bool(cmd) and Path(cmd[0]).name == "claude"
+
+
+def model_in(cmd):
+    """The --model a command list gives, if any."""
+    for i, a in enumerate(cmd):
+        if a == "--model" and i + 1 < len(cmd):
+            return cmd[i + 1]
+        if a.startswith("--model="):
+            return a.split("=", 1)[1]
+    return None
+
+
+def with_model(cmd, model):
+    """cmd with claude's --model set to model, replacing any it has. No model: cmd as
+    it is; "default": no --model, so Claude Code picks. Other agents are left alone."""
+    if not model or not is_claude(cmd):
+        return list(cmd)
+    out, skip = [], False
+    for a in cmd:
+        if skip:
+            skip = False
+        elif a == "--model":
+            skip = True
+        elif not a.startswith("--model="):
+            out.append(a)
+    return out if model == "default" else out + ["--model", model]
+
+
+def model_phrase(cmd, model):
+    """What model an agent with this command and setting runs, for `config`."""
+    if not is_claude(cmd):
+        return f"not set by bullpen: the command is {cmd[0] if cmd else 'empty'}, not claude"
+    return model_in(with_model(cmd, model)) or "default (Claude Code picks)"
 
 
 # ---------- repo, config, tasks ----------
@@ -691,12 +730,16 @@ def cmd_start(args):
     full = repo.dir / "briefs" / f"{t['id']}.full.md"
     full.write_text(f"# {t['id']}: {t['title']}\n\n{brief}\n{footer(repo, t)}")
     first = f"You are the worker for bullpen task {t['id']}. Read your brief at {full} and follow it."
+    if args.model:
+        t["worker_model"] = args.model  # this task's own, over the config's
     launch(repo, t, session, first, resume=False)
     print(f"{t['id']} started in {t['worktree']} (branch {t['branch']}, pane {t['block']})")
 
 
 def launch(repo, t, session, first, resume):
-    argv = resolve(repo.cfg["worker"]) + (["--continue"] if resume else []) + \
+    cmd = with_model(repo.cfg["worker"], t.get("worker_model") or repo.cfg.get("worker_model"))
+    t["model"] = model_in(cmd) if is_claude(cmd) else None
+    argv = resolve(cmd) + (["--continue"] if resume else []) + \
         ["-n", f"{t['id']}: {t['title']}", first]
     unindex_block(t.get("block"))
     label = f"bullpen: {t['id']}"
@@ -954,7 +997,7 @@ def start_review(repo, t, base_ref):
         worktree=t["worktree"], branch=t["branch"], base_ref=base_ref, bin=SELF,
         summary=t.get("summary") or "(none)"))
     first = f"You are the reviewer for bullpen task {t['id']}. Read {prompt} and follow it."
-    argv = resolve(repo.cfg["reviewer"]) + ["-n", f"{t['id']} review", first]
+    argv = resolve(with_model(repo.cfg["reviewer"], repo.cfg.get("reviewer_model"))) + ["-n", f"{t['id']} review", first]
     session = t.get("session") or session_for(repo)
     if repo.cfg.get("workers") == "tabs":
         block = rex_run(session, t["worktree"], review_label(t), argv)
@@ -1181,8 +1224,8 @@ def cmd_show(args):
     if args.json:
         print(json.dumps(t, indent=2))
         return
-    for k in ("id", "title", "status", "why", "note", "base", "branch", "worktree", "block", "pr", "diffstat",
-              "summary"):
+    for k in ("id", "title", "status", "why", "note", "base", "branch", "worktree", "block", "model", "pr",
+              "diffstat", "summary"):
         if t.get(k):
             print(f"{k:>9}: {t[k]}")
         elif k == "pr" and t.get("local"):
@@ -1304,9 +1347,16 @@ def cmd_config(args):
                           f"start the Monitor tool on `{follow_cmd()}` now, as your guide says")
         repo.cfg["news"] = args.news
         print(news_mode_line(repo), file=sys.stderr)
+    for role, model in (("worker", args.worker_model or args.model),
+                        ("reviewer", args.reviewer_model or args.model)):
+        if model:
+            repo.cfg[f"{role}_model"] = None if model == "default" else model
     repo.save()
     reindex(repo)
-    print(json.dumps({"repo": str(repo.root), "state": str(repo.dir), **repo.cfg}, indent=2))
+    models = {role: model_phrase(repo.cfg[role], repo.cfg.get(f"{role}_model"))
+              for role in ("worker", "reviewer")}
+    print(json.dumps({"repo": str(repo.root), "state": str(repo.dir), **repo.cfg,
+                      "models": models}, indent=2))
 
 
 def cmd_guide(args):
@@ -2285,6 +2335,7 @@ def main(argv=None):
 
     p = sub.add_parser("start", help="make a task's worktree and start its worker")
     p.add_argument("id")
+    p.add_argument("--model", help="claude's --model for this task's worker, over the config's")
     p.add_argument("--session")
     p.set_defaults(fn=cmd_start)
 
@@ -2361,6 +2412,10 @@ def main(argv=None):
     p.add_argument("--news", choices=["type", "monitor"],
                    help="how news reaches the coordinator: typed into its pane, or read by "
                         "its Monitor tool from `bullpen news --follow`")
+    p.add_argument("--model", help="claude's --model for workers and reviewers "
+                   "(an alias like opus, or a model ID; default: let Claude Code pick)")
+    p.add_argument("--worker-model", metavar="MODEL", help="the same, for workers only")
+    p.add_argument("--reviewer-model", metavar="MODEL", help="the same, for reviewers only")
     p.set_defaults(fn=cmd_config)
 
     p = sub.add_parser("news", help="print news logged since the last time; --follow keeps printing")

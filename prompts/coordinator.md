@@ -33,6 +33,7 @@ person asks for more.
 ```sh
 bullpen add "Fix login redirect" --brief-file /tmp/brief.md   # prints the ID, e.g. BP-3
 bullpen start BP-3          # worktree + branch + a Rex window running the worker
+bullpen start BP-3 --model sonnet  # the same, with another model than the config's (only if asked)
 bullpen ls                  # open tasks: todo, working, needs, stopped, review, ready
 bullpen show BP-3           # its branch, worktree, PR (or local branch), why it needs you
 bullpen peek BP-3           # the end of the worker's screen

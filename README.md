@@ -221,6 +221,14 @@ never). `bullpen config --prefix XY --base develop` changes the task prefix (def
 and the base branch (default: origin's default branch). The worker and coordinator
 commands are in that folder's `config.json` (`worker`, `coordinator_cmd`).
 
+`bullpen config --model opus` sets the model for workers and reviewers;
+`--worker-model` and `--reviewer-model` set one each. It takes anything `claude --model`
+does (an alias like `opus`, or a full model ID), and `default` lets Claude Code pick
+again. Bullpen adds `--model` when it starts an agent, in place of any `--model` in its
+command; it leaves other agents' commands alone. `bullpen config` shows the models in
+use, `bullpen show BP-3` the one a worker was started with, and `bullpen start BP-3
+--model sonnet` picks one for a single task.
+
 ## Tests
 
 ```sh

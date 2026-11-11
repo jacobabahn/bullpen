@@ -1308,6 +1308,106 @@ class BullpenTest(unittest.TestCase):
         self.bp("ready", tid, "--summary", "Did it.", cwd=wt)
 
 
+    # ---------- the agents' model ----------
+
+    def last_command(self):
+        cmd = self.api("session.new_layer")[-1]["layout"]["block"]["options"]["command"]
+        return cmd[cmd.index("--permission-mode"):]  # past env and the resolved program
+
+    def set_commands(self, **cmds):
+        """Edit the repo's config.json by hand, as a person would."""
+        self.bp("config")
+        path = next((self.tmp / "state").rglob("config.json"))
+        cfg = json.loads(path.read_text())
+        cfg.update(cmds)
+        path.write_text(json.dumps(cfg))
+
+    def models(self, cmd):
+        return [cmd[i + 1] for i, a in enumerate(cmd) if a == "--model"]
+
+    def test_no_model_set_leaves_the_command_alone(self):
+        tid = self.start_task()
+        self.assertNotIn("--model", self.last_command())
+        self.assertIsNone(self.show(tid).get("model"))
+        cfg = json.loads(self.bp("config").stdout)
+        self.assertEqual(cfg["models"], {"worker": "default (Claude Code picks)",
+                                         "reviewer": "default (Claude Code picks)"})
+
+    def test_config_model_sets_both_and_the_per_role_flags_one_each(self):
+        cfg = json.loads(self.bp("config", "--model", "opus").stdout)
+        self.assertEqual((cfg["worker_model"], cfg["reviewer_model"]), ("opus", "opus"))
+        self.assertEqual(cfg["models"], {"worker": "opus", "reviewer": "opus"})
+        cfg = json.loads(self.bp("config", "--reviewer-model", "sonnet").stdout)
+        self.assertEqual((cfg["worker_model"], cfg["reviewer_model"]), ("opus", "sonnet"))
+        cfg = json.loads(self.bp("config", "--worker-model", "claude-opus-4-1").stdout)
+        self.assertEqual((cfg["worker_model"], cfg["reviewer_model"]), ("claude-opus-4-1", "sonnet"))
+        cfg = json.loads(self.bp("config", "--model", "default").stdout)
+        self.assertEqual((cfg["worker_model"], cfg["reviewer_model"]), (None, None))
+
+    def test_model_is_passed_at_start_resume_and_review(self):
+        self.bp("config", "--worker-model", "opus", "--reviewer-model", "sonnet")
+        tid = self.start_task()
+        self.assertEqual(self.models(self.last_command()), ["opus"])
+        self.assertEqual(self.show(tid)["model"], "opus")
+        self.assertIn("    model: opus", self.bp("show", tid).stdout)
+        blk = self.block(tid)
+        (self.fake / "alive" / blk).unlink()
+        self.bp("_gone", blk)
+        self.bp("resume", tid)
+        cmd = self.last_command()
+        self.assertIn("--continue", cmd)
+        self.assertEqual(self.models(cmd), ["opus"])
+        self.commit_and_ready(tid)
+        self.assertEqual(self.models(self.last_command()), ["sonnet"])
+
+    def test_config_model_replaces_one_in_the_command(self):
+        self.set_commands(worker=["claude", "--permission-mode", "auto", "--model", "opus"],
+                          reviewer=["claude", "--model=haiku", "--permission-mode", "auto"])
+        cfg = json.loads(self.bp("config").stdout)
+        self.assertEqual(cfg["models"], {"worker": "opus", "reviewer": "haiku"})
+        self.bp("config", "--model", "sonnet")
+        tid = self.start_task()
+        self.assertEqual(self.models(self.last_command()), ["sonnet"])
+        self.assertEqual(self.show(tid)["model"], "sonnet")
+        self.commit_and_ready(tid)
+        cmd = self.last_command()
+        self.assertEqual(self.models(cmd), ["sonnet"])
+        self.assertFalse(any(a.startswith("--model=") for a in cmd))
+
+    def test_model_default_keeps_the_commands_own(self):
+        self.set_commands(worker=["claude", "--permission-mode", "auto", "--model", "opus"])
+        self.bp("config", "--model", "sonnet")
+        self.bp("config", "--model", "default")
+        tid = self.start_task()
+        self.assertEqual(self.models(self.last_command()), ["opus"])
+        self.assertEqual(self.show(tid)["model"], "opus")
+
+    def test_start_model_is_for_that_task_and_stays_on_resume(self):
+        self.bp("config", "--model", "opus")
+        self.bp("up")
+        tid = self.bp("add", "Fix it", "--brief", "x").stdout.strip()
+        self.bp("start", tid, "--model", "haiku")
+        self.assertEqual(self.models(self.last_command()), ["haiku"])
+        blk = self.block(tid)
+        (self.fake / "alive" / blk).unlink()
+        self.bp("_gone", blk)
+        self.bp("resume", tid)
+        self.assertEqual(self.models(self.last_command()), ["haiku"])
+        tid2 = self.bp("add", "Other", "--brief", "x").stdout.strip()
+        self.bp("start", tid2)
+        self.assertEqual(self.models(self.last_command()), ["opus"])
+
+    def test_other_agents_commands_are_left_alone(self):
+        self.set_commands(worker=["codex", "--permission-mode", "auto"])
+        cfg = json.loads(self.bp("config", "--model", "opus").stdout)
+        self.assertIn("not claude", cfg["models"]["worker"])
+        self.assertEqual(cfg["models"]["reviewer"], "opus")
+        tid = self.start_task()
+        cmd = self.api("session.new_layer")[-1]["layout"]["block"]["options"]["command"]
+        self.assertNotIn("--model", cmd)
+        self.assertIsNone(self.show(tid).get("model"))
+
+
 class LocalModeTest(unittest.TestCase):
     """A repository without an origin remote: no push, no gh; accept merges locally."""
 
