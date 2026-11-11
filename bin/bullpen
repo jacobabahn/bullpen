@@ -23,7 +23,6 @@ PROMPTS = HOME / "prompts"
 WATCH_LUA = HOME / "lua" / "watch.lua"
 STATE = Path(os.environ.get("BULLPEN_STATE") or Path.home() / ".local/state/bullpen")
 REX = os.environ.get("BULLPEN_REX", "rex")
-GH = os.environ.get("BULLPEN_GH", "gh")
 SELF = str(Path(__file__).resolve())
 
 DEFAULT_CONFIG = {
@@ -34,6 +33,7 @@ DEFAULT_CONFIG = {
     "coordinator_cmd": ["claude", "--permission-mode", "auto"],
     "coordinator": None,  # {"block": ..., "session": ...}
     "workers": "float",   # "float": minimized floating panes in the coordinator's tab; "tabs"
+    "gh": None,           # the gh program, if not the one on PATH (BULLPEN_GH wins)
 }
 
 TERMINAL = "com.superlogical.terminal.shell"
@@ -116,6 +116,9 @@ class Repo:
 
     def save(self):
         write_json(self.dir / "config.json", self.cfg)
+
+    def gh(self):
+        return os.environ.get("BULLPEN_GH") or self.cfg.get("gh") or "gh"
 
     def base(self):
         if self.cfg.get("base"):
@@ -300,9 +303,15 @@ def board_label(repo):
 
 
 def session_for(repo, args=None):
+    """The Rex session to work in: --session, else the coordinator's while it exists
+    (a Rex restart gives sessions new IDs), else the one we're running in."""
     s = getattr(args, "session", None) if args else None
-    c = repo.cfg.get("coordinator") or {}
-    return s or c.get("session") or os.environ.get("REX_SESSION")
+    c = (repo.cfg.get("coordinator") or {}).get("session")
+    if s:
+        return s
+    if c and (c == os.environ.get("REX_SESSION") or rex_view(c) is not None):
+        return c
+    return os.environ.get("REX_SESSION") or c
 
 
 # ---------- commands ----------
@@ -461,9 +470,25 @@ def relink(repo, session):
     view = rex_view(session)
     if view is None:
         return
+    known = {}
+
+    def ours(stored):
+        """Is a pane recorded in session `stored` one to look for here? Yes if it's
+        this session, or if that session no longer exists (a restart renamed it)."""
+        if stored in (None, session, view.get("session_id"), view.get("label")):
+            return True
+        if stored not in known:
+            known[stored] = rex_view(stored) is None
+        return known[stored]
+
     for key, label in (("coordinator", coordinator_label(repo)), ("board", board_label(repo))):
         c = repo.cfg.get(key)
-        if not c or find_pane(view, block=c.get("block")) or c.get("session") not in (None, session, view.get("session_id"), view.get("label")):
+        if not c or (c.get("session") == session and find_pane(view, block=c.get("block"))):
+            continue
+        if find_pane(view, block=c.get("block")):
+            c["session"] = session
+            continue
+        if not ours(c.get("session")):
             continue
         unindex_block(c.get("block"))
         hit = find_pane(view, label=label)
@@ -475,12 +500,12 @@ def relink(repo, session):
     for t in repo.tasks():
         if t["status"] in CLOSED or not t.get("block") or find_pane(view, block=t["block"]):
             continue
-        if t.get("session") not in (None, session, view.get("session_id"), view.get("label")):
+        if not ours(t.get("session")):
             continue
         unindex_block(t["block"])
         hit = find_pane(view, label=f"bullpen: {t['id']}")
         if hit:
-            t["block"] = hit[2]
+            t.update(block=hit[2], session=session)
             index_block(hit[2], repo, t["id"])
             print(f"{t['id']}: found again ({hit[2]})")
         else:
@@ -547,7 +572,7 @@ def cmd_ready(args):
     git(wt, "push", "-q", "--force-with-lease", "-u", "origin", f"HEAD:refs/heads/{t['branch']}")
     if not t.get("pr"):
         body = (summary.strip() or t["title"]) + f"\n\nBullpen task {t['id']}.\n"
-        p = run([GH, "pr", "create", "--base", t["base"], "--head", t["branch"],
+        p = run([repo.gh(), "pr", "create", "--base", t["base"], "--head", t["branch"],
                  "--title", f"{t['title']} ({t['id']})", "--body-file", "-"], cwd=wt, input=body)
         t["pr"] = p.stdout.strip().splitlines()[-1]
     t.update(status="ready", why=None, summary=summary.strip() or t.get("summary"))
@@ -569,7 +594,7 @@ def cmd_accept(args):
     if t["status"] != "ready":
         raise Fail(f"{t['id']} is {t['status']}, not ready")
     if t.get("pr"):
-        p = run([GH, "pr", "merge", t["pr"], "--squash"], cwd=repo.root, check=False)
+        p = run([repo.gh(), "pr", "merge", t["pr"], "--squash"], cwd=repo.root, check=False)
         if p.returncode != 0:
             raise Fail(f"merge refused: {(p.stderr or p.stdout).strip()}")
         git(repo.root, "push", "-q", "origin", "--delete", t["branch"], check=False)
@@ -590,7 +615,7 @@ def cmd_drop(args):
     rex_close(t["session"], t["block"])
     unindex_block(t["block"])
     if t.get("pr"):
-        run([GH, "pr", "close", t["pr"]], cwd=repo.root, check=False)
+        run([repo.gh(), "pr", "close", t["pr"]], cwd=repo.root, check=False)
     remove_worktree(repo, t, force=args.force)
     t.update(status="dropped", block=None, worktree=None)
     repo.save_task(t)
@@ -670,7 +695,8 @@ def cmd_go(args):
     repo = find_repo(args.from_block)
     session, block, name = go_target(repo, args)
     if not rex_alive(session, block):
-        relink(repo, session)  # after a Rex restart its ID changed
+        # after a Rex restart its ID changed (and maybe its session's)
+        relink(repo, args.session or os.environ.get("REX_SESSION") or session)
         repo = Repo(repo.root)
         session, block, name = go_target(repo, args)
         if not rex_alive(session, block):
@@ -943,6 +969,7 @@ def main(argv=None):
     p.add_argument("--board", action="store_true")
     p.add_argument("--from", dest="from_block", default=os.environ.get("REX_BLOCK"),
                    help="the pane you're in (default: this one)")
+    p.add_argument("--session", help="the session you're in (key bindings pass it)")
     p.add_argument("--json", action="store_true", help="print the target instead of focusing it")
     p.set_defaults(fn=cmd_go)
 

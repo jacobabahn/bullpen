@@ -24,7 +24,7 @@ function M.setup(opts)
 
   -- `bullpen go` works out which pane (from the one that's focused) and focuses it.
   local function go(ctx, flag)
-    local argv = { bin, "go", "--from", ctx.block_id or "" }
+    local argv = { bin, "go", "--from", ctx.block_id or "", "--session", ctx.session_id or "" }
     if flag then argv[#argv + 1] = flag end
     local r, err = rex.exec(argv, { env = env, timeout = 10 })
     if not r then

@@ -44,7 +44,10 @@ FAKE_REX = textwrap.dedent("""\
         print("line one\\nline two\\n\\n")
     elif a[:2] == ["api", "call"]:
         rest = a[2:]
+        sid = R.get("session", "session:1")
         if rest[0] == "-s":
+            if rest[1] not in (sid, "main"):  # a session that no longer exists
+                sys.exit(1)
             rest = rest[2:]
         method, args = rest[0], json.loads(rest[1]) if len(rest) > 1 else {}
         if method == "session.new_layer":
@@ -69,7 +72,7 @@ FAKE_REX = textwrap.dedent("""\
                                    "state": R["layers"][info["layer"]], "blocks": [entry]})
                 else:
                     tiled["blocks"].append(entry)
-            print(json.dumps({"session_id": "session:1", "label": "sess1",
+            print(json.dumps({"session_id": sid, "label": "main",
                               "windows": [{"window_id": "w1", "layers": layers}]}))
     reg.write_text(json.dumps(R))
 """)
@@ -114,7 +117,7 @@ class BullpenTest(unittest.TestCase):
         sh("git", "-C", str(self.repo), "push", "-q", "-u", "origin", "main")
         self.env = {**os.environ, "BULLPEN_STATE": str(self.tmp / "state"),
                     "BULLPEN_REX": str(fake / "rex"), "BULLPEN_GH": str(fake / "gh"),
-                    "FAKE_DIR": str(fake), "REX_SESSION": "sess1", "REX_BLOCK": "me",
+                    "FAKE_DIR": str(fake), "REX_SESSION": "session:1", "REX_BLOCK": "me",
                     "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@example.com",
                     "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@example.com"}
 
@@ -140,10 +143,14 @@ class BullpenTest(unittest.TestCase):
     def layer_states(self):
         return json.loads((self.fake / "reg.json").read_text())["layers"]
 
-    def restart_rex(self):
-        """Rex restarts: every placed pane comes back with a new ID, detached ones don't."""
+    def restart_rex(self, new_session=False):
+        """Rex restarts: every placed pane comes back with a new ID, detached ones don't.
+        With new_session, the session gets a new ID too (its label stays)."""
         reg = self.fake / "reg.json"
         R = json.loads(reg.read_text())
+        if new_session:
+            R["session"] = "session:2"
+            self.env["REX_SESSION"] = "session:2"
         for b, info in list(R["blocks"].items()):
             if (self.fake / "alive" / b).exists():
                 (self.fake / "alive" / b).unlink()
@@ -194,7 +201,7 @@ class BullpenTest(unittest.TestCase):
         self.bp("up", "--here")
         self.assertFalse(any(a[0] == "run" and "bullpen: proj" in a for a in self.rex_calls()))
         cfg = json.loads(self.bp("config").stdout)
-        self.assertEqual(cfg["coordinator"], {"block": "me", "session": "sess1"})
+        self.assertEqual(cfg["coordinator"], {"block": "me", "session": "session:1"})
 
     def test_start_makes_worktree_branch_and_pane(self):
         tid = self.start_task()
@@ -379,6 +386,26 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(len(self.api("session.new_block")), 2)  # the watcher, again
         self.bp("_event", "blk8", "blocked", "permission", "ok?")  # events reach the task
         self.assertEqual(self.show(a)["status"], "needs")
+
+    def test_up_after_a_restart_that_renamed_the_session(self):
+        tid = self.start_task()
+        self.restart_rex(new_session=True)
+        self.bp("up")
+        self.assertEqual([x[0] for x in self.rex_calls()].count("run"), 1)  # no second coordinator
+        cfg = json.loads(self.bp("config").stdout)
+        self.assertEqual(cfg["coordinator"], {"block": "blk5", "session": "session:2"})
+        self.assertEqual(self.show(tid)["block"], "blk7")
+        self.assertEqual(self.show(tid)["session"], "session:2")
+        self.assertEqual(self.show(tid)["status"], "working")
+
+    def test_go_after_a_restart_that_renamed_the_session(self):
+        tid = self.start_task()
+        self.restart_rex(new_session=True)
+        env = {k: v for k, v in self.env.items() if k != "REX_SESSION"}  # as a key binding runs it
+        p = subprocess.run([str(BULLPEN), "go", tid, "--session", "session:2", "--from", "x"],
+                           cwd=self.tmp, env=env, text=True, capture_output=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(self.block(tid), "blk7")
 
     def test_go_finds_a_pane_again_after_a_rex_restart(self):
         tid = self.start_task()
