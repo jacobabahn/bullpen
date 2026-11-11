@@ -58,7 +58,10 @@ def now():
 
 
 def run(cmd, cwd=None, check=True, input=None):
-    p = subprocess.run(cmd, cwd=cwd, input=input, text=True, capture_output=True)
+    # Never let a program read our terminal: from the board, it would wait there
+    # for keys meant for the board.
+    stdin = None if input is not None else subprocess.DEVNULL
+    p = subprocess.run(cmd, cwd=cwd, input=input, stdin=stdin, text=True, capture_output=True)
     if check and p.returncode != 0:
         msg = (p.stderr or p.stdout).strip()
         raise Fail(f"`{' '.join(map(str, cmd))}` failed: {msg}")
@@ -751,7 +754,8 @@ def cmd_accept(args):
                 cwd=repo.root, check=False)
         if p.returncode != 0:
             raise Fail(f"merge refused: {(p.stderr or p.stdout).strip()}")
-        git(repo.root, "push", "-q", "origin", "--delete", t["branch"], check=False)
+        if t.get("branch"):
+            git(repo.root, "push", "-q", "origin", "--delete", t["branch"], check=False)
     rex_close(t["session"], t["block"])
     unindex_block(t["block"])
     close_reviewer(t)
@@ -1074,6 +1078,14 @@ def cmd_board(args):
                 except curses.error:
                     pass
 
+        def busy(text):
+            """Say what's happening on the message line before something slow."""
+            h, w = scr.getmaxyx()
+            scr.move(h - 1, 0)
+            scr.clrtoeol()
+            put(h - 1, 1, fit(text, w - 2), BOLD)
+            scr.refresh()
+
         def ask(question):
             """A y/n question on the footer line."""
             h, w = scr.getmaxyx()
@@ -1259,21 +1271,24 @@ def cmd_board(args):
                     msg = f"Only a task that's ready to accept can be accepted."
                 elif ask(f"Accept {sel}? " + (f"{MERGE_VERB[repo.cfg.get('merge', 'rebase')]} {pr_short(cur['pr'])}."
                                                if cur.get("pr") else "Cleans it up.")):
-                    msg = "Accepting…"
+                    busy(f"Accepting {sel}…")
                     ok, out = bp("accept", sel)
                     msg = f"Accepted {sel}." if ok else out
             elif ch == "d":
                 if cur["status"] in CLOSED:
                     continue
                 if ask(f"Drop {sel}? Closes its PR, pane and worktree."):
+                    busy(f"Dropping {sel}…")
                     ok, out = bp("drop", sel)
                     if not ok and "uncommitted" in out and ask(f"{sel} has uncommitted changes. Discard them?"):
                         ok, out = bp("drop", sel, "--force")
                     msg = f"Dropped {sel}." if ok else out
             elif ch == "s":
+                busy(f"Starting {sel}…")
                 ok, out = bp("start", sel)
                 msg = f"Started {sel}." if ok else out
             elif ch == "r":
+                busy(f"Resuming {sel}…")
                 ok, out = bp("resume", sel)
                 msg = f"Resumed {sel}." if ok else out
             elif ch == "p":

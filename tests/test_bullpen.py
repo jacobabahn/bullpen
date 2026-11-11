@@ -107,7 +107,7 @@ FAKE_GH = textwrap.dedent("""\
     import json, os, sys
     from pathlib import Path
     d = Path(os.environ["FAKE_DIR"])
-    body = sys.stdin.read() if "--body-file" in sys.argv else ""
+    body = sys.stdin.read()  # like a gh that waits for input: it must get none
     with open(d / "gh.log", "a") as f:
         f.write(json.dumps({"argv": sys.argv[1:], "body": body}) + "\\n")
     if sys.argv[1:3] == ["pr", "create"]:
