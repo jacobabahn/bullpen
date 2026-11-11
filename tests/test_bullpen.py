@@ -41,6 +41,8 @@ FAKE_REX = textwrap.dedent("""\
         R["windows"].append(w)
         return w
 
+    if a[0] in ("send", "send-key") and (d / f"send_fails_{a[a.index('-b') + 1]}").exists():
+        sys.exit("rex: couldn't send to the block")  # what the tests make a pane refuse
     if a[0] == "run":
         b = new_block(a[a.index("--label") + 1] if "--label" in a else None, window=new_window())
         print(json.dumps({"window_id": R["blocks"][b]["window"], "block_ids": [b]}))
@@ -565,6 +567,47 @@ class BullpenTest(unittest.TestCase):
         block, line = self.typed()[-1]
         self.assertEqual(block, "blk1")
         self.assertIn("still asks for changes", line)
+
+    def test_changes_that_dont_reach_the_worker_need_you(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        self.commit_and_ready(tid)
+        (self.fake / f"send_fails_{worker}").write_text("")
+        self.verdict(tid, "changes", "The fix misses the empty case.")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("needs", "Review findings didn't reach its worker"))
+        self.assertEqual(t["review"]["verdict"], "changes")
+        line = self.news()[-1]
+        self.assertIn("BP-1's reviewer asked for changes, but the message didn't reach its worker", line)
+        self.assertIn("BP-1.review-1.findings.md", line)
+        self.assertIn("`bullpen tell BP-1`", line)
+        (self.fake / f"send_fails_{worker}").unlink()
+        self.bp("tell", tid, "Read the findings.")
+        self.assertEqual(self.show(tid)["status"], "working")
+
+    def test_an_empty_findings_file_is_refused(self):
+        tid = self.start_task()
+        self.commit_and_ready(tid)
+        empty = self.tmp / "findings.md"
+        empty.write_text("\n")
+        p = self.bp("verdict", tid, "changes", "--summary-file", str(empty), ok=False)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("is empty", p.stderr)
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["review"]["verdict"]), ("review", None))
+        self.assertEqual(list((self.tmp / "state").rglob("BP-1.review-1.findings.md")), [])
+        p = self.bp("verdict", tid, "changes", "--summary-file", str(self.tmp / "missing.md"), ok=False)
+        self.assertIn("can't read", p.stderr)
+
+    def test_an_empty_ready_summary_file_is_refused(self):
+        tid = self.start_task()
+        wt = self.show(tid)["worktree"]
+        empty = self.tmp / "summary.md"
+        empty.write_text("")
+        p = self.bp("ready", tid, "--summary-file", str(empty), cwd=wt, ok=False)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("is empty", p.stderr)
+        self.assertEqual(self.show(tid)["status"], "working")
 
     def test_changes_resume_a_worker_that_exited(self):
         tid = self.start_task()
@@ -1655,6 +1698,20 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(t["why"], "PR checks failed: test, ci/build")
         self.assertIn("`bullpen resume BP-1` restarts it", self.news_lines()[-1])
 
+    def test_feedback_that_doesnt_reach_the_worker_leaves_the_task(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        self.bp("config", "--review", "off")
+        self.commit_and_ready_no_review(tid)
+        (self.fake / f"send_fails_{worker}").write_text("")
+        self.github(statusCheckRollup=self.FAILING)
+        self.bp("_prs")
+        t = self.show(tid)
+        self.assertEqual(t["status"], "ready")
+        self.assertNotIn("sent", t.get("gh") or {})
+        self.assertIn("The message didn't reach its worker", self.news_lines()[-1])
+        self.assertIn("`bullpen tell BP-1` it", self.news_lines()[-1])
+
     def test_feedback_is_not_typed_into_a_worker_blocked_on_a_prompt(self):
         tid = self.start_task()
         worker = self.block(tid)
@@ -2426,6 +2483,16 @@ class LocalModeTest(unittest.TestCase):
         self.assertNotIn("fetch", line)
         self.assertEqual(self.news_lines()[-1],
                          "bullpen · After BP-1: BP-2 conflicts in fix.txt, sent back.")
+
+    def test_after_accept_a_conflict_that_cant_be_sent_leaves_the_task(self):
+        tid, _ = self.ready_task()
+        self.second_ready("fix.txt", "fixed differently\n")
+        (self.fake / f"send_fails_{self.show('BP-2')['block']}").write_text("")
+        self.bp("accept", tid)
+        self.assertEqual(self.show("BP-2")["status"], "ready")
+        line = self.news_lines()[-1]
+        self.assertIn("BP-2 conflicts in fix.txt, but the message didn't reach its worker", line)
+        self.assertIn("`bullpen tell BP-2` it to rebase onto main and fix them", line)
 
     def test_after_accept_a_conflict_resumes_a_worker_that_exited(self):
         tid, _ = self.ready_task()

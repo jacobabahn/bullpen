@@ -311,6 +311,16 @@ def rex_type(session, block, text):
     run([REX, "send-key", *s, "-b", block, "enter"])
 
 
+def type_to_worker(t, msg):
+    """Type msg into the task's worker. None if it went through, else why not
+    (the caller leaves the task where it was and says so)."""
+    try:
+        rex_type(t["session"], t["block"], msg)
+    except Fail as e:
+        return clip(str(e), 160)
+    return None
+
+
 def rex_focus(session, block):
     run([REX, "focus", *(["-s", session] if session else []), block])
 
@@ -1140,6 +1150,25 @@ def cmd_peek(args):
     print("\n".join(lines[-args.lines:]))
 
 
+def summary_text(args, what, required=True):
+    """The text of --summary-file (or --summary). An empty file is refused: it is a
+    write that failed (a full disk, /tmp out of inodes), not "nothing to say"."""
+    if not args.summary_file:
+        text = (args.summary or "").strip()
+        if required and not text:
+            raise Fail(f"give your {what} with --summary-file (or --summary)")
+        return text
+    try:
+        text = Path(args.summary_file).read_text().strip()
+    except OSError as e:
+        raise Fail(f"can't read {args.summary_file}: {e.strerror or e}")
+    if not text:
+        raise Fail(f"{args.summary_file} is empty, so writing your {what} to it probably failed "
+                   f"(a full disk, or /tmp out of inodes). Write it again, somewhere else if need "
+                   f"be, and rerun this command")
+    return text
+
+
 def cmd_ready(args):
     repo = Repo(repo_root())
     t = repo.task(args.id)
@@ -1148,7 +1177,7 @@ def cmd_ready(args):
         raise Fail(f"{t['id']} has no worktree")
     if git(wt, "status", "--porcelain").stdout.strip():
         raise Fail("uncommitted changes: commit (or discard) them, then run ready again")
-    summary = Path(args.summary_file).read_text() if args.summary_file else (args.summary or "")
+    summary = summary_text(args, "summary", required=False)
     if t.get("gh"):
         t["gh"].pop("sent", None)  # whatever GitHub sent it back for is answered now
     t.pop("rebased", None)  # what the board says of a rebase after an accept
@@ -1272,9 +1301,7 @@ def cmd_verdict(args):
     r = t.get("review") or {}
     if t["status"] not in ("review", "needs") or not r.get("block"):
         raise Fail(f"{t['id']} isn't in review")
-    text = (Path(args.summary_file).read_text() if args.summary_file else (args.summary or "")).strip()
-    if not text:
-        raise Fail("give your findings with --summary-file (or --summary)")
+    text = summary_text(args, "findings")
     findings = repo.dir / "briefs" / f"{t['id']}.review-{r['round']}.findings.md"
     findings.write_text(text + "\n")
     rounds = repo.cfg.get("review_rounds", 2)
@@ -1296,14 +1323,27 @@ def cmd_verdict(args):
         msg = (f"The reviewer asked for changes (review round {r['round']} of {rounds}). Read "
                f"{findings}, fix what you agree with, commit, and run your ready command again. "
                f"If you disagree with a finding, say why in your ready summary.")
-        t.update(status="working", why=None, last=None)
         if t.get("gh"):
             t["gh"].pop("sent", None)  # it's the review it is fixing now, not GitHub
-        repo.save_task(t)
         if rex_alive(t.get("session"), t.get("block")):
-            rex_type(t["session"], t["block"], msg)
+            failed = type_to_worker(t, msg)
+            if not failed:
+                t.update(status="working", why=None, last=None)
         else:
-            launch(repo, t, session_for(repo), msg, resume=True)
+            try:
+                launch(repo, t, session_for(repo), msg, resume=True)
+                failed = None
+            except Fail as e:
+                failed = clip(str(e), 160)
+        if failed:
+            # nobody is on it: the person has to pass the findings on
+            t.update(status="needs", why="Review findings didn't reach its worker")
+            repo.save_task(t)
+            news(repo, t, "not-sent", f"{t['id']}'s reviewer asked for changes, but the message didn't "
+                 f"reach its worker ({failed}). The findings are in {findings}: "
+                 f"`bullpen tell {t['id']}` it to read them")
+        else:
+            repo.save_task(t)
     else:
         t.update(status="ready", why=f"Review still asks for changes after {rounds} rounds")
         repo.save_task(t)
@@ -1581,7 +1621,10 @@ def rebase_conflict(repo, t, accepted, ref, files):
            f"{onto(ref)}, fix the conflicts, rerun the tests, commit, and run your ready "
            f"command again.")
     if rex_alive(t.get("session"), t.get("block")):
-        rex_type(t["session"], t["block"], msg)
+        failed = type_to_worker(t, msg)
+        if failed:  # left where it was
+            return (f"{t['id']} conflicts in {names}, but the message didn't reach its worker "
+                    f"({failed}): `bullpen tell {t['id']}` it to rebase onto {ref} and fix them")
         t.update(status="working", why=None, last=None)
         repo.save_task(t)
     else:
@@ -2472,7 +2515,7 @@ def worker_idle(t):
     Not when it needs you itself: it's blocked on a prompt (or failed mid-turn)."""
     if t["status"] != "needs":
         return True
-    return (t.get("why") or "").startswith(("Reviewer", "Ended its turn", "PR "))
+    return (t.get("why") or "").startswith(("Reviewer", "Review findings", "Ended its turn", "PR "))
 
 
 def send_back(repo, t, lines, ask):
@@ -2492,9 +2535,16 @@ def send_back(repo, t, lines, ask):
             news(repo, t, "pr-feedback", f"{line.rstrip('.')}. Not sent to its worker, which "
                  f"is waiting on you: `bullpen tell {t['id']}` it when it's free")
         return
+    alive = rex_alive(t.get("session"), t.get("block"))
+    failed = alive and type_to_worker(t, clip(f"{ask} Then commit and run your ready command again.", 2000))
+    if failed:  # left where it was
+        write_json(repo.task_path(t["id"]), t)
+        for line in lines:
+            news(repo, t, "pr-feedback", f"{line.rstrip('.')}. The message didn't reach its "
+                 f"worker ({failed}): `bullpen tell {t['id']}` it")
+        return
     t.setdefault("gh", {})["sent"] = True  # the board says so once its worker is on it
-    if rex_alive(t.get("session"), t.get("block")):
-        rex_type(t["session"], t["block"], clip(f"{ask} Then commit and run your ready command again.", 2000))
+    if alive:
         t.update(status="working", why=None, last=None)
         repo.save_task(t)
         for line in lines:
