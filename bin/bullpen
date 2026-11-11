@@ -716,6 +716,8 @@ def cmd_ready(args):
     if git(wt, "status", "--porcelain").stdout.strip():
         raise Fail("uncommitted changes: commit (or discard) them, then run ready again")
     summary = Path(args.summary_file).read_text() if args.summary_file else (args.summary or "")
+    if t.get("gh"):
+        t["gh"].pop("sent", None)  # whatever GitHub sent it back for is answered now
     local = not repo.has_origin()
     base_ref = task_base_ref(repo, t)
     ahead = int(git(wt, "rev-list", "--count", f"{base_ref}..HEAD").stdout.strip())
@@ -849,6 +851,8 @@ def cmd_verdict(args):
                f"{findings}, fix what you agree with, commit, and run your ready command again. "
                f"If you disagree with a finding, say why in your ready summary.")
         t.update(status="working", why=None, last=None)
+        if t.get("gh"):
+            t["gh"].pop("sent", None)  # it's the review it is fixing now, not GitHub
         repo.save_task(t)
         if rex_alive(t.get("session"), t.get("block")):
             rex_type(t["session"], t["block"], msg)
@@ -1340,7 +1344,7 @@ def status_detail(t, rounds=2):
         if r.get("verdict") == "changes":
             return f"{pr}. Review still asks for changes."
         return f"{pr}." if pr else "Done."
-    if st == "working" and pr_phrase(t):
+    if st == "working" and sent_back_by_github(t):
         return "Fixing what GitHub said."
     if st == "working" and r.get("verdict") == "changes":
         return f"Fixing what review round {r.get('round', 1)} found."
@@ -1874,11 +1878,21 @@ def feedback(pr):
     return out
 
 
+def sent_back_by_github(t):
+    """Is the worker fixing failed checks or comments from its PR? Set by `send_back`,
+    cleared by the next `ready` (or a reviewer's changes)."""
+    return bool((t.get("gh") or {}).get("sent"))
+
+
 def pr_phrase(t):
-    """The PR's latest state in a few words, for the board and `show`, or ""."""
+    """The PR's latest state in a few words, for the board and `show`, or "".
+    A working task only shows what GitHub sent it back for: anything else is
+    about the old push."""
     g = t.get("gh") or {}
     if g.get("state") in ("merged", "closed"):
         return f"{g['state']} on GitHub"
+    if t.get("status") == "working" and not sent_back_by_github(t):
+        return ""
     parts = []
     if g.get("checks"):
         parts.append(f"checks {g['checks']}")
@@ -1983,6 +1997,7 @@ def send_back(repo, t, lines, ask):
             news(repo, t, "pr-feedback", f"{line.rstrip('.')}. Not sent to its worker, which "
                  f"is waiting on you: `bullpen tell {t['id']}` it when it's free")
         return
+    t.setdefault("gh", {})["sent"] = True  # the board says so once its worker is on it
     if rex_alive(t.get("session"), t.get("block")):
         rex_type(t["session"], t["block"], clip(f"{ask} Then commit and run your ready command again.", 2000))
         t.update(status="working", why=None, last=None)

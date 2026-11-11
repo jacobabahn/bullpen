@@ -837,6 +837,10 @@ class BullpenTest(unittest.TestCase):
         calls = [json.loads(l)["argv"] for l in log.read_text().splitlines()] if log.exists() else []
         return [a for a in calls if a[:2] == ["pr", "view"]]
 
+    def detail(self, tid):
+        """The board's sentence for the task."""
+        return BoardTest.cli().task_detail(self.show(tid))
+
     def news_lines(self):
         return [l for b, l in self.typed() if b == "blk1"]
 
@@ -861,9 +865,11 @@ class BullpenTest(unittest.TestCase):
         self.assertFalse((self.fake / "alive" / reviewer).exists())  # its review is moot
         self.assertEqual(t["review"]["round"], 0)  # and doesn't use up a round
         self.assertIn("checks failing", self.bp("show", tid).stdout)
+        self.assertEqual(self.detail(tid), "Fixing what GitHub said. Checks failing.")
         # the worker runs ready again without fixing them: same commit, same failure
         self.bp("ready", tid, "--summary", "Did it.", cwd=t["worktree"])
         self.assertEqual(self.show(tid)["review"]["round"], 1)
+        self.assertNotIn("sent", self.show(tid)["gh"])
         before = len(self.typed())
         self.bp("_prs")
         self.bp("_prs")
@@ -873,6 +879,27 @@ class BullpenTest(unittest.TestCase):
         self.github(statusCheckRollup=self.FAILING, headRefOid="def")
         self.bp("_prs")
         self.assertIn("checks failed: test, ci/build", self.news_lines()[-1])
+
+    def test_review_changes_after_the_watcher_looked_say_review(self):
+        tid = self.start_task()
+        self.commit_and_ready(tid)
+        self.github(statusCheckRollup=[
+            {"__typename": "CheckRun", "name": "test", "status": "COMPLETED", "conclusion": "SUCCESS"}])
+        self.bp("_prs")
+        self.assertEqual(self.show(tid)["gh"]["checks"], "passing")
+        self.verdict(tid, "changes", "The fix misses the empty case.")
+        self.assertEqual(self.detail(tid), "Fixing what review round 1 found.")
+        self.assertNotIn("github:", self.bp("show", tid).stdout)
+
+    def test_review_changes_after_a_github_send_back_say_review(self):
+        tid = self.start_task()
+        self.commit_and_ready(tid)
+        self.github(statusCheckRollup=self.FAILING)
+        self.bp("_prs")
+        self.assertEqual(self.detail(tid), "Fixing what GitHub said. Checks failing.")
+        self.commit_and_ready(tid, 2)
+        self.verdict(tid, "changes", "The fix misses the empty case.")
+        self.assertEqual(self.detail(tid), "Fixing what review round 1 found.")
 
     def test_a_new_comment_is_forwarded_once(self):
         tid = self.start_task()
@@ -1222,13 +1249,19 @@ class LocalModeTest(unittest.TestCase):
 
 class BoardTest(unittest.TestCase):
     @classmethod
-    def setUpClass(cls):
+    def cli(cls):
+        """bin/bullpen as a module, to call its functions directly."""
         import importlib.util
         from importlib.machinery import SourceFileLoader
         loader = SourceFileLoader("bullpen_cli", str(BULLPEN))
         spec = importlib.util.spec_from_loader("bullpen_cli", loader)
-        cls.bp = importlib.util.module_from_spec(spec)
-        loader.exec_module(cls.bp)
+        mod = importlib.util.module_from_spec(spec)
+        loader.exec_module(mod)
+        return mod
+
+    @classmethod
+    def setUpClass(cls):
+        cls.bp = cls.cli()
 
     def test_groups_follow_what_you_do_next(self):
         tasks = [{"id": f"BP-{i}", "status": st} for i, st in enumerate(
@@ -1250,10 +1283,27 @@ class BoardTest(unittest.TestCase):
                          "Fixing what review round 1 found.")
         self.assertEqual(d({"status": "ready", "pr": "https://x/pull/4", "gh": {"checks": "failing", "new": 1}}),
                          "PR #4. Checks failing, 1 new comment.")
-        self.assertEqual(d({"status": "working", "gh": {"checks": "failing"}}),
+        self.assertEqual(d({"status": "working", "gh": {"checks": "failing", "sent": True}}),
                          "Fixing what GitHub said. Checks failing.")
         self.assertEqual(d({"status": "ready", "pr": "https://x/pull/4", "gh": {"state": "merged"}}),
                          "PR #4. Merged on GitHub.")
+
+    def test_a_working_task_says_who_sent_it_back(self):
+        d = self.bp.task_detail
+        gh = {"state": "open", "checks": "passing", "new": 0}
+        # a reviewer's changes, after the watcher recorded the old push's checks
+        self.assertEqual(d({"status": "working", "pr": "https://x/pull/4",
+                            "review": {"round": 1, "verdict": "changes"}, "gh": gh}),
+                         "Fixing what review round 1 found.")
+        # GitHub's, even when an earlier review round asked for changes
+        self.assertEqual(d({"status": "working", "pr": "https://x/pull/4",
+                            "review": {"round": 1, "verdict": "changes"},
+                            "gh": {"state": "open", "checks": "failing", "new": 1, "sent": True}}),
+                         "Fixing what GitHub said. Checks failing, 1 new comment.")
+        # resumed or told by the person: nothing about the old push
+        self.assertEqual(d({"status": "working", "pr": "https://x/pull/4", "gh": gh}), "")
+        self.assertEqual(self.bp.pr_phrase({"status": "working", "gh": gh}), "")
+        self.assertEqual(self.bp.pr_phrase({"status": "ready", "gh": gh}), "checks passing")
 
     def test_local_tasks_show_their_branch(self):
         d = self.bp.task_detail
