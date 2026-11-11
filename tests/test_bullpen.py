@@ -580,6 +580,167 @@ class BullpenTest(unittest.TestCase):
         self.assertNotIn("stuck", self.show(tid))
         self.assertEqual(len(self.news()), 1)  # just the permission prompt
 
+    # ----- the usage limit -----
+
+    def limit_msg(self, minutes=60):
+        """A limit message whose reset time is this many minutes from now."""
+        import datetime as dt
+        when = dt.datetime.now() + dt.timedelta(minutes=minutes)
+        return f"You've hit your 5-hour limit · resets {when.hour % 12 or 12}:{when.minute:02d}{'am' if when.hour < 12 else 'pm'}"
+
+    def limit_file(self):
+        return self.tmp / "state" / "limit.json"
+
+    def reset_passed(self, *tids):
+        """Move the noted reset time (and each task's) ten minutes into the past."""
+        import datetime as dt
+        past = (dt.datetime.now().astimezone() - dt.timedelta(minutes=10)).isoformat(timespec="seconds")
+        lim = json.loads(self.limit_file().read_text())
+        self.limit_file().write_text(json.dumps({**lim, "resets": past}))
+        for tid in tids:
+            path = next((self.tmp / "state").rglob(f"tasks/{tid}.json"))
+            t = json.loads(path.read_text())
+            t["limit"]["resets"] = past
+            path.write_text(json.dumps(t))
+
+    def test_a_limit_message_marks_the_task_with_one_news_line(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        self.bp("_event", worker, "working", "", "")
+        self.bp("_event", worker, "error", "", self.limit_msg())
+        self.bp("_event", worker, "idle", "", "")  # what follows says nothing new
+        t = self.show(tid)
+        self.assertEqual(t["status"], "working")  # not "needs": nothing for the person to do
+        self.assertEqual(t["limit"]["who"], "worker")
+        self.assertRegex(t["why"], r"^Usage limit, resets (\w{3} )?\d{1,2}:\d\d [AP]M$")
+        news = self.news()
+        self.assertEqual(len(news), 1)
+        self.assertRegex(news[0], r"^bullpen · BP-1 stopped at the usage limit, resets .*[AP]M: nothing to do, "
+                                  r"it is continued then\. `bullpen start` refuses meanwhile \(`--force` overrides\)$")
+        self.assertIn("Usage limit, resets", self.bp("ls").stdout)
+        self.assertTrue(self.limit_file().exists())
+
+    def test_a_limit_message_only_on_screen_is_found(self):
+        tid = self.start_task()
+        (self.fake / "screen").write_text(f"● Working on it\n  ⎿ {self.limit_msg()}\n\n❯ \n")
+        self.bp("_event", self.block(tid), "error", "", "API error")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["limit"]["who"]), ("working", "worker"))
+        self.assertIn("stopped at the usage limit", self.news()[-1])
+
+    def test_a_finished_turn_is_not_a_limit_whatever_the_screen_says(self):
+        tid = self.start_task()
+        (self.fake / "screen").write_text(f"I added the text '{self.limit_msg()}' to the tests.\n")
+        self.bp("_event", self.block(tid), "done", "", "")
+        t = self.show(tid)
+        self.assertEqual(t["status"], "needs")
+        self.assertNotIn("limit", t)
+        self.assertFalse(self.limit_file().exists())
+
+    def test_start_is_refused_at_the_limit_unless_forced(self):
+        tid = self.start_task()
+        self.bp("_event", self.block(tid), "error", "", self.limit_msg())
+        tid2 = self.bp("add", "Another", "--brief", "x").stdout.strip()
+        p = self.bp("start", tid2, ok=False)
+        self.assertEqual(p.returncode, 1)
+        self.assertRegex(p.stderr, r"usage limit is reached \(resets .*[AP]M\)")
+        self.assertIn("--force", p.stderr)
+        self.assertEqual(self.show(tid2)["status"], "todo")
+        self.assertIsNone(self.show(tid2)["worktree"])
+        self.bp("start", tid2, "--force")
+        self.assertEqual(self.show(tid2)["status"], "working")
+
+    def test_start_works_again_once_a_limited_worker_is_working(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        self.bp("_event", worker, "error", "", self.limit_msg())
+        self.bp("_event", worker, "working", "", "")  # the person continued it, or Claude Code did
+        t = self.show(tid)
+        self.assertNotIn("limit", t)
+        self.assertEqual((t["status"], t["why"]), ("working", None))
+        tid2 = self.bp("add", "Another", "--brief", "x").stdout.strip()
+        self.bp("start", tid2)
+        self.assertEqual(self.show(tid2)["status"], "working")
+
+    def test_start_works_again_after_the_reset_time(self):
+        tid = self.start_task()
+        self.bp("_event", self.block(tid), "error", "", self.limit_msg())
+        self.reset_passed()
+        tid2 = self.bp("add", "Another", "--brief", "x").stdout.strip()
+        self.bp("start", tid2)
+        self.assertEqual(self.show(tid2)["status"], "working")
+
+    def test_limited_tasks_are_continued_after_the_reset(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        self.bp("_event", worker, "error", "", self.limit_msg())
+        tid2 = self.bp("add", "Another", "--brief", "x").stdout.strip()
+        self.bp("start", tid2, "--force")
+        worker2 = self.block(tid2)
+        self.bp("_event", worker2, "error", "", self.limit_msg())
+        self.assertIn("BP-2 stopped at the usage limit", self.news()[-1])
+        self.assertNotIn("bullpen start", self.news()[-1])  # said once, with the first
+        (self.fake / "alive" / worker2).unlink()  # its pane goes meanwhile
+        self.bp("_gone", worker2)
+        self.assertEqual(self.show(tid2)["status"], "working")  # still waiting for the reset
+        before = len(self.typed())
+        self.bp("_limit")  # not yet
+        self.assertEqual(len(self.typed()), before)
+        self.reset_passed(tid, tid2)
+        self.bp("_limit")
+        self.assertIn((worker, "The usage limit has reset. Carry on where you stopped."), self.typed())
+        cmd = self.api("session.new_layer")[-1]["layout"]["block"]["options"]["command"]
+        self.assertIn("--continue", cmd)  # BP-2, resumed in a new pane
+        self.assertEqual(self.news()[-1], "bullpen · the usage limit has reset: continued BP-1, "
+                                          "BP-2 (its pane was gone: resumed in a new one)")
+        for t in (self.show(tid), self.show(tid2)):
+            self.assertEqual((t["status"], t["why"]), ("working", None))
+            self.assertNotIn("limit", t)
+        self.assertFalse(self.limit_file().exists())
+        n = len(self.typed())
+        self.bp("_limit")  # nothing left to do
+        self.assertEqual(len(self.typed()), n)
+
+    def test_an_unreadable_reset_time_is_not_continued(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        self.bp("_event", worker, "error", "", "Usage limit reached")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("working", "Usage limit, reset time unknown"))
+        self.assertIsNone(t["limit"]["resets"])
+        self.assertIn("its reset time couldn't be read, so it won't be continued by itself: "
+                      "`bullpen tell BP-1 continue`", self.news()[-1])
+        before = len(self.typed())
+        self.bp("_limit")
+        self.assertEqual(len(self.typed()), before)
+        self.assertIn("limit", self.show(tid))
+        tid2 = self.bp("add", "Another", "--brief", "x").stdout.strip()
+        self.assertIn("reset time unknown", self.bp("start", tid2, ok=False).stderr)
+
+    def test_a_limited_reviewer_is_continued_too(self):
+        tid = self.start_task()
+        reviewer = self.commit_and_ready(tid)
+        self.bp("_event", reviewer, "error", "", self.limit_msg())
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["limit"]["who"]), ("review", "reviewer"))
+        self.assertIn("BP-1's reviewer stopped at the usage limit", self.news()[-1])
+        self.reset_passed(tid)
+        self.bp("_limit")
+        self.assertIn((reviewer, "The usage limit has reset. Carry on where you stopped."), self.typed())
+        self.assertEqual(self.news()[-1], "bullpen · the usage limit has reset: continued BP-1's reviewer")
+        self.assertEqual(self.show(tid)["status"], "review")
+
+    def test_a_limit_stays_with_the_screen_that_showed_it(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        (self.fake / "screen").write_text(f"  ⎿ {self.limit_msg()}\n")
+        self.bp("_event", worker, "error", "", "")
+        self.bp("_event", worker, "working", "", "")  # continued; the old line is still on screen
+        self.bp("_event", worker, "idle", "", "")
+        t = self.show(tid)
+        self.assertEqual(t["status"], "needs")  # an ordinary end of turn
+        self.assertNotIn("limit", t)
+
     def test_stuck_after_zero_turns_it_off(self):
         tid = self.start_task()
         self.assertEqual(json.loads(self.bp("config").stdout)["stuck_after"], 20)
@@ -1735,6 +1896,48 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(d(moved), "Reviewer on round 1 of 2.")
         self.assertFalse(self.bp.is_stuck({"status": "working"}))
 
+    def test_a_limited_task_says_when_it_resets(self):
+        import datetime as dt
+        at = dt.datetime(2026, 11, 11, 13, 0).astimezone()
+        d = lambda t: self.bp.limit_detail(t, at)
+        lim = {"who": "worker", "resets": at.replace(hour=15).isoformat(), "text": "x"}
+        t = {"status": "working", "limit": lim}
+        self.assertTrue(self.bp.is_limited(t))
+        self.assertEqual(d(t), "Usage limit, resets 3:00 PM. Continues by itself then.")
+        self.assertEqual(self.bp.limit_why(lim, at), "Usage limit, resets 3:00 PM")
+        self.assertEqual(d({"status": "working", "limit": {**lim, "resets": None}}),
+                         "Usage limit, reset time unknown. t tells it to continue.")
+        self.assertEqual(d({"status": "review", "limit": {**lim, "who": "reviewer"}}),
+                         "Reviewer stopped at the usage limit, resets 3:00 PM. Continues by itself then.")
+        self.assertIn("Usage limit, resets", self.bp.task_detail(t))
+        # a worker's limit says nothing about a task that has moved on
+        self.assertFalse(self.bp.is_limited({"status": "ready", "limit": lim}))
+
+    def test_reset_times_are_read(self):
+        import datetime as dt
+        at = dt.datetime(2026, 11, 11, 13, 0).astimezone()  # a Wednesday, 1 PM
+        when = lambda text: self.bp.limit_reset(text, at)
+        day = lambda d, h, m=0: dt.datetime(2026, 11, d, h, m).astimezone()
+        self.assertEqual(when("You've hit your 5-hour limit · resets 3pm"), day(11, 15))
+        self.assertEqual(when("You've hit your session limit · resets 3:45pm"), day(11, 15, 45))
+        self.assertEqual(when("Resets at 3:10 PM"), day(11, 15, 10))
+        self.assertEqual(when("resets 15:00"), day(11, 15))
+        self.assertEqual(when("You've hit your Opus limit · resets 9am"), day(12, 9))  # tomorrow
+        self.assertEqual(when("resets 12:58pm"), day(11, 12, 58))  # just gone: now, not tomorrow
+        self.assertEqual(when("You've hit your weekly limit · resets Mon 12:00am"), day(16, 0))
+        self.assertEqual(when("weekly limit · resets Nov 14, 3pm · progress saved"), day(14, 15))
+        self.assertEqual(when("Claude AI usage limit reached|1794430800"),
+                         dt.datetime.fromtimestamp(1794430800).astimezone())
+        ny = when("Claude usage limit reached. Your limit will reset at 3pm (America/New_York).")
+        self.assertEqual((ny.utcoffset(), ny.astimezone(dt.timezone.utc).hour),
+                         (at.utcoffset(), 20))  # 3 PM in New York, told in local time
+        for text in ("Usage limit reached", "spend limit reached · resets Aug 8", "resets in 8 minutes",
+                     "resets 3", "resets 13pm", "resets 3pm (Nowhere/Land)"):
+            self.assertIsNone(when(text), text)
+        self.assertEqual(self.bp.clock(day(11, 15), at), "3:00 PM")
+        self.assertEqual(self.bp.clock(day(16, 0), at), "Mon 12:00 AM")
+        self.assertEqual(self.bp.clock(day(30, 9, 5), at), "Nov 30 9:05 AM")
+
     def test_fit_and_age(self):
         import datetime as dt
         self.assertEqual(self.bp.fit("Add a done command", 10), "Add a don…")
@@ -1815,6 +2018,9 @@ tick(61)
 tick(62)
 handlers["block_closed"]({}, { block_id = "blk1" })
 tick(200)
+timers[30]()                              -- no limit noted: nothing to call
+local f = io.open(args.state .. "/limit.json", "w") f:write("{}") f:close()
+timers[30]()
 return table.concat(calls, "|")
 """
 
@@ -1848,6 +2054,7 @@ class WatcherTest(unittest.TestCase):
             "_event blk1 working  Testing",  # the event that ends the spell
             "_stuck blk1 20",              # quiet again from minute 42
             "_gone blk1",
+            "_limit",                      # only while <state>/limit.json exists
         ])
 
 

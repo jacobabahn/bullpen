@@ -94,6 +94,8 @@ bullpen · BP-6 failed: ...
 bullpen · BP-7 stopped before saying ready: `bullpen resume BP-7` continues it
 bullpen · BP-9 has shown no progress for 20 min: `bullpen peek BP-9`
 bullpen · BP-9's reviewer has shown no progress for 20 min: `bullpen go BP-9 --review` shows it
+bullpen · BP-4 stopped at the usage limit, resets 3:00 PM: nothing to do, it is continued then. `bullpen start` refuses meanwhile (`--force` overrides)
+bullpen · the usage limit has reset: continued BP-4, BP-6's reviewer
 bullpen · BP-3's PR checks failed: test. Sent back to its worker.
 bullpen · BP-3's PR has 1 new comment: ann Please cover logout too. Sent back to its worker.
 bullpen · BP-3's PR #12 was merged outside bullpen: `bullpen accept BP-3` cleans up
@@ -114,6 +116,14 @@ bullpen · BP-9 dropped
   Hung on a command or going in circles: `bullpen tell` it what you see. Waiting
   on the person (a prompt): tell them. For a reviewer, tell the person; you can't
   type to it. You hear of each quiet spell once.
+- Stopped at the usage limit: you, the workers and the reviewers share one
+  subscription, and it has run out until the time given. Nothing to do: don't
+  `tell` or `resume` the task, and don't ask the person. Bullpen continues it
+  after the reset and says so. Until then `bullpen start` refuses, and a worker
+  started with `--force` would stop at once: leave queued tasks queued, and use
+  `--force` only if the person asks. If the news says the reset time couldn't be
+  read, bullpen won't continue the task: tell the person, and `bullpen tell <ID>
+  continue` when they say the limit has reset.
 - Ready: tell the person in one or two lines what it did and what review said
   (`bullpen show <ID>` has the summary; findings are in the review files it
   names), and that it waits for their accept: `a` on the board, or ask you.

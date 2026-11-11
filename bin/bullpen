@@ -711,6 +711,11 @@ def cmd_start(args):
     t = repo.task(args.id)
     if t["status"] not in ("todo", "stopped"):
         raise Fail(f"{t['id']} is {t['status']}; use `resume` or `tell`")
+    lim = None if args.force else limit_active()
+    if lim:
+        raise Fail(f"the usage limit is reached ({limit_phrase(lim.get('resets'))}): a worker started "
+                   f"now would stop at once. `start` works again after the reset, or once a "
+                   f"limited worker is working again; `start {t['id']} --force` starts it anyway")
     session = session_for(repo, args)
     if not session:
         raise Fail("no Rex session: run `bullpen up` first or pass --session")
@@ -813,7 +818,7 @@ def relink(repo, session):
             print(f"{t['id']}: found again ({hit[2]})")
         else:
             t["block"] = None
-            if t["status"] in ("working", "needs"):
+            if t["status"] in ("working", "needs") and not is_limited(t):  # a limited one is resumed later
                 t.update(status="stopped", why="Its pane was gone")
         repo.save_task(t)
     relink_reviewers(repo, session, view)
@@ -1552,6 +1557,8 @@ def status_detail(t, rounds=2):
         if t["stuck"]["who"] == "reviewer":
             return f"Reviewer has shown {quiet}. ⏎ opens it."
         return f"{quiet[0].upper()}{quiet[1:]}. p shows its screen."
+    if is_limited(t):
+        return limit_detail(t)
     if st == "needs":
         why = t.get("why") or ""
         if why == "Ended its turn without saying ready":
@@ -1958,8 +1965,10 @@ def cmd_event(args):
     state, msg = args.state, (args.msg or "").strip()
     key = f"{state}|{msg}"
     woke = unstick(t, "worker")
+    if state != "working" and (limited(t, "worker") or limit_hit(repo, t, "worker", args)):
+        return
     if state == "working":
-        if t["status"] in ("needs", "stopped"):
+        if t["status"] in ("needs", "stopped") or limit_over(t):
             t.update(status="working", why=None)
         t["last"] = key
         repo.save_task(t)
@@ -1997,10 +2006,13 @@ def review_event(repo, t, args):
     state, msg = args.state, (args.msg or "").strip()
     stuck = t["status"] == "needs" and (t.get("why") or "").startswith("Reviewer")
     woke = unstick(t, "reviewer")
+    if state != "working" and (limited(t, "reviewer") or limit_hit(repo, t, "reviewer", args)):
+        return
     if state == "working":
-        if stuck:
+        back = limit_over(t)
+        if stuck or back:
             t.update(status="review", why=None)
-        if stuck or woke:
+        if stuck or woke or back:
             repo.save_task(t)
     elif state == "blocked":
         why = f"Reviewer needs you ({args.kind or 'input'})" + (f": {msg}" if msg else "")
@@ -2074,7 +2086,9 @@ def cmd_gone(args):
         r = t.get("review") or {}
         if r.get("block") == args.block:
             r["block"] = None
-            if t["status"] in ("review", "needs") and not r.get("verdict"):
+            if limited(t, "reviewer"):
+                pass  # started again when the limit resets
+            elif t["status"] in ("review", "needs") and not r.get("verdict"):
                 t.update(status="needs", why="Reviewer exited without a verdict")
                 news(repo, t, "stopped", f"{t['id']}'s reviewer exited without a verdict")
             repo.save_task(t)
@@ -2083,12 +2097,254 @@ def cmd_gone(args):
     if t["block"] != args.block:
         return
     t["block"] = None
-    if t["status"] in ("working", "needs"):
+    if limited(t, "worker"):
+        repo.save_task(t)  # resumed when the limit resets
+    elif t["status"] in ("working", "needs"):
         t.update(status="stopped", why="Agent exited before saying ready")
         repo.save_task(t)
         news(repo, t, "stopped", f"{t['id']} stopped before saying ready: `bullpen resume {t['id']}` continues it")
     else:
         repo.save_task(t)
+
+
+# ---------- the usage limit (called by lua/watch.lua) ----------
+#
+# Every agent shares one subscription. An agent that reaches its usage limit stops
+# with a line like "You've hit your 5-hour limit · resets 3pm": Claude Code reports
+# that turn as `error` (or just goes idle), with the line as the record's msg or
+# only on its screen. Nothing for the person to do: the task keeps its status,
+# carries a `limit` and is continued after the reset. <state>/limit.json holds the
+# limit for every repo while it lasts; `start` refuses meanwhile.
+
+LIMIT_FILE = STATE / "limit.json"
+LIMIT_RE = re.compile(r"you['’]ve hit your [\w' -]*limit|usage limit reached|limit will reset"
+                      r"|out of usage credits", re.I)
+LIMIT_GRACE = 120          # seconds after the reset before continuing: Claude Code may do it itself
+LIMIT_FORGET = 5 * 3600    # seconds a limit with no known reset time holds `start` back
+LIMIT_CONTINUE = "The usage limit has reset. Carry on where you stopped."
+DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+RESET_RE = re.compile(
+    r"resets?(?:\s+at)?\s+"
+    rf"(?:(?P<day>{'|'.join(DAYS)})[a-z]*,?\s+)?"
+    rf"(?:(?P<month>{'|'.join(MONTHS)})[a-z]*\.?\s+(?P<date>\d{{1,2}})(?:,|\s+at)?\s+)?"
+    r"(?P<h>\d{1,2})(?::(?P<m>\d{2}))?\s*(?P<ap>[ap])?(?(ap)\.?m\b\.?)"
+    r"(?:\s*\((?P<tz>[A-Za-z_]+(?:/[A-Za-z0-9_+-]+)*)\))?", re.I)
+
+
+def limit_reset(text, at=None):
+    """When a limit message says the limit resets, as a local time, or None if it
+    doesn't say so in a way we can read. Reads "resets 3pm", "resets 3:45pm",
+    "resets Mon 12:00am", "resets Oct 9, 3pm", "reset at 3pm (America/New_York)"
+    and "resets 15:00"; a time with no date is the next time the clock shows it."""
+    at = at or dt.datetime.now().astimezone()
+    m = re.search(r"limit reached\|(\d{10})\b", text)  # older Claude Code: a Unix time
+    if m:
+        return dt.datetime.fromtimestamp(int(m.group(1))).astimezone()
+    m = RESET_RE.search(text)
+    if not m or not (m["ap"] or m["m"]):
+        return None
+    hour, minute = int(m["h"]), int(m["m"] or 0)
+    if m["ap"]:
+        if not 1 <= hour <= 12:
+            return None
+        hour = hour % 12 + (12 if m["ap"].lower() == "p" else 0)
+    if hour > 23 or minute > 59:
+        return None
+    here = at
+    if m["tz"]:
+        try:
+            import zoneinfo
+            here = at.astimezone(zoneinfo.ZoneInfo(m["tz"]))
+        except Exception:
+            return None
+    when = here.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    slack = dt.timedelta(minutes=5)  # a time just gone is now, not tomorrow
+    if m["month"]:
+        try:
+            when = when.replace(month=MONTHS.index(m["month"].lower()) + 1, day=int(m["date"]))
+        except ValueError:
+            return None
+        if when < here - dt.timedelta(days=1):
+            when = when.replace(year=when.year + 1)
+    elif m["day"]:
+        when += dt.timedelta(days=(DAYS.index(m["day"].lower()) - when.weekday()) % 7)
+        if when <= here - slack:
+            when += dt.timedelta(days=7)
+    elif when <= here - slack:
+        when += dt.timedelta(days=1)
+    return when.astimezone()
+
+
+def clock(when, at=None):
+    """ "3:00 PM", with the day when it isn't today: "Mon 12:00 AM", "Oct 9 3:00 PM"."""
+    at = (at or dt.datetime.now().astimezone()).astimezone()
+    when = when.astimezone()
+    text = f"{when.hour % 12 or 12}:{when.minute:02d} {'AM' if when.hour < 12 else 'PM'}"
+    days = (when.date() - at.date()).days
+    if days == 0:
+        return text
+    return (f"{when:%a} " if 0 < days < 7 else f"{when:%b} {when.day} ") + text
+
+
+def limit_phrase(resets, at=None):
+    """ "resets 3:00 PM" for a stored reset time, "reset time unknown" for none."""
+    return f"resets {clock(dt.datetime.fromisoformat(resets), at)}" if resets else "reset time unknown"
+
+
+def limit_active(at=None):
+    """The usage limit in force ({"at", "resets", "text"}), or None. It holds until
+    its reset time; one with no known reset time, for LIMIT_FORGET seconds."""
+    lim = read_json(LIMIT_FILE)
+    if not lim:
+        return None
+    if lim.get("resets"):
+        return lim if seconds_since(lim["resets"], at) < 0 else None
+    return lim if seconds_since(lim["at"], at) < LIMIT_FORGET else None
+
+
+def limited(t, who):
+    """Is this agent of the task (its "worker" or its "reviewer") stopped at the limit?"""
+    return is_limited(t) and t["limit"]["who"] == who
+
+
+def is_limited(t):
+    """Is the agent the task is waiting on stopped at the usage limit?"""
+    lim = t.get("limit")
+    return bool(lim) and t["status"] == ("review" if lim["who"] == "reviewer" else "working")
+
+
+def limit_why(lim, at=None):
+    return f"Usage limit, {limit_phrase(lim.get('resets'), at)}"
+
+
+def limit_detail(t, at=None):
+    """The board's line for a task stopped at the limit."""
+    lim = t["limit"]
+    who = "Reviewer stopped at the usage limit" if lim["who"] == "reviewer" else "Usage limit"
+    if lim.get("resets"):
+        return f"{who}, {limit_phrase(lim['resets'], at)}. Continues by itself then."
+    return f"{who}, reset time unknown. " + ("⏎ opens it." if lim["who"] == "reviewer"
+                                             else "t tells it to continue.")
+
+
+def limit_text(session, block, state, msg, seen=None):
+    """The limit message an agent stopped with, or None. It is the record's msg, or
+    (for a turn that failed or went idle, not one that finished) among the last
+    lines of its screen. A screen still showing the message we've already acted on
+    (`seen`) says nothing new."""
+    if LIMIT_RE.search(msg):
+        return msg
+    if state not in ("error", "idle"):
+        return None
+    p = run([REX, "capture", *(["-s", session] if session else []), "-b", block], check=False)
+    lines = [" ".join(l.split()) for l in p.stdout.splitlines() if l.strip()][-15:]
+    for i in range(len(lines) - 1, -1, -1):
+        if LIMIT_RE.search(lines[i]):
+            text = clip(" ".join(lines[i:i + 2]), 200)  # with the next line: it may have wrapped
+            return None if text == seen else text
+    return None
+
+
+def limit_hit(repo, t, who, args):
+    """Did this event say the agent stopped at the usage limit? Then note it on the
+    task and for `start`, with one line of news, and return True."""
+    r = t.get("review") or {}
+    session = r.get("session") if who == "reviewer" else t.get("session")
+    text = limit_text(session, args.block, args.state, (args.msg or "").strip(), t.get("limit_seen"))
+    if not text:
+        return False
+    text = clip(text, 200)
+    before = limit_active()
+    when = limit_reset(text)
+    resets = when.isoformat(timespec="seconds") if when else (before or {}).get("resets")
+    write_json(LIMIT_FILE, {"at": now(), "resets": resets, "text": text})
+    name = f"{t['id']}'s reviewer" if who == "reviewer" else t["id"]
+    waits = t["status"] in (("review", "needs") if who == "reviewer" else ("working", "needs", "stopped"))
+    if waits:  # else the task doesn't wait on this agent: nothing to continue later
+        lim = {"who": who, "at": now(), "resets": resets, "text": text}
+        t.update(status="review" if who == "reviewer" else "working", limit=lim, why=limit_why(lim))
+        t["last"] = f"{args.state}|{(args.msg or '').strip()}" if who == "worker" else t.get("last")
+        repo.save_task(t)
+    if resets:
+        line = f"{name} stopped at the usage limit, {limit_phrase(resets)}: nothing to do" + \
+            (", it is continued then" if waits else "")
+    elif who == "reviewer":
+        line = (f"{name} stopped at the usage limit, and its reset time couldn't be read, so it won't "
+                f"be continued by itself: `bullpen go {t['id']} --review` shows it")
+    else:
+        line = (f"{name} stopped at the usage limit, and its reset time couldn't be read, so it won't "
+                f"be continued by itself: `bullpen tell {t['id']} continue` once the limit has reset")
+    if not before:
+        line += ". `bullpen start` refuses meanwhile (`--force` overrides)"
+    news(repo, t, "limit", line)
+    return True
+
+
+def limit_over(t):
+    """The agent the task waits on is working again: forget its limit, and the one
+    that held `start` back. True if it was limited."""
+    if not is_limited(t):
+        return False
+    t["limit_seen"] = t.pop("limit")["text"]
+    LIMIT_FILE.unlink(missing_ok=True)
+    return True
+
+
+def cmd_limit(args):
+    """(watcher) once the limit has reset, continue the agents that stopped at it."""
+    if not LIMIT_FILE.exists():
+        return
+    waiting = False
+    for cfg in (STATE / "repos").glob("*/config.json"):
+        root = read_json(cfg, {}).get("root")
+        if not root or not Path(root).is_dir():
+            continue
+        repo = Repo(root)
+        repo.dir = cfg.parent
+        repo.cfg = {**DEFAULT_CONFIG, **read_json(cfg, {})}
+        done = []
+        for t in repo.tasks():
+            resets = (t.get("limit") or {}).get("resets")
+            if not is_limited(t) or not resets:
+                continue  # no known reset time: the person (or coordinator) continues it
+            if seconds_since(resets) < LIMIT_GRACE:
+                waiting = True
+                continue
+            done.append((t, continue_limited(repo, t)))
+        if done:
+            news(repo, done[0][0], "limit-reset",
+                 "the usage limit has reset: continued " + ", ".join(said for _, said in done))
+    if not waiting and not limit_active():
+        LIMIT_FILE.unlink(missing_ok=True)
+
+
+def continue_limited(repo, t):
+    """Tell the task's limited agent to carry on, in a new pane if its old one is
+    gone. Returns what to call it in the news."""
+    lim = t.pop("limit")
+    t.update(limit_seen=lim["text"], why=None)
+    r = t.get("review") or {}
+    try:
+        if lim["who"] == "reviewer":
+            if rex_alive(r.get("session"), r.get("block")):
+                rex_type(r["session"], r["block"], LIMIT_CONTINUE)
+                repo.save_task(t)
+                return f"{t['id']}'s reviewer"
+            r["round"] = max(0, r.get("round", 1) - 1)  # the round it didn't finish
+            start_review(repo, t, task_base_ref(repo, t))
+            return f"{t['id']}'s reviewer (its pane was gone: started again)"
+        if rex_alive(t.get("session"), t.get("block")):
+            rex_type(t["session"], t["block"], LIMIT_CONTINUE)
+            t["last"] = None
+            repo.save_task(t)
+            return t["id"]
+        launch(repo, t, session_for(repo) or t.get("session"), LIMIT_CONTINUE, resume=True)
+        return f"{t['id']} (its pane was gone: resumed in a new one)"
+    except Fail as e:
+        t.update(status="needs", why=f"Couldn't be continued after the usage limit: {clip(str(e), 120)}")
+        repo.save_task(t)
+        return f"{t['id']} (not continued, it needs you: {clip(str(e), 120)})"
 
 
 # ---------- following pull requests after ready (called by lua/watch.lua) ----------
@@ -2337,6 +2593,7 @@ def main(argv=None):
     p.add_argument("id")
     p.add_argument("--model", help="claude's --model for this task's worker, over the config's")
     p.add_argument("--session")
+    p.add_argument("--force", action="store_true", help="start even while the usage limit is reached")
     p.set_defaults(fn=cmd_start)
 
     p = sub.add_parser("resume", help="restart a stopped worker, continuing its conversation")
@@ -2443,6 +2700,9 @@ def main(argv=None):
 
     p = sub.add_parser("_prs")
     p.set_defaults(fn=cmd_prs)
+
+    p = sub.add_parser("_limit")
+    p.set_defaults(fn=cmd_limit)
 
     p = sub.add_parser("_gone")
     p.add_argument("block")

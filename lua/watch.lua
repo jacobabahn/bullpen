@@ -104,6 +104,13 @@ rex.every(pr_every, function()
   if f then f:close() call("_prs") end
 end)
 
+-- Agents stopped at the usage limit are continued once it has reset:
+-- <state>/limit.json exists while a limit is noted.
+rex.every(30, function()
+  local f = io.open(state_dir .. "/limit.json", "r")
+  if f then f:close() call("_limit") end
+end)
+
 -- Working panes with no event for too long: hung, in a loop, or waiting on
 -- something Rex doesn't call blocked.
 rex.every(60, function()
