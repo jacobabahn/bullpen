@@ -1,6 +1,6 @@
 -- bullpen watcher: forwards status changes of bullpen panes to the bullpen CLI.
 --
---   rex do --all watch.lua bin=/path/to/bullpen state=/path/to/state [quiet=30]
+--   rex do --all watch.lua bin=/path/to/bullpen state=/path/to/state [quiet=30] [prs=120]
 --
 -- Only panes bullpen started (listed in <state>/blocks/) are forwarded, and
 -- only when their state changes, so a worker's stream of "working: ..."
@@ -71,6 +71,15 @@ rex.on("block_closed", gone)
 rex.every(3, function()
   local f = io.open(state_dir .. "/outbox", "r")
   if f then f:close() call("_flush") end
+end)
+
+-- Pull requests past ready (failed checks, people's comments, a merge outside
+-- bullpen): <state>/prs exists while any task has one to follow, so with none
+-- this costs a file check, not a `gh` call.
+local pr_every = tonumber(rex.args.prs or "") or 120 -- seconds
+rex.every(pr_every, function()
+  local f = io.open(state_dir .. "/prs", "r")
+  if f then f:close() call("_prs") end
 end)
 
 print("bullpen watcher: listening")

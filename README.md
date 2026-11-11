@@ -68,6 +68,23 @@ to accept once review approves, or after the last round with the open findings
 listed. `bullpen config --review off` skips review; `review_rounds` and
 `reviewer` in the repo's `config.json` set the rounds and the reviewer's command.
 
+### After ready
+
+While a task waits in review or for you, the watcher looks at its pull request
+every 2 minutes (one `gh pr view` per PR; none when no task has one open):
+
+- A check that fails: news (`BP-3's PR checks failed: test`), and the worker is
+  told which checks failed, to fix them and run `ready` again. The task goes
+  back to working, and a review still running is stopped (its round doesn't count).
+- New comments, or changes requested, by people on GitHub (not bots, not
+  approvals): the same, with the comment text.
+- A PR merged or closed on GitHub: one news line saying so. Nothing else changes:
+  `bullpen accept` (merged) or `drop` (closed) cleans up.
+
+Each failure or comment is reported once. If the worker's pane is gone, the task
+needs you instead. The board and `show` say what GitHub last said ("checks
+failing", "1 new comment"). In local mode there's no PR, so nothing is looked at.
+
 ### Keys
 
 `bullpen keys` prints a line to add to your Rex config (`init.lua`). It defines
@@ -145,5 +162,4 @@ The tests use fake `rex` and `gh` programs and a local bare repository as origin
 ## Not yet
 
 - Dependencies between tasks and a run queue: the coordinator holds tasks back itself.
-- Hearing about pull request checks or reviews after `ready`.
 - Noticing a worker that's working but stuck for a long time.

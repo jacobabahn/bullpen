@@ -113,6 +113,9 @@ FAKE_GH = textwrap.dedent("""\
         f.write(json.dumps({"argv": sys.argv[1:], "body": body}) + "\\n")
     if sys.argv[1:3] == ["pr", "create"]:
         print("https://github.com/me/repo/pull/7")
+    elif sys.argv[1:3] == ["pr", "view"]:
+        pr = d / "pr.json"  # what the tests say GitHub has on the PR
+        print(pr.read_text() if pr.exists() else json.dumps({"state": "OPEN"}))
 """)
 
 
@@ -720,6 +723,140 @@ class BullpenTest(unittest.TestCase):
         out = self.bp("go", tid, "--json", "--from", "nowhere", cwd=self.tmp).stdout
         self.assertEqual(json.loads(out)["block"], self.block(tid))
 
+    # ---- following the PR after ready ----
+
+    def github(self, **pr):
+        """What `gh pr view` says about the PR from now on."""
+        (self.fake / "pr.json").write_text(json.dumps({"state": "OPEN", "headRefOid": "abc",
+            "statusCheckRollup": [], "reviews": [], "comments": [], **pr}))
+
+    def gh_views(self):
+        log = self.fake / "gh.log"
+        calls = [json.loads(l)["argv"] for l in log.read_text().splitlines()] if log.exists() else []
+        return [a for a in calls if a[:2] == ["pr", "view"]]
+
+    def news_lines(self):
+        return [l for b, l in self.typed() if b == "blk1"]
+
+    FAILING = [{"__typename": "CheckRun", "name": "test", "status": "COMPLETED", "conclusion": "FAILURE"},
+               {"__typename": "CheckRun", "name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS"},
+               {"__typename": "StatusContext", "context": "ci/build", "state": "ERROR"}]
+
+    def test_a_failing_check_goes_back_to_the_worker_once(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        reviewer = self.commit_and_ready(tid)
+        self.assertTrue((self.tmp / "state" / "prs").exists())
+        self.github(statusCheckRollup=self.FAILING)
+        self.bp("_prs")
+        self.assertEqual(self.news_lines()[-1],
+                         "bullpen · BP-1's PR checks failed: test, ci/build. Sent back to its worker.")
+        line = [l for b, l in self.typed() if b == worker][-1]
+        self.assertIn("test, ci/build", line)
+        self.assertIn("ready command again", line)
+        t = self.show(tid)
+        self.assertEqual(t["status"], "working")
+        self.assertFalse((self.fake / "alive" / reviewer).exists())  # its review is moot
+        self.assertEqual(t["review"]["round"], 0)  # and doesn't use up a round
+        self.assertIn("checks failing", self.bp("show", tid).stdout)
+        # the worker runs ready again without fixing them: same commit, same failure
+        self.bp("ready", tid, "--summary", "Did it.", cwd=t["worktree"])
+        self.assertEqual(self.show(tid)["review"]["round"], 1)
+        before = len(self.typed())
+        self.bp("_prs")
+        self.bp("_prs")
+        self.assertEqual(len(self.typed()), before)
+        self.assertEqual(self.show(tid)["status"], "review")
+        # a new push that fails again is news again
+        self.github(statusCheckRollup=self.FAILING, headRefOid="def")
+        self.bp("_prs")
+        self.assertIn("checks failed: test, ci/build", self.news_lines()[-1])
+
+    def test_a_new_comment_is_forwarded_once(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        self.commit_and_ready(tid)
+        self.verdict(tid, "approve")
+        self.github(comments=[
+            {"id": "c1", "author": {"login": "ann"}, "body": "Please also\ncover the logout path."},
+            {"id": "c2", "author": {"login": "codecov[bot]"}, "body": "Coverage 90%"}],
+            reviews=[{"id": "r1", "author": {"login": "bo"}, "state": "APPROVED", "body": "LGTM"}])
+        self.bp("_prs")
+        self.assertEqual(self.news_lines()[-1], "bullpen · BP-1's PR has 1 new comment: "
+                         "ann Please also cover the logout path. Sent back to its worker.")
+        line = [l for b, l in self.typed() if b == worker][-1]
+        self.assertIn("Please also cover the logout path.", line)
+        self.assertNotIn("\n", line)
+        self.assertNotIn("Coverage", line)
+        self.assertNotIn("LGTM", line)
+        t = self.show(tid)
+        self.assertEqual(t["status"], "working")
+        self.assertIn("1 new comment", self.bp("show", tid).stdout)
+        self.commit_and_ready(tid, 2)
+        before = len(self.typed())
+        self.bp("_prs")
+        self.assertEqual(len(self.typed()), before)  # already seen
+        self.github(comments=[{"id": "c1", "author": {"login": "ann"}, "body": "Please also cover it."}],
+                    reviews=[{"id": "r2", "author": {"login": "bo"}, "state": "CHANGES_REQUESTED", "body": ""}])
+        self.bp("_prs")
+        self.assertIn("bo requested changes", self.news_lines()[-1])
+
+    def test_a_pr_merged_outside_bullpen_is_news_once(self):
+        tid = self.start_task()
+        self.bp("config", "--review", "off")
+        self.commit_and_ready_no_review(tid)
+        self.github(state="MERGED")
+        self.bp("_prs")
+        self.bp("_prs")
+        merged = [l for l in self.news_lines() if "merged outside bullpen" in l]
+        self.assertEqual(merged, ["bullpen · BP-1's PR #7 was merged outside bullpen: "
+                                  "`bullpen accept BP-1` cleans up"])
+        self.assertEqual(len(self.gh_views()), 1)  # a merged PR isn't looked at again
+        self.assertFalse((self.tmp / "state" / "prs").exists())
+        t = self.show(tid)
+        self.assertEqual(t["status"], "ready")  # nothing changes until the person says
+        self.assertTrue(Path(t["worktree"]).exists())
+        self.bp("accept", tid)
+        gh = [json.loads(l)["argv"] for l in (self.fake / "gh.log").read_text().splitlines()]
+        self.assertFalse(any(a[:2] == ["pr", "merge"] for a in gh))
+        self.assertEqual(self.show(tid)["status"], "done")
+
+    def test_a_pr_closed_outside_bullpen_points_at_drop(self):
+        tid = self.start_task()
+        self.bp("config", "--review", "off")
+        self.commit_and_ready_no_review(tid)
+        self.github(state="CLOSED")
+        self.bp("_prs")
+        self.assertEqual(self.news_lines()[-1], "bullpen · BP-1's PR #7 was closed outside bullpen: "
+                                                "`bullpen drop BP-1` cleans up")
+
+    def test_feedback_for_a_worker_that_is_gone_needs_you(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        self.bp("config", "--review", "off")
+        self.commit_and_ready_no_review(tid)
+        (self.fake / "alive" / worker).unlink()
+        self.github(statusCheckRollup=self.FAILING)
+        self.bp("_prs")
+        self.assertFalse(any(b == worker for b, _ in self.typed()))
+        t = self.show(tid)
+        self.assertEqual(t["status"], "needs")
+        self.assertEqual(t["why"], "PR checks failed: test, ci/build")
+        self.assertIn("`bullpen resume BP-1` restarts it", self.news_lines()[-1])
+
+    def test_nothing_to_follow_calls_no_gh(self):
+        tid = self.start_task()
+        self.bp("_prs")  # working, no PR yet
+        self.assertEqual(self.gh_views(), [])
+        self.assertFalse((self.tmp / "state" / "prs").exists())
+
+    def commit_and_ready_no_review(self, tid):
+        wt = self.show(tid)["worktree"]
+        (Path(wt) / "fix.txt").write_text("fixed\n")
+        sh("git", "-C", wt, "add", ".")
+        sh("git", "-C", wt, "commit", "-qm", "Fix it")
+        self.bp("ready", tid, "--summary", "Did it.", cwd=wt)
+
 
 class LocalModeTest(unittest.TestCase):
     """A repository without an origin remote: no push, no gh; accept merges locally."""
@@ -772,6 +909,8 @@ class LocalModeTest(unittest.TestCase):
         self.assertIsNone(t["pr"])
         self.assertTrue(t["local"])
         self.assertEqual(t["commits"], 1)
+        self.bp("_prs")  # no PR to follow: no gh call (tearDown checks)
+        self.assertFalse((self.tmp / "state" / "prs").exists())
         self.assertEqual(self.typed()[-1], ("blk1", "bullpen · BP-1 is ready (1 commit, local branch): Fix the thing"))
         ls = self.bp("ls").stdout
         self.assertIn("local branch bullpen/bp-1-fix-the-thing", ls)
@@ -946,6 +1085,12 @@ class BoardTest(unittest.TestCase):
                          "PR #4, approved by review.")
         self.assertEqual(d({"status": "working", "review": {"verdict": "changes", "round": 1}}),
                          "Fixing what review round 1 found.")
+        self.assertEqual(d({"status": "ready", "pr": "https://x/pull/4", "gh": {"checks": "failing", "new": 1}}),
+                         "PR #4. Checks failing, 1 new comment.")
+        self.assertEqual(d({"status": "working", "gh": {"checks": "failing"}}),
+                         "Fixing what GitHub said. Checks failing.")
+        self.assertEqual(d({"status": "ready", "pr": "https://x/pull/4", "gh": {"state": "merged"}}),
+                         "PR #4. Merged on GitHub.")
 
     def test_local_tasks_show_their_branch(self):
         d = self.bp.task_detail

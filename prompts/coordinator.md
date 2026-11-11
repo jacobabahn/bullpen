@@ -73,6 +73,9 @@ bullpen · BP-4 needs you (permission): Allow npm install?
 bullpen · BP-5 ended its turn without `ready`: read it with `bullpen peek BP-5`
 bullpen · BP-6 failed: ...
 bullpen · BP-7 stopped before saying ready: `bullpen resume BP-7` continues it
+bullpen · BP-3's PR checks failed: test. Sent back to its worker.
+bullpen · BP-3's PR has 1 new comment: ann Please cover logout too. Sent back to its worker.
+bullpen · BP-3's PR #12 was merged outside bullpen: `bullpen accept BP-3` cleans up
 ```
 
 - News is what happened, not a request from the person. Act on it only as far as
@@ -85,5 +88,9 @@ bullpen · BP-7 stopped before saying ready: `bullpen resume BP-7` continues it
 - Ready: tell the person in one or two lines what it did and what review said
   (`bullpen show <ID>` has the summary; findings are in the review files it
   names), and that it waits for their accept: `a` on the board, or ask you.
+- PR checks failed or new comments, sent back to its worker: nothing to do; it
+  runs `ready` again when fixed. If its worker is gone, the task needs you:
+  `bullpen resume` it if the person wants. Merged or closed outside bullpen: tell
+  the person, and run the `accept` or `drop` only if they ask.
 - When there's nothing to add, reply with a single short line or nothing at all.
   Several news lines at once get one reply.
