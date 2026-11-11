@@ -763,6 +763,14 @@ class LocalModeTest(unittest.TestCase):
         self.assertEqual(len(parents), 2)
         self.assertIn("BP-1", self.git("log", "-1", "--format=%s", "main"))
 
+    def test_accept_merges_locally_even_if_an_origin_was_added_after_ready(self):
+        tid, wt = self.ready_task()
+        origin = self.tmp / "later.git"
+        sh("git", "init", "-q", "--bare", "-b", "main", str(origin))
+        self.git("remote", "add", "origin", str(origin))
+        self.bp("accept", tid)
+        self.accepted(tid, wt)
+
     def test_accept_keeps_unrelated_uncommitted_changes_in_the_main_checkout(self):
         tid, wt = self.ready_task()
         (self.repo / "README").write_text("edited, not committed\n")

@@ -827,7 +827,8 @@ def cmd_accept(args):
             raise Fail(f"merge refused: {(p.stderr or p.stdout).strip()}")
         if t.get("branch"):
             git(repo.root, "push", "-q", "origin", "--delete", t["branch"], check=False)
-    elif not repo.has_origin() and t.get("branch"):
+    elif t.get("branch") and (t.get("local") or not repo.has_origin()):
+        # t["local"] too: a remote added after ready mustn't make accept skip the merge
         merge_locally(repo, t)  # raises, leaving the task as it was, if it can't
     rex_close(t["session"], t["block"])
     unindex_block(t["block"])
