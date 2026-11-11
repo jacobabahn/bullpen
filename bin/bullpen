@@ -908,7 +908,15 @@ def go_target(repo, args):
 
 def cmd_go(args):
     repo = find_repo(args.from_block)
-    session, block, name = go_target(repo, args)
+    try:
+        session, block, name = go_target(repo, args)
+    except Fail as e:
+        if not (args.next and str(e) == "nothing needs you" and (repo.cfg.get("board") or {}).get("block")):
+            raise
+        # A key that does nothing looks broken: show the board, where that's plain.
+        print("bullpen: nothing needs you; showing the board", file=sys.stderr)
+        args.next, args.board = False, True
+        session, block, name = go_target(repo, args)
     if not rex_alive(session, block):
         # after a Rex restart its ID changed (and maybe its session's)
         relink(repo, args.session or os.environ.get("REX_SESSION") or session)

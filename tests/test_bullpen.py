@@ -630,8 +630,9 @@ class BullpenTest(unittest.TestCase):
         b = "BP-2"
         self.bp("start", b)
         self.start_task("Third")  # working: never a target
-        p = self.bp("go", "--next", "--from", "elsewhere", ok=False)
+        p = self.bp("go", "--next", "--from", "elsewhere")  # nothing needs you: the board
         self.assertIn("nothing needs you", p.stderr)
+        self.assertEqual(self.focused()[-1], "blk2")
         self.bp("_event", self.block(b), "blocked", "permission", "Allow?")
         self.bp("_event", self.block(a), "blocked", "question", "Which?")
         nxt = lambda frm: json.loads(self.bp("go", "--next", "--json", "--from", frm).stdout)["block"]
