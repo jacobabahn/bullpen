@@ -124,13 +124,26 @@ fn key_line(keys: &[(&str, &str)]) -> Line<'static> {
     Line::from(spans)
 }
 
+/// The empty rows to leave at the bottom (the config's board_bottom_gap): Rex draws
+/// minimized panes' capsules over the bottom right of the window, so the board's
+/// last lines would sit under them. A board too short for its other lines and
+/// `need` more drops the gap first.
+fn bottom_gap(app: &App, h: usize, need: usize) -> usize {
+    let gap = app.cfg.bottom_gap;
+    if h >= need + gap { gap } else { 0 }
+}
+
 pub fn draw(f: &mut Frame, app: &mut App) {
     let full = f.area();
-    app.height = full.height;
     let buf = f.buffer_mut();
 
+    if matches!(app.mode, Mode::Overlay { .. }) {
+        // the title, a blank line, at least one line and the foot
+        let h = full.height as usize;
+        app.height = (h - bottom_gap(app, h, 4)) as u16;
+    }
     if let Mode::Overlay { title, lines, peek } = &app.mode {
-        let (area, w, h) = (full, full.width as usize, full.height as usize);
+        let (area, w, h) = (full, full.width as usize, app.height as usize);
         put(buf, area, 0, 1, span(fit(title, w.saturating_sub(2)), bold()));
         for (j, line) in lines.iter().take(h.saturating_sub(3)).enumerate() {
             put(buf, area, 2 + j, 1, screen_line(line));
@@ -144,6 +157,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let (w, h) = (area.width as usize, area.height as usize);
 
     let layout = app.cfg.layout;
+    let footer = if layout == Layout::Grouped { 3 } else { 7 };
+    // from here on h is the board's height above the gap: everything at the
+    // bottom (the detail panel, message line, keys, scroll mark) sits on top of it
+    let h = h - bottom_gap(app, h, 4 + footer);
+    app.height = h as u16;
     let groups = model::board_groups(&app.tasks, app.finished);
     let cur_id = app.current().map(|t| t.id.clone());
     let is_cur = |t: &Task| Some(&t.id) == cur_id.as_ref();
@@ -194,7 +212,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
 
     // keep the selected task in view, starting at a heading or a task
-    let footer = if layout == Layout::Grouped { 3 } else { 7 };
     let avail = h.saturating_sub(3 + footer).max(1); // one line spare for the scroll mark
     let sel_row = rows.iter().position(|r| matches!(r, Row::Title(t) if is_cur(t)));
     let mut top = app.top;
@@ -202,7 +219,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         if i < top {
             top = i - usize::from(i > 0 && matches!(rows[i - 1], Row::Head(_)));
         } else if i + 1 >= top + avail {
-            top = i + 2 - avail;
+            top = (i + 2 - avail).min(i); // with room for one row, the task's own
         }
     }
     top = top.min(rows.len().saturating_sub(avail));
@@ -355,4 +372,130 @@ fn title_line(app: &App, t: &Task, selected: bool, w: usize, idw: usize, now: ch
         (dim(), title, if stale { bold().fg(Color::Red) } else { dim() })
     };
     Line::from(vec![span(id, id_style), span(middle, title_style), span(age, age_style)])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::Config;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use std::time::Instant;
+
+    fn app(tasks: Vec<Task>, gap: usize, layout: Layout) -> App {
+        let (tx, _) = std::sync::mpsc::channel();
+        App {
+            dir: Default::default(),
+            root: Default::default(),
+            bullpen: Default::default(),
+            me: None,
+            repo_name: "repo".into(),
+            cfg: Config { bottom_gap: gap, layout, ..Config::default_for_test() },
+            tasks,
+            sel: None,
+            finished: false,
+            msg: String::new(),
+            top: 0,
+            pending: None,
+            running: Vec::new(),
+            mode: Mode::Normal,
+            height: 0,
+            started: Instant::now(),
+            tx,
+            peeking: false,
+            peek_due: Instant::now(),
+        }
+    }
+
+    fn ready(id: &str) -> Task {
+        Task { id: id.into(), title: format!("Task {id}"), status: "ready".into(), ..Default::default() }
+    }
+
+    /// The board's rows as text, trailing spaces cut.
+    fn screen(app: &mut App, w: u16, h: u16) -> Vec<String> {
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| draw(f, app)).unwrap();
+        let buf = term.backend().buffer();
+        (0..h)
+            .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>().trim_end().to_string())
+            .collect()
+    }
+
+    fn row(s: &[String], from_bottom: usize) -> &str {
+        &s[s.len() - 1 - from_bottom]
+    }
+
+    #[test]
+    fn the_last_row_is_left_for_rexs_capsules() {
+        let mut a = app(vec![ready("BP-1")], 1, Layout::Grouped);
+        let s = screen(&mut a, 40, 12);
+        assert_eq!(row(&s, 0), "");
+        assert!(row(&s, 1).starts_with(" a accept  d drop"), "{s:#?}");
+        assert!(row(&s, 1).ends_with("? keys"), "{s:#?}");
+
+        a.msg = "Accepted BP-1".into();
+        let s = screen(&mut a, 40, 12);
+        assert_eq!(row(&s, 2), " Accepted BP-1");
+        assert_eq!(row(&s, 0), "");
+
+        a.pending = Some((Action::Drop, "BP-1".into()));
+        let s = screen(&mut a, 40, 12);
+        assert_eq!(row(&s, 1), " y drop   any other key cancels");
+        assert_eq!(row(&s, 0), "");
+
+        a.pending = None;
+        a.mode = Mode::Tell { id: "BP-1".into(), text: "hi".into() };
+        let s = screen(&mut a, 40, 12);
+        assert_eq!(row(&s, 1), " Tell BP-1: hi");
+        assert_eq!(row(&s, 0), "");
+
+        a.mode = Mode::Overlay { title: "Keys".into(), lines: vec!["one".into()], peek: None };
+        let s = screen(&mut a, 40, 12);
+        assert_eq!(row(&s, 1), " any key returns");
+        assert_eq!(row(&s, 0), "");
+    }
+
+    #[test]
+    fn a_gap_of_none_is_the_old_layout() {
+        let mut a = app(vec![ready("BP-1")], 0, Layout::Grouped);
+        a.msg = "Accepted BP-1".into();
+        let s = screen(&mut a, 40, 12);
+        assert_eq!(row(&s, 1), " Accepted BP-1");
+        assert!(row(&s, 0).starts_with(" a accept  d drop"), "{s:#?}");
+        assert!(row(&s, 0).ends_with("? keys"), "{s:#?}");
+    }
+
+    #[test]
+    fn the_compact_panel_and_scroll_mark_move_up_too() {
+        let tasks: Vec<Task> = (1..=9).map(|i| ready(&format!("BP-{i}"))).collect();
+        let lines = |gap| {
+            let mut a = app(tasks.clone(), gap, Layout::Compact);
+            screen(&mut a, 40, 16)
+        };
+        let (old, new) = (lines(0), lines(1));
+        // everything from the top down is the same; the bottom rows move up by one
+        assert_eq!(row(&new, 0), "");
+        for k in 0..8 {
+            assert_eq!(row(&new, k + 1), row(&old, k), "row {k} from the bottom: {new:#?}");
+        }
+        assert!(row(&new, 7).starts_with(" ─"), "the panel's rule: {new:#?}");
+        assert!(row(&new, 8).ends_with("↓"), "the scroll mark: {new:#?}");
+        // and the list has one row fewer
+        assert_eq!(&new[..7], &old[..7]);
+    }
+
+    #[test]
+    fn a_short_board_drops_the_gap_before_the_keys() {
+        // grouped: header, blank, one row, scroll mark and three footer rows
+        for h in [7u16, 4, 2] {
+            let mut a = app(vec![ready("BP-1")], 1, Layout::Grouped);
+            let s = screen(&mut a, 40, h);
+            assert!(row(&s, 0).starts_with(" a accept"), "height {h}: {s:#?}");
+        }
+        let mut a = app(vec![ready("BP-1")], 1, Layout::Grouped);
+        let s = screen(&mut a, 40, 8);
+        assert_eq!(row(&s, 0), "");
+        assert!(row(&s, 1).starts_with(" a accept"), "{s:#?}");
+        assert!(s[2].contains("BP-1"), "the task still shows: {s:#?}");
+    }
 }

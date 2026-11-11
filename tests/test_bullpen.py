@@ -1671,6 +1671,13 @@ class BullpenTest(unittest.TestCase):
         self.bp("config", "--board-layout", "compact")
         self.assertEqual(json.loads(self.bp("config").stdout)["board_layout"], "compact")
 
+    def test_board_bottom_gap_is_a_setting(self):
+        self.assertEqual(json.loads(self.bp("config").stdout)["board_bottom_gap"], 1)
+        self.bp("config", "--board-bottom-gap", "0")
+        self.assertEqual(json.loads(self.bp("config").stdout)["board_bottom_gap"], 0)
+        p = self.bp("config", "--board-bottom-gap", "-1", ok=False)
+        self.assertIn("takes rows", p.stderr)
+
     def test_peek_vt_keeps_colours_and_drops_blank_coloured_lines(self):
         tid = self.start_task()
         (self.fake / "screen").write_text("\x1b[0m\x1b[31mred\x1b[0m\r\n\x1b[0mplain\n\x1b[0m\r\n\n")

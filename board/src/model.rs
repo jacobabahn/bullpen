@@ -186,6 +186,9 @@ pub struct Config {
     pub coordinators: Vec<String>,
     /// the worker model for all tasks (`bullpen config --worker-model`)
     pub worker_model: Option<String>,
+    /// rows the board leaves empty at its bottom, for Rex's minimized-pane capsules
+    /// (`bullpen config --board-bottom-gap`; 0: none)
+    pub bottom_gap: usize,
 }
 
 impl Config {
@@ -237,6 +240,7 @@ impl Config {
                 .map(|cs| cs.iter().filter_map(|c| c["id"].as_str().map(String::from)).collect())
                 .unwrap_or_default(),
             worker_model: v["worker_model"].as_str().map(String::from),
+            bottom_gap: v["board_bottom_gap"].as_u64().unwrap_or(1) as usize,
         }
     }
 }
@@ -681,11 +685,11 @@ fn split_at_width(s: &str, w: usize) -> (String, String) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     impl Config {
-        fn default_for_test() -> Config {
+        pub(crate) fn default_for_test() -> Config {
             Config {
                 layout: Layout::Grouped,
                 review_rounds: 2,
@@ -693,6 +697,7 @@ mod tests {
                 auto_accept: false,
                 coordinators: Vec::new(),
                 worker_model: None,
+                bottom_gap: 1,
             }
         }
     }
@@ -749,6 +754,7 @@ mod tests {
             auto_accept: on,
             coordinators: Vec::new(),
             worker_model: None,
+            bottom_gap: 1,
         };
         let approved = Some(Review { round: Some(1), verdict: Some("approved".into()) });
         let t = Task { pr: Some("https://github.com/me/repo/pull/4".into()), review: approved, ..task("BP-1", "ready") };

@@ -64,6 +64,11 @@ progress for a while (below) stops turning and gets the amber bar too. The top
 line counts the tasks in each state. `l` switches to a compact layout, one line
 per task with the selected task's detail at the bottom.
 
+The board leaves its bottom row empty: Rex draws minimized panes (the workers'
+and reviewers' capsules) over the bottom right of the window, which would cover
+the end of the key line. `bullpen config --board-bottom-gap 0` takes the row
+back (or give more rows); a board too short to spare it drops the gap first.
+
 The keys at the bottom follow the selected task: `⏎` opens its worker (or its
 reviewer), `a` accepts and `d` drops (each asks y/n first), `t` tells, `p`
 peeks, `v` shows its diff, `s` starts, `r` resumes, `c` goes back to the
@@ -487,7 +492,9 @@ by default). `bullpen config --merge squash` changes how `accept` merges (`rebas
 `squash` or `merge`). `bullpen config --stuck-after 45` sets how many minutes a
 working agent can show no progress before you hear of it (20 by default, `0` for
 never). `bullpen config --triage-minutes 15` sets how long a task can wait on its
-coordinator before it goes to you (10 by default; see [Triage](#triage)). `bullpen config --prefix XY --base develop` changes the task prefix (default `BP`)
+coordinator before it goes to you (10 by default; see [Triage](#triage)). `bullpen config
+--board-bottom-gap 0` lets the board use its bottom row (1 empty row by default, for
+Rex's capsules). `bullpen config --prefix XY --base develop` changes the task prefix (default `BP`)
 and the base branch (default: origin's default branch). The worker and coordinator
 commands are in that folder's `config.json` (`worker`, `coordinator_cmd`). `"rebase_others": false`
 there stops `accept` rebasing the other open tasks (see [After accept](#after-accept)).
