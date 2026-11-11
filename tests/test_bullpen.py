@@ -319,6 +319,34 @@ class BullpenTest(unittest.TestCase):
         news = [l for b, l in self.typed() if b == "blk1"]
         self.assertIn("ended its turn without `ready`", news[-1])
 
+    def test_every_end_of_turn_is_news(self):
+        # BP-12: it ended its turn, a background shell finished, it took another turn
+        # and ended it the same way. Each end is news; a repeat within a turn isn't.
+        tid = self.start_task()
+        blk = self.block(tid)
+        for turn in (1, 2):
+            self.bp("_event", blk, "working", "", "Running the tests")
+            self.assertEqual(self.show(tid)["status"], "working")
+            self.bp("_event", blk, "idle", "", "Waiting for the tests")
+            self.bp("_event", blk, "idle", "", "Waiting for the tests")  # repeat: no news
+            t = self.show(tid)
+            self.assertEqual((t["status"], t["why"]), ("needs", "Ended its turn without saying ready"))
+            ended = [l for l in self.news() if "ended its turn" in l]
+            self.assertEqual(len(ended), turn)
+
+    def test_every_stop_of_a_reviewer_is_news(self):
+        tid = self.start_task()
+        reviewer = self.commit_and_ready(tid)
+        for turn in (1, 2):
+            self.bp("_event", reviewer, "working", "", "Reading the diff")
+            self.assertEqual(self.show(tid)["status"], "review")
+            self.bp("_event", reviewer, "idle", "", "Waiting")
+            self.bp("_event", reviewer, "idle", "", "Waiting")  # repeat: no news
+            t = self.show(tid)
+            self.assertEqual((t["status"], t["why"]), ("needs", "Reviewer stopped without a verdict"))
+            stopped = [l for l in self.news() if "stopped without a verdict" in l]
+            self.assertEqual(len(stopped), turn)
+
     def test_done_after_ready_is_silent(self):
         tid = self.start_task()
         self.bp("ready", tid)  # no commits: ready with nothing to merge
