@@ -38,10 +38,11 @@ fn spinner(app: &App) -> &'static str {
     FRAMES[(app.started.elapsed().as_millis() / 100) as usize % FRAMES.len()]
 }
 
-/// A working task's mark types out dots (one, two, three, in one cell), so the
-/// board shows it's alive.
+/// A working task's mark types out three dots, left to right. They are braille
+/// dots, which sit evenly spaced whatever the font, and run from the mark's cell
+/// into the gap before the ID.
 fn working_mark(app: &App) -> &'static str {
-    const FRAMES: [&str; 4] = [" ", "․", "‥", "…"];
+    const FRAMES: [&str; 4] = ["  ", "⡀ ", "⣀ ", "⣀⡀"];
     FRAMES[(app.started.elapsed().as_millis() / 400) as usize % FRAMES.len()]
 }
 
