@@ -38,10 +38,11 @@ fn spinner(app: &App) -> &'static str {
     FRAMES[(app.started.elapsed().as_millis() / 100) as usize % FRAMES.len()]
 }
 
-/// A working task's mark turns slowly, so the board shows it's alive.
+/// A working task's mark types out dots (one, two, three, in one cell), so the
+/// board shows it's alive.
 fn working_mark(app: &App) -> &'static str {
-    const FRAMES: [&str; 4] = ["◴", "◷", "◶", "◵"];
-    FRAMES[(app.started.elapsed().as_millis() / 250) as usize % FRAMES.len()]
+    const FRAMES: [&str; 4] = [" ", "․", "‥", "…"];
+    FRAMES[(app.started.elapsed().as_millis() / 400) as usize % FRAMES.len()]
 }
 
 /// Write a line at (x, y), never into the last column.

@@ -408,7 +408,7 @@ impl App {
         } else if matches!(self.mode, Mode::Overlay { peek: Some(_), .. })
             || self.tasks.iter().any(|t| t.status == "working")
         {
-            Duration::from_millis(250) // a peek reads again; working marks turn
+            Duration::from_millis(200) // a peek reads again; working marks move
         } else {
             Duration::from_secs(1) // ages move on by the minute
         }
