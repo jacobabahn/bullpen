@@ -75,7 +75,7 @@ three actions, also in the command palette under Bullpen, and binds:
 - `cmd+;` then `b`: the board.
 - `cmd+;` then `c`: the coordinator.
 
-And in a worker's or reviewer's floating pane, `cmd+escape` puts it back into its
+And in a worker's or reviewer's floating pane, `ctrl+escape` puts it back into its
 capsule and returns you to the board (`bullpen hide`); elsewhere the key goes
 through.
 

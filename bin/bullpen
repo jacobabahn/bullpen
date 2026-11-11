@@ -1401,7 +1401,7 @@ def cmd_keys(args):
     print(f"-- Add to your Rex config (rex config shows where), then run `rex config reload`:\n"
           f'dofile("{keys}").setup{{ {opts} }}\n'
           f"-- Defaults: cmd+;>n next task needing you, cmd+;>b board, cmd+;>c coordinator,\n"
-          f"-- and cmd+escape puts the worker pane you're in back into its capsule.\n"
+          f"-- and ctrl+escape puts the worker pane you're in back into its capsule.\n"
           f'-- Change them with prefix = "...", or keys = {{ next = ..., board = ..., coordinator = ..., hide = ... }}.')
 
 
