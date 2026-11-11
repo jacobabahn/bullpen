@@ -1064,6 +1064,9 @@ def cmd_board(args):
 
     def main(scr):
         curses.curs_set(0)
+        # Escape also starts arrow-key sequences, so curses waits a second after it
+        # by default. A terminal sends a sequence's bytes together: 25 ms is plenty.
+        curses.set_escdelay(25)
         C = {}
         try:
             curses.use_default_colors()
