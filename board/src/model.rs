@@ -166,7 +166,7 @@ pub fn mark(status: &str) -> &'static str {
         "ready" | "done" => "✓",
         "review" => "◐",
         "working" => "○",
-        "todo" => "◷", // a clock face: waiting its turn
+        "todo" => "⧖", // an hourglass: waiting its turn
         "dropped" => "–",
         _ => " ",
     }
