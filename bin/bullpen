@@ -230,7 +230,7 @@ class Repo:
             t["note"] = None  # what it needed then, not now
             t.pop("stuck", None)
             t.pop("auto_wait", None)  # only an approval that is still current accepts it
-            for k in ("ok", "ask"):  # said of the old status; one set just now stays
+            for k in ("ok", "ask", "ask_of"):  # said of the old status; one set just now stays
                 if k in old:
                     t.pop(k, None)
         if old.get("status") != t["status"] or not t.get("since"):
@@ -2426,6 +2426,8 @@ def cmd_ask(args):
     question = " ".join(" ".join(args.question).split())
     if not question:
         raise Fail("give the question to ask")
+    if t["status"] in WAITING and not t.get("ask"):
+        t["ask_of"] = t.get("why")  # what stopped it: whether its worker is mid-turn goes by this
     t.update(status="needs", why=question, ask=True)
     repo.save_task(t)
     tell_coordinator(repo, t, "ask", f"{t['id']} needs the person: {question}")
@@ -2464,7 +2466,7 @@ def cmd_review(args):
         raise Fail(f"{t['id']} is {t['status']}" + ("" if t.get("worktree") else ", with no worktree"))
     if not r:
         raise Fail(f"{t['id']} has had no review: its worker starts one with `ready`")
-    if r.get("verdict") or t["status"] not in ("review", *WAITING):
+    if r.get("verdict") or not (t["status"] == "review" or on_reviewer(t)):
         raise Fail(f"{t['id']} isn't waiting on a reviewer (it is {t['status']})")
     rounds = repo.cfg.get("review_rounds", 2)
     if r.get("round", 0) >= rounds:
@@ -2508,6 +2510,7 @@ def cmd_event(args):
     if state == "blocked":
         kind = args.kind or "input"
         t.pop("ask", None)  # the prompt is what it needs the person for now
+        t.pop("ask_of", None)
         t.update(status="needs", why=f"Needs you ({kind})" + (f": {msg}" if msg else ""))
         repo.save_task(t)
         news(repo, t, "needs-you", f"{t['id']} needs the person ({kind})" + (f": {msg}" if msg else ""))
@@ -2531,9 +2534,15 @@ def cmd_event(args):
         repo.save_task(t)
 
 
+def stop_why(t):
+    """Why the task stopped: its reason, or, once the person was asked about it, the
+    reason it had then (its why is the question now)."""
+    return (t.get("ask_of") if t.get("ask") else t.get("why")) or ""
+
+
 def on_reviewer(t):
     """Is the task stopped on its reviewer (a prompt, or no verdict)?"""
-    return t["status"] in WAITING and (t.get("why") or "").startswith("Reviewer")
+    return t["status"] in WAITING and stop_why(t).startswith("Reviewer")
 
 
 def review_event(repo, t, args):
@@ -2555,6 +2564,7 @@ def review_event(repo, t, args):
     elif state == "blocked":
         kind = args.kind or "input"
         t.pop("ask", None)
+        t.pop("ask_of", None)
         t.update(status="needs", why=f"Reviewer needs you ({kind})" + (f": {msg}" if msg else ""))
         repo.save_task(t)
         news(repo, t, "needs-you", f"{t['id']}'s reviewer needs the person ({kind})" + (f": {msg}" if msg else ""))
@@ -3295,7 +3305,7 @@ def worker_idle(t):
     Not when it's blocked on a prompt, or failed mid-turn."""
     if t["status"] not in WAITING:
         return True
-    return not (t.get("why") or "").startswith(("Needs you", "Failed", "Couldn't be continued"))
+    return not stop_why(t).startswith(("Needs you", "Failed", "Couldn't be continued"))
 
 
 def send_back(repo, t, lines, ask):

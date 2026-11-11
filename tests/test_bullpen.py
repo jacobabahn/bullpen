@@ -1975,6 +1975,23 @@ class BullpenTest(unittest.TestCase):
         self.bp("tell", tid, "Fix the checks.")
         self.assertEqual(self.show(tid)["status"], "working")
 
+    def test_feedback_isnt_typed_into_a_prompt_the_person_was_asked_about(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        self.bp("config", "--review", "off")
+        self.commit_and_ready_no_review(tid)
+        self.bp("_event", worker, "blocked", "permission", "Allow rm?")
+        self.bp("ask", tid, "Should it delete the cache?")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"], t["ask_of"]),
+                         ("needs", "Should it delete the cache?", "Needs you (permission): Allow rm?"))
+        typed = len([1 for b, _ in self.typed() if b == worker])
+        self.github(comments=[{"id": "c1", "author": {"login": "ann"}, "body": "Cover logout too."}])
+        self.bp("_prs")
+        self.assertEqual(len([1 for b, _ in self.typed() if b == worker]), typed)  # still at its prompt
+        self.assertIn("Not sent to its worker", self.news_lines()[-1])
+        self.assertEqual(self.show(tid)["why"], "Should it delete the cache?")
+
     def test_feedback_during_review_that_doesnt_reach_the_worker_goes_to_the_coordinator(self):
         tid = self.start_task()
         worker = self.block(tid)
@@ -2903,6 +2920,21 @@ class BullpenTest(unittest.TestCase):
         self.verdict(tid, "changes", "Fix it.")
         self.assertEqual(self.show(tid)["status"], "working")
         self.assertIn("isn't waiting on a reviewer", self.bp("review", tid, ok=False).stderr)
+
+    def test_review_is_refused_for_a_worker_stopped_after_ready_was_undone(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.commit_and_ready(tid)
+        self.verdict(tid, "approve")
+        self.bp("_event", blk, "idle", "", "")
+        self.bp("_event", blk, "working", "", "More")  # back to working, verdict dropped
+        self.assertEqual(self.show(tid)["review"]["verdict"], None)
+        self.bp("_event", blk, "error", "", "boom")
+        self.assertEqual(self.show(tid)["status"], "triage")
+        self.assertIn("isn't waiting on a reviewer", self.bp("review", tid, ok=False).stderr)
+        self.bp("_event", blk, "blocked", "permission", "Allow rm?")
+        self.assertIn("isn't waiting on a reviewer", self.bp("review", tid, ok=False).stderr)
+        self.assertEqual(self.show(tid)["status"], "needs")
 
     def test_a_ready_task_whose_worker_works_again_is_working_again(self):
         tid = self.start_task()
