@@ -169,8 +169,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         for t in ts {
             rows.push(Row::Title(t));
             if layout == Layout::Grouped {
-                // what a task needs from you, or GitHub said, gets two lines; anything else one
-                let lines = if t.flagged() || !model::pr_phrase(t).is_empty() { 2 } else { 1 };
+                // what a task needs from you, GitHub said, or the usage limit gets two lines; anything else one
+                let lines = if t.flagged() || t.is_limited() || !model::pr_phrase(t).is_empty() { 2 } else { 1 };
                 for d in model::wrap(&model::task_detail(t, rounds, now), detail_w, lines) {
                     if !d.is_empty() {
                         rows.push(Row::Detail(t, d));
@@ -227,6 +227,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                     Some(_) => span(spinner(app), bold()),
                     // an agent that has gone quiet: a still mark, in the colour of one that needs you
                     None if t.is_stuck() => span(model::mark(&t.status), mark_style("needs")),
+                    // one stopped at the usage limit isn't working either: a still mark
+                    None if t.is_limited() => span(model::mark(&t.status), mark_style(&t.status)),
                     None if t.status == "working" => span(working_mark(app), Style::new()),
                     None if t.status == "review" => span(review_mark(app), mark_style("review")),
                     None => span(model::mark(&t.status), mark_style(&t.status)),
