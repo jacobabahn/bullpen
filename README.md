@@ -179,6 +179,19 @@ mode `--follow` always does that, and plain `bullpen news` still works. News
 logged in `monitor` mode but not yet read when you switch back is not typed:
 `bullpen news` prints it.
 
+### Rules
+
+Rules every worker and reviewer should follow go in `.bullpen/rules.md`, committed
+in the repository, so everyone using bullpen on it gets them. Rules of your own go
+in `rules.md` in bullpen's folder for the repository (`bullpen rules --edit` opens
+it in `$EDITOR`); they aren't committed. `start` puts both, the repository's first,
+in the worker's brief under "Rules for this repository", and the reviewer gets the
+same rules and checks the work against them. No rules, no heading.
+
+The repository's file is read from the task's new worktree, so it is the copy on
+the base branch: an uncommitted edit in your checkout isn't used. `bullpen rules`
+prints the rules in effect and where each came from.
+
 ### Keys
 
 `bullpen keys` prints a line to add to your Rex config (`init.lua`). It defines
@@ -234,7 +247,7 @@ task ready, with its worktree and branch as they were.
 
 ## Where things live
 
-- Tasks, briefs and settings: `~/.local/state/bullpen/repos/<repo>/` (`BULLPEN_STATE` moves it).
+- Tasks, briefs, settings and your own rules: `~/.local/state/bullpen/repos/<repo>/` (`BULLPEN_STATE` moves it).
 - Worktrees: `<repo>-bullpen/<ID>` next to the repository.
 - News: `news.log` beside the tasks, with `news.cursor` (how far `bullpen news` has
   read) and `outbox.txt` (typed news waiting for an empty input). See [News](#news).

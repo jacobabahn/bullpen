@@ -706,6 +706,62 @@ def footer(repo, t):
         base=t["base"], bin=SELF)
 
 
+RULES_FILE = ".bullpen/rules.md"
+
+
+def personal_rules(repo):
+    return repo.dir / "rules.md"
+
+
+def rule_sources(repo, committed, where):
+    """[(where it came from, text)]: the repo's rules file first, then the personal one."""
+    out = []
+    if committed and committed.strip():
+        out.append((f"{RULES_FILE} {where}".strip(), committed.strip()))
+    p = personal_rules(repo)
+    if p.exists() and p.read_text().strip():
+        out.append((str(p), p.read_text().strip()))
+    return out
+
+
+def committed_rules_on(repo, ref):
+    """The repo's rules file as committed on ref, or None."""
+    p = git(repo.root, "show", f"{ref}:{RULES_FILE}", check=False)
+    return p.stdout if p.returncode == 0 else None
+
+
+def rules_text(sources):
+    return "\n\n".join(text for _, text in sources)
+
+
+def task_rules(repo, t):
+    """The rules the task's worker was given; for a task started before rules
+    were saved, the ones on its base now."""
+    saved = repo.dir / "briefs" / f"{t['id']}.rules.md"
+    if saved.exists():
+        return saved.read_text().strip()
+    return rules_text(rule_sources(repo, committed_rules_on(repo, task_base_ref(repo, t)), ""))
+
+
+def cmd_rules(args):
+    repo = Repo(repo_root())
+    if args.edit:
+        p = personal_rules(repo)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
+        subprocess.call([*editor.split(), str(p)])
+        return
+    base = repo.base()
+    ref = f"origin/{base}" if repo.has_origin() and git(
+        repo.root, "rev-parse", "-q", "--verify", f"origin/{base}", check=False).returncode == 0 else base
+    sources = rule_sources(repo, committed_rules_on(repo, ref), f"on {ref}")
+    if not sources:
+        print(f"No rules. Commit them as {RULES_FILE}, or keep your own in "
+              f"{personal_rules(repo)} (`bullpen rules --edit`).")
+        return
+    print("\n\n".join(f"# From {where}\n\n{text}" for where, text in sources))
+
+
 def cmd_start(args):
     repo = Repo(repo_root())
     t = repo.task(args.id)
@@ -733,7 +789,12 @@ def cmd_start(args):
         t["worktree"] = str(wt)
     brief = (repo.dir / "briefs" / f"{t['id']}.md").read_text()
     full = repo.dir / "briefs" / f"{t['id']}.full.md"
-    full.write_text(f"# {t['id']}: {t['title']}\n\n{brief}\n{footer(repo, t)}")
+    wt_rules = Path(t["worktree"]) / RULES_FILE
+    rules = rules_text(rule_sources(repo, wt_rules.read_text() if wt_rules.exists() else None, ""))
+    saved = repo.dir / "briefs" / f"{t['id']}.rules.md"
+    saved.write_text(rules + "\n" if rules else "")
+    section = f"## Rules for this repository\n\n{rules}\n\n" if rules else ""
+    full.write_text(f"# {t['id']}: {t['title']}\n\n{brief}\n{section}{footer(repo, t)}")
     first = f"You are the worker for bullpen task {t['id']}. Read your brief at {full} and follow it."
     if args.model:
         t["worker_model"] = args.model  # this task's own, over the config's
@@ -1000,7 +1061,7 @@ def start_review(repo, t, base_ref):
     prompt.write_text((PROMPTS / "reviewer.md").read_text().format(
         id=t["id"], title=t["title"], round=n, rounds=rounds, brief=briefs / f"{t['id']}.md",
         worktree=t["worktree"], branch=t["branch"], base_ref=base_ref, bin=SELF,
-        summary=t.get("summary") or "(none)"))
+        summary=t.get("summary") or "(none)", rules=review_rules(repo, t)))
     first = f"You are the reviewer for bullpen task {t['id']}. Read {prompt} and follow it."
     argv = resolve(with_model(repo.cfg["reviewer"], repo.cfg.get("reviewer_model"))) + ["-n", f"{t['id']} review", first]
     session = t.get("session") or session_for(repo)
@@ -1012,6 +1073,14 @@ def start_review(repo, t, base_ref):
     t.update(status="review", why=None, review={
         "round": n, "block": block, "session": session, "verdict": None, "findings": None})
     repo.save_task(t)
+
+
+def review_rules(repo, t):
+    rules = task_rules(repo, t)
+    if not rules:
+        return ""
+    return ("## Rules for this repository\n\nThe worker was given these rules too. "
+            f"Check that the work follows them.\n\n{rules}\n\n")
 
 
 def close_reviewer(t):
@@ -2685,6 +2754,10 @@ def main(argv=None):
     p.add_argument("--follow", action="store_true", help="keep running and print each line as it is logged")
     p.add_argument("--every", type=float, default=0.5, help=argparse.SUPPRESS)  # seconds between looks
     p.set_defaults(fn=cmd_news)
+
+    p = sub.add_parser("rules", help="print the rules every worker and reviewer gets, and where they're from")
+    p.add_argument("--edit", action="store_true", help="edit your own rules for this repo in $EDITOR")
+    p.set_defaults(fn=cmd_rules)
 
     p = sub.add_parser("guide", help="print the coordinator's guide")
     p.set_defaults(fn=cmd_guide)

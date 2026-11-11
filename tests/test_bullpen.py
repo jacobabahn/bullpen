@@ -1508,6 +1508,91 @@ class BullpenTest(unittest.TestCase):
         sh("git", "-C", wt, "commit", "-qm", "Fix it")
         self.bp("ready", tid, "--summary", "Did it.", cwd=wt)
 
+    # ---------- rules ----------
+
+    def commit_rules(self, text):
+        (self.repo / ".bullpen").mkdir(exist_ok=True)
+        (self.repo / ".bullpen" / "rules.md").write_text(text)
+        sh("git", "-C", str(self.repo), "add", ".")
+        sh("git", "-C", str(self.repo), "commit", "-qm", "Rules")
+        sh("git", "-C", str(self.repo), "push", "-q", "origin", "main")
+
+    def personal_rules(self, text):
+        d = next((self.tmp / "state" / "repos").iterdir())
+        (d / "rules.md").write_text(text)
+
+    def full_brief(self, tid="BP-1"):
+        return next((self.tmp / "state").rglob(f"{tid}.full.md")).read_text()
+
+    def test_rules_from_the_repo_go_in_the_brief(self):
+        self.commit_rules("- Keep functions small.\n")
+        self.start_task()
+        brief = self.full_brief()
+        self.assertIn("## Rules for this repository\n\n- Keep functions small.\n", brief)
+        self.assertLess(brief.index("Make it work."), brief.index("Keep functions small."))
+        self.assertLess(brief.index("Keep functions small."), brief.index("## How you work"))
+
+    def test_personal_rules_go_in_the_brief(self):
+        self.bp("up")
+        self.personal_rules("- Say it plainly.\n")
+        self.bp("add", "Fix", "--brief", "Make it work.")
+        self.bp("start", "BP-1")
+        self.assertIn("## Rules for this repository\n\n- Say it plainly.\n", self.full_brief())
+
+    def test_both_rules_files_repo_first(self):
+        self.commit_rules("- Repo rule.\n")
+        self.bp("up")
+        self.personal_rules("- My rule.\n")
+        self.bp("add", "Fix", "--brief", "Make it work.")
+        self.bp("start", "BP-1")
+        brief = self.full_brief()
+        self.assertEqual(brief.count("## Rules for this repository"), 1)
+        self.assertLess(brief.index("Repo rule."), brief.index("My rule."))
+        out = self.bp("rules").stdout
+        self.assertIn("From .bullpen/rules.md on origin/main", out)
+        self.assertIn("rules.md\n\n- My rule.", out)
+        self.assertLess(out.index("Repo rule."), out.index("My rule."))
+
+    def test_no_rules_no_heading(self):
+        self.start_task()
+        self.assertNotIn("Rules for this repository", self.full_brief())
+        self.commit_and_ready("BP-1")
+        prompt = next((self.tmp / "state").rglob("BP-1.review-1.md")).read_text()
+        self.assertNotIn("Rules for this repository", prompt)
+        self.assertIn("No rules.", self.bp("rules").stdout)
+
+    def test_uncommitted_rules_in_the_main_checkout_are_not_used(self):
+        self.commit_rules("- Committed rule.\n")
+        (self.repo / ".bullpen" / "rules.md").write_text("- Half-written rule.\n")
+        self.start_task()
+        brief = self.full_brief()
+        self.assertIn("Committed rule.", brief)
+        self.assertNotIn("Half-written", brief)
+        self.assertNotIn("Half-written", self.bp("rules").stdout)
+
+    def test_reviewer_gets_the_workers_rules(self):
+        self.commit_rules("- Repo rule.\n")
+        tid = self.start_task()
+        wt = self.show(tid)["worktree"]
+        (Path(wt) / ".bullpen" / "rules.md").write_text("- Changed by the worker.\n")
+        self.commit_and_ready(tid)
+        prompt = next((self.tmp / "state").rglob("BP-1.review-1.md")).read_text()
+        self.assertIn("## Rules for this repository", prompt)
+        self.assertIn("Check that the work follows them.", prompt)
+        self.assertIn("- Repo rule.", prompt)
+        self.assertNotIn("Changed by the worker", prompt)
+
+    def test_rules_edit_opens_the_personal_file(self):
+        self.bp("up")
+        editor = self.tmp / "ed"
+        editor.write_text("#!/bin/sh\necho '- Edited.' > \"$1\"\n")
+        editor.chmod(0o755)
+        self.env = {**self.env, "EDITOR": str(editor), "VISUAL": ""}
+        self.bp("rules", "--edit")
+        out = self.bp("rules").stdout
+        self.assertIn("- Edited.", out)
+        self.assertIn(str(self.tmp / "state" / "repos"), out)
+
 
     # ---------- the agents' model ----------
 
@@ -1684,6 +1769,13 @@ class LocalModeTest(unittest.TestCase):
         (Path(wt) / "dirty.txt").unlink()
         self.bp("ready", tid, cwd=wt)
         self.assertEqual(self.show(tid)["why"], "Nothing to merge (no commits)")
+
+    def test_rules_from_the_local_base(self):
+        (self.repo / ".bullpen").mkdir()
+        self.commit(self.repo, ".bullpen/rules.md", "- Local rule.\n", "Rules")
+        self.start_task()
+        self.assertIn("- Local rule.", next((self.tmp / "state").rglob("BP-1.full.md")).read_text())
+        self.assertIn("From .bullpen/rules.md on main", self.bp("rules").stdout)
 
     def test_ready_starts_the_reviewer(self):
         tid, wt = self.ready_task(review=True)

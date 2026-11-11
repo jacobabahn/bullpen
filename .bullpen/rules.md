@@ -1,0 +1,5 @@
+- Everything is in `bin/bullpen` (Python CLI), `lua/watch.lua` (the Rex watcher, run with `rex do --all`), `prompts/` and `tests/test_bullpen.py` (fake `rex`/`gh`, a local bare repo as origin). Keep the style: small functions, plain wording in messages, no new dependencies.
+- The repo may have no `origin` remote: bullpen has a local mode for that (no push, no PR; `accept` merges locally). Your change must work, or cleanly do nothing, in both modes.
+- Run `python3 -m unittest discover -s tests`; it must pass, with new tests for what you add.
+- Update `README.md` (and `prompts/coordinator.md` if the coordinator should know) in the same plain style; remove the matching line under "Not yet" if you close it.
+- Commits: no Co-Authored-By trailer, no mention of AI or Claude.

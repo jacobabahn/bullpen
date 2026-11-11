@@ -21,7 +21,14 @@ window (labelled `bullpen: <ID>`), its own git worktree and its own branch.
 
 Split the ask into tasks. Each gets a short title ("Fix login redirect") and a
 full brief: the goal, the files in scope, what done looks like and how to check
-it. Put repo rules that matter (from AGENTS.md or CLAUDE.md) in the brief.
+it.
+
+Bullpen adds the repository's standing rules to every brief and every review on its
+own (`.bullpen/rules.md`, then the person's own; `bullpen rules` prints them), so
+don't repeat them. Put only what this task needs. When you notice yourself writing
+the same rule into brief after brief, suggest it to the person as a standing rule,
+or, if they agree, start a task to add it to `.bullpen/rules.md` (you don't edit
+files yourself).
 
 Tasks that touch the same files must not run at once: start the second only after
 the first is accepted. Tasks on different files can run in parallel. If the split
