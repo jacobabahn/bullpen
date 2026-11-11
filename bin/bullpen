@@ -209,6 +209,7 @@ class Repo:
         if old.get("status") != t["status"]:
             t["note"] = None  # what it needed then, not now
             t.pop("stuck", None)
+            t.pop("auto_wait", None)  # only an approval that is still current accepts it
         if old.get("status") != t["status"] or not t.get("since"):
             # when it entered its current status; fine-grained so `go --next` can order it
             t["since"] = dt.datetime.now().astimezone().isoformat(timespec="microseconds")

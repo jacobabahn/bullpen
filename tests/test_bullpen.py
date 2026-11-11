@@ -1468,6 +1468,18 @@ class BullpenTest(unittest.TestCase):
         self.assertIn("bullpen · BP-1 not auto-accepted: its PR's checks failed", self.news_lines())
         self.assertFalse(any(a[:2] == ["pr", "merge"] for a in self.merges()))
 
+    def test_a_waiting_auto_accept_ends_when_the_task_leaves_ready(self):
+        self.github(statusCheckRollup=self.RUNNING)
+        tid, wt = self.approved_with_auto_accept()
+        self.bp("tell", tid, "One more thing.")
+        self.assertNotIn("auto_wait", self.show(tid))
+        self.bp("config", "--review", "off")
+        self.commit_and_ready(tid, 2)  # ready with no approval
+        self.github(statusCheckRollup=self.PASSING)
+        self.bp("_prs")
+        self.assertEqual(self.show(tid)["status"], "ready")
+        self.assertEqual(self.merges(), [])
+
     def test_auto_accept_skips_failing_checks(self):
         self.github(statusCheckRollup=self.FAILING)
         tid, _ = self.approved_with_auto_accept()
