@@ -40,7 +40,7 @@ bullpen go BP-3             # show the person that worker's pane, when they ask 
 bullpen note BP-3 "..."     # one line on the board saying what BP-3 needs from the person
 bullpen tell BP-3 "..."     # type a message to the worker (guidance, a fix request)
 bullpen resume BP-3 "..."   # restart a stopped worker, continuing its conversation
-bullpen accept BP-3         # only when the person asks: squash-merge its PR, clean up
+bullpen accept BP-3         # only when the person asks: merge its PR, clean up
 bullpen drop BP-3           # only when the person asks: close it and remove its worktree
 ```
 

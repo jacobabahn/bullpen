@@ -5,7 +5,7 @@ A coordinator agent and its workers, each in its own [Rex](https://www.superlogi
 You talk to the coordinator. It splits your ask into tasks and starts one worker
 agent per task: each gets its own git worktree, its own branch and its own Rex
 pane labelled `bullpen: <ID>`. When a worker finishes, it pushes its branch and
-opens a pull request. You accept (squash-merge) or drop it.
+opens a pull request. You accept (merge) or drop it.
 
 The coordinator learns what its workers are doing from Rex itself. Rex records the
 status coding agents report (working, blocked, done) and a Lua watcher
@@ -89,7 +89,7 @@ bullpen go BP-1       # focus its pane (`go` alone: the coordinator; --next: nex
 bullpen tell BP-1 "Also cover the logout path"
 bullpen resume BP-1   # restart a stopped worker, continuing its conversation
 bullpen note BP-1 "Asks: ..."   # say on the board what it needs from you
-bullpen accept BP-1   # squash-merge its PR, close its window, remove its worktree
+bullpen accept BP-1   # merge its PR (rebase), close its pane, remove its worktree
 bullpen drop BP-1     # close its PR, window and worktree without merging
 ```
 
@@ -102,7 +102,8 @@ uncommitted changes, pushes the branch and opens (or updates) the pull request.
 - Worktrees: `<repo>-bullpen/<ID>` next to the repository.
 - News that couldn't be delivered: `news.log` beside the tasks.
 
-`bullpen config --prefix XY --base develop` changes the task prefix (default `BP`)
+`bullpen config --merge squash` changes how `accept` merges (`rebase` by default;
+`squash` or `merge`). `bullpen config --prefix XY --base develop` changes the task prefix (default `BP`)
 and the base branch (default: origin's default branch). The worker and coordinator
 commands are in that folder's `config.json` (`worker`, `coordinator_cmd`).
 

@@ -38,6 +38,7 @@ DEFAULT_CONFIG = {
     "review_rounds": 2,   # reviews before a task is ready anyway, findings listed
     "reviewer": ["claude", "--permission-mode", "auto"],
     "board_layout": "grouped",  # or "compact"
+    "merge": "rebase",    # how accept merges a PR: rebase, squash or merge
 }
 
 TERMINAL = "com.superlogical.terminal.shell"
@@ -713,7 +714,8 @@ def cmd_accept(args):
     if t["status"] != "ready":
         raise Fail(f"{t['id']} is {t['status']}, not ready")
     if t.get("pr"):
-        p = run([repo.gh(), "pr", "merge", t["pr"], "--squash"], cwd=repo.root, check=False)
+        p = run([repo.gh(), "pr", "merge", t["pr"], f"--{repo.cfg.get('merge', 'rebase')}"],
+                cwd=repo.root, check=False)
         if p.returncode != 0:
             raise Fail(f"merge refused: {(p.stderr or p.stdout).strip()}")
         git(repo.root, "push", "-q", "origin", "--delete", t["branch"], check=False)
@@ -784,6 +786,8 @@ def cmd_config(args):
         repo.cfg["workers"] = args.workers
     if args.review:
         repo.cfg["review"] = args.review == "on"
+    if args.merge:
+        repo.cfg["merge"] = args.merge
     repo.save()
     print(json.dumps({"repo": str(repo.root), "state": str(repo.dir), **repo.cfg}, indent=2))
 
@@ -876,6 +880,7 @@ GROUPS = [  # (heading, statuses), in the order the board shows them
 MARKS = {"needs": "●", "stopped": "■", "ready": "✓", "review": "◐", "working": "○",
          "todo": "·", "done": "✓", "dropped": "–"}
 STALE = 300  # seconds a task can need you before its age turns red
+MERGE_VERB = {"rebase": "Rebase-merges", "squash": "Squash-merges", "merge": "Merges"}
 
 
 def board_groups(tasks, finished=False):
@@ -983,7 +988,7 @@ Moving
   c            back to the coordinator, panes put away
 
 Acting on the selected task
-  a            accept: squash-merge its PR and clean up
+  a            accept: merge its PR and clean up
   d            drop: close its PR, pane and worktree
   t            tell its worker something
   p            peek at the end of its worker's screen
@@ -1218,7 +1223,8 @@ def cmd_board(args):
             elif ch == "a":
                 if cur["status"] != "ready":
                     msg = f"Only a task that's ready to accept can be accepted."
-                elif ask(f"Accept {sel}? " + (f"Squash-merges {pr_short(cur['pr'])}." if cur.get("pr") else "Cleans it up.")):
+                elif ask(f"Accept {sel}? " + (f"{MERGE_VERB[repo.cfg.get('merge', 'rebase')]} {pr_short(cur['pr'])}."
+                                               if cur.get("pr") else "Cleans it up.")):
                     msg = "Accepting…"
                     ok, out = bp("accept", sel)
                     msg = f"Accepted {sel}." if ok else out
@@ -1429,7 +1435,7 @@ def main(argv=None):
     p.add_argument("text", nargs="+")
     p.set_defaults(fn=cmd_note)
 
-    p = sub.add_parser("accept", help="(the person's call) merge a ready task's PR and clean up")
+    p = sub.add_parser("accept", help="(the person's call) merge a ready task's PR (config --merge) and clean up")
     p.add_argument("id")
     p.set_defaults(fn=cmd_accept)
 
@@ -1454,6 +1460,7 @@ def main(argv=None):
     p.add_argument("--workers", choices=["float", "tabs"],
                    help="new workers as capsules in the coordinator's tab (float) or as tabs")
     p.add_argument("--review", choices=["on", "off"], help="a reviewer agent checks each task")
+    p.add_argument("--merge", choices=["rebase", "squash", "merge"], help="how accept merges a PR")
     p.set_defaults(fn=cmd_config)
 
     p = sub.add_parser("guide", help="print the coordinator's guide")

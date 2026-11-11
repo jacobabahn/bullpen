@@ -307,7 +307,7 @@ class BullpenTest(unittest.TestCase):
         self.assertFalse(Path(wt).exists())
         gh = [json.loads(l)["argv"] for l in (self.fake / "gh.log").read_text().splitlines()]
         self.assertEqual(gh[-1][:2], ["pr", "merge"])
-        self.assertIn("--squash", gh[-1])
+        self.assertIn("--rebase", gh[-1])
         self.assertFalse((self.fake / "alive" / blk).exists())
         branches = sh("git", "-C", str(self.repo), "branch")
         self.assertNotIn("bullpen/", branches)
