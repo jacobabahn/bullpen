@@ -962,6 +962,8 @@ def cmd_add(args):
         t["coordinator"] = c["id"]
     if after:
         t["after"] = after
+    if args.model:
+        t["worker_model"] = args.model  # its own, over the config's, from its first start
     set_auto_accept(t, args)
     (repo.dir / "briefs").mkdir(parents=True, exist_ok=True)
     (repo.dir / "briefs" / f"{tid}.md").write_text(brief.rstrip() + "\n")
@@ -1070,6 +1072,34 @@ def cmd_after(args):
         t.pop("after", None)
     write_json(repo.task_path(t["id"]), t)  # not save_task: the status didn't change
     print(f"{t['id']} waits on {', '.join(after)}" if after else f"{t['id']} waits on nothing")
+
+
+def own_model(repo, t):
+    """The worker model a task chose for itself, if it isn't the config's."""
+    m = t.get("worker_model")
+    return m if m and m != repo.cfg.get("worker_model") else None
+
+
+def cmd_model(args):
+    """Set, change or clear the worker model a task starts and resumes with."""
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    if args.clear == bool(args.model):
+        raise Fail("give the model (an alias like opus, or a model ID), or --clear")
+    if t["status"] in CLOSED:
+        raise Fail(f"{t['id']} is {t['status']}")
+    if args.clear:
+        t.pop("worker_model", None)
+    else:
+        t["worker_model"] = args.model
+    write_json(repo.task_path(t["id"]), t)  # not save_task: the status didn't change
+    cfg = repo.cfg.get("worker_model")
+    said = (f"{t['id']} uses the config's worker model ({cfg})" if args.clear and cfg else
+            f"{t['id']} uses the worker command's own model" if args.clear else
+            f"{t['id']} uses {args.model}")
+    if rex_alive(t.get("session"), t.get("block")):
+        said += f"; its worker keeps running on {t.get('model') or 'its model'}: this takes effect at its next start or resume"
+    print(said)
 
 
 def running_count(repo):
@@ -1967,7 +1997,19 @@ def cmd_ls(args):
     every = {t["id"]: t for t in repo.tasks()}
     for t in tasks:
         extra = waits_phrase(repo, t, every) or stuck_phrase(t) or t.get("why") or t.get("pr") or (f"local branch {t['branch']}" if t.get("local") else "")
-        print(f"{t['id']:<7} {t['status']:<8} {t['title']}" + (f"  ({extra})" if extra else ""))
+        model = own_model(repo, t)
+        print(f"{t['id']:<7} {t['status']:<8} {t['title']}" + (f"  ({extra})" if extra else "")
+              + (f"  [model {model}]" if model else ""))
+
+
+def model_line(repo, t):
+    """ "opus (its own, over the config's sonnet)", and what runs now if that's another."""
+    cfg = repo.cfg.get("worker_model")
+    line = f"{own_model(repo, t)} (its own, over the config's{' ' + cfg if cfg else ''})"
+    now_on = t.get("model") if rex_alive(t.get("session"), t.get("block")) else None
+    if now_on and now_on != own_model(repo, t):
+        line += f"; running {now_on} until its next start or resume"
+    return line
 
 
 def cmd_show(args):
@@ -1978,7 +2020,9 @@ def cmd_show(args):
         return
     for k in ("id", "title", "status", "why", "note", "base", "branch", "worktree", "block", "model", "pr",
               "diffstat", "summary"):
-        if t.get(k):
+        if k == "model" and own_model(repo, t):
+            print(f"{k:>9}: {model_line(repo, t)}")
+        elif t.get(k):
             print(f"{k:>9}: {t[k]}")
         elif k == "pr" and t.get("local"):
             print(f"{k:>9}: none; local branch, merged into {t['base']} by accept")
@@ -3170,6 +3214,8 @@ def main(argv=None):
     p.add_argument("--base", help="branch to start from and open the PR against")
     p.add_argument("--after", action="append", metavar="ID",
                    help="a task this one waits on (repeat, or comma-separated): it starts once they're accepted")
+    p.add_argument("--model", help="claude's --model for this task's worker, over the config's, "
+                   "whenever it starts (by itself too) or resumes")
     p.add_argument("--auto-accept", dest="auto_accept", action="store_true", default=None,
                    help="accept it by itself once review approves it, whatever config --auto-accept says")
     p.add_argument("--no-auto-accept", dest="auto_accept", action="store_false",
@@ -3181,6 +3227,12 @@ def main(argv=None):
     p.add_argument("deps", nargs="*", metavar="ID")
     p.add_argument("--none", action="store_true", help="it waits on nothing")
     p.set_defaults(fn=cmd_after)
+
+    p = sub.add_parser("model", help="set the worker model a task starts and resumes with (--clear: the config's)")
+    p.add_argument("id")
+    p.add_argument("model", nargs="?", help="an alias like opus, or a model ID; default: let Claude Code pick")
+    p.add_argument("--clear", action="store_true", help="use the config's worker model again")
+    p.set_defaults(fn=cmd_model)
 
     p = sub.add_parser("start", help="make a task's worktree and start its worker")
     p.add_argument("id")

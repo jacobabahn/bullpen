@@ -374,6 +374,7 @@ Then tell the coordinator what you want. To drive it by hand:
 bullpen add "Fix login redirect" --brief-file brief.md   # prints BP-1
 bullpen add "Cover logout" --brief-file b2.md --after BP-1 # BP-2 starts once BP-1 is accepted
 bullpen after BP-2 --none   # change (or clear) what a task waits on
+bullpen model BP-2 sonnet   # the worker model it starts and resumes with (--clear: the config's)
 bullpen start BP-1    # worktree + branch + a Rex window running the worker
 bullpen ls            # todo, working, needs, stopped, ready
 bullpen peek BP-1     # the end of the worker's screen
@@ -433,8 +434,16 @@ does (an alias like `opus`, or a full model ID), and `default` lets Claude Code 
 again. Bullpen adds `--model` when it starts an agent, in place of any `--model` in its
 command; it leaves other agents' commands alone. (To use a `--model` written in the
 command instead, set `worker_model` or `reviewer_model` back to `null` in `config.json`.) `bullpen config` shows the models in
-use, `bullpen show BP-3` the one a worker was started with, and `bullpen start BP-3
---model sonnet` picks one for a single task.
+use, and `bullpen show BP-3` the one a worker was started with.
+
+A task can have a worker model of its own, over the config's: `bullpen add "..."
+--model sonnet` gives it one from the start, so a task that starts by itself (after
+its dependencies are accepted, or when a slot frees up) uses it. `bullpen model BP-3
+sonnet` sets or changes it later, and `bullpen model BP-3 --clear` goes back to the
+config's. A running worker isn't restarted: the change takes effect at its next start
+or resume. `bullpen start BP-3 --model sonnet` picks one as it starts, and keeps it
+for later resumes. `ls`, `show` and the board name a task's model when it isn't the
+config's.
 
 ## Tests
 

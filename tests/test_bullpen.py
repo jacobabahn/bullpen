@@ -2409,6 +2409,54 @@ class BullpenTest(unittest.TestCase):
         self.bp("start", tid2)
         self.assertEqual(self.models(self.last_command()), ["opus"])
 
+    def test_add_model_carries_to_a_start_by_itself(self):
+        self.bp("config", "--worker-model", "opus")
+        tid = self.ready_with_a_commit()
+        self.assertEqual(self.models(self.api("session.new_layer")[0]["layout"]["block"]["options"]["command"]), ["opus"])
+        nxt = self.bp("add", "Next", "--brief", "x", "--after", tid, "--model", "haiku").stdout.strip()
+        self.assertEqual(self.show(nxt)["worker_model"], "haiku")
+        self.assertIn("[model haiku]", self.bp("ls").stdout)
+        self.assertIn("    model: haiku (its own, over the config's opus)", self.bp("show", nxt).stdout)
+        self.merge_on_github(tid)
+        self.bp("accept", tid)
+        self.assertEqual(self.show(nxt)["status"], "working")
+        self.assertEqual(self.models(self.last_command()), ["haiku"])
+        self.assertEqual(self.show(nxt)["model"], "haiku")
+
+    def test_model_sets_and_clears_a_tasks_own(self):
+        self.bp("config", "--worker-model", "opus")
+        self.bp("up")
+        tid = self.bp("add", "Fix it", "--brief", "x").stdout.strip()
+        self.assertIn(f"{tid} uses sonnet", self.bp("model", tid, "sonnet").stdout)
+        self.bp("start", tid)
+        self.assertEqual(self.models(self.last_command()), ["sonnet"])
+        out = self.bp("model", tid, "--clear").stdout
+        self.assertIn(f"{tid} uses the config's worker model (opus)", out)
+        self.assertIn("takes effect at its next start or resume", out)
+        self.assertNotIn("worker_model", self.show(tid))
+        self.assertNotIn("[model", self.bp("ls").stdout)
+        self.assertEqual(len(self.api("session.new_layer")), 1)  # nothing restarted
+        self.bp("model", tid, "haiku")
+        self.assertIn("running sonnet until its next start or resume", self.bp("show", tid).stdout)
+        blk = self.block(tid)
+        (self.fake / "alive" / blk).unlink()
+        self.bp("_gone", blk)
+        self.bp("resume", tid)
+        self.assertEqual(self.models(self.last_command()), ["haiku"])
+        self.assertNotEqual(self.bp("model", tid, ok=False).returncode, 0)
+
+    def test_start_model_overrides_the_tasks_own(self):
+        self.bp("up")
+        tid = self.bp("add", "Fix it", "--brief", "x", "--model", "haiku").stdout.strip()
+        self.bp("start", tid, "--model", "sonnet")
+        self.assertEqual(self.models(self.last_command()), ["sonnet"])
+        self.assertEqual(self.show(tid)["worker_model"], "sonnet")
+        blk = self.block(tid)
+        (self.fake / "alive" / blk).unlink()
+        self.bp("_gone", blk)
+        self.bp("resume", tid)
+        self.assertEqual(self.models(self.last_command()), ["sonnet"])
+
     def test_other_agents_commands_are_left_alone(self):
         self.set_commands(worker=["codex", "--permission-mode", "auto"])
         cfg = json.loads(self.bp("config", "--model", "opus").stdout)

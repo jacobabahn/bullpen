@@ -100,6 +100,9 @@ pub struct Task {
     /// the ID of the coordinator that owns it: its news goes there
     #[serde(default, deserialize_with = "lenient")]
     pub coordinator: Option<String>,
+    /// its own worker model, over the config's (`add --model`, `start --model`, `model`)
+    #[serde(default, deserialize_with = "lenient")]
+    pub worker_model: Option<String>,
     /// those not done yet, worked out from the other tasks: "BP-8", "BP-9 (dropped)"
     #[serde(skip)]
     pub waits: Vec<String>,
@@ -165,6 +168,8 @@ pub struct Config {
     pub auto_accept: bool,
     /// the IDs of the repo's coordinators
     pub coordinators: Vec<String>,
+    /// the worker model for all tasks (`bullpen config --worker-model`)
+    pub worker_model: Option<String>,
 }
 
 impl Config {
@@ -215,6 +220,7 @@ impl Config {
                 .as_array()
                 .map(|cs| cs.iter().filter_map(|c| c["id"].as_str().map(String::from)).collect())
                 .unwrap_or_default(),
+            worker_model: v["worker_model"].as_str().map(String::from),
         }
     }
 }
@@ -409,13 +415,20 @@ pub fn auto_phrase(t: &Task, on: bool) -> &'static str {
     }
 }
 
-/// task_detail, then what auto-accept does with it.
+/// The worker model the task chose, when it isn't the config's: "Model: opus." or "".
+pub fn model_phrase(t: &Task, cfg: &Config) -> String {
+    match t.worker_model.as_deref() {
+        Some(m) if !m.is_empty() && !t.closed() && Some(m) != cfg.worker_model.as_deref() => format!("Model: {m}."),
+        _ => String::new(),
+    }
+}
+
+/// task_detail, then what auto-accept does with it and the model it chose.
 pub fn detail_with_auto(t: &Task, cfg: &Config, at: DateTime<FixedOffset>) -> String {
     let text = task_detail(t, cfg.review_rounds, at);
-    match auto_phrase(t, cfg.auto_accept) {
-        "" => text,
-        auto => format!("{text} {auto}").trim().to_string(),
-    }
+    let model = model_phrase(t, cfg);
+    let parts = [text.as_str(), auto_phrase(t, cfg.auto_accept), model.as_str()];
+    parts.iter().filter(|p| !p.is_empty()).copied().collect::<Vec<_>>().join(" ").trim().to_string()
 }
 
 fn capitalize(text: &str) -> String {
@@ -635,6 +648,7 @@ mod tests {
                 merge: "rebase".into(),
                 auto_accept: false,
                 coordinators: Vec::new(),
+                worker_model: None,
             }
         }
     }
@@ -689,6 +703,7 @@ mod tests {
             merge: "rebase".into(),
             auto_accept: on,
             coordinators: Vec::new(),
+            worker_model: None,
         };
         let approved = Some(Review { round: Some(1), verdict: Some("approved".into()) });
         let t = Task { pr: Some("https://github.com/me/repo/pull/4".into()), review: approved, ..task("BP-1", "ready") };
@@ -701,6 +716,17 @@ mod tests {
         let waiting = Task { auto_wait: Some(true), ..t.clone() };
         assert_eq!(detail_with_auto(&waiting, &cfg(true), now()), "PR #4, approved by review. Auto-accepts once its checks pass.");
         assert_eq!(auto_phrase(&Task { status: "done".into(), ..held }, true), "");
+    }
+
+    #[test]
+    fn a_task_says_its_model_when_it_isnt_the_configs() {
+        let mut cfg = Config::default_for_test();
+        let own = Task { worker_model: Some("haiku".into()), ..task("BP-1", "todo") };
+        assert_eq!(detail_with_auto(&own, &cfg, now()), "Not started. s starts it. Model: haiku.");
+        assert_eq!(detail_with_auto(&task("BP-1", "todo"), &cfg, now()), "Not started. s starts it.");
+        cfg.worker_model = Some("haiku".into());
+        assert_eq!(detail_with_auto(&own, &cfg, now()), "Not started. s starts it.");
+        assert_eq!(model_phrase(&Task { status: "done".into(), ..own }, &Config::default_for_test()), "");
     }
 
     #[test]

@@ -48,6 +48,7 @@ bullpen add "Cover logout" --brief-file /tmp/b.md --after BP-3   # waits on BP-3
 bullpen after BP-4 BP-3     # change what a task waits on; `--none` clears it
 bullpen start BP-3          # worktree + branch + a Rex window running the worker
 bullpen start BP-3 --model sonnet  # the same, with another model than the config's (only if asked)
+bullpen model BP-4 sonnet   # the model a task starts and resumes with, even by itself (`add --model` too; `--clear`)
 bullpen ls                  # open tasks: todo, working, needs, stopped, review, ready
 bullpen show BP-3           # its branch, worktree, PR (or local branch), why it needs you
 bullpen peek BP-3           # the end of the worker's screen
