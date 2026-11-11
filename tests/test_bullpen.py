@@ -1538,6 +1538,52 @@ class BullpenTest(unittest.TestCase):
         sh("git", "-C", wt, "commit", "-qm", "Fix it")
         self.bp("ready", tid, "--summary", "Did it.", cwd=wt)
 
+    # ---------- rebase after accept ----------
+
+    def two_tasks(self):
+        """BP-1 and BP-2 started, review off, each with a commit; BP-1 ready."""
+        self.bp("config", "--review", "off")
+        self.start_task("First")
+        self.bp("add", "Second", "--brief", "x")
+        self.bp("start", "BP-2")
+        for tid, name in (("BP-1", "one.txt"), ("BP-2", "two.txt")):
+            wt = self.show(tid)["worktree"]
+            (Path(wt) / name).write_text(f"{tid}\n")
+            sh("git", "-C", wt, "add", ".")
+            sh("git", "-C", wt, "commit", "-qm", f"{tid} work")
+        self.bp("ready", "BP-1", "--summary", "done")
+
+    def merge_on_github(self, tid):
+        """What `gh pr merge` would do: the task's branch lands on origin's main."""
+        sh("git", "-C", str(self.repo), "push", "-q", "origin", f"{self.show(tid)['branch']}:main")
+
+    def test_after_accept_a_ready_task_is_rebased_and_pushed(self):
+        self.two_tasks()
+        self.bp("ready", "BP-2", "--summary", "done")
+        self.merge_on_github("BP-1")
+        self.bp("accept", "BP-1")
+        t = self.show("BP-2")
+        self.assertEqual(t["status"], "ready")
+        main = sh("git", "-C", str(self.repo), "rev-parse", "origin/main").strip()
+        pushed = sh("git", "-C", str(self.tmp / "origin.git"), "rev-parse", t["branch"]).strip()
+        self.assertEqual(sh("git", "-C", t["worktree"], "rev-parse", "HEAD").strip(), pushed)
+        sh("git", "-C", t["worktree"], "merge-base", "--is-ancestor", main, pushed)
+        self.assertEqual(t["rebased"], "main")  # the board says "Rebased onto main."
+        self.assertEqual(self.news_lines()[-1], "bullpen · After BP-1: BP-2 rebased.")
+
+    def test_after_accept_a_working_task_is_told_not_rebased(self):
+        self.two_tasks()
+        wt = self.show("BP-2")["worktree"]
+        head = sh("git", "-C", wt, "rev-parse", "HEAD")
+        self.merge_on_github("BP-1")
+        self.bp("accept", "BP-1")
+        self.assertEqual(sh("git", "-C", wt, "rev-parse", "HEAD"), head)
+        block, line = [x for x in self.typed() if x[0] == self.block("BP-2")][-1]
+        self.assertIn("git fetch origin", line)
+        self.assertIn("rebase your branch onto origin/main", line)
+        self.assertEqual(self.show("BP-2")["status"], "working")
+        self.assertEqual(self.news_lines()[-1], "bullpen · After BP-1: BP-2 told to rebase.")
+
     # ---------- rules ----------
 
     def commit_rules(self, text):
@@ -1969,6 +2015,91 @@ class LocalModeTest(unittest.TestCase):
         self.bp("ready", tid)
         self.bp("accept", tid)
         self.assertEqual(self.typed()[-1][1], "bullpen · BP-1 accepted (nothing to merge)")
+
+
+    def second_ready(self, name, text):
+        """BP-2, started from main before BP-1's accept, with one commit, ready."""
+        self.bp("add", "Second", "--brief", "x")
+        self.bp("start", "BP-2")
+        wt = self.show("BP-2")["worktree"]
+        self.commit(wt, name, text, "Second")
+        self.bp("ready", "BP-2", "--summary", "done", cwd=wt)
+        return wt
+
+    def news_lines(self):
+        return [l for b, l in self.typed() if b == "blk1"]
+
+    def test_after_accept_a_ready_task_is_rebased(self):
+        tid, _ = self.ready_task()
+        wt = self.second_ready("two.txt", "two\n")
+        self.bp("accept", tid)
+        t = self.show("BP-2")
+        self.assertEqual(t["status"], "ready")
+        self.git("merge-base", "--is-ancestor", "main", "HEAD", cwd=wt)
+        self.assertEqual(self.git("log", "--format=%s", "-1", cwd=wt), "Second")
+        self.assertEqual(t["rebased"], "main")  # the board says "Rebased onto main."
+        self.assertEqual(self.news_lines()[-1], "bullpen · After BP-1: BP-2 rebased.")
+        self.bp("ready", "BP-2", "--summary", "again", cwd=wt)
+        self.assertNotIn("rebased", self.show("BP-2"))  # said once, until its next ready
+
+    def test_after_accept_a_conflict_goes_back_with_the_branch_untouched(self):
+        tid, _ = self.ready_task()
+        wt = self.second_ready("fix.txt", "fixed differently\n")
+        head = self.git("rev-parse", "HEAD", cwd=wt)
+        self.bp("accept", tid)
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=wt), head)
+        self.assertEqual(self.git("status", "--porcelain", cwd=wt), "")
+        rebase = self.git("rev-parse", "--path-format=absolute", "--git-path", "rebase-merge", cwd=wt)
+        self.assertFalse(Path(rebase).exists())
+        t = self.show("BP-2")
+        self.assertEqual(t["status"], "working")
+        block, line = self.typed()[-2]
+        self.assertEqual(block, t["block"])
+        self.assertIn("conflicts in fix.txt", line)
+        self.assertIn("rebase your branch onto main", line)
+        self.assertNotIn("fetch", line)
+        self.assertEqual(self.news_lines()[-1],
+                         "bullpen · After BP-1: BP-2 conflicts in fix.txt, sent back.")
+
+    def test_after_accept_a_conflict_resumes_a_worker_that_exited(self):
+        tid, _ = self.ready_task()
+        self.second_ready("fix.txt", "fixed differently\n")
+        (self.fake / "alive" / self.show("BP-2")["block"]).unlink()
+        self.bp("accept", tid)
+        cmd = self.api("session.new_layer")[-1]["layout"]["block"]["options"]["command"]
+        self.assertIn("--continue", cmd)
+        self.assertTrue(any("conflicts in fix.txt" in x for x in cmd))
+        self.assertEqual(self.show("BP-2")["status"], "working")
+
+    def test_after_accept_a_dirty_worktree_is_skipped(self):
+        tid, _ = self.ready_task()
+        wt = self.second_ready("two.txt", "two\n")
+        head = self.git("rev-parse", "HEAD", cwd=wt)
+        (Path(wt) / "scratch.txt").write_text("x\n")
+        self.bp("accept", tid)
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=wt), head)
+        self.assertEqual(self.show("BP-2")["status"], "ready")
+        self.assertEqual(self.news_lines()[-1],
+                         "bullpen · After BP-1: BP-2 has uncommitted changes, not rebased.")
+
+    def test_after_accept_several_tasks_in_one_line(self):
+        tid, _ = self.ready_task()
+        self.second_ready("fix.txt", "fixed differently\n")
+        self.bp("add", "Third", "--brief", "x")
+        self.bp("start", "BP-3")  # working, its pane up
+        self.bp("accept", tid)
+        self.assertEqual(self.news_lines()[-1], "bullpen · After BP-1: BP-2 conflicts in fix.txt, "
+                         "sent back; BP-3 told to rebase.")
+
+    def test_rebase_others_off(self):
+        tid, _ = self.ready_task()
+        wt = self.second_ready("two.txt", "two\n")
+        head = self.git("rev-parse", "HEAD", cwd=wt)
+        cfg = next((self.tmp / "state").rglob("config.json"))
+        cfg.write_text(json.dumps({**json.loads(cfg.read_text()), "rebase_others": False}))
+        self.bp("accept", tid)
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=wt), head)
+        self.assertEqual(self.news_lines()[-1], "bullpen · BP-1 accepted (merged into main, rebase)")
 
 
 class HelpersTest(unittest.TestCase):

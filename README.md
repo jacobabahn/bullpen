@@ -75,6 +75,26 @@ Accepting or dropping from the board (or a shell) is news to the coordinator:
 it can start queued tasks that waited for the accepted one. Run from the
 coordinator's own pane, `accept` and `drop` post nothing: it already knows.
 
+### After accept
+
+Accepting a task moves the base branch, so bullpen brings the other open tasks
+on that base up to date, and they don't drift behind and conflict later:
+
+- Working: its worker is told the base moved and to rebase onto it at a good
+  point (after `git fetch origin`, with a remote), fix conflicts and rerun the
+  tests. Its worktree isn't touched under it.
+- In review: left alone. Its next `ready` brings it up to date.
+- Between turns (needs you, stopped, ready): bullpen rebases its branch itself,
+  if its worktree is clean, and pushes it to the PR (`--force-with-lease`). The
+  status stays; a ready task says "Rebased onto main." on the board until its
+  next `ready`. If the rebase conflicts, it is undone, the branch stays as it was,
+  and the task goes back to its worker with the conflicting files (resumed if its
+  pane is gone). Uncommitted changes: skipped.
+
+One news line sums it up: `After BP-4: BP-5 told to rebase; BP-8 rebased; BP-9
+conflicts in bin/bullpen, sent back.` Set `"rebase_others": false` in the repo's
+`config.json` to turn this off.
+
 ### Review
 
 When a worker runs `ready`, bullpen pushes its branch, opens the PR and starts a
@@ -264,7 +284,8 @@ by default). `bullpen config --merge squash` changes how `accept` merges (`rebas
 working agent can show no progress before you hear of it (20 by default, `0` for
 never). `bullpen config --prefix XY --base develop` changes the task prefix (default `BP`)
 and the base branch (default: origin's default branch). The worker and coordinator
-commands are in that folder's `config.json` (`worker`, `coordinator_cmd`).
+commands are in that folder's `config.json` (`worker`, `coordinator_cmd`). `"rebase_others": false`
+there stops `accept` rebasing the other open tasks (see [After accept](#after-accept)).
 
 `bullpen config --model opus` sets the model for workers and reviewers;
 `--worker-model` and `--reviewer-model` set one each. It takes anything `claude --model`

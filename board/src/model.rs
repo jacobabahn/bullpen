@@ -85,6 +85,9 @@ pub struct Task {
     pub stuck: Option<Stuck>,
     #[serde(default, deserialize_with = "lenient")]
     pub limit: Option<Limit>,
+    /// the base it was rebased onto after another task's accept, until its next ready
+    #[serde(default, deserialize_with = "lenient")]
+    pub rebased: Option<String>,
 }
 
 impl Task {
@@ -340,6 +343,15 @@ fn capitalize(text: &str) -> String {
     c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
 }
 
+fn ready_detail(pr: &str, verdict: Option<&str>) -> String {
+    match verdict {
+        Some("approved") => format!("{pr}, approved by review."),
+        Some("changes") => format!("{pr}. Review still asks for changes."),
+        _ if !pr.is_empty() => format!("{pr}."),
+        _ => "Done.".into(),
+    }
+}
+
 fn status_detail(t: &Task, rounds: u32, at: DateTime<FixedOffset>) -> String {
     let r = t.review.clone().unwrap_or_default();
     let round = r.round.unwrap_or(1);
@@ -372,10 +384,10 @@ fn status_detail(t: &Task, rounds: u32, at: DateTime<FixedOffset>) -> String {
         "stopped" => "Its agent exited. r resumes it.".into(),
         "review" => format!("Reviewer on round {round} of {rounds}."),
         "ready" if why.starts_with("Nothing to merge") => "Done, with nothing to merge.".into(),
-        "ready" if verdict == Some("approved") => format!("{pr}, approved by review."),
-        "ready" if verdict == Some("changes") => format!("{pr}. Review still asks for changes."),
-        "ready" if !pr.is_empty() => format!("{pr}."),
-        "ready" => "Done.".into(),
+        "ready" => match &t.rebased {
+            Some(base) => format!("{} Rebased onto {base}.", ready_detail(&pr, verdict)),
+            None => ready_detail(&pr, verdict),
+        },
         "working" if t.sent_back_by_github() => "Fixing what GitHub said.".into(),
         "working" if verdict == Some("changes") => format!("Fixing what review round {round} found."),
         "todo" => "Not started. s starts it.".into(),
@@ -614,6 +626,8 @@ mod tests {
         };
         assert_eq!(task_detail(&t, 2, now()), "Local branch bullpen/bp-2-x, approved by review.");
         assert_eq!(task_detail(&Task { review: None, ..t.clone() }, 2, now()), "Local branch bullpen/bp-2-x.");
+        let rebased = Task { rebased: Some("main".into()), ..t.clone() };
+        assert_eq!(task_detail(&rebased, 2, now()), "Local branch bullpen/bp-2-x, approved by review. Rebased onto main.");
         let done = Task { status: "done".into(), merged: Some("abc".into()), ..t.clone() };
         assert_eq!(task_detail(&done, 2, now()), "Accepted. Merged into main.");
         assert_eq!(confirm_text(Action::Accept, &t, "squash"), "Accept and squash-merge into main?");

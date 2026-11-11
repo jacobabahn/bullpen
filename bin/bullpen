@@ -979,6 +979,7 @@ def cmd_ready(args):
     summary = Path(args.summary_file).read_text() if args.summary_file else (args.summary or "")
     if t.get("gh"):
         t["gh"].pop("sent", None)  # whatever GitHub sent it back for is answered now
+    t.pop("rebased", None)  # what the board says of a rebase after an accept
     local = not repo.has_origin()
     base_ref = task_base_ref(repo, t)
     ahead = int(git(wt, "rev-list", "--count", f"{base_ref}..HEAD").stdout.strip())
@@ -1188,6 +1189,8 @@ def cmd_accept(args):
         print(f"{t['id']} done")
         how = "nothing to merge"
     tell_coordinator(repo, t, "accepted", f"{t['id']} accepted ({how})")
+    if how != "nothing to merge":
+        rebase_others(repo, t)
     refresh_watcher(repo)  # the merge may have changed the watcher itself
 
 
@@ -1260,6 +1263,89 @@ def move_base(repo, base, old, new):
     if git(repo.root, "merge-base", "--is-ancestor", old, new, check=False).returncode != 0:
         raise Fail(f"merge refused: {base} can't be fast-forwarded")
     git(repo.root, "update-ref", "-m", "bullpen accept", f"refs/heads/{base}", new, old)
+
+
+def rebase_others(repo, accepted):
+    """After an accept, bring the other open tasks on the same base up to date: tell a
+    working agent to rebase, rebase one between turns, and leave a running review be.
+    One news line sums it up. Off with "rebase_others": false in config.json."""
+    if not repo.cfg.get("rebase_others", True):
+        return
+    base = accepted["base"]
+    others = [o for o in repo.tasks() if o["id"] != accepted["id"] and o["status"] not in CLOSED
+              and o.get("base") == base and o.get("worktree") and Path(o["worktree"]).is_dir()]
+    if not others:
+        return
+    if repo.has_origin():
+        git(repo.root, "fetch", "-q", "origin", base, check=False)
+    said = []
+    for o in others:
+        try:
+            line = rebase_other(repo, o, accepted)
+        except Fail as e:
+            line = f"{o['id']} not rebased ({e})"
+        if line:
+            said.append(line)
+    if said:
+        news(repo, accepted, "rebased", f"After {accepted['id']}: {'; '.join(said)}.")
+
+
+def rebase_other(repo, t, accepted):
+    """Bring one task up to date with its base; say how in a few words, or None when
+    there was nothing to do."""
+    wt, ref = t["worktree"], task_base_ref(repo, t)
+    if git(wt, "merge-base", "--is-ancestor", ref, "HEAD", check=False).returncode == 0:
+        return None  # already on top of it
+    if t["status"] == "review":
+        return f"{t['id']} left in review"  # its next ready rebases it
+    if t["status"] == "working" and rex_alive(t.get("session"), t.get("block")):
+        rex_type(t["session"], t["block"],
+                 f"{t['base']} moved: {accepted['id']} was just accepted. At a good point, "
+                 f"{onto(ref)}, fix any conflicts, and rerun the tests.")
+        return f"{t['id']} told to rebase"
+    if git(wt, "status", "--porcelain").stdout.strip():
+        return f"{t['id']} has uncommitted changes, not rebased"
+    p = git(wt, "rebase", "-q", ref, check=False)
+    if p.returncode != 0:
+        files = git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split()
+        git(wt, "rebase", "--abort", check=False)
+        return rebase_conflict(repo, t, accepted, ref, files)
+    if t.get("pr"):
+        p = git(wt, "push", "-q", "--force-with-lease", "origin", f"HEAD:refs/heads/{t['branch']}",
+                check=False)
+        if p.returncode != 0:
+            return f"{t['id']} rebased, but the push failed: {' '.join((p.stderr or p.stdout).split())}"
+    t["rebased"] = t["base"]
+    if t["status"] == "ready" and t.get("diffstat"):
+        t["diffstat"] = shortstat(wt, ref)
+    repo.save_task(t)  # same status: it stays where it was
+    return f"{t['id']} rebased"
+
+
+def onto(ref):
+    """How a worker rebases onto ref, in words for its prompt."""
+    if ref.startswith("origin/"):
+        return f"run `git fetch origin`, then rebase your branch onto {ref}"
+    return f"rebase your branch onto {ref}"
+
+
+def rebase_conflict(repo, t, accepted, ref, files):
+    """The task's branch doesn't rebase onto the moved base: it's left as it was, and
+    the conflict goes to its worker, like review findings do."""
+    names = ", ".join(files) or "some files"
+    msg = (f"{t['base']} moved ({accepted['id']} was accepted) and your branch doesn't rebase "
+           f"cleanly onto it: conflicts in {names}. Your branch is as it was. Now "
+           f"{onto(ref)}, fix the conflicts, rerun the tests, commit, and run your ready "
+           f"command again.")
+    if not worker_idle(t):
+        return f"{t['id']} conflicts in {names}, not sent to its worker, which is waiting on you"
+    if rex_alive(t.get("session"), t.get("block")):
+        rex_type(t["session"], t["block"], msg)
+        t.update(status="working", why=None, last=None)
+        repo.save_task(t)
+    else:
+        launch(repo, t, session_for(repo) or t.get("session"), msg, resume=True)
+    return f"{t['id']} conflicts in {names}, sent back"
 
 
 def cmd_drop(args):

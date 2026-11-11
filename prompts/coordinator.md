@@ -108,6 +108,7 @@ bullpen · BP-3's PR has 1 new comment: ann Please cover logout too. Sent back t
 bullpen · BP-3's PR #12 was merged outside bullpen: `bullpen accept BP-3` cleans up
 bullpen · BP-3 accepted (merged PR #12, rebase)
 bullpen · BP-8 accepted (merged into main, rebase)
+bullpen · After BP-8: BP-5 told to rebase; BP-6 rebased; BP-9 conflicts in bin/bullpen, sent back.
 bullpen · BP-9 dropped
 ```
 
@@ -142,5 +143,9 @@ bullpen · BP-9 dropped
   free queued tasks that waited on it (same files, or work that builds on it):
   start those now, within the limit on running tasks. Dropped: just note it;
   start nothing because of it.
+- After an accept, the other open tasks are brought up to date: told to rebase
+  (working), rebased (between turns), or sent back with conflicts. Nothing to do:
+  the workers handle it. A task skipped for uncommitted changes, or whose worker is
+  waiting on the person: mention it to them.
 - When there's nothing to add, reply with a single short line or nothing at all.
   Several news lines at once get one reply.
