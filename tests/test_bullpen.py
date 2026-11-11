@@ -1302,6 +1302,25 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.show(tid)["diffstat"], "1 file, +2 −0")
         self.assertIn("diffstat: 1 file, +2 −0", self.bp("show", tid).stdout)
 
+    def test_board_runs_the_rust_board_on_this_repos_state(self):
+        fake = self.fake / "board"
+        fake.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
+        fake.chmod(0o755)
+        self.env["BULLPEN_BOARD"] = str(fake)
+        args = self.bp("board").stdout.splitlines()
+        cfg = json.loads(self.bp("config").stdout)
+        self.assertEqual(args[:4], ["--dir", cfg["state"], "--root", str(self.repo)])
+        self.assertEqual(args[4], "--bullpen")
+
+    def test_board_says_when_it_isnt_built(self):
+        self.env["BULLPEN_BOARD"] = str(self.tmp / "missing")
+        p = self.bp("board", ok=False)
+        self.assertIn("isn't built", p.stderr)
+
+    def test_board_layout_is_a_setting(self):
+        self.bp("config", "--board-layout", "compact")
+        self.assertEqual(json.loads(self.bp("config").stdout)["board_layout"], "compact")
+
     def test_go_finds_the_repo_from_any_directory(self):
         tid = self.start_task()
         out = self.bp("go", tid, "--json", "--from", "nowhere", cwd=self.tmp).stdout
@@ -1319,9 +1338,13 @@ class BullpenTest(unittest.TestCase):
         calls = [json.loads(l)["argv"] for l in log.read_text().splitlines()] if log.exists() else []
         return [a for a in calls if a[:2] == ["pr", "view"]]
 
-    def detail(self, tid):
-        """The board's sentence for the task."""
-        return BoardTest.cli().task_detail(self.show(tid))
+    def sent_back_by(self, tid):
+        """Who the board says sent a working task back (board/src/model.rs reads
+        the same fields): "github", "review", or None."""
+        t = self.show(tid)
+        if (t.get("gh") or {}).get("sent"):
+            return "github"
+        return "review" if (t.get("review") or {}).get("verdict") == "changes" else None
 
     def news_lines(self):
         return [l for b, l in self.typed() if b == "blk1"]
@@ -1347,7 +1370,7 @@ class BullpenTest(unittest.TestCase):
         self.assertFalse((self.fake / "alive" / reviewer).exists())  # its review is moot
         self.assertEqual(t["review"]["round"], 0)  # and doesn't use up a round
         self.assertIn("checks failing", self.bp("show", tid).stdout)
-        self.assertEqual(self.detail(tid), "Fixing what GitHub said. Checks failing.")
+        self.assertEqual((self.sent_back_by(tid), self.show(tid)["gh"]["checks"]), ("github", "failing"))
         # the worker runs ready again without fixing them: same commit, same failure
         self.bp("ready", tid, "--summary", "Did it.", cwd=t["worktree"])
         self.assertEqual(self.show(tid)["review"]["round"], 1)
@@ -1370,7 +1393,7 @@ class BullpenTest(unittest.TestCase):
         self.bp("_prs")
         self.assertEqual(self.show(tid)["gh"]["checks"], "passing")
         self.verdict(tid, "changes", "The fix misses the empty case.")
-        self.assertEqual(self.detail(tid), "Fixing what review round 1 found.")
+        self.assertEqual(self.sent_back_by(tid), "review")
         self.assertNotIn("github:", self.bp("show", tid).stdout)
 
     def test_review_changes_after_a_github_send_back_say_review(self):
@@ -1378,10 +1401,10 @@ class BullpenTest(unittest.TestCase):
         self.commit_and_ready(tid)
         self.github(statusCheckRollup=self.FAILING)
         self.bp("_prs")
-        self.assertEqual(self.detail(tid), "Fixing what GitHub said. Checks failing.")
+        self.assertEqual((self.sent_back_by(tid), self.show(tid)["gh"]["checks"]), ("github", "failing"))
         self.commit_and_ready(tid, 2)
         self.verdict(tid, "changes", "The fix misses the empty case.")
-        self.assertEqual(self.detail(tid), "Fixing what review round 1 found.")
+        self.assertEqual(self.sent_back_by(tid), "review")
 
     def test_a_new_comment_is_forwarded_once(self):
         tid = self.start_task()
@@ -1941,7 +1964,7 @@ class LocalModeTest(unittest.TestCase):
         self.assertEqual(self.typed()[-1][1], "bullpen · BP-1 accepted (nothing to merge)")
 
 
-class BoardTest(unittest.TestCase):
+class HelpersTest(unittest.TestCase):
     @classmethod
     def cli(cls):
         """bin/bullpen as a module, to call its functions directly."""
@@ -1957,107 +1980,28 @@ class BoardTest(unittest.TestCase):
     def setUpClass(cls):
         cls.bp = cls.cli()
 
-    def test_groups_follow_what_you_do_next(self):
-        tasks = [{"id": f"BP-{i}", "status": st} for i, st in enumerate(
-            ["todo", "working", "ready", "needs", "stopped", "review", "done"], 1)]
-        groups = [(h, [t["id"] for t in ts]) for h, ts in self.bp.board_groups(tasks)]
-        self.assertEqual(groups, [("Needs you", ["BP-4", "BP-5"]), ("Ready to accept", ["BP-3"]),
-                                  ("In review", ["BP-6"]), ("Working", ["BP-2"]), ("Queued", ["BP-1"])])
-        self.assertEqual(self.bp.board_groups(tasks, finished=True)[-1][0], "Finished")
+    def test_a_local_task_is_on_a_local_branch(self):
+        self.assertEqual(self.bp.where({"status": "ready", "pr": None, "local": True}), "local branch")
 
-    def test_detail_says_what_a_task_needs(self):
-        d = self.bp.task_detail
-        self.assertEqual(d({"status": "needs", "why": "Ended its turn without saying ready",
-                            "note": "Asks: python3 or python?"}), "Asks: python3 or python?")
-        self.assertIn("probably with a question", d({"status": "needs", "why": "Ended its turn without saying ready"}))
-        self.assertEqual(d({"status": "review", "review": {"round": 2}}), "Reviewer on round 2 of 2.")
-        self.assertEqual(d({"status": "ready", "pr": "https://x/pull/4", "review": {"verdict": "approved"}}),
-                         "PR #4, approved by review.")
-        self.assertEqual(d({"status": "working", "review": {"verdict": "changes", "round": 1}}),
-                         "Fixing what review round 1 found.")
-        self.assertEqual(d({"status": "ready", "pr": "https://x/pull/4", "gh": {"checks": "failing", "new": 1}}),
-                         "PR #4. Checks failing, 1 new comment.")
-        self.assertEqual(d({"status": "working", "gh": {"checks": "failing", "sent": True}}),
-                         "Fixing what GitHub said. Checks failing.")
-        self.assertEqual(d({"status": "ready", "pr": "https://x/pull/4", "gh": {"state": "merged"}}),
-                         "PR #4. Merged on GitHub.")
-
-    def test_a_working_task_says_who_sent_it_back(self):
-        d = self.bp.task_detail
+    def test_a_working_task_only_shows_what_github_sent_it_back_for(self):
         gh = {"state": "open", "checks": "passing", "new": 0}
-        # a reviewer's changes, after the watcher recorded the old push's checks
-        self.assertEqual(d({"status": "working", "pr": "https://x/pull/4",
-                            "review": {"round": 1, "verdict": "changes"}, "gh": gh}),
-                         "Fixing what review round 1 found.")
-        # GitHub's, even when an earlier review round asked for changes
-        self.assertEqual(d({"status": "working", "pr": "https://x/pull/4",
-                            "review": {"round": 1, "verdict": "changes"},
-                            "gh": {"state": "open", "checks": "failing", "new": 1, "sent": True}}),
-                         "Fixing what GitHub said. Checks failing, 1 new comment.")
-        # resumed or told by the person: nothing about the old push
-        self.assertEqual(d({"status": "working", "pr": "https://x/pull/4", "gh": gh}), "")
         self.assertEqual(self.bp.pr_phrase({"status": "working", "gh": gh}), "")
+        self.assertEqual(self.bp.pr_phrase({"status": "working", "gh": {**gh, "sent": True}}), "checks passing")
         self.assertEqual(self.bp.pr_phrase({"status": "ready", "gh": gh}), "checks passing")
 
-    def test_local_tasks_show_their_branch(self):
-        d = self.bp.task_detail
-        t = {"status": "ready", "pr": None, "local": True, "branch": "bullpen/bp-2-x", "base": "main",
-             "review": {"verdict": "approved"}}
-        self.assertEqual(d(t), "Local branch bullpen/bp-2-x, approved by review.")
-        self.assertEqual(d({**t, "review": None}), "Local branch bullpen/bp-2-x.")
-        self.assertEqual(d({**t, "status": "done", "merged": "abc"}), "Accepted. Merged into main.")
-        self.assertEqual(self.bp.confirm_text("accept", t, "squash"), "Accept and squash-merge into main?")
-        self.assertEqual(self.bp.confirm_text("drop", t), "Drop it?")
-        self.assertEqual(self.bp.where(t), "local branch")
-
-    def test_keys_fit_the_task(self):
-        self.assertTrue(self.bp.task_keys({"status": "ready"}).startswith("a accept"))
-        self.assertTrue(self.bp.task_keys({"status": "needs"}).startswith("⏎ answer"))
-        self.assertEqual(self.bp.task_keys(None), "")
-        self.assertTrue(self.bp.task_keys({"status": "working", "worktree": "/w"}).endswith("v diff"))
-        self.assertNotIn("v diff", self.bp.task_keys({"status": "todo"}))
-        self.assertNotIn("v diff", self.bp.task_keys({"status": "done", "worktree": "/w"}))
-
-    def test_stat_shows_for_review_and_ready(self):
-        t = {"status": "ready", "diffstat": "3 files, +120 −14"}
-        self.assertEqual(self.bp.task_stat(t), "3 files, +120 −14")
-        self.assertEqual(self.bp.task_stat({**t, "status": "review"}), "3 files, +120 −14")
-        self.assertEqual(self.bp.task_stat({**t, "status": "working"}), "")
-        self.assertEqual(self.bp.task_stat({"status": "ready"}), "")
-
-    def test_a_stuck_task_says_so(self):
+    def test_only_the_agent_a_task_waits_on_is_stuck_or_limited(self):
         import datetime as dt
-        ago = lambda m: (dt.datetime.now().astimezone() - dt.timedelta(minutes=m)).isoformat()
-        d = self.bp.task_detail
-        t = {"status": "working", "stuck": {"who": "worker", "since": ago(25)}}
+        ago = (dt.datetime.now().astimezone() - dt.timedelta(minutes=25)).isoformat()
+        t = {"status": "working", "stuck": {"who": "worker", "since": ago}}
         self.assertTrue(self.bp.is_stuck(t))
-        self.assertEqual(d(t), "No progress for 25 min. p shows its screen.")
-        self.assertEqual(d({**t, "note": "Hung on npm install"}), "Hung on npm install")
-        self.assertEqual(d({"status": "review", "review": {"round": 1},
-                            "stuck": {"who": "reviewer", "since": ago(190)}}),
-                         "Reviewer has shown no progress for 3 h. ⏎ opens it.")
-        # a worker's quiet spell says nothing about a task that has moved on
-        moved = {"status": "review", "review": {"round": 1}, "stuck": {"who": "worker", "since": ago(25)}}
-        self.assertFalse(self.bp.is_stuck(moved))
-        self.assertEqual(d(moved), "Reviewer on round 1 of 2.")
+        self.assertEqual(self.bp.stuck_phrase(t), "no progress for 25 min")
+        self.assertFalse(self.bp.is_stuck({**t, "status": "review"}))
         self.assertFalse(self.bp.is_stuck({"status": "working"}))
-
-    def test_a_limited_task_says_when_it_resets(self):
-        import datetime as dt
         at = dt.datetime(2026, 11, 11, 13, 0).astimezone()
-        d = lambda t: self.bp.limit_detail(t, at)
         lim = {"who": "worker", "resets": at.replace(hour=15).isoformat(), "text": "x"}
-        t = {"status": "working", "limit": lim}
-        self.assertTrue(self.bp.is_limited(t))
-        self.assertEqual(d(t), "Usage limit, resets 3:00 PM. Continues by itself then.")
-        self.assertEqual(self.bp.limit_why(lim, at), "Usage limit, resets 3:00 PM")
-        self.assertEqual(d({"status": "working", "limit": {**lim, "resets": None}}),
-                         "Usage limit, reset time unknown. t tells it to continue.")
-        self.assertEqual(d({"status": "review", "limit": {**lim, "who": "reviewer"}}),
-                         "Reviewer stopped at the usage limit, resets 3:00 PM. Continues by itself then.")
-        self.assertIn("Usage limit, resets", self.bp.task_detail(t))
-        # a worker's limit says nothing about a task that has moved on
+        self.assertTrue(self.bp.is_limited({"status": "working", "limit": lim}))
         self.assertFalse(self.bp.is_limited({"status": "ready", "limit": lim}))
+        self.assertEqual(self.bp.limit_why(lim, at), "Usage limit, resets 3:00 PM")
 
     def test_reset_times_are_read(self):
         import datetime as dt
@@ -2084,12 +2028,6 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(self.bp.clock(day(16, 0), at), "Mon 12:00 AM")
         self.assertEqual(self.bp.clock(day(30, 9, 5), at), "Nov 30 9:05 AM")
 
-    def test_fit_and_age(self):
-        import datetime as dt
-        self.assertEqual(self.bp.fit("Add a done command", 10), "Add a don…")
-        at = dt.datetime(2026, 1, 1, 12, 0, tzinfo=dt.timezone.utc)
-        self.assertEqual(self.bp.ago("2026-01-01T11:55:00+00:00", at), "5m")
-        self.assertEqual(self.bp.ago("2026-01-01T09:55:00+00:00", at), "2h")
 
 
 # Drives lua/stuck.lua with made-up times: T counts minutes.

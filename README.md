@@ -17,11 +17,12 @@ pane, or the coordinator follows it with Claude Code's Monitor tool (see [News](
 ## Install
 
 ```sh
-./install.sh          # links bin/bullpen into ~/.local/bin
+./install.sh          # links bin/bullpen into ~/.local/bin and builds the board
 ```
 
 Needs Rex (a server from preview.13 on, for minimized floating panes), git, `gh`
-(signed in) and Claude Code.
+(signed in), Claude Code and, to build the task board, Rust's `cargo`. Run
+`./install.sh` again after pulling changes to the board.
 
 ## Use
 
@@ -48,7 +49,8 @@ The watcher is also replaced when it is out of date. `up` and `accept` compare
 pull brought a new version, they close the old watcher and start a new one. A
 current watcher is left alone.
 
-The task board (`bullpen board`) sits in a narrow pane beside the coordinator.
+The task board (`bullpen board`, a Rust program in `board/`) sits in a narrow
+pane beside the coordinator and updates as soon as a task changes.
 It groups tasks by what you do next: needs you, ready to accept, in review,
 working, queued. Each task shows how long it has been there and, on a second
 line, what it needs or where it stands ("Asks: python3 or python?", "PR #4,
