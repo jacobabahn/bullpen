@@ -736,6 +736,16 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.show(tid)["status"], "working")
         self.assertEqual(self.check(), [])
 
+    def test_check_sees_a_busy_agent_working_again(self):
+        # a working agent's record is new every few seconds (its message changes)
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.bp("_event", blk, "blocked", "permission", "Allow rm?")
+        self.agent(blk, "working", msg="Running rm", ago=3)
+        self.assertEqual(self.check(), [f"{tid} is marked needs (permission) but its agent is working again"])
+        self.check("--fix", "--quiet")
+        self.assertEqual(self.show(tid)["status"], "working")
+
     def test_check_finds_a_gone_pane(self):
         tid = self.start_task()
         (self.fake / "alive" / self.block(tid)).unlink()

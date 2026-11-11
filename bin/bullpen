@@ -2385,7 +2385,7 @@ def cmd_gone(args):
 # pane with what Rex says that agent is doing right now, and `--fix` applies the
 # event that was missed, through the same paths (and news) as the watcher.
 
-SETTLE = 60  # seconds a new state is left alone: its event may still be on the way
+SETTLE = 60  # seconds a new idle, blocked or error state is left alone: its event may still be on the way
 SHELL_RE = re.compile(r"\b\d+ (?:background )?shells?\b|shells? still running", re.I)
 
 
@@ -2434,10 +2434,13 @@ def agent_state(session, block, at=None):
     r = program_status(session, block)
     if r:
         age = seconds_since(r["updated_at"], at) if r.get("updated_at") else None
-        if age is not None and age < SETTLE:
-            return None
         state = r.get("state") or "idle"
         state = state if state in ("working", "blocked", "error") else "idle"
+        if state != "working" and age is not None and age < SETTLE:
+            # its event may still be on the way (the watcher holds an end of turn back).
+            # Not working: the watcher forwards that at once, and a busy agent's record
+            # is new every few seconds, as its message changes.
+            return None
         out = {"state": state, "kind": r.get("kind") or "", "msg": r.get("msg") or "", "age": age}
     else:  # no record to read: go by the screen
         state = screen_state(screen(session, block))

@@ -253,7 +253,7 @@ BP-6 is marked working but its pane is gone
 It prints nothing, and exits 0, when all agree (1 when something doesn't). It
 reads the status record Rex keeps for each pane (the one the watcher's events come
 from), and goes by the screen where Rex has none: Claude Code's spinner, its
-prompt. A state that changed in the last minute is left alone, since its event may
+prompt. An idle, blocked or error state that began in the last minute is left alone, since its event may
 still be on the way, and so is a task bullpen itself moved in the last minute
 (`start`, `tell`, `ready`): its agent has yet to report. `bullpen check BP-3` checks one task.
 
