@@ -641,6 +641,80 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(nxt(first), self.block(a))
         self.assertEqual(nxt(self.block(a)), self.block(b))  # wraps around
 
+    def change_things(self, tid):
+        """A committed new file, an uncommitted edit and an untracked file."""
+        wt = self.show(tid)["worktree"]
+        (Path(wt) / "fix.txt").write_text("one\ntwo\n")
+        sh("git", "-C", wt, "add", ".")
+        sh("git", "-C", wt, "commit", "-qm", "Fix it")
+        (Path(wt) / "README").write_text("changed\n")
+        (Path(wt) / "scratch.txt").write_text("x\n")
+        return wt
+
+    def test_diff_stat(self):
+        tid = self.start_task()
+        self.assertEqual(self.bp("diff", tid, "--stat").stdout.strip(), "BP-1 has no commits against origin/main.")
+        wt = self.change_things(tid)
+        sh("git", "-C", str(self.repo), "commit", "-q", "--allow-empty", "-m", "Later on main")
+        sh("git", "-C", str(self.repo), "push", "-q", "origin", "main")
+        sh("git", "-C", wt, "fetch", "-q", "origin")  # the base moved on: only the task's changes show
+        out = self.bp("diff", tid, "--stat").stdout
+        committed, loose = out.split("\n\n")
+        self.assertIn("fix.txt | 2 ++", committed)
+        self.assertIn("1 file changed, 2 insertions(+)", committed)
+        self.assertNotIn("README", committed)
+        self.assertTrue(loose.startswith("Uncommitted"))
+        self.assertIn("README | 2 +-", loose)
+        self.assertIn("untracked: scratch.txt", loose)
+        self.assertEqual(self.rex_calls()[-1][0], "api")  # no pane, no pager: nothing new in Rex
+
+    def test_diff_prints_the_changes_when_not_on_a_terminal(self):
+        tid = self.start_task()
+        self.change_things(tid)
+        out = self.bp("diff", tid).stdout
+        self.assertIn("+++ b/fix.txt", out)
+        self.assertIn("Uncommitted (not in any commit yet):", out)
+        self.assertIn("+changed", out)
+        self.assertIn("untracked: scratch.txt", out)
+        self.assertNotIn("\x1b[", out)  # no colour codes into a file or pipe
+
+    def test_diff_of_a_task_without_a_worktree(self):
+        self.bp("up")
+        tid = self.bp("add", "Later", "--brief", "x").stdout.strip()
+        for args in ((), ("--stat",), ("--pane",)):
+            p = self.bp("diff", tid, *args, ok=False)
+            self.assertEqual(p.returncode, 1)
+            self.assertIn("BP-1 has no worktree (it is todo)", p.stderr)
+        self.assertEqual(self.api("session.new_layer"), [])
+
+    def test_diff_pane_opens_over_the_board_and_goes_back_after(self):
+        tid = self.start_task()  # its worker is the capsule lyr1
+        wt = self.show(tid)["worktree"]
+        self.bp("go", tid)  # the worker is up: the diff puts it away
+        self.bp("diff", tid, "--pane")
+        layer = self.api("session.new_layer")[-1]
+        block = layer["layout"]["block"]
+        self.assertEqual(block["label"], "bullpen: BP-1 diff")
+        self.assertEqual(block["options"]["cwd"], wt)
+        self.assertEqual(block["options"]["command"][-3:], ["diff", "BP-1", "--back"])
+        self.assertEqual(layer["window_id"], "w1")
+        self.assertEqual(self.layer_states(), {"lyr1": "minimized", "lyr2": "normal"})
+        self.assertTrue(self.api("session.set_layer_state")[-1].get("focus"))
+        self.bp("diff", tid, "--pane")  # again: the old diff pane closes first
+        self.assertFalse((self.fake / "alive" / "blk5").exists())
+        self.bp("diff", tid, "--back")  # what the pane runs: the board after the pager
+        self.assertEqual(self.focused()[-1], "blk2")
+
+    def test_ready_records_the_size_of_the_change(self):
+        tid = self.start_task()
+        self.change_things(tid)
+        wt = self.show(tid)["worktree"]
+        (Path(wt) / "README").write_text("hi\n")
+        (Path(wt) / "scratch.txt").unlink()
+        self.bp("ready", tid, cwd=wt)
+        self.assertEqual(self.show(tid)["diffstat"], "1 file, +2 −0")
+        self.assertIn("diffstat: 1 file, +2 −0", self.bp("show", tid).stdout)
+
     def test_go_finds_the_repo_from_any_directory(self):
         tid = self.start_task()
         out = self.bp("go", tid, "--json", "--from", "nowhere", cwd=self.tmp).stdout
@@ -829,6 +903,14 @@ class LocalModeTest(unittest.TestCase):
         self.assertEqual(self.show(tid)["status"], "done")
         self.assertEqual(self.git("rev-parse", "main"), main)
 
+    def test_diff_against_the_local_base(self):
+        tid, wt = self.ready_task()  # main moved on since: only the task's own change shows
+        out = self.bp("diff", tid, "--stat").stdout
+        self.assertIn("fix.txt | 1 +", out)
+        self.assertNotIn("other.txt", out)
+        self.assertNotIn("Uncommitted", out)
+        self.assertEqual(self.show(tid)["diffstat"], "1 file, +1 −0")
+
     def test_drop_closes_no_pr(self):
         tid, wt = self.ready_task()
         self.bp("drop", tid)
@@ -880,6 +962,16 @@ class BoardTest(unittest.TestCase):
         self.assertTrue(self.bp.task_keys({"status": "ready"}).startswith("a accept"))
         self.assertTrue(self.bp.task_keys({"status": "needs"}).startswith("⏎ answer"))
         self.assertEqual(self.bp.task_keys(None), "")
+        self.assertTrue(self.bp.task_keys({"status": "working", "worktree": "/w"}).endswith("v diff"))
+        self.assertNotIn("v diff", self.bp.task_keys({"status": "todo"}))
+        self.assertNotIn("v diff", self.bp.task_keys({"status": "done", "worktree": "/w"}))
+
+    def test_stat_shows_for_review_and_ready(self):
+        t = {"status": "ready", "diffstat": "3 files, +120 −14"}
+        self.assertEqual(self.bp.task_stat(t), "3 files, +120 −14")
+        self.assertEqual(self.bp.task_stat({**t, "status": "review"}), "3 files, +120 −14")
+        self.assertEqual(self.bp.task_stat({**t, "status": "working"}), "")
+        self.assertEqual(self.bp.task_stat({"status": "ready"}), "")
 
     def test_fit_and_age(self):
         import datetime as dt

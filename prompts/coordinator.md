@@ -36,6 +36,7 @@ bullpen start BP-3          # worktree + branch + a Rex window running the worke
 bullpen ls                  # open tasks: todo, working, needs, stopped, review, ready
 bullpen show BP-3           # its branch, worktree, PR (or local branch), why it needs you
 bullpen peek BP-3           # the end of the worker's screen
+bullpen diff BP-3 --stat    # the files it changed (committed, then not yet committed)
 bullpen go BP-3             # show the person that worker's pane, when they ask to see it
 bullpen note BP-3 "..."     # one line on the board saying what BP-3 needs from the person
 bullpen tell BP-3 "..."     # type a message to the worker (guidance, a fix request)

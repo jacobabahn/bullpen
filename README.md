@@ -45,15 +45,17 @@ The task board (`bullpen board`) sits in a narrow pane beside the coordinator.
 It groups tasks by what you do next: needs you, ready to accept, in review,
 working, queued. Each task shows how long it has been there and, on a second
 line, what it needs or where it stands ("Asks: python3 or python?", "PR #4,
-approved by review."). A task that needs you gets an amber bar; its age turns
-red after 5 minutes. `l` switches to a compact layout, one line per task with
-the selected task's detail at the bottom.
+approved by review."). A task in review or ready also shows the size of its
+change ("3 files, +120 −14"), worked out once when its worker runs `ready`. A
+task that needs you gets an amber bar; its age turns red after 5 minutes. `l`
+switches to a compact layout, one line per task with the selected task's detail
+at the bottom.
 
 The keys at the bottom follow the selected task: `⏎` opens its worker (or its
 reviewer), `a` accepts and `d` drops (each asks y/n first), `t` tells, `p`
-peeks, `s` starts, `r` resumes, `c` goes back to the coordinator, `n` selects
-the next task that needs you. `?` lists them all. `bullpen up --no-board`
-leaves the board out.
+peeks, `v` shows its diff, `s` starts, `r` resumes, `c` goes back to the
+coordinator, `n` selects the next task that needs you. `?` lists them all.
+`bullpen up --no-board` leaves the board out.
 
 ### Review
 
@@ -89,6 +91,7 @@ bullpen add "Fix login redirect" --brief-file brief.md   # prints BP-1
 bullpen start BP-1    # worktree + branch + a Rex window running the worker
 bullpen ls            # todo, working, needs, stopped, ready
 bullpen peek BP-1     # the end of the worker's screen
+bullpen diff BP-1     # its changes against its base, in a pager (--stat: just the files)
 bullpen go BP-1       # focus its pane (`go` alone: the coordinator; --next: next needing you)
 bullpen tell BP-1 "Also cover the logout path"
 bullpen resume BP-1   # restart a stopped worker, continuing its conversation
@@ -96,6 +99,12 @@ bullpen note BP-1 "Asks: ..."   # say on the board what it needs from you
 bullpen accept BP-1   # merge its PR (or local branch; rebase), close its pane, remove its worktree
 bullpen drop BP-1     # close its PR, window and worktree without merging
 ```
+
+`bullpen diff BP-1` shows `git diff <base>...HEAD` from the task's worktree, then
+any changes not committed yet, in `delta` if it's installed, else `less -R`. The
+base is `origin/<base>` when there's a remote, the local base branch when there
+isn't. On the board, `v` opens the same view in a floating pane; `q` closes it and
+takes you back to the board.
 
 A worker finishes with `bullpen ready <ID> --summary-file <file>`, which refuses
 uncommitted changes, pushes the branch and opens (or updates) the pull request.

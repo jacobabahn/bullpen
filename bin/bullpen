@@ -672,17 +672,16 @@ def cmd_ready(args):
         raise Fail("uncommitted changes: commit (or discard) them, then run ready again")
     summary = Path(args.summary_file).read_text() if args.summary_file else (args.summary or "")
     local = not repo.has_origin()
-    if local or git(wt, "rev-parse", "-q", "--verify", f"origin/{t['base']}", check=False).returncode != 0:
-        base_ref = t["base"]
-    else:
-        base_ref = f"origin/{t['base']}"
+    base_ref = task_base_ref(repo, t)
     ahead = int(git(wt, "rev-list", "--count", f"{base_ref}..HEAD").stdout.strip())
     if ahead == 0:
-        t.update(status="ready", why="Nothing to merge (no commits)", summary=summary.strip() or None)
+        t.update(status="ready", why="Nothing to merge (no commits)", summary=summary.strip() or None,
+                 diffstat=None)
         repo.save_task(t)
         news(repo, t, "ready", f"{t['id']} is ready with nothing to merge: {t['title']}")
         print("no commits: marked ready with nothing to merge")
         return
+    t["diffstat"] = shortstat(wt, base_ref)  # for the board, worked out once per ready
     if local:
         t["local"] = True
         t.update(why=None, summary=summary.strip() or t.get("summary"), commits=ahead)
@@ -717,6 +716,25 @@ def cmd_ready(args):
 
 def commits(n):
     return f"{n} commit{'s' if n != 1 else ''}"
+
+
+def task_base_ref(repo, t):
+    """What the task's branch is compared with: origin's copy of its base branch when
+    there is one, else the local base branch (local mode)."""
+    if repo.has_origin() and git(t["worktree"], "rev-parse", "-q", "--verify", f"origin/{t['base']}",
+                                 check=False).returncode == 0:
+        return f"origin/{t['base']}"
+    return t["base"]
+
+
+def shortstat(wt, base_ref):
+    """The branch's change against its base in a few words: "3 files, +120 −14"."""
+    out = git(wt, "diff", "--shortstat", f"{base_ref}...HEAD").stdout
+    n = {k: int(v) for v, k in re.findall(r"(\d+) (file|insertion|deletion)", out)}
+    if not n.get("file"):
+        return None
+    files = f"{n['file']} file{'s' if n['file'] != 1 else ''}"
+    return f"{files}, +{n.get('insertion', 0)} −{n.get('deletion', 0)}"
 
 
 def review_label(t):
@@ -951,7 +969,8 @@ def cmd_show(args):
     if args.json:
         print(json.dumps(t, indent=2))
         return
-    for k in ("id", "title", "status", "why", "note", "base", "branch", "worktree", "block", "pr", "summary"):
+    for k in ("id", "title", "status", "why", "note", "base", "branch", "worktree", "block", "pr", "diffstat",
+              "summary"):
         if t.get(k):
             print(f"{k:>9}: {t[k]}")
         elif k == "pr" and t.get("local"):
@@ -961,6 +980,84 @@ def cmd_show(args):
         state = r.get("verdict") or "in progress"
         print(f"   review: round {r.get('round')}, {state}" + (f"; findings: {r['findings']}" if r.get("findings") else ""))
     print(f"    brief: {repo.dir / 'briefs' / (t['id'] + '.md')}")
+
+
+def diff_label(t):
+    return f"bullpen: {t['id']} diff"
+
+
+def cmd_diff(args):
+    """A task's changes against its base, through a pager; --stat just the files."""
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    wt = t.get("worktree")
+    if not wt or not Path(wt).is_dir():
+        raise Fail(f"{t['id']} has no worktree (it is {t['status']}), so there's nothing to diff")
+    if args.pane:
+        return diff_pane(repo, t, args)
+    base_ref = task_base_ref(repo, t)
+    if args.stat:
+        print(diff_stat(wt, base_ref, t["id"]))
+        return
+    delta = shutil.which("delta")
+    tty = sys.stdout.isatty()
+    color = ["--color=always"] if tty and not delta else ["--no-color"]
+    text = git(wt, "diff", *color, f"{base_ref}...HEAD").stdout
+    loose = git(wt, "diff", *color, "HEAD").stdout
+    untracked = git(wt, "ls-files", "--others", "--exclude-standard").stdout.splitlines()
+    if loose or untracked:
+        text += ("\n" if text else "") + f"{UNCOMMITTED}\n\n" + loose + "".join(f"untracked: {f}\n" for f in untracked)
+    if not text:
+        text = f"{t['id']} has no changes against {base_ref}.\n"
+    page(text, delta if tty else None, tty)
+    if args.back:
+        b = repo.cfg.get("board") or {}
+        if rex_alive(b.get("session"), b.get("block")):
+            rex_focus(b.get("session"), b["block"])
+
+
+UNCOMMITTED = "Uncommitted (not in any commit yet):"
+
+
+def diff_stat(wt, base_ref, tid):
+    """The files the branch changed since its base, then any not committed yet."""
+    parts = []
+    committed = git(wt, "diff", "--stat", f"{base_ref}...HEAD").stdout.rstrip()
+    parts.append(committed or f"{tid} has no commits against {base_ref}.")
+    loose = git(wt, "diff", "--stat", "HEAD").stdout.rstrip()
+    untracked = git(wt, "ls-files", "--others", "--exclude-standard").stdout.splitlines()
+    if loose or untracked:
+        parts.append("\n".join([UNCOMMITTED] + ([loose] if loose else []) +
+                               [f" untracked: {f}" for f in untracked]))
+    return "\n\n".join(parts)
+
+
+def page(text, delta, tty):
+    """Show text in delta, else `less -R`; straight to stdout when that's no terminal.
+    The pager never quits by itself on a short diff: in a pane, that would close it at once."""
+    if not tty:
+        sys.stdout.write(text)
+        return
+    pager = [delta, "--paging=always"] if delta else ["less", "-R", "-+F"]
+    try:
+        subprocess.run(pager, input=text, text=True)
+    except FileNotFoundError:
+        sys.stdout.write(text)
+
+
+def diff_pane(repo, t, args):
+    """Show the diff in a floating pane over the board (a tab with --workers tabs);
+    quitting the pager closes it and focuses the board again."""
+    session = session_for(repo, args) or t.get("session")
+    old = find_pane(rex_view(session), label=diff_label(t))
+    if old:
+        rex_close(session, old[2])  # one diff pane per task, showing the latest
+    argv = [SELF, "diff", t["id"], "--back"]
+    if repo.cfg.get("workers") == "tabs":
+        block = rex_run(session, t["worktree"], diff_label(t), argv, focus=True)
+    else:
+        block = float_pane(repo, session, diff_label(t), t["worktree"], argv)
+    show_pane(repo, session, block)
 
 
 def cmd_config(args):
@@ -1188,16 +1285,26 @@ def task_detail(t, rounds=2):
     return ""
 
 
+def task_stat(t):
+    """The size of a task's change, for one in review or ready: "3 files, +120 −14"."""
+    return (t.get("diffstat") or "") if t["status"] in ("review", "ready") else ""
+
+
 def task_keys(t):
     """The keys that make sense for this task, for the footer."""
-    return {
+    if not t:
+        return ""
+    keys = {
         "needs": "⏎ answer  t tell  p peek",
         "stopped": "r resume  p peek  d drop",
         "review": "⏎ reviewer  p peek",
         "ready": "a accept  d drop  ⏎ open",
         "working": "⏎ open  t tell  p peek",
         "todo": "s start  d drop",
-    }.get(t["status"], "") if t else ""
+    }.get(t["status"], "")
+    if t.get("worktree") and t["status"] not in CLOSED:
+        keys += "  v diff"
+    return keys
 
 
 def fit(text, width):
@@ -1228,6 +1335,7 @@ Acting on the selected task
   d            drop: close its PR, pane and worktree
   t            tell its worker something
   p            peek at the end of its worker's screen
+  v            view its diff against its base (q closes it)
   s            start it
   r            resume a stopped worker
 
@@ -1355,6 +1463,8 @@ def cmd_board(args):
                         for d in wrap(task_detail(t, rounds), detail_w(t), lines):
                             if d:
                                 rows.append(("detail", t, d))
+                        if task_stat(t):
+                            rows.append(("detail", t, task_stat(t)))
 
             footer = 3 if layout == "grouped" else 7  # lines kept at the bottom
             avail = max(1, h - 3 - footer)  # one line spare for the scroll mark
@@ -1418,8 +1528,10 @@ def cmd_board(args):
                 yb = h - footer
                 put(yb, 1, "─" * (w - 3), DIM)
                 put(yb + 1, 1, fit(f"{cur['id']}  {cur['title']}", w - 2), BOLD)
-                for j, line in enumerate(wrap(task_detail(cur, rounds), w - 2, 3)):
-                    put(yb + 2 + j, 1, line, DIM)
+                stat = task_stat(cur)
+                lines = wrap(task_detail(cur, rounds), w - 2, 2 if stat else 3) + ([stat] if stat else [])
+                for j, line in enumerate(lines):
+                    put(yb + 2 + j, 1, fit(line, w - 2), DIM)
             if msg:
                 put(h - 2, 1, fit(msg, w - 2), BOLD)
             if pending:
@@ -1505,6 +1617,8 @@ def cmd_board(args):
                 busy(f"Resuming {sel}…")
                 ok, out = bp("resume", sel)
                 msg = f"Resumed {sel}." if ok else out
+            elif ch == "v":
+                ok, msg = bp("diff", sel, "--pane")
             elif ch == "p":
                 out = run([SELF, "peek", sel, "--lines", str(max(1, h - 4))], cwd=root, check=False)
                 text = out.stdout if out.returncode == 0 else out.stderr
@@ -1723,6 +1837,14 @@ def main(argv=None):
     p.add_argument("id")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_show)
+
+    p = sub.add_parser("diff", help="a task's changes against its base, in a pager (delta if installed)")
+    p.add_argument("id")
+    p.add_argument("--stat", action="store_true", help="just the files changed, no pager")
+    p.add_argument("--pane", action="store_true", help="show it in a floating pane (the board's v)")
+    p.add_argument("--back", action="store_true", help=argparse.SUPPRESS)  # focus the board after
+    p.add_argument("--session")
+    p.set_defaults(fn=cmd_diff)
 
     p = sub.add_parser("config", help="show or change this repo's settings")
     p.add_argument("--prefix")
