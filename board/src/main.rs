@@ -357,8 +357,7 @@ impl App {
         let sel = cur.id.as_str();
         match (code, ch) {
             (KeyCode::Enter, _) => {
-                let reviewer = cur.status == "review"
-                    || (cur.status == "needs" && cur.why.as_deref().unwrap_or("").starts_with("Reviewer"));
+                let reviewer = cur.status == "review" || cur.on_reviewer();
                 // a pane that opens in another tab shows nothing here: say it worked
                 self.msg = if reviewer {
                     let (ok, out) = self.bp(&["go", sel, "--review"]);

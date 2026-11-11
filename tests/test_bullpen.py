@@ -320,7 +320,7 @@ class BullpenTest(unittest.TestCase):
         self.bp("_event", self.block(tid), "blocked", "permission", "Allow rm?")  # repeat: no news
         news = [l for b, l in self.typed() if b == "blk1"]
         self.assertEqual(len(news), 1)
-        self.assertTrue(news[0].startswith("bullpen · BP-1 needs you (permission)"))
+        self.assertTrue(news[0].startswith("bullpen · BP-1 needs the person (permission)"))
         self.assertIn("Allow rm?", news[0])
         self.assertEqual(self.show(tid)["status"], "needs")
         self.bp("_event", self.block(tid), "working", "", "")
@@ -340,7 +340,7 @@ class BullpenTest(unittest.TestCase):
             self.bp("_event", blk, "idle", "", "Waiting for the tests")
             self.bp("_event", blk, "idle", "", "Waiting for the tests")  # repeat: no news
             t = self.show(tid)
-            self.assertEqual((t["status"], t["why"]), ("needs", "Ended its turn without saying ready"))
+            self.assertEqual((t["status"], t["why"]), ("triage", "Ended its turn without saying ready"))
             ended = [l for l in self.news() if "ended its turn" in l]
             self.assertEqual(len(ended), turn)
 
@@ -353,7 +353,7 @@ class BullpenTest(unittest.TestCase):
             self.bp("_event", reviewer, "idle", "", "Waiting")
             self.bp("_event", reviewer, "idle", "", "Waiting")  # repeat: no news
             t = self.show(tid)
-            self.assertEqual((t["status"], t["why"]), ("needs", "Reviewer stopped without a verdict"))
+            self.assertEqual((t["status"], t["why"]), ("triage", "Reviewer stopped without a verdict"))
             stopped = [l for l in self.news() if "stopped without a verdict" in l]
             self.assertEqual(len(stopped), turn)
 
@@ -576,14 +576,14 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(block, "blk1")
         self.assertIn("still asks for changes", line)
 
-    def test_changes_that_dont_reach_the_worker_need_you(self):
+    def test_changes_that_dont_reach_the_worker_go_to_the_coordinator(self):
         tid = self.start_task()
         worker = self.block(tid)
         self.commit_and_ready(tid)
         (self.fake / f"send_fails_{worker}").write_text("")
         self.verdict(tid, "changes", "The fix misses the empty case.")
         t = self.show(tid)
-        self.assertEqual((t["status"], t["why"]), ("needs", "Review findings didn't reach its worker"))
+        self.assertEqual((t["status"], t["why"]), ("triage", "Review findings didn't reach its worker"))
         self.assertEqual(t["review"]["verdict"], "changes")
         line = self.news()[-1]
         self.assertIn("BP-1's reviewer asked for changes, but the message didn't reach its worker", line)
@@ -632,13 +632,13 @@ class BullpenTest(unittest.TestCase):
         self.bp("_event", reviewer, "blocked", "permission", "Allow curl?")
         t = self.show(tid)
         self.assertEqual((t["status"], t["why"]), ("needs", "Reviewer needs you (permission): Allow curl?"))
-        self.assertIn("reviewer needs you", self.typed()[-1][1])
+        self.assertIn("reviewer needs the person", self.typed()[-1][1])
         self.bp("_event", reviewer, "working", "", "")
         self.assertEqual(self.show(tid)["status"], "review")
         self.bp("_event", reviewer, "done", "", "")
         self.assertEqual(self.show(tid)["why"], "Reviewer stopped without a verdict")
         self.bp("_gone", reviewer)
-        self.assertEqual(self.show(tid)["status"], "needs")
+        self.assertEqual(self.show(tid)["status"], "triage")
 
     def news(self):
         return [l for b, l in self.typed() if b == "blk1"]
@@ -654,8 +654,9 @@ class BullpenTest(unittest.TestCase):
         (self.fake / f"status_{blk}.json").write_text(json.dumps(rec))
 
     def settle(self):
-        """Every task entered its status 10 minutes ago: past check's settle."""
-        at = (dt.datetime.now().astimezone() - dt.timedelta(minutes=10)).isoformat()
+        """Every task entered its status 3 minutes ago: past check's settle (and short
+        of triage_minutes)."""
+        at = (dt.datetime.now().astimezone() - dt.timedelta(minutes=3)).isoformat()
         for f in (self.tmp / "state").rglob("tasks/*.json"):
             t = json.loads(f.read_text())
             f.write_text(json.dumps({**t, "since": at}))
@@ -707,7 +708,7 @@ class BullpenTest(unittest.TestCase):
         before = len(self.news())
         self.assertEqual(self.bp("check", "--fix", "--quiet").stdout, "")
         t = self.show(tid)
-        self.assertEqual((t["status"], t["why"]), ("needs", "Ended its turn without saying ready"))
+        self.assertEqual((t["status"], t["why"]), ("triage", "Ended its turn without saying ready"))
         news = self.news()[before:]
         self.assertEqual(len(news), 1)
         self.assertIn("ended its turn without `ready`", news[0])
@@ -728,7 +729,7 @@ class BullpenTest(unittest.TestCase):
         self.check("--fix")
         t = self.show(tid)
         self.assertEqual((t["status"], t["why"]), ("needs", "Needs you (permission): Allow rm?"))
-        self.assertIn("needs you (permission)", self.news()[-1])
+        self.assertIn("needs the person (permission)", self.news()[-1])
         self.agent(blk, "working", msg="Removing")
         self.assertEqual(self.check(), [f"{tid} is marked needs (permission) but its agent is working again"])
         self.assertEqual(self.check("--fix"), [f"{tid} is marked needs (permission) but its agent is "
@@ -763,11 +764,11 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.check(), [f"{tid} is in review but its reviewer is idle without a verdict"])
         self.check("--fix", "--quiet")
         t = self.show(tid)
-        self.assertEqual((t["status"], t["why"]), ("needs", "Reviewer stopped without a verdict"))
+        self.assertEqual((t["status"], t["why"]), ("triage", "Reviewer stopped without a verdict"))
         self.assertIn("stopped without a verdict", self.news()[-1])
         self.assertEqual(self.check(), [])
         self.agent(reviewer, "working")
-        self.assertEqual(self.check(), [f"{tid} is marked needs (reviewer stopped without a verdict) but "
+        self.assertEqual(self.check(), [f"{tid} is marked triage (reviewer stopped without a verdict) but "
                                         "its reviewer is working again"])
         self.check("--fix")
         self.assertEqual(self.show(tid)["status"], "review")
@@ -786,7 +787,7 @@ class BullpenTest(unittest.TestCase):
         (self.fake / f"screen_{blk}").unlink()  # the shell ended, and so did its next turn
         self.bp("_event", blk, "working", "", "Reading the results")
         self.bp("_event", blk, "idle", "", "Waiting for the tests")
-        self.assertEqual(self.show(tid)["status"], "needs")
+        self.assertEqual(self.show(tid)["status"], "triage")
 
     def test_a_background_shell_left_running_is_drift_after_a_while(self):
         tid = self.start_task()
@@ -801,7 +802,7 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.check(), [line])
         self.assertEqual(self.check("--fix"), [line + " (fixed)"])
         t = self.show(tid)
-        self.assertEqual((t["status"], t["why"]), ("needs", "Ended its turn without saying ready"))
+        self.assertEqual((t["status"], t["why"]), ("triage", "Ended its turn without saying ready"))
         self.assertIn("background shell of its own still runs", self.news()[-1])
         before = len(self.news())
         self.check("--fix")
@@ -854,7 +855,7 @@ class BullpenTest(unittest.TestCase):
         self.agent(self.block(tid), "idle")
         self.settle()
         self.bp("check", "--fix", "--quiet", "--all-repos", cwd=self.tmp)
-        self.assertEqual(self.show(tid)["status"], "needs")
+        self.assertEqual(self.show(tid)["status"], "triage")
 
     def test_a_quiet_worker_is_news_once_until_its_next_event(self):
         tid = self.start_task()
@@ -946,7 +947,7 @@ class BullpenTest(unittest.TestCase):
         (self.fake / "screen").write_text(f"I added the text '{self.limit_msg()}' to the tests.\n")
         self.bp("_event", self.block(tid), "done", "", "")
         t = self.show(tid)
-        self.assertEqual(t["status"], "needs")
+        self.assertEqual(t["status"], "triage")
         self.assertNotIn("limit", t)
         self.assertFalse(self.limit_file().exists())
 
@@ -1044,7 +1045,7 @@ class BullpenTest(unittest.TestCase):
         t = self.show(tid)
         self.assertEqual(t["status"], "needs")
         self.assertNotIn("limit", t)
-        self.assertIn("BP-1 needs you (permission)", self.news()[-1])
+        self.assertIn("BP-1 needs the person (permission)", self.news()[-1])
         self.assertFalse(self.limit_file().exists())
         reviewer_tid = self.bp("add", "Another", "--brief", "x").stdout.strip()
         self.bp("start", reviewer_tid)
@@ -1091,7 +1092,7 @@ class BullpenTest(unittest.TestCase):
         self.bp("_event", worker, "working", "", "")  # continued; the old line is still on screen
         self.bp("_event", worker, "idle", "", "")
         t = self.show(tid)
-        self.assertEqual(t["status"], "needs")  # an ordinary end of turn
+        self.assertEqual(t["status"], "triage")  # an ordinary end of turn
         self.assertNotIn("limit", t)
 
     def test_stuck_after_zero_turns_it_off(self):
@@ -1158,9 +1159,9 @@ class BullpenTest(unittest.TestCase):
     def test_note_shows_until_the_status_changes(self):
         tid = self.start_task()
         self.bp("_event", self.block(tid), "done", "", "")
-        self.bp("note", tid, "Asks:", "python3 or python?")
-        self.assertEqual(self.show(tid)["note"], "Asks: python3 or python?")
-        self.assertEqual(self.show(tid)["status"], "needs")
+        self.bp("note", tid, "Waits", "on the CI image.")
+        self.assertEqual(self.show(tid)["note"], "Waits on the CI image.")
+        self.assertEqual(self.show(tid)["status"], "triage")
         self.bp("_event", self.block(tid), "working", "", "")
         self.assertIsNone(self.show(tid)["note"])
 
@@ -1285,7 +1286,7 @@ class BullpenTest(unittest.TestCase):
         p, lines, quiet = self.follow()
         self.assertTrue(quiet())  # nothing logged yet (and no news.log): nothing printed
         self.ask(tid, "first")
-        self.assertEqual(lines(1), ["bullpen · BP-1 needs you (question): first"])
+        self.assertEqual(lines(1), ["bullpen · BP-1 needs the person (question): first"])
         self.ask(tid, "second")
         self.ask(tid, "third")
         self.assertEqual([l.rsplit(" ", 1)[-1] for l in lines(2)], ["second", "third"])
@@ -1330,11 +1331,11 @@ class BullpenTest(unittest.TestCase):
         self.ask(tid, "one")
         self.ask(tid, "two")
         out = self.bp_in("blk1", "news").stdout.splitlines()
-        self.assertEqual(out, ["bullpen · BP-1 needs you (question): one",
-                               "bullpen · BP-1 needs you (question): two"])
+        self.assertEqual(out, ["bullpen · BP-1 needs the person (question): one",
+                               "bullpen · BP-1 needs the person (question): two"])
         self.assertEqual(self.bp_in("blk1", "news").stdout, "")
         self.ask(tid, "three")
-        self.assertEqual(self.bp_in("blk1", "news").stdout, "bullpen · BP-1 needs you (question): three\n")
+        self.assertEqual(self.bp_in("blk1", "news").stdout, "bullpen · BP-1 needs the person (question): three\n")
 
     def test_news_never_replays_what_was_logged_before_it_first_ran(self):
         tid = self.start_task()
@@ -1346,7 +1347,7 @@ class BullpenTest(unittest.TestCase):
         self.bp("config", "--news", "monitor")  # switching starts from here
         self.assertEqual(self.bp_in("blk1", "news").stdout, "")
         self.ask(tid, "new")
-        self.assertEqual(self.bp_in("blk1", "news").stdout, "bullpen · BP-1 needs you (question): new\n")
+        self.assertEqual(self.bp_in("blk1", "news").stdout, "bullpen · BP-1 needs the person (question): new\n")
 
     def test_monitor_mode_types_nothing_and_keeps_no_outbox(self):
         tid = self.start_task()
@@ -1365,7 +1366,7 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(list(state.rglob("outbox*.txt")), [])
         log = next(state.rglob("news.log")).read_text().splitlines()
         self.assertEqual(len(log), 2)
-        self.assertIn("BP-1 needs-you: bullpen · BP-1 needs you (question): Which one?", log[0])
+        self.assertIn("BP-1 needs-you: bullpen · BP-1 needs the person (question): Which one?", log[0])
 
     def test_type_is_the_default_and_can_be_set_back(self):
         tid = self.start_task()
@@ -1374,7 +1375,7 @@ class BullpenTest(unittest.TestCase):
         self.bp("config", "--news", "type")
         self.ask(tid, "Which one?")
         self.assertEqual([l for b, l in self.typed() if b == "blk1"][1:],
-                         ["bullpen · BP-1 needs you (question): Which one?"])
+                         ["bullpen · BP-1 needs the person (question): Which one?"])
 
     def test_switching_to_type_ends_a_running_follower_with_one_line(self):
         tid = self.start_task()
@@ -1552,7 +1553,7 @@ class BullpenTest(unittest.TestCase):
         tid = self.start_task()
         self.bp("_event", self.block(tid), "blocked", "question", "Which one?\nA or B")
         line = self.typed()[-1][1]
-        self.assertEqual(line, "bullpen · BP-1 needs you (question): Which one? A or B")
+        self.assertEqual(line, "bullpen · BP-1 needs the person (question): Which one? A or B")
 
     def test_go_refuses_a_task_without_a_pane(self):
         self.bp("up")
@@ -1941,7 +1942,7 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.news_lines()[-1], "bullpen · BP-1's PR #7 was closed outside bullpen: "
                                                 "`bullpen drop BP-1` cleans up")
 
-    def test_feedback_for_a_worker_that_is_gone_needs_you(self):
+    def test_feedback_for_a_worker_that_is_gone_goes_to_the_coordinator(self):
         tid = self.start_task()
         worker = self.block(tid)
         self.bp("config", "--review", "off")
@@ -1951,11 +1952,11 @@ class BullpenTest(unittest.TestCase):
         self.bp("_prs")
         self.assertFalse(any(b == worker for b, _ in self.typed()))
         t = self.show(tid)
-        self.assertEqual(t["status"], "needs")
+        self.assertEqual(t["status"], "triage")
         self.assertEqual(t["why"], "PR checks failed: test, ci/build")
         self.assertIn("`bullpen resume BP-1` restarts it", self.news_lines()[-1])
 
-    def test_feedback_that_doesnt_reach_the_worker_needs_you(self):
+    def test_feedback_that_doesnt_reach_the_worker_goes_to_the_coordinator(self):
         tid = self.start_task()
         worker = self.block(tid)
         self.bp("config", "--review", "off")
@@ -1964,7 +1965,7 @@ class BullpenTest(unittest.TestCase):
         self.github(statusCheckRollup=self.FAILING)
         self.bp("_prs")
         t = self.show(tid)
-        self.assertEqual((t["status"], t["why"]), ("needs", "PR checks failed: test, ci/build"))
+        self.assertEqual((t["status"], t["why"]), ("triage", "PR checks failed: test, ci/build"))
         self.assertNotIn("sent", t.get("gh") or {})
         line = self.news_lines()[-1]
         self.assertIn("The message didn't reach its worker (rex: couldn't send to the block)", line)
@@ -1974,7 +1975,7 @@ class BullpenTest(unittest.TestCase):
         self.bp("tell", tid, "Fix the checks.")
         self.assertEqual(self.show(tid)["status"], "working")
 
-    def test_feedback_during_review_that_doesnt_reach_the_worker_needs_you(self):
+    def test_feedback_during_review_that_doesnt_reach_the_worker_goes_to_the_coordinator(self):
         tid = self.start_task()
         worker = self.block(tid)
         reviewer = self.commit_and_ready(tid)
@@ -1982,7 +1983,7 @@ class BullpenTest(unittest.TestCase):
         self.github(statusCheckRollup=self.FAILING)
         self.bp("_prs")
         t = self.show(tid)
-        self.assertEqual((t["status"], t["why"]), ("needs", "PR checks failed: test, ci/build"))
+        self.assertEqual((t["status"], t["why"]), ("triage", "PR checks failed: test, ci/build"))
         self.assertFalse((self.fake / "alive" / reviewer).exists())  # moot once the work changes
         self.assertIn("The message didn't reach its worker", self.news_lines()[-1])
         (self.fake / f"send_fails_{worker}").unlink()
@@ -2534,8 +2535,8 @@ class BullpenTest(unittest.TestCase):
         self.bp("start", b)
         self.ask(a, "for c2?")
         self.ask(b, "for c1?")
-        self.assertEqual(self.typed(), [(other, "bullpen · BP-1 needs you (question): for c2?"),
-                                        ("blk1", "bullpen · BP-2 needs you (question): for c1?")])
+        self.assertEqual(self.typed(), [(other, "bullpen · BP-1 needs the person (question): for c2?"),
+                                        ("blk1", "bullpen · BP-2 needs the person (question): for c1?")])
         self.bp("drop", a, "--force")
         typed = self.typed()[2:]
         self.assertEqual(typed[0], (other, "bullpen · BP-1 dropped"))  # its own coordinator alone
@@ -2565,14 +2566,14 @@ class BullpenTest(unittest.TestCase):
         self.ask(b, "two")
         self.ask(a, "three")
         self.assertEqual(self.bp_in(other, "news").stdout.splitlines(),
-                         ["bullpen · BP-1 needs you (question): one", "bullpen · BP-1 needs you (question): three"])
-        self.assertEqual(self.bp_in("blk1", "news").stdout, "bullpen · BP-2 needs you (question): two\n")
+                         ["bullpen · BP-1 needs the person (question): one", "bullpen · BP-1 needs the person (question): three"])
+        self.assertEqual(self.bp_in("blk1", "news").stdout, "bullpen · BP-2 needs the person (question): two\n")
         self.assertEqual(self.bp_in(other, "news").stdout, "")
         self.ask(b, "four")
         self.assertEqual(self.bp_in(other, "news").stdout, "")
         self.assertIn("isn't one of this repo's coordinators", self.bp("news", ok=False).stderr)  # another pane
         del self.env["REX_BLOCK"]  # outside Rex: the primary's
-        self.assertEqual(self.bp("news").stdout, "bullpen · BP-2 needs you (question): four\n")
+        self.assertEqual(self.bp("news").stdout, "bullpen · BP-2 needs the person (question): four\n")
         self.assertEqual(self.bp_in("blk1", "news").stdout, "")  # one cursor for c1, wherever it's read
         # two followers at once, one per coordinator: neither waits for the other
         self.bp_in(other, "news")
@@ -2591,7 +2592,7 @@ class BullpenTest(unittest.TestCase):
         stray.wait(timeout=10)
         p, lines, _ = self.follow()  # the coordinator's own gets the lock at once
         self.ask(tid, "one")
-        self.assertEqual(lines(1), ["bullpen · BP-1 needs you (question): one"])
+        self.assertEqual(lines(1), ["bullpen · BP-1 needs the person (question): one"])
         self.assertIn("isn't one of", self.bp("news", ok=False).stderr)  # a one-off read neither
 
     def test_a_monitor_stops_when_its_pane_is_no_longer_a_coordinator(self):
@@ -2599,7 +2600,7 @@ class BullpenTest(unittest.TestCase):
         self.bp("config", "--news", "monitor")
         p, lines, _ = self.follow()
         self.ask(tid, "one")
-        self.assertEqual(lines(1), ["bullpen · BP-1 needs you (question): one"])
+        self.assertEqual(lines(1), ["bullpen · BP-1 needs the person (question): one"])
         path = next((self.tmp / "state" / "repos").iterdir()) / "config.json"
         cfg = json.loads(path.read_text())
         cfg["coordinators"][0]["block"] = "blk9"  # another pane took the role
@@ -2639,7 +2640,7 @@ class BullpenTest(unittest.TestCase):
         for p in d.glob("news-*.cursor"):  # as an older bullpen left it
             (d / "news.cursor").write_text(p.read_text())
             p.unlink()
-        self.assertEqual(self.bp_in("blk1", "news").stdout, "bullpen · BP-1 needs you (question): one\n")
+        self.assertEqual(self.bp_in("blk1", "news").stdout, "bullpen · BP-1 needs the person (question): one\n")
         self.assertEqual(self.bp_in("blk1", "news").stdout, "")
 
     def test_a_gone_coordinators_tasks_fall_back_to_the_others(self):
@@ -2651,8 +2652,8 @@ class BullpenTest(unittest.TestCase):
         board2 = self.coordinators()[1]["board"]["block"]
         (self.fake / "alive" / other).unlink()  # c2's agent is closed
         self.ask(a, "anyone?")
-        self.assertEqual(sorted(self.typed()), sorted([("blk1", "bullpen · BP-1 needs you (question): anyone?"),
-                                                       (third, "bullpen · BP-1 needs you (question): anyone?")]))
+        self.assertEqual(sorted(self.typed()), sorted([("blk1", "bullpen · BP-1 needs the person (question): anyone?"),
+                                                       (third, "bullpen · BP-1 needs the person (question): anyone?")]))
         self.bp("up")  # drops c2, and closes its board
         self.assertEqual([c["id"] for c in self.coordinators()], ["c1", "c3"])
         self.assertIn(["block", "close", board2, "-s", "session:1"], self.rex_calls())
@@ -2660,7 +2661,7 @@ class BullpenTest(unittest.TestCase):
         self.bp_in(third, "adopt", a)
         self.assertEqual(self.show(a)["coordinator"], "c3")
         self.ask(a, "c3?")
-        self.assertEqual(self.typed()[-1], (third, "bullpen · BP-1 needs you (question): c3?"))
+        self.assertEqual(self.typed()[-1], (third, "bullpen · BP-1 needs the person (question): c3?"))
         self.assertIn("coordinator's own pane", self.bp("adopt", a, ok=False).stderr)
 
     def test_waiting_news_for_a_gone_coordinator_goes_to_the_others(self):
@@ -2673,7 +2674,7 @@ class BullpenTest(unittest.TestCase):
         (self.fake / "alive" / other).unlink()
         (self.fake / "screen").write_text("❯ \n")
         self.bp("_flush")
-        self.assertEqual(self.typed(), [("blk1", "bullpen · BP-1 needs you (question): waiting")])
+        self.assertEqual(self.typed(), [("blk1", "bullpen · BP-1 needs the person (question): waiting")])
         self.assertEqual(list((self.tmp / "state").rglob("outbox*.txt")), [])
 
     def test_news_while_no_coordinator_is_alive_is_typed_once(self):
@@ -2688,7 +2689,7 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.typed(), [])
         (self.fake / "alive" / "blk1").write_text("")  # one comes back
         self.bp("_flush")
-        self.assertEqual(self.typed(), [("blk1", "bullpen · BP-1 needs you (question): nobody home")])
+        self.assertEqual(self.typed(), [("blk1", "bullpen · BP-1 needs the person (question): nobody home")])
         self.assertEqual(list((self.tmp / "state").rglob("outbox*.txt")), [])
         self.assertFalse((self.tmp / "state" / "outbox").exists())
 
@@ -2709,6 +2710,248 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.focused()[-1], other)
         self.bp("go")  # from elsewhere: the primary one
         self.assertEqual(self.focused()[-1], "blk1")
+
+
+    # ---------- triage: the coordinator's, then the person's ----------
+
+    def ago(self, tid, minutes):
+        """The task entered its status this many minutes ago."""
+        f = next((self.tmp / "state").rglob(f"tasks/{tid}.json"))
+        t = json.loads(f.read_text())
+        at = dt.datetime.now().astimezone() - dt.timedelta(minutes=minutes)
+        f.write_text(json.dumps({**t, "since": at.isoformat()}))
+
+    def test_worker_stops_go_to_the_coordinator_and_prompts_to_the_person(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.bp("_event", blk, "error", "", "API error")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("triage", "Failed: API error"))
+        self.assertTrue(self.news()[-1].startswith("bullpen · For the coordinator: BP-1's turn failed: API error"))
+        self.assertIn("goes to the person", self.news()[-1])
+        self.bp("_event", blk, "working", "", "")  # clears by itself
+        self.assertEqual(self.show(tid)["status"], "working")
+        self.bp("_event", blk, "idle", "", "")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("triage", "Ended its turn without saying ready"))
+        self.assertTrue(self.news()[-1].startswith("bullpen · For the coordinator: BP-1 ended its turn without `ready`"))
+        self.bp("_event", blk, "blocked", "permission", "Allow rm?")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("needs", "Needs you (permission): Allow rm?"))
+        self.assertEqual(self.news()[-1], "bullpen · BP-1 needs the person (permission): Allow rm?")
+
+    def test_reviewer_stops_go_to_the_coordinator_and_prompts_to_the_person(self):
+        tid = self.start_task()
+        reviewer = self.commit_and_ready(tid)
+        self.bp("_event", reviewer, "blocked", "permission", "Allow curl?")
+        self.assertEqual(self.show(tid)["status"], "needs")
+        self.assertEqual(self.news()[-1], "bullpen · BP-1's reviewer needs the person (permission): Allow curl?")
+        self.bp("_event", reviewer, "working", "", "")
+        self.assertEqual(self.show(tid)["status"], "review")
+        self.bp("_event", reviewer, "idle", "", "")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("triage", "Reviewer stopped without a verdict"))
+        self.assertIn("For the coordinator: BP-1's reviewer stopped without a verdict", self.news()[-1])
+        self.assertIn("`bullpen review BP-1`", self.news()[-1])
+        self.bp("_gone", reviewer)
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("triage", "Reviewer exited without a verdict"))
+        self.assertIn("For the coordinator: BP-1's reviewer exited without a verdict", self.news()[-1])
+
+    def test_ask_puts_the_question_to_the_person(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.bp("_event", blk, "idle", "", "")
+        self.assertEqual(self.show(tid)["status"], "triage")
+        p = self.bp("ask", tid, "Use", "SQLite or Postgres?")
+        self.assertIn("needs the person", p.stdout)
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("needs", "Use SQLite or Postgres?"))
+        self.assertEqual(self.news()[-1], "bullpen · BP-1 needs the person: Use SQLite or Postgres?")
+        self.assertEqual(json.loads(self.bp("go", "--next", "--json").stdout)["block"], blk)
+        # its agent's own state doesn't undo it: the question is the person's
+        self.agent(blk, "working", msg="Reading")
+        self.assertEqual(self.check(), [])
+        # the coordinator asking from its own pane hears nothing of it
+        before = len(self.news())
+        self.bp_in("blk1", "ask", tid, "Still SQLite?")
+        self.assertEqual(len(self.news()), before)
+        self.assertEqual(self.show(tid)["why"], "Still SQLite?")
+        # the person answers in its pane: it works again
+        self.bp("_event", blk, "working", "", "")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t.get("ask")), ("working", None))
+        self.assertNotEqual(self.bp("ask", tid, ok=False).returncode, 0)  # no question
+
+    def test_ok_clears_triage_without_typing(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.assertNotEqual(self.bp("ok", tid, ok=False).returncode, 0)  # working: nothing to clear
+        self.bp("_event", blk, "idle", "", "")
+        typed = len(self.typed())
+        self.bp("ok", tid)
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"], t["ok"]), ("working", None, True))
+        self.assertEqual(len(self.typed()), typed)  # nothing typed anywhere
+        self.agent(blk, "idle")
+        self.assertEqual(self.check(), [])  # the coordinator said it's fine
+        self.agent(blk, "blocked", "permission", "Allow?")
+        self.assertEqual(len(self.check()), 1)  # a prompt still counts
+        self.bp("_event", blk, "working", "", "")
+        self.assertNotIn("ok", self.show(tid))  # its next turn is reported as usual
+        self.bp("_event", blk, "idle", "", "")
+        self.assertEqual(self.show(tid)["status"], "triage")
+        (self.fake / "alive" / blk).unlink()
+        p = self.bp("ok", tid, ok=False)
+        self.assertIn("`bullpen resume BP-1`", p.stderr)
+
+    def test_ok_puts_a_task_whose_reviewer_stopped_back_in_review(self):
+        tid = self.start_task()
+        reviewer = self.commit_and_ready(tid)
+        self.bp("_event", reviewer, "idle", "", "")
+        self.bp("ok", tid)
+        self.assertEqual(self.show(tid)["status"], "review")
+        self.agent(reviewer, "idle")
+        self.assertEqual(self.check(), [])
+        self.bp("_event", reviewer, "working", "", "")
+        self.bp("_event", reviewer, "idle", "", "")
+        self.assertEqual(self.show(tid)["status"], "triage")
+        (self.fake / "alive" / reviewer).unlink()
+        p = self.bp("ok", tid, ok=False)
+        self.assertIn("`bullpen review BP-1`", p.stderr)
+
+    def test_triage_goes_to_the_person_after_triage_minutes(self):
+        tid = self.start_task()
+        self.bp("_event", self.block(tid), "error", "", "boom")
+        self.ago(tid, 5)
+        self.assertEqual(self.bp("check").stdout, "")
+        self.bp("check", "--fix", "--quiet")
+        self.assertEqual(self.show(tid)["status"], "triage")
+        self.ago(tid, 11)
+        out = self.bp("check", ok=False)
+        self.assertEqual(out.returncode, 1)
+        self.assertEqual(out.stdout.strip(), "BP-1 waits on its coordinator, but its coordinator didn't "
+                                             "resolve it in 10 min: it needs the person")
+        self.assertEqual(self.show(tid)["status"], "triage")  # no --fix: nothing changes
+        before = len(self.news())
+        self.bp("check", "--fix", "--quiet")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("needs", "Failed: boom (coordinator didn't resolve it)"))
+        self.assertEqual(self.news()[before:], ["bullpen · BP-1 needs the person: Failed: boom "
+                                                "(coordinator didn't resolve it)"])
+        self.bp("check", "--fix", "--quiet")
+        self.assertEqual(len(self.news()), before + 1)  # once
+        # the repo's own setting
+        tid2 = self.bp("add", "Two", "--brief", "x").stdout.strip()
+        self.bp("start", tid2)
+        self.bp("config", "--triage-minutes", "30")
+        self.bp("_event", self.block(tid2), "idle", "", "")
+        self.ago(tid2, 20)
+        self.bp("check", "--fix", "--quiet", tid2)
+        self.assertEqual(self.show(tid2)["status"], "triage")
+        self.assertIn("in 30 min", [l for l in self.news() if "BP-2" in l][-1])
+
+    def test_triage_needs_the_person_when_no_coordinator_runs(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.bp("_event", blk, "error", "", "boom")
+        self.assertEqual(self.show(tid)["status"], "triage")
+        (self.fake / "alive" / "blk1").unlink()  # the coordinator's pane is gone
+        self.bp("check", "--fix", "--quiet")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("needs", "Failed: boom (no coordinator is running)"))
+        self.bp("_event", blk, "working", "", "")
+        self.bp("_event", blk, "idle", "", "")  # straight to the person
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("needs", "Ended its turn without saying ready"))
+        line = [l for l in self.outbox_lines() if "ended its turn" in l][-1]
+        self.assertIn("No coordinator is running to see to it, so it needs the person", line)
+        self.assertNotIn("For the coordinator", line)
+
+    def outbox_lines(self):
+        return [l for f in (self.tmp / "state").rglob("outbox*.txt") for l in f.read_text().splitlines()]
+
+    def test_triage_follows_its_own_coordinator(self):
+        other = self.two_coordinators()
+        tid = self.bp_in(other, "add", "Theirs", "--brief", "x").stdout.strip()
+        self.bp("start", tid)
+        (self.fake / "alive" / other).unlink()  # its owner is gone; c1 still runs
+        self.bp("_event", self.block(tid), "error", "", "boom")
+        self.assertEqual(self.show(tid)["status"], "needs")
+
+    def test_review_starts_a_new_reviewer_within_the_rounds(self):
+        tid = self.start_task()
+        self.assertIn("no review", self.bp("review", tid, ok=False).stderr)
+        reviewer = self.commit_and_ready(tid)
+        self.assertEqual(self.show(tid)["review"]["round"], 1)
+        self.bp("_event", reviewer, "idle", "", "")
+        self.assertEqual(self.show(tid)["status"], "triage")
+        self.assertIn("round 2 of 2", self.bp("review", tid).stdout)
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["review"]["round"], t["review"]["verdict"]), ("review", 2, None))
+        self.assertNotEqual(t["review"]["block"], reviewer)
+        self.assertFalse((self.fake / "alive" / reviewer).exists())  # the old one is closed
+        self.bp("_gone", t["review"]["block"])
+        self.assertEqual(self.show(tid)["status"], "triage")
+        p = self.bp("review", tid, ok=False)
+        self.assertIn("used its 2 review rounds: `bullpen ask BP-1`", p.stderr)
+        self.assertEqual(self.show(tid)["status"], "triage")
+
+    def test_review_is_refused_while_the_worker_is_on_it(self):
+        tid = self.start_task()
+        self.commit_and_ready(tid)
+        self.verdict(tid, "changes", "Fix it.")
+        self.assertEqual(self.show(tid)["status"], "working")
+        self.assertIn("isn't waiting on a reviewer", self.bp("review", tid, ok=False).stderr)
+
+    def test_a_ready_task_whose_worker_works_again_is_working_again(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.bp("_event", blk, "working", "", "Fixing")
+        self.commit_and_ready(tid)
+        self.verdict(tid, "approve")
+        self.assertEqual(self.show(tid)["status"], "ready")
+        self.bp("_event", blk, "working", "", "Still in the turn that ran ready")
+        self.assertEqual(self.show(tid)["status"], "ready")  # the same turn: nothing new
+        self.bp("_event", blk, "idle", "", "")
+        self.assertEqual(self.show(tid)["status"], "ready")
+        self.bp("_event", blk, "working", "", "The person asked for more")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["review"]["verdict"]), ("working", None))
+        self.assertIn("BP-1 was ready, but its worker started working again", self.news()[-1])
+        self.assertIn("run `ready` again", self.news()[-1])
+        self.assertNotEqual(self.bp("accept", tid, ok=False).returncode, 0)
+
+    def test_old_needs_tasks_become_triage_once(self):
+        tid = self.start_task()
+        d = next((self.tmp / "state").rglob("config.json")).parent
+        cfg = json.loads((d / "config.json").read_text())
+        cfg.pop("triage_migrated", None)
+        (d / "config.json").write_text(json.dumps(cfg))
+        f = d / "tasks" / f"{tid}.json"
+        base = json.loads(f.read_text())
+        whys = {"BP-1": "Ended its turn without saying ready", "BP-2": "Needs you (permission): Allow?",
+                "BP-3": "Reviewer stopped without a verdict", "BP-4": "Reviewer needs you (input)",
+                "BP-5": "PR checks failed: test", "BP-6": "Failed: boom"}
+        for i, why in whys.items():
+            (d / "tasks" / f"{i}.json").write_text(json.dumps({**base, "id": i, "status": "needs", "why": why,
+                                                               "block": None}))
+        self.bp("ls")
+        got = {i: self.show(i)["status"] for i in whys}
+        self.assertEqual(got, {"BP-1": "triage", "BP-2": "needs", "BP-3": "triage", "BP-4": "needs",
+                               "BP-5": "triage", "BP-6": "triage"})
+        # once: a task needing the person for such a reason later stays so
+        t = json.loads((d / "tasks" / "BP-1.json").read_text())
+        (d / "tasks" / "BP-1.json").write_text(json.dumps({**t, "status": "needs"}))
+        self.bp("ls")
+        self.assertEqual(self.show("BP-1")["status"], "needs")
+
+    def test_go_next_skips_triage(self):
+        tid = self.start_task()
+        self.bp("_event", self.block(tid), "idle", "", "")
+        self.assertEqual(self.show(tid)["status"], "triage")
+        p = self.bp("go", "--next", "--json", ok=False)
+        self.assertIn("nothing needs you", p.stderr)
 
 
 class LocalModeTest(unittest.TestCase):
@@ -3104,7 +3347,7 @@ class LocalModeTest(unittest.TestCase):
         self.assertEqual(self.git("rev-parse", "HEAD", cwd=t["worktree"]), head)
         self.assertEqual(self.show("BP-2")["status"], "needs")
         self.assertEqual(self.news_lines()[-1],
-                         "bullpen · After BP-1: BP-2 waiting on you, not rebased.")
+                         "bullpen · After BP-1: BP-2 waiting on the person, not rebased.")
 
     def test_after_accept_a_task_whose_reviewer_is_stuck_is_left_alone(self):
         tid, _ = self.ready_task()

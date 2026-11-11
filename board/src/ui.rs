@@ -87,6 +87,7 @@ fn counts(tasks: &[Task], room: usize) -> Line<'static> {
         (n(&["needs"]), "needs"),
         (n(&["stopped"]), "stopped"),
         (n(&["ready"]), "ready"),
+        (n(&["triage"]), "triage"),
         (n(&["review"]), "review"),
         (n(&["working"]), "working"),
         (n(&["todo"]), "todo"),
@@ -348,7 +349,7 @@ fn title_line(app: &App, t: &Task, selected: bool, w: usize, idw: usize, now: ch
         let on = Style::new().bg(TINT);
         (on.add_modifier(Modifier::BOLD), on, if stale { on.fg(Color::Red).add_modifier(Modifier::BOLD) } else { on })
     } else {
-        let title = if t.closed() || app.cfg.theirs(t, app.me.as_deref()) { dim() } else { Style::new() };
+        let title = if t.closed() || t.triage() || app.cfg.theirs(t, app.me.as_deref()) { dim() } else { Style::new() };
         (dim(), title, if stale { bold().fg(Color::Red) } else { dim() })
     };
     Line::from(vec![span(id, id_style), span(middle, title_style), span(age, age_style)])

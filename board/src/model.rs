@@ -118,6 +118,16 @@ impl Task {
         matches!(self.status.as_str(), "needs" | "stopped")
     }
 
+    /// Stopped on something its coordinator sees to: not yours (yet).
+    pub fn triage(&self) -> bool {
+        self.status == "triage"
+    }
+
+    /// Is it stopped on its reviewer (a prompt, or no verdict), so ⏎ opens the reviewer?
+    pub fn on_reviewer(&self) -> bool {
+        matches!(self.status.as_str(), "needs" | "triage") && self.why.as_deref().unwrap_or("").starts_with("Reviewer")
+    }
+
     pub fn closed(&self) -> bool {
         matches!(self.status.as_str(), "done" | "dropped")
     }
@@ -260,10 +270,12 @@ pub fn link_waits(tasks: &mut [Task]) {
 }
 
 // The board groups tasks by what the person does next. Colour only marks status;
-// the one loud thing is the amber bar beside a task that needs you.
+// the one loud thing is the amber bar beside a task that needs you. A task its
+// coordinator sees to (triage) sits dimmed below, with no bar: it isn't yours yet.
 
 pub const GROUPS: &[(&str, &[&str])] = &[
     ("Needs you", &["needs", "stopped"]),
+    ("Coordinator on it", &["triage"]),
     ("Ready to accept", &["ready"]),
     ("In review", &["review"]),
     ("Working", &["working"]),
@@ -278,6 +290,7 @@ pub fn mark(status: &str) -> &'static str {
     match status {
         "needs" => "●",
         "stopped" => "■",
+        "triage" => "◎",
         "ready" => "✔",
         "done" => "✓",
         "review" => "◐",
@@ -474,6 +487,9 @@ fn status_detail(t: &Task, rounds: u32, at: DateTime<FixedOffset>) -> String {
         }
         "needs" if why.is_empty() => "Waiting for you.".into(),
         "needs" => why.into(),
+        "triage" if why == "Ended its turn without saying ready" => "Ended its turn without ready.".into(),
+        "triage" if why.is_empty() => "Waiting for its coordinator.".into(),
+        "triage" => why.into(),
         "stopped" => "Its agent exited. r resumes it.".into(),
         "review" => format!("Reviewer on round {round} of {rounds}."),
         "ready" if why.starts_with("Nothing to merge") => "Done, with nothing to merge.".into(),
@@ -509,6 +525,7 @@ pub fn task_keys(t: Option<&Task>) -> Vec<(&'static str, &'static str)> {
     let Some(t) = t else { return Vec::new() };
     let mut keys: Vec<(&str, &str)> = match t.status.as_str() {
         "needs" => vec![("⏎", "answer"), ("t", "tell"), ("p", "peek")],
+        "triage" => vec![("⏎", "open"), ("p", "peek"), ("t", "tell")],
         "stopped" => vec![("r", "resume"), ("p", "peek"), ("d", "drop")],
         "review" => vec![("⏎", "reviewer"), ("p", "peek")],
         "ready" => vec![("a", "accept"), ("d", "drop"), ("⏎", "open")],
@@ -673,7 +690,7 @@ mod tests {
 
     #[test]
     fn groups_follow_what_you_do_next() {
-        let tasks: Vec<Task> = ["todo", "working", "ready", "needs", "stopped", "review", "done"]
+        let tasks: Vec<Task> = ["todo", "working", "ready", "needs", "stopped", "review", "done", "triage"]
             .iter()
             .enumerate()
             .map(|(i, st)| task(&format!("BP-{}", i + 1), st))
@@ -686,6 +703,7 @@ mod tests {
             groups,
             vec![
                 ("Needs you", vec!["BP-4", "BP-5"]),
+                ("Coordinator on it", vec!["BP-8"]),
                 ("Ready to accept", vec!["BP-3"]),
                 ("In review", vec!["BP-6"]),
                 ("Working", vec!["BP-2"]),
@@ -796,6 +814,27 @@ mod tests {
         assert_eq!(task_stat(&Task { status: "review".into(), ..t.clone() }), "3 files, +120 −14");
         assert_eq!(task_stat(&Task { status: "working".into(), ..t }), "");
         assert_eq!(task_stat(&task("BP-1", "ready")), "");
+    }
+
+    #[test]
+    fn triage_is_the_coordinators_not_yours() {
+        let t = Task { why: Some("Failed: API error".into()), ..task("BP-1", "triage") };
+        assert!(t.triage());
+        assert!(!t.needs_you());
+        assert!(!t.flagged()); // no amber bar
+        assert_eq!(task_detail(&t, 2, now()), "Failed: API error");
+        let ended = Task { why: Some("Ended its turn without saying ready".into()), ..task("BP-1", "triage") };
+        assert_eq!(task_detail(&ended, 2, now()), "Ended its turn without ready.");
+        assert_eq!(task_keys(Some(&t)), vec![("⏎", "open"), ("p", "peek"), ("t", "tell")]);
+        let reviewer = Task { why: Some("Reviewer stopped without a verdict".into()), ..task("BP-1", "triage") };
+        assert!(reviewer.on_reviewer());
+        assert!(!t.on_reviewer());
+        let asked = Task { why: Some("Reviewer needs you (permission)".into()), ..task("BP-1", "needs") };
+        assert!(asked.on_reviewer() && asked.flagged());
+        // escalated: it needs you, with its reason
+        let late = Task { why: Some("Failed (coordinator didn't resolve it)".into()), ..task("BP-1", "needs") };
+        assert!(late.needs_you() && late.flagged());
+        assert_eq!(task_detail(&late, 2, now()), "Failed (coordinator didn't resolve it)");
     }
 
     #[test]

@@ -51,8 +51,8 @@ current watcher is left alone.
 
 The task board (`bullpen board`, a Rust program in `board/`) sits in a narrow
 pane beside the coordinator and updates as soon as a task changes.
-It groups tasks by what you do next: needs you, ready to accept, in review,
-working, queued. Each task shows how long it has been there and, on a second
+It groups tasks by what you do next: needs you, coordinator on it (dimmed: see
+[Triage](#triage)), ready to accept, in review, working, queued. Each task shows how long it has been there and, on a second
 line, what it needs or where it stands ("Asks: python3 or python?", "PR #4,
 approved by review."). A task in review or ready also shows the size of its
 change ("3 files, +120 −14"), worked out once when its worker runs `ready`. A
@@ -147,9 +147,9 @@ on that base up to date, and they don't drift behind and conflict later:
   tests. Its worktree isn't touched under it.
 - In review, or with its reviewer waiting on you: left alone. Its next `ready`
   brings it up to date.
-- Waiting on you mid-turn (a permission prompt, a failure): not rebased, and the
-  news says so.
-- Between turns (needs you, stopped, ready): bullpen rebases its branch itself,
+- Waiting on you or the coordinator mid-turn (a permission prompt, a failure): not
+  rebased, and the news says so.
+- Between turns (needs you, triage, stopped, ready): bullpen rebases its branch itself,
   if its worktree is clean, and pushes it to the PR (`--force-with-lease`). The
   status stays; a ready task says "Rebased onto main." on the board until its
   next `ready`. If the rebase conflicts, it is undone, the branch stays as it was,
@@ -173,9 +173,9 @@ listed. `bullpen config --review off` skips review; `review_rounds` and
 
 A task goes back to `working` only once its worker has the message: review
 findings, a rebase conflict or PR feedback. If typing it into the worker's pane
-fails, it needs you instead (as "Review findings didn't reach its worker", or
-the PR's reason), or for a rebase conflict stays where it was, and news says
-so, with where the findings are, so you can `bullpen tell` it. `verdict` and
+fails, it goes to the coordinator instead (triage, as "Review findings didn't
+reach its worker", or the PR's reason), or for a rebase conflict stays where it
+was, and news says so, with where the findings are, so it can `bullpen tell` it. `verdict` and
 `ready` refuse an empty `--summary-file`: an empty file is a write that failed
 (a full disk, `/tmp` out of inodes), not "no findings".
 
@@ -198,6 +198,39 @@ for you while it's on (and `--auto-accept` auto-accepts one task while it's off)
 The board shows `· auto-accept` beside the repo's name while it's on, and a task
 held back says "Kept for you: no auto-accept."
 
+### Triage
+
+A task that stops is either the coordinator's to see to or yours:
+
+- **triage**, "needs the coordinator": the worker's turn failed; it ended its
+  turn without `ready`; review findings or PR feedback didn't reach it; it
+  couldn't be continued after the usage limit; its reviewer stopped or exited
+  without a verdict. The news starts `For the coordinator:`. The board shows the
+  task dimmed under "Coordinator on it", with no amber bar, and `go --next` (and
+  `n`) skip it.
+- **needs**, "needs you": the worker or the reviewer is at a permission or input
+  prompt, or the coordinator ran `bullpen ask BP-3 "question"`, which shows the
+  question on the board. The news says it needs the person.
+
+The coordinator settles triage with `tell` or `resume` (which put the task back to
+work), `bullpen review BP-3` (a new reviewer on the task's current commit in place of
+one that stopped without a verdict; it counts as a review round and is refused once
+they're used up), `bullpen ok BP-3` (back to working, or in review, typing nothing to
+the agent), or `ask`. A task also leaves triage when its agent starts working again.
+One still in triage after `triage_minutes` (10 by default; `bullpen config
+--triage-minutes 15`) goes to you, its reason ending "(coordinator didn't resolve
+it)", with one news line. The watcher's `check` run, every 3 minutes, sees to that.
+With the task's coordinator (or, for a task without one, every coordinator) not
+running, it goes to you at once.
+
+A ready task whose worker starts working again (you typed to it, say) goes back to
+working: its review approval is dropped, there's a news line, and it has to run
+`ready` again.
+
+Tasks that needed you before triage existed are sorted out once, the first time
+bullpen runs after the update: those stopped for one of the triage reasons above
+become triage; prompts stay needs.
+
 ### After ready
 
 While a task waits in review or for you, the watcher looks at its pull request
@@ -212,8 +245,8 @@ every 2 minutes (one `gh pr view` per PR; none when no task has one open):
   `bullpen accept` (merged) or `drop` (closed) cleans up.
 
 Each failure or comment is reported once. If the worker's pane is gone, the task
-needs you instead; if the worker is waiting on you (a permission prompt), the news
-says so and nothing is typed into it. The board and `show` say what GitHub last said ("checks
+goes to the coordinator (triage) instead; if the worker is stopped mid-turn (a
+permission prompt, a failure), the news says so and nothing is typed into it. The board and `show` say what GitHub last said ("checks
 failing", "1 new comment"); while a task is working they say it only if that is what
 sent it back ("Fixing what GitHub said."), since it's about the old push. In local mode there's no PR, so nothing is looked at.
 
@@ -246,6 +279,7 @@ that agent is doing now, and prints one line per mismatch:
 ```
 BP-3 is marked working but its agent is idle at its prompt: `bullpen peek` it
 BP-4 is marked needs (permission) but its agent is working again
+BP-7 waits on its coordinator, but its coordinator didn't resolve it in 10 min: it needs the person
 BP-5 is in review but its reviewer is idle without a verdict
 BP-6 is marked working but its pane is gone
 ```
@@ -255,7 +289,10 @@ reads the status record Rex keeps for each pane (the one the watcher's events co
 from), and goes by the screen where Rex has none: Claude Code's spinner, its
 prompt. An idle, blocked or error state that began in the last minute is left alone, since its event may
 still be on the way, and so is a task bullpen itself moved in the last minute
-(`start`, `tell`, `ready`): its agent has yet to report. `bullpen check BP-3` checks one task.
+(`start`, `tell`, `ready`): its agent has yet to report. `bullpen check BP-3` checks one task. An agent
+idle after the coordinator's `bullpen ok` isn't drift, nor is a task waiting on an
+`ask` whatever its agent does. `check` also passes a task left in triage too long to
+the person (see [Triage](#triage)).
 
 `bullpen check --fix` applies what the missed event would have done, news
 included, as if it had come; it never types into an agent or approves anything.
@@ -376,14 +413,17 @@ bullpen add "Cover logout" --brief-file b2.md --after BP-1 # BP-2 starts once BP
 bullpen after BP-2 --none   # change (or clear) what a task waits on
 bullpen model BP-2 sonnet   # the worker model it starts and resumes with (--clear: the config's)
 bullpen start BP-1    # worktree + branch + a Rex window running the worker
-bullpen ls            # todo, working, needs, stopped, ready
+bullpen ls            # todo, working, triage, needs, stopped, review, ready
 bullpen peek BP-1     # the end of the worker's screen
 bullpen diff BP-1     # its changes against its base, in a pager (--stat: just the files)
 bullpen check         # tasks whose status is out of step with their agent; --fix catches up
 bullpen go BP-1       # focus its pane (`go` alone: the coordinator; --next: next needing you)
 bullpen tell BP-1 "Also cover the logout path"
 bullpen resume BP-1   # restart a stopped worker, continuing its conversation
-bullpen note BP-1 "Asks: ..."   # say on the board what it needs from you
+bullpen ask BP-1 "..."   # (coordinator) BP-1 needs you: the question shows on the board
+bullpen ok BP-1       # (coordinator) a task in triage is seen to: back to work, nothing typed
+bullpen review BP-1   # (coordinator) a new reviewer for one that stopped without a verdict
+bullpen note BP-1 "..."   # an informational line on the board
 bullpen accept BP-1   # merge its PR (or local branch; rebase), close its pane, remove its worktree
 bullpen drop BP-1     # close its PR, window and worktree without merging
 ```
@@ -423,7 +463,8 @@ default; see [Auto-accept](#auto-accept)). `bullpen config --news monitor` chang
 by default). `bullpen config --merge squash` changes how `accept` merges (`rebase` by default;
 `squash` or `merge`). `bullpen config --stuck-after 45` sets how many minutes a
 working agent can show no progress before you hear of it (20 by default, `0` for
-never). `bullpen config --prefix XY --base develop` changes the task prefix (default `BP`)
+never). `bullpen config --triage-minutes 15` sets how long a task can wait on its
+coordinator before it goes to you (10 by default; see [Triage](#triage)). `bullpen config --prefix XY --base develop` changes the task prefix (default `BP`)
 and the base branch (default: origin's default branch). The worker and coordinator
 commands are in that folder's `config.json` (`worker`, `coordinator_cmd`). `"rebase_others": false`
 there stops `accept` rebasing the other open tasks (see [After accept](#after-accept)).
