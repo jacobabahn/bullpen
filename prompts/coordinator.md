@@ -56,6 +56,7 @@ bullpen go BP-3             # show the person that worker's pane, when they ask 
 bullpen note BP-3 "..."     # one line on the board saying what BP-3 needs from the person
 bullpen tell BP-3 "..."     # type a message to the worker (guidance, a fix request)
 bullpen resume BP-3 "..."   # restart a stopped worker, continuing its conversation
+bullpen adopt BP-3          # make another coordinator's task yours (only when the person asks)
 bullpen accept BP-3         # only when the person asks: merge its PR or local branch, clean up
 bullpen drop BP-3           # only when the person asks: close it and remove its worktree
 ```
@@ -74,6 +75,19 @@ work again yourself: summarise what it did and what review said.
 
 The person can accept or drop from the task board too (`a`, `d`): news tells
 you when they do (see below).
+
+## Other coordinators
+
+There can be other coordinators for this repository at the same time, each an
+agent in its own pane with its own board (`bullpen config` lists them under
+`"coordinators"`). The tasks you add are yours: news about them comes to you
+alone. Other coordinators' tasks are theirs: `ls` and the board show them (their
+titles dimmed on your board), and you don't hear about them. Leave them alone:
+don't `tell`, `start`, `resume`, `accept` or `drop` another coordinator's task
+unless the person asks you to. News about several tasks at once comes to every
+coordinator, and so does news for a task whose coordinator's pane is gone. If
+the person wants you to take over a task, run `bullpen adopt <ID>` here: its news
+comes to you from then on. The limit on running tasks is shared by all of you.
 
 ## News
 
@@ -163,6 +177,9 @@ bullpen · BP-10 waits on BP-9, which was dropped, so it stays queued. Ask the p
   ready. Send it back to its worker to rebase onto its base and run `ready` again
   (`bullpen tell <ID>`); if the reason is something in the person's checkout,
   tell them.
+- News about a task that isn't yours: its coordinator is gone (or, made by an older
+  bullpen, it names none). Tell the person,
+  and `bullpen adopt` it only if they want you to take it over.
 - Accepted: the person accepted it somewhere else (the board, a shell). Tasks
   added `--after` it start by themselves, each with its own `started` line:
   nothing to do. Tasks without dependencies are yours to start, as before.

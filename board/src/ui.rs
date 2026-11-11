@@ -154,6 +154,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let name = fit(&app.repo_name, w.saturating_sub(2).min(24));
     // a small marker when approved tasks accept themselves
     let auto = if app.cfg.auto_accept { " · auto-accept" } else { "" };
+    // with several coordinators: whose board this is (other ones' tasks are dimmed)
+    let auto = match app.me.as_deref() {
+        Some(me) if app.cfg.coordinators.len() > 1 => format!(" · {me}{auto}"),
+        _ => auto.to_string(),
+    };
+    let auto = auto.as_str();
     let count = counts(&app.tasks, w.saturating_sub(width(&name) + width(auto) + 5));
     put(buf, area, 0, w.saturating_sub(2 + count.width()).max(1), count);
     put(buf, area, 0, 1 + width(&name), span(auto, dim()));
@@ -342,7 +348,7 @@ fn title_line(app: &App, t: &Task, selected: bool, w: usize, idw: usize, now: ch
         let on = Style::new().bg(TINT);
         (on.add_modifier(Modifier::BOLD), on, if stale { on.fg(Color::Red).add_modifier(Modifier::BOLD) } else { on })
     } else {
-        let title = if t.closed() { dim() } else { Style::new() };
+        let title = if t.closed() || app.cfg.theirs(t, app.me.as_deref()) { dim() } else { Style::new() };
         (dim(), title, if stale { bold().fg(Color::Red) } else { dim() })
     };
     Line::from(vec![span(id, id_style), span(middle, title_style), span(age, age_style)])

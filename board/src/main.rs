@@ -100,6 +100,8 @@ pub struct App {
     pub dir: PathBuf,
     pub root: PathBuf,
     pub bullpen: PathBuf,
+    /// the coordinator this board sits beside (`--coordinator`): other ones' tasks are dimmed
+    pub me: Option<String>,
     pub repo_name: String,
     pub cfg: Config,
     pub tasks: Vec<Task>,
@@ -432,26 +434,29 @@ fn status(report: &str) {
     let _ = std::io::stdout().flush();
 }
 
-fn args() -> Result<(PathBuf, PathBuf, PathBuf), String> {
+fn args() -> Result<(PathBuf, PathBuf, PathBuf, Option<String>), String> {
     let mut it = std::env::args().skip(1);
-    let (mut dir, mut root, mut bullpen) = (None, None, None);
+    let (mut dir, mut root, mut bullpen, mut me) = (None, None, None, None);
     while let Some(a) = it.next() {
         let v = it.next().ok_or(format!("{a} needs a value"))?;
         match a.as_str() {
             "--dir" => dir = Some(PathBuf::from(v)),
             "--root" => root = Some(PathBuf::from(v)),
             "--bullpen" => bullpen = Some(PathBuf::from(v)),
+            "--coordinator" => me = Some(v),
             _ => return Err(format!("unknown argument {a}")),
         }
     }
     match (dir, root, bullpen) {
-        (Some(d), Some(r), Some(b)) => Ok((d, r, b)),
-        _ => Err("usage: bullpen-board --dir <state dir> --root <repo> --bullpen <program> (`bullpen board` runs it)".into()),
+        (Some(d), Some(r), Some(b)) => Ok((d, r, b, me)),
+        _ => Err("usage: bullpen-board --dir <state dir> --root <repo> --bullpen <program> [--coordinator <id>] \
+                  (`bullpen board` runs it)"
+            .into()),
     }
 }
 
 fn main() {
-    let (dir, root, bullpen) = match args() {
+    let (dir, root, bullpen, me) = match args() {
         Ok(a) => a,
         Err(e) => {
             eprintln!("bullpen-board: {e}");
@@ -493,6 +498,7 @@ fn main() {
         dir,
         root,
         bullpen,
+        me,
         repo_name,
         sel: None,
         finished: false,

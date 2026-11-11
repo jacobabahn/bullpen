@@ -247,7 +247,7 @@ class BullpenTest(unittest.TestCase):
         splits = [a for a in self.rex_calls() if a[0] == "split"]
         self.assertEqual(len(splits), 1)  # one board, beside the coordinator
         self.assertEqual(splits[0][splits[0].index("-b") + 1], "blk1")
-        self.assertEqual(splits[0][-1], "board")
+        self.assertEqual(splits[0][-3:], ["board", "--coordinator", "c1"])
         watcher = watchers[0]["options"]["command"]
         self.assertIn("--all", watcher)
         self.assertTrue(any(x.startswith("bin=") for x in watcher))
@@ -256,7 +256,8 @@ class BullpenTest(unittest.TestCase):
         self.bp("up", "--here")
         self.assertFalse(any(a[0] == "run" and "bullpen: proj" in a for a in self.rex_calls()))
         cfg = json.loads(self.bp("config").stdout)
-        self.assertEqual(cfg["coordinator"], {"block": "me", "session": "session:1"})
+        self.assertEqual([(c["id"], c["block"], c["session"]) for c in cfg["coordinators"]],
+                         [("c1", "me", "session:1")])
 
     def test_start_makes_worktree_branch_and_pane(self):
         tid = self.start_task()
@@ -1106,7 +1107,7 @@ class BullpenTest(unittest.TestCase):
         self.assertIn("news now comes by monitor", typed[0])
         state = self.tmp / "state"
         self.assertFalse((state / "outbox").exists())
-        self.assertEqual(list(state.rglob("outbox.txt")), [])
+        self.assertEqual(list(state.rglob("outbox*.txt")), [])
         log = next(state.rglob("news.log")).read_text().splitlines()
         self.assertEqual(len(log), 2)
         self.assertIn("BP-1 needs-you: bullpen · BP-1 needs you (question): Which one?", log[0])
@@ -1165,7 +1166,7 @@ class BullpenTest(unittest.TestCase):
         p = self.bp("config", "--news", "monitor")
         self.assertIn("news --follow", p.stderr)
         self.assertEqual(self.typed(), [])
-        self.assertEqual(list((self.tmp / "state").rglob("outbox.txt")), [])
+        self.assertEqual(list((self.tmp / "state").rglob("outbox*.txt")), [])
         self.assertIn("News comes by monitor: start it first", self.bp("up", "--here").stdout)
 
     def test_up_says_how_news_arrives(self):
@@ -1257,8 +1258,8 @@ class BullpenTest(unittest.TestCase):
         self.bp("up")
         self.assertEqual([x for x in self.rex_calls() if x[0] == "run"], runs)  # no second coordinator
         cfg = json.loads(self.bp("config").stdout)
-        self.assertEqual(cfg["coordinator"]["block"], "blk6")
-        self.assertEqual(cfg["board"]["block"], "blk7")
+        self.assertEqual(cfg["coordinators"][0]["block"], "blk6")
+        self.assertEqual(cfg["coordinators"][0]["board"]["block"], "blk7")
         self.assertEqual(self.block(a), "blk8")
         self.assertEqual(self.show("BP-2")["status"], "stopped")
         self.assertEqual(len(self.api("session.new_block")), 2)  # the watcher, again
@@ -1271,7 +1272,8 @@ class BullpenTest(unittest.TestCase):
         self.bp("up")
         self.assertEqual([x[0] for x in self.rex_calls()].count("run"), 1)  # no second coordinator
         cfg = json.loads(self.bp("config").stdout)
-        self.assertEqual(cfg["coordinator"], {"block": "blk5", "session": "session:2"})
+        c = cfg["coordinators"][0]
+        self.assertEqual((c["block"], c["session"]), ("blk5", "session:2"))
         self.assertEqual(self.show(tid)["block"], "blk7")
         self.assertEqual(self.show(tid)["session"], "session:2")
         self.assertEqual(self.show(tid)["status"], "working")
@@ -2161,6 +2163,202 @@ class BullpenTest(unittest.TestCase):
         cmd = self.api("session.new_layer")[-1]["layout"]["block"]["options"]["command"]
         self.assertNotIn("--model", cmd)
         self.assertIsNone(self.show(tid).get("model"))
+
+
+    # ---------- several coordinators ----------
+
+    def new_pane(self, label="claude"):
+        """An agent's pane the person opened in Rex, in a tab of its own."""
+        reg = self.fake / "reg.json"
+        R = json.loads(reg.read_text()) if reg.exists() else {"blocks": {}, "layers": {}, "windows": []}
+        b, w = f"pane{len(R['blocks']) + 1}", f"w{len(R['windows']) + 1}"
+        R["windows"].append(w)
+        R["blocks"][b] = {"label": label, "layer": None, "window": w}
+        reg.write_text(json.dumps(R))
+        (self.fake / "alive").mkdir(exist_ok=True)
+        (self.fake / "alive" / b).write_text("")
+        return b
+
+    def bp_in(self, block, *args, ok=True):
+        """bullpen run from another pane."""
+        env, self.env = self.env, {**self.env, "REX_BLOCK": block}
+        try:
+            return self.bp(*args, ok=ok)
+        finally:
+            self.env = env
+
+    def two_coordinators(self):
+        """c1 started by `up` (blk1, board blk2), c2 an agent's pane made one with
+        `up --here`. Returns c2's block."""
+        self.bp("up")
+        other = self.new_pane()
+        self.bp_in(other, "up", "--here")
+        return other
+
+    def coordinators(self):
+        return json.loads(self.bp("config").stdout)["coordinators"]
+
+    def test_a_second_up_here_keeps_the_first_coordinator(self):
+        other = self.two_coordinators()
+        cs = self.coordinators()
+        self.assertEqual([(c["id"], c["block"]) for c in cs], [("c1", "blk1"), ("c2", other)])
+        splits = [a for a in self.rex_calls() if a[0] == "split"]
+        self.assertEqual([a[a.index("-b") + 1] for a in splits], ["blk1", other])  # a board each
+        self.assertEqual([a[-1] for a in splits], ["c1", "c2"])
+        self.assertTrue(cs[0]["board"]["block"] and cs[1]["board"]["block"])
+        out = self.bp_in(other, "up", "--here").stdout  # again: nothing changes
+        self.assertIn("coordinator c2: this pane", out)
+        self.assertEqual(len(self.coordinators()), 2)
+        self.assertEqual(len([a for a in self.rex_calls() if a[0] == "split"]), 2)
+        out = self.bp("up").stdout  # from elsewhere: as before, nothing new
+        self.assertIn("coordinator already running: c1 (blk1), c2", out)
+        self.assertEqual([a[0] for a in self.rex_calls()].count("run"), 1)
+
+    def test_a_task_belongs_to_the_coordinator_that_added_it(self):
+        other = self.two_coordinators()
+        mine = self.bp_in(other, "add", "Theirs", "--brief", "x").stdout.strip()
+        primary = self.bp("add", "Elsewhere", "--brief", "x").stdout.strip()  # not a coordinator's pane
+        self.assertEqual(self.show(mine)["coordinator"], "c2")
+        self.assertEqual(self.show(primary)["coordinator"], "c1")
+        self.assertIn("coord: c2", self.bp("show", mine).stdout)
+
+    def test_news_goes_to_the_tasks_own_coordinator(self):
+        other = self.two_coordinators()
+        a = self.bp_in(other, "add", "Theirs", "--brief", "x").stdout.strip()
+        b = self.bp("add", "Primary's", "--brief", "x").stdout.strip()
+        self.bp("add", "Waits", "--brief", "x", "--after", a)
+        self.bp("start", a)
+        self.bp("start", b)
+        self.ask(a, "for c2?")
+        self.ask(b, "for c1?")
+        self.assertEqual(self.typed(), [(other, "bullpen · BP-1 needs you (question): for c2?"),
+                                        ("blk1", "bullpen · BP-2 needs you (question): for c1?")])
+        self.bp("drop", a, "--force")
+        typed = self.typed()[2:]
+        self.assertEqual(typed[0], (other, "bullpen · BP-1 dropped"))  # its own coordinator alone
+        # news about more than one task goes to every coordinator
+        waits = [(blk, l) for blk, l in typed if "waits on BP-1, which was dropped" in l]
+        self.assertEqual(sorted(blk for blk, _ in waits), sorted(["blk1", other]))
+
+    def test_news_from_a_coordinators_pane_goes_to_the_owner_only(self):
+        other = self.two_coordinators()
+        a = self.bp_in(other, "add", "Theirs", "--brief", "x").stdout.strip()
+        self.bp("start", a)
+        self.bp_in(other, "drop", a, "--force")  # c2 did it: no news to itself
+        self.assertEqual(self.typed(), [])
+        b = self.bp_in(other, "add", "Theirs too", "--brief", "x").stdout.strip()
+        self.bp("start", b)
+        self.bp_in("blk1", "drop", b, "--force")  # c1 dropped c2's task: c2 hears of it
+        self.assertEqual(self.typed(), [(other, "bullpen · BP-2 dropped")])
+
+    def test_each_coordinator_reads_its_own_news(self):
+        other = self.two_coordinators()
+        self.bp("config", "--news", "monitor")
+        a = self.bp_in(other, "add", "Theirs", "--brief", "x").stdout.strip()
+        b = self.bp("add", "Primary's", "--brief", "x").stdout.strip()
+        self.bp("start", a)
+        self.bp("start", b)
+        self.ask(a, "one")
+        self.ask(b, "two")
+        self.ask(a, "three")
+        self.assertEqual(self.bp_in(other, "news").stdout.splitlines(),
+                         ["bullpen · BP-1 needs you (question): one", "bullpen · BP-1 needs you (question): three"])
+        self.assertEqual(self.bp_in("blk1", "news").stdout, "bullpen · BP-2 needs you (question): two\n")
+        self.assertEqual(self.bp_in(other, "news").stdout, "")
+        self.ask(b, "four")
+        self.assertEqual(self.bp_in(other, "news").stdout, "")
+        self.assertEqual(self.bp("news").stdout, "bullpen · BP-2 needs you (question): four\n")  # the primary's
+        self.assertEqual(self.bp_in("blk1", "news").stdout, "")  # one cursor for c1, wherever it's read
+        # two followers at once, one per coordinator: neither waits for the other
+        self.bp_in(other, "news")
+        self.bp_in("blk1", "news")
+
+    def test_an_old_config_with_one_coordinator_still_loads(self):
+        self.bp("up")  # blk1, board blk2
+        path = next((self.tmp / "state" / "repos").iterdir()) / "config.json"
+        cfg = json.loads(path.read_text())
+        for k in ("coordinators", "next_coordinator"):
+            cfg.pop(k)
+        cfg["coordinator"] = {"block": "blk1", "session": "session:1"}
+        cfg["board"] = {"block": "blk2", "session": "session:1"}
+        path.write_text(json.dumps(cfg))
+        (path.parent / "news.log").write_text("")
+        (path.parent / "news.cursor").write_text("0\n")  # its one cursor
+        cs = self.coordinators()
+        self.assertEqual(cs, [{"id": "c1", "block": "blk1", "session": "session:1",
+                               "board": {"block": "blk2", "session": "session:1"}}])
+        self.assertNotIn("coordinator", json.loads(self.bp("config").stdout))
+        self.assertIn("coordinator already running: c1 (blk1)", self.bp("up").stdout)
+        self.assertEqual([a[0] for a in self.rex_calls()].count("split"), 1)  # its board stays
+        self.bp("config", "--news", "monitor")
+        tid = self.bp("add", "T", "--brief", "x").stdout.strip()
+        self.assertEqual(self.show(tid)["coordinator"], "c1")
+        other = self.new_pane()
+        self.bp_in(other, "up", "--here")
+        self.assertEqual([c["id"] for c in self.coordinators()], ["c1", "c2"])
+
+    def test_an_old_cursor_carries_on_for_the_first_coordinator(self):
+        tid = self.start_task()
+        self.bp("config", "--news", "monitor")
+        d = next((self.tmp / "state" / "repos").iterdir())
+        self.ask(tid, "one")
+        for p in d.glob("news-*.cursor"):  # as an older bullpen left it
+            (d / "news.cursor").write_text(p.read_text())
+            p.unlink()
+        self.assertEqual(self.bp("news").stdout, "bullpen · BP-1 needs you (question): one\n")
+        self.assertEqual(self.bp("news").stdout, "")
+
+    def test_a_gone_coordinators_tasks_fall_back_to_the_others(self):
+        other = self.two_coordinators()
+        third = self.new_pane()
+        self.bp_in(third, "up", "--here")
+        a = self.bp_in(other, "add", "Theirs", "--brief", "x").stdout.strip()
+        self.bp("start", a)
+        board2 = self.coordinators()[1]["board"]["block"]
+        (self.fake / "alive" / other).unlink()  # c2's agent is closed
+        self.ask(a, "anyone?")
+        self.assertEqual(sorted(self.typed()), sorted([("blk1", "bullpen · BP-1 needs you (question): anyone?"),
+                                                       (third, "bullpen · BP-1 needs you (question): anyone?")]))
+        self.bp("up")  # drops c2, and closes its board
+        self.assertEqual([c["id"] for c in self.coordinators()], ["c1", "c3"])
+        self.assertIn(["block", "close", board2, "-s", "session:1"], self.rex_calls())
+        self.assertIn("coord: c2, gone: its news goes to every coordinator", self.bp("show", a).stdout)
+        self.bp_in(third, "adopt", a)
+        self.assertEqual(self.show(a)["coordinator"], "c3")
+        self.ask(a, "c3?")
+        self.assertEqual(self.typed()[-1], (third, "bullpen · BP-1 needs you (question): c3?"))
+        self.assertIn("coordinator's own pane", self.bp("adopt", a, ok=False).stderr)
+
+    def test_waiting_news_for_a_gone_coordinator_goes_to_the_others(self):
+        other = self.two_coordinators()
+        a = self.bp_in(other, "add", "Theirs", "--brief", "x").stdout.strip()
+        self.bp("start", a)
+        (self.fake / "screen").write_text("❯ half a message\n")  # the person is typing: news waits
+        self.ask(a, "waiting")
+        self.assertEqual(self.typed(), [])
+        (self.fake / "alive" / other).unlink()
+        (self.fake / "screen").write_text("❯ \n")
+        self.bp("_flush")
+        self.assertEqual(self.typed(), [("blk1", "bullpen · BP-1 needs you (question): waiting")])
+        self.assertEqual(list((self.tmp / "state").rglob("outbox*.txt")), [])
+
+    def test_go_and_hide_use_the_tasks_own_coordinator(self):
+        other = self.two_coordinators()
+        board2 = self.coordinators()[1]["board"]["block"]
+        a = self.bp_in(other, "add", "Theirs", "--brief", "x").stdout.strip()
+        self.bp("start", a)
+        self.assertEqual(self.api("session.new_layer")[-1]["window_id"], "w2")  # c2's tab
+        self.bp_in(board2, "go")  # the board's own coordinator
+        self.assertEqual(self.focused()[-1], other)
+        self.bp_in(board2, "go", "--board")
+        self.assertEqual(self.focused()[-1], board2)
+        self.bp("go", a)
+        self.bp("hide", "--from", self.block(a))
+        self.assertEqual(self.focused()[-1], board2)
+        self.bp("go", "--from", self.block(a))
+        self.assertEqual(self.focused()[-1], other)
+        self.bp("go")  # from elsewhere: the primary one
+        self.assertEqual(self.focused()[-1], "blk1")
 
 
 class LocalModeTest(unittest.TestCase):

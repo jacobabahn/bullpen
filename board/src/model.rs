@@ -97,6 +97,9 @@ pub struct Task {
     /// approved, and auto-accepts once its PR's checks pass
     #[serde(default, deserialize_with = "lenient")]
     pub auto_wait: Option<bool>,
+    /// the ID of the coordinator that owns it: its news goes there
+    #[serde(default, deserialize_with = "lenient")]
+    pub coordinator: Option<String>,
     /// those not done yet, worked out from the other tasks: "BP-8", "BP-9 (dropped)"
     #[serde(skip)]
     pub waits: Vec<String>,
@@ -160,6 +163,19 @@ pub struct Config {
     pub merge: String,
     /// approved tasks accept themselves (`bullpen config --auto-accept on`)
     pub auto_accept: bool,
+    /// the IDs of the repo's coordinators
+    pub coordinators: Vec<String>,
+}
+
+impl Config {
+    /// Is the task another coordinator's? Only when there are several: a task with
+    /// no owner, or one whose owner is gone, is everyone's.
+    pub fn theirs(&self, t: &Task, me: Option<&str>) -> bool {
+        match (me, t.coordinator.as_deref()) {
+            (Some(me), Some(o)) => self.coordinators.len() > 1 && o != me && self.coordinators.iter().any(|c| c == o),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,6 +211,10 @@ impl Config {
             review_rounds: v["review_rounds"].as_u64().unwrap_or(2) as u32,
             merge: v["merge"].as_str().unwrap_or("rebase").to_string(),
             auto_accept: v["auto_accept"].as_bool().unwrap_or(false),
+            coordinators: v["coordinators"]
+                .as_array()
+                .map(|cs| cs.iter().filter_map(|c| c["id"].as_str().map(String::from)).collect())
+                .unwrap_or_default(),
         }
     }
 }
@@ -607,8 +627,34 @@ fn split_at_width(s: &str, w: usize) -> (String, String) {
 mod tests {
     use super::*;
 
+    impl Config {
+        fn default_for_test() -> Config {
+            Config {
+                layout: Layout::Grouped,
+                review_rounds: 2,
+                merge: "rebase".into(),
+                auto_accept: false,
+                coordinators: Vec::new(),
+            }
+        }
+    }
+
     fn task(id: &str, status: &str) -> Task {
         Task { id: id.into(), status: status.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn another_coordinators_task_is_theirs_only_while_it_is_listed() {
+        let mut cfg = Config::default_for_test();
+        let owned = |o: Option<&str>| Task { coordinator: o.map(String::from), ..task("BP-1", "working") };
+        cfg.coordinators = vec!["c1".into()];
+        assert!(!cfg.theirs(&owned(Some("c2")), Some("c1"))); // one coordinator: all are its
+        cfg.coordinators = vec!["c1".into(), "c2".into()];
+        assert!(cfg.theirs(&owned(Some("c2")), Some("c1")));
+        assert!(!cfg.theirs(&owned(Some("c1")), Some("c1")));
+        assert!(!cfg.theirs(&owned(Some("c3")), Some("c1"))); // its owner is gone: everyone's
+        assert!(!cfg.theirs(&owned(None), Some("c1")));
+        assert!(!cfg.theirs(&owned(Some("c2")), None)); // a board that isn't anyone's
     }
 
     #[test]
@@ -637,7 +683,13 @@ mod tests {
 
     #[test]
     fn auto_accept_says_when_a_task_differs_or_waits() {
-        let cfg = |on| Config { layout: Layout::Grouped, review_rounds: 2, merge: "rebase".into(), auto_accept: on };
+        let cfg = |on| Config {
+            layout: Layout::Grouped,
+            review_rounds: 2,
+            merge: "rebase".into(),
+            auto_accept: on,
+            coordinators: Vec::new(),
+        };
         let approved = Some(Review { round: Some(1), verdict: Some("approved".into()) });
         let t = Task { pr: Some("https://github.com/me/repo/pull/4".into()), review: approved, ..task("BP-1", "ready") };
         assert_eq!(detail_with_auto(&t, &cfg(true), now()), "PR #4, approved by review.");

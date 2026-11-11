@@ -30,7 +30,7 @@ In a Rex pane, inside the repository:
 
 ```sh
 bullpen up            # opens the coordinator's tab, the task board and the watcher
-bullpen up --here     # or: make the agent already in this pane the coordinator
+bullpen up --here     # or: make the agent already in this pane a coordinator
 ```
 
 Everything stays in one tab per repository. The coordinator is on the left and
@@ -75,6 +75,39 @@ Accepting or dropping from the board (or a shell) is news to the coordinator:
 coordinator's own pane, `accept` and `drop` post nothing: it already knows.
 Tasks that waited on the accepted one start by themselves (see
 [Dependencies](#dependencies)).
+
+### Several coordinators
+
+A repository can have more than one coordinator at a time, each an agent in its
+own pane. `bullpen up --here` in another agent's pane adds it as a coordinator and
+leaves the others as they are; `bullpen up` from elsewhere starts one only when
+none is running. Each coordinator has an ID (`c1`, `c2`, ...) and its own board
+beside it. Every board shows every task; with several coordinators, the board's
+top line names its coordinator and other coordinators' tasks have dimmed titles.
+
+A task belongs to the coordinator that added it: the one whose pane ran `bullpen
+add`, or the first coordinator when `add` ran anywhere else (`bullpen show`
+says which, with several). News about a task goes to its own coordinator only:
+typed into its pane, or printed by its own `bullpen news`. News that isn't about
+one task (several tasks to start after an accept, a dropped dependency, the
+usage limit resetting, rebases after an accept) goes to every coordinator. So
+does news for a task whose coordinator's pane is gone, and news that was waiting
+to be typed into it. `bullpen adopt BP-3`, run in a coordinator's pane, makes the
+task that coordinator's own (its panes move to that coordinator's tab too).
+Accepting or dropping a task from a coordinator's pane tells its own
+coordinator if that is another one.
+
+`bullpen up` forgets coordinators whose panes are gone and closes their boards.
+After a Rex restart it finds the coordinators it started by their labels; one
+made with `--here` isn't found again: run `bullpen up --here` there again, then
+`bullpen adopt` its tasks. `max_running` and the queue are shared by all of
+them. Worker panes go in their own coordinator's tab. `bullpen go` from a
+board goes to its coordinator, from a worker to the task's coordinator, and
+from elsewhere to the first one.
+
+A config from before this, with one coordinator, loads as coordinator `c1`, and
+its tasks (which name no coordinator) are news for every coordinator until one
+adopts them.
 
 ### Dependencies
 
@@ -248,9 +281,11 @@ sets how it reaches the coordinator, and `bullpen up` says which is in use:
 
 `bullpen news` prints the lines logged since the last time and exits;
 `bullpen news --follow` keeps running and prints each new line as it is logged.
-Both remember how far they got (a byte offset in `news.cursor`), so each line is
-printed once, across restarts too. Only one reads at a time: a second
-`--follow` waits for the first to end and then takes over. The first run starts
+Both remember how far they got (a byte offset in `news-c1.cursor`, one per
+coordinator), so each line is printed once, across restarts too. They print the
+news of the coordinator whose pane runs them (`REX_BLOCK`), or of the first one
+elsewhere. Only one reads per coordinator at a time: a second `--follow` waits
+for the first to end and then takes over. The first run starts
 from the end of the log, and switching to `monitor` starts from there too, so
 old news is never printed again.
 
@@ -336,8 +371,10 @@ task ready, with its worktree and branch as they were.
 
 - Tasks, briefs, settings and your own rules: `~/.local/state/bullpen/repos/<repo>/` (`BULLPEN_STATE` moves it).
 - Worktrees: `<repo>-bullpen/<ID>` next to the repository.
-- News: `news.log` beside the tasks, with `news.cursor` (how far `bullpen news` has
-  read) and `outbox.txt` (typed news waiting for an empty input). See [News](#news).
+- News: `news.log` beside the tasks (each line names the coordinators it is for,
+  as `[c1]`), with `news-<id>.cursor` (how far each coordinator's `bullpen news`
+  has read) and `outbox-<id>.txt` (typed news waiting for an empty input). See
+  [News](#news).
 
 `bullpen config --auto-accept on` accepts approved tasks by themselves (off by
 default; see [Auto-accept](#auto-accept)). `bullpen config --news monitor` changes how news reaches the coordinator (`type`
