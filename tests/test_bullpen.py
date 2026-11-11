@@ -1698,7 +1698,7 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(t["why"], "PR checks failed: test, ci/build")
         self.assertIn("`bullpen resume BP-1` restarts it", self.news_lines()[-1])
 
-    def test_feedback_that_doesnt_reach_the_worker_leaves_the_task(self):
+    def test_feedback_that_doesnt_reach_the_worker_needs_you(self):
         tid = self.start_task()
         worker = self.block(tid)
         self.bp("config", "--review", "off")
@@ -1707,10 +1707,30 @@ class BullpenTest(unittest.TestCase):
         self.github(statusCheckRollup=self.FAILING)
         self.bp("_prs")
         t = self.show(tid)
-        self.assertEqual(t["status"], "ready")
+        self.assertEqual((t["status"], t["why"]), ("needs", "PR checks failed: test, ci/build"))
         self.assertNotIn("sent", t.get("gh") or {})
+        line = self.news_lines()[-1]
+        self.assertIn("The message didn't reach its worker (rex: couldn't send to the block)", line)
+        self.assertNotIn("rex send", line)  # the reason, not the command
+        self.assertIn("`bullpen tell BP-1` it", line)
+        (self.fake / f"send_fails_{worker}").unlink()
+        self.bp("tell", tid, "Fix the checks.")
+        self.assertEqual(self.show(tid)["status"], "working")
+
+    def test_feedback_during_review_that_doesnt_reach_the_worker_needs_you(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        reviewer = self.commit_and_ready(tid)
+        (self.fake / f"send_fails_{worker}").write_text("")
+        self.github(statusCheckRollup=self.FAILING)
+        self.bp("_prs")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("needs", "PR checks failed: test, ci/build"))
+        self.assertFalse((self.fake / "alive" / reviewer).exists())  # moot once the work changes
         self.assertIn("The message didn't reach its worker", self.news_lines()[-1])
-        self.assertIn("`bullpen tell BP-1` it", self.news_lines()[-1])
+        (self.fake / f"send_fails_{worker}").unlink()
+        self.bp("tell", tid, "Fix the checks.")
+        self.assertEqual(self.show(tid)["status"], "working")
 
     def test_feedback_is_not_typed_into_a_worker_blocked_on_a_prompt(self):
         tid = self.start_task()

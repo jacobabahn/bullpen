@@ -314,10 +314,11 @@ def rex_type(session, block, text):
 def type_to_worker(t, msg):
     """Type msg into the task's worker. None if it went through, else why not
     (the caller leaves the task where it was and says so)."""
-    try:
-        rex_type(t["session"], t["block"], msg)
-    except Fail as e:
-        return clip(str(e), 160)
+    s = ["-s", t["session"]] if t.get("session") else []
+    for cmd in ([REX, "send", *s, "-b", t["block"], msg], [REX, "send-key", *s, "-b", t["block"], "enter"]):
+        p = run(cmd, check=False)
+        if p.returncode != 0:
+            return clip(" ".join((p.stderr or p.stdout).split()) or "typing into its pane failed", 160)
     return None
 
 
@@ -2537,8 +2538,9 @@ def send_back(repo, t, lines, ask):
         return
     alive = rex_alive(t.get("session"), t.get("block"))
     failed = alive and type_to_worker(t, clip(f"{ask} Then commit and run your ready command again.", 2000))
-    if failed:  # left where it was
-        write_json(repo.task_path(t["id"]), t)
+    if failed:  # its reviewer, if it had one, is closed: the person passes this on
+        t.update(status="needs", why=why)
+        repo.save_task(t)
         for line in lines:
             news(repo, t, "pr-feedback", f"{line.rstrip('.')}. The message didn't reach its "
                  f"worker ({failed}): `bullpen tell {t['id']}` it")

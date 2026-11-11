@@ -140,11 +140,11 @@ listed. `bullpen config --review off` skips review; `review_rounds` and
 
 A task goes back to `working` only once its worker has the message: review
 findings, a rebase conflict or PR feedback. If typing it into the worker's pane
-fails, the task stays where it was (after `changes`: needs you, as "Review
-findings didn't reach its worker") and news says so, with where the findings
-are, so you can `bullpen tell` it. `verdict` and `ready` refuse an empty
-`--summary-file`: an empty file is a write that failed (a full disk, `/tmp` out
-of inodes), not "no findings".
+fails, it needs you instead (as "Review findings didn't reach its worker", or
+the PR's reason), or for a rebase conflict stays where it was, and news says
+so, with where the findings are, so you can `bullpen tell` it. `verdict` and
+`ready` refuse an empty `--summary-file`: an empty file is a write that failed
+(a full disk, `/tmp` out of inodes), not "no findings".
 
 ### Auto-accept
 

@@ -137,9 +137,9 @@ bullpen · BP-10 waits on BP-9, which was dropped, so it stays queued. Ask the p
   on the person (a prompt): tell them. For a reviewer, tell the person; you can't
   type to it. You hear of each quiet spell once.
 - A message didn't reach its worker (review findings, a rebase conflict, PR
-  feedback): the task stays where it was. `bullpen tell` the worker what the news
-  says (for findings, to read the findings file it names and fix what it agrees
-  with, then run ready).
+  feedback): the task needs you, or stays where it was. `bullpen tell` the
+  worker what the news says (for findings, to read the findings file it names
+  and fix what it agrees with, then run ready).
 - Stopped at the usage limit: you, the workers and the reviewers share one
   subscription, and it has run out until the time given. Nothing to do: don't
   `tell` or `resume` the task, and don't ask the person. Bullpen continues it
