@@ -235,6 +235,38 @@ turns it off. The watcher only knows of events since it started, so a pane that
 was already silent when the watcher (re)started isn't noticed until its next
 event.
 
+### Status drift
+
+A task's status follows its agent's status events. One that goes missing (a
+watcher or Rex restart, a bug) leaves the task out of step: marked working while
+its agent sits at its prompt, say. `bullpen check` compares each open task that
+has an agent in a pane (its worker, or its reviewer while in review) with what
+that agent is doing now, and prints one line per mismatch:
+
+```
+BP-3 is marked working but its agent is idle at its prompt: `bullpen peek` it
+BP-4 is marked needs (permission) but its agent is working again
+BP-5 is in review but its reviewer is idle without a verdict
+BP-6 is marked working but its pane is gone
+```
+
+It prints nothing, and exits 0, when all agree (1 when something doesn't). It
+reads the status record Rex keeps for each pane (the one the watcher's events come
+from), and goes by the screen where Rex has none: Claude Code's spinner, its
+prompt. A state that changed in the last minute is left alone, since its event may
+still be on the way. `bullpen check BP-3` checks one task.
+
+`bullpen check --fix` applies what the missed event would have done, news
+included, as if it had come; it never types into an agent or approves anything.
+The watcher runs it every 3 minutes, quietly, so drift fixes itself and you hear
+of it once, in the usual words.
+
+An agent that ended its turn while a background shell of its own still runs
+(Claude Code's footer says `1 shell`) isn't finished: it takes another turn when
+the shell ends. Bullpen counts it as busy, and holds back the "ended its turn
+without `ready`" news for that turn. `check` also hints at an idle worker with
+commits and a clean worktree that never ran `ready`; that one it leaves to you.
+
 ### Usage limit
 
 All of bullpen's agents share one Claude subscription. When it runs out, a
@@ -338,6 +370,7 @@ bullpen start BP-1    # worktree + branch + a Rex window running the worker
 bullpen ls            # todo, working, needs, stopped, ready
 bullpen peek BP-1     # the end of the worker's screen
 bullpen diff BP-1     # its changes against its base, in a pager (--stat: just the files)
+bullpen check         # tasks whose status is out of step with their agent; --fix catches up
 bullpen go BP-1       # focus its pane (`go` alone: the coordinator; --next: next needing you)
 bullpen tell BP-1 "Also cover the logout path"
 bullpen resume BP-1   # restart a stopped worker, continuing its conversation

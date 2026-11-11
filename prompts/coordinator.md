@@ -51,6 +51,7 @@ bullpen start BP-3 --model sonnet  # the same, with another model than the confi
 bullpen ls                  # open tasks: todo, working, needs, stopped, review, ready
 bullpen show BP-3           # its branch, worktree, PR (or local branch), why it needs you
 bullpen peek BP-3           # the end of the worker's screen
+bullpen check               # tasks whose status is out of step with their agent (nothing: all agree)
 bullpen diff BP-3 --stat    # the files it changed (committed, then not yet committed)
 bullpen go BP-3             # show the person that worker's pane, when they ask to see it
 bullpen note BP-3 "..."     # one line on the board saying what BP-3 needs from the person
@@ -150,6 +151,12 @@ bullpen · BP-10 waits on BP-9, which was dropped, so it stays queued. Ask the p
   Hung on a command or going in circles: `bullpen tell` it what you see. Waiting
   on the person (a prompt): tell them. For a reviewer, tell the person; you can't
   type to it. You hear of each quiet spell once.
+- Something seems off (the board says working but nothing happens), or a task
+  has been quiet a while: `bullpen check` (or `bullpen check <ID>`). Each line
+  says what's out of step and what to look at; `bullpen check --fix` catches the
+  board and the news up (the watcher does that by itself every few minutes). A
+  hint that a worker has commits but never ran ready: peek it, and tell it to run
+  ready if it's done.
 - A message didn't reach its worker (review findings, a rebase conflict, PR
   feedback): the task needs you, or stays where it was. `bullpen tell` the
   worker what the news says (for findings, to read the findings file it names

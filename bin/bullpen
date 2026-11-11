@@ -2253,7 +2253,8 @@ def cmd_event(args):
         repo.save_task(t)
         news(repo, t, "failed", f"{t['id']} failed" + (f": {msg}" if msg else ""))
     elif state in ("done", "idle"):
-        if t["status"] != "working":
+        if t["status"] != "working" or shell_running(screen(t.get("session"), t["block"])):
+            # a background shell of its own still runs: it takes another turn when that ends
             repo.save_task(t)
             return
         t.update(status="needs", why="Ended its turn without saying ready")
@@ -2370,6 +2371,208 @@ def cmd_gone(args):
         news(repo, t, "stopped", f"{t['id']} stopped before saying ready: `bullpen resume {t['id']}` continues it")
     else:
         repo.save_task(t)
+
+
+# ---------- status drift: `bullpen check` ----------
+#
+# A task's status follows its agent's events; a missed one (a watcher or Rex restart,
+# a bug) leaves it out of step. `check` compares each task that has an agent in a
+# pane with what Rex says that agent is doing right now, and `--fix` applies the
+# event that was missed, through the same paths (and news) as the watcher.
+
+SETTLE = 60  # seconds a new state is left alone: its event may still be on the way
+SHELL_RE = re.compile(r"\b\d+ (?:background )?shells?\b|shells? still running", re.I)
+
+
+def screen(session, block):
+    """The text on a pane's screen, or "" if Rex can't say."""
+    p = run([REX, "capture", *(["-s", session] if session else []), "-b", block], check=False)
+    return p.stdout if p.returncode == 0 else ""
+
+
+def shell_running(text):
+    """Does Claude Code's footer say a background shell of its own still runs?"""
+    return any(SHELL_RE.search(l) for l in text.splitlines()[-6:])
+
+
+def program_status(session, block):
+    """The program's own (root) status record in the pane, as Rex keeps it, or None."""
+    cmd = [REX, "block", "call", *(["-s", session] if session else []), "-b", block, "program_status"]
+    p = run(cmd, check=False)
+    try:
+        records = json.loads(p.stdout).get("records") if p.returncode == 0 else None
+    except ValueError:
+        return None
+    return next((r for r in records or [] if not r.get("id")), None)
+
+
+def screen_state(text):
+    """What Claude Code's screen shows: working (a spinner), blocked (a question),
+    idle (its prompt), or None if it's none of those."""
+    lines = [l.strip() for l in text.splitlines() if l.strip()][-12:]
+    if any("esc to interrupt" in l for l in lines):
+        return "working"
+    if any(l.startswith("Do you want to") for l in lines):
+        return "blocked"
+    if any(l.startswith("❯") for l in lines):
+        return "idle"
+    return None
+
+
+def agent_state(session, block, at=None):
+    """What the agent in a pane is doing now: {"state", "kind", "msg"}, with state one
+    of gone, working, blocked, error, idle or shell (its turn ended, but a background
+    shell of its own runs, so it takes another). None: unsure, or it just changed."""
+    if not rex_alive(session, block):
+        return {"state": "gone", "kind": "", "msg": ""}
+    r = program_status(session, block)
+    if r:
+        if r.get("updated_at") and seconds_since(r["updated_at"], at) < SETTLE:
+            return None
+        state = r.get("state") or "idle"
+        state = state if state in ("working", "blocked", "error") else "idle"
+        out = {"state": state, "kind": r.get("kind") or "", "msg": r.get("msg") or ""}
+    else:  # no record to read: go by the screen
+        state = screen_state(screen(session, block))
+        if not state:
+            return None
+        out = {"state": state, "kind": "", "msg": ""}
+    if out["state"] == "idle" and shell_running(screen(session, block)):
+        out["state"] = "shell"
+    return out
+
+
+def needs_label(why):
+    """ "permission" for "Needs you (permission): ...", else the why in a few words."""
+    m = re.match(r"(?:Reviewer )?[Nn]eeds you \(([^)]*)\)", why or "")
+    if m:
+        return m.group(1)
+    return clip((why or "waiting")[:1].lower() + (why or "waiting")[1:], 60)
+
+
+def doing(a, who="agent"):
+    """What the agent is doing, in words: "its agent is idle at its prompt"."""
+    return {"idle": f"its {who} is idle at its prompt",
+            "blocked": f"its {who} is waiting on you ({a['kind'] or 'input'})",
+            "error": f"its {who}'s turn failed",
+            "working": f"its {who} is working again"}[a["state"]]
+
+
+def worker_drift(t, a):
+    """(line, fix) when the worker's task status disagrees with what it does, else None.
+    fix is the event the watcher missed: "gone", or the agent's state."""
+    tid, st = t["id"], t["status"]
+    if a["state"] == "gone":
+        return f"{tid} is marked {st} but its pane is gone", "gone"
+    if a["state"] == "shell":
+        return None  # busy: it takes another turn when its shell ends
+    if st == "working" and a["state"] != "working":
+        tail = ": `bullpen peek` it" if a["state"] == "idle" else ""
+        return f"{tid} is marked working but {doing(a)}{tail}", a["state"]
+    if st == "needs" and a["state"] == "working":
+        return f"{tid} is marked needs ({needs_label(t.get('why'))}) but {doing(a)}", "working"
+    if st == "needs" and a["state"] == "blocked" and not (t.get("why") or "").startswith("Needs you"):
+        return f"{tid} is marked needs ({needs_label(t.get('why'))}) but {doing(a)}", "blocked"
+    return None
+
+
+def reviewer_drift(t, a):
+    """The same for a task waiting on its reviewer."""
+    tid, st = t["id"], t["status"]
+    if a["state"] == "gone":
+        return f"{tid} is {'in review' if st == 'review' else 'marked needs'} but its reviewer's pane is gone", "gone"
+    if st == "review" and a["state"] in ("idle", "error"):
+        return f"{tid} is in review but its reviewer is idle without a verdict", a["state"]
+    if st == "review" and a["state"] == "blocked":
+        return f"{tid} is in review but {doing(a, 'reviewer')}", "blocked"
+    if st == "needs" and a["state"] == "working":
+        return f"{tid} is marked needs ({needs_label(t.get('why'))}) but {doing(a, 'reviewer')}", "working"
+    return None
+
+
+def waited_on(t):
+    """("worker" or "reviewer", session, block) for the agent the task waits on now,
+    or None: nothing is running for it, or it waits on the usage limit."""
+    r = t.get("review") or {}
+    if is_limited(t):
+        return None
+    if t["status"] == "review" or (t["status"] == "needs" and (t.get("why") or "").startswith("Reviewer")):
+        return ("reviewer", r.get("session") or t.get("session"), r["block"]) if r.get("block") else None
+    if t["status"] in ("working", "needs") and t.get("block"):
+        return "worker", t.get("session"), t["block"]
+    return None
+
+
+def unready_hint(repo, t, a):
+    """A line for an idle worker whose work looks finished but never ran ready, or None."""
+    if a["state"] != "idle" or t["status"] not in ("working", "needs"):
+        return None
+    wt = t.get("worktree")
+    if not wt or not Path(wt).is_dir() or git(wt, "status", "--porcelain", check=False).stdout.strip():
+        return None
+    ahead = git(wt, "rev-list", "--count", f"{task_base_ref(repo, t)}..HEAD", check=False).stdout.strip()
+    if not ahead.isdigit() or int(ahead) == 0:
+        return None
+    return (f"{t['id']} is idle with commits and a clean worktree but never ran ready: "
+            f"`bullpen peek` it, then `bullpen tell` it to run ready if it's done")
+
+
+def fix_drift(repo, t, who, block, fix, a):
+    """Apply the event the watcher missed, through its own path (and news)."""
+    if fix == "gone":
+        return cmd_gone(argparse.Namespace(block=block))
+    if who == "worker":
+        t = repo.task(t["id"])
+        t["last"] = None  # the event did come: don't take it for a repeat
+        write_json(repo.task_path(t["id"]), t)
+    cmd_event(argparse.Namespace(block=block, state=fix, kind=a["kind"], msg=a["msg"]))
+
+
+def check_repo(repo, ids, fix, out):
+    """Check the repo's tasks (those in ids, if given). Returns how many disagreed."""
+    drift = 0
+    for t in repo.tasks():
+        if t["status"] in CLOSED or (ids and t["id"] not in ids):
+            continue
+        agent = waited_on(t)
+        if not agent:
+            continue
+        who, session, block = agent
+        a = agent_state(session, block)
+        if not a:
+            continue
+        found = (worker_drift if who == "worker" else reviewer_drift)(t, a)
+        if found:
+            drift += 1
+            line, what = found
+            if fix:
+                fix_drift(repo, t, who, block, what, a)
+                line += " (fixed)"
+            out(line)
+        hint = unready_hint(repo, repo.task(t["id"]), a) if who == "worker" else None
+        if hint:
+            out(hint)
+    return drift
+
+
+def cmd_check(args):
+    """Compare each task's status with what its agent is doing now; --fix catches up."""
+    out = (lambda line: None) if args.quiet else print
+    if args.all_repos:
+        repos = []
+        for cfg in (STATE / "repos").glob("*/config.json"):
+            root = read_json(cfg, {}).get("root")
+            if root and Path(root).is_dir():
+                repos.append(Repo(root))
+    else:
+        repos = [Repo(repo_root())]
+    drift = 0
+    for repo in repos:
+        ids = {repo.norm(i) for i in args.ids}
+        for i in ids:
+            repo.task(i)  # an unknown ID is an error, not "all agree"
+        drift += check_repo(repo, ids, args.fix, out)
+    return 1 if drift and not args.fix else 0
 
 
 # ---------- the usage limit (called by lua/watch.lua) ----------
@@ -2990,6 +3193,14 @@ def main(argv=None):
     p = sub.add_parser("guide", help="print the coordinator's guide")
     p.set_defaults(fn=cmd_guide)
 
+    p = sub.add_parser("check", help="compare each task's status with what its agent is doing now")
+    p.add_argument("ids", nargs="*", metavar="ID", help="only these tasks")
+    p.add_argument("--fix", action="store_true",
+                   help="apply the updates the missed events would have made (news included)")
+    p.add_argument("--quiet", action="store_true", help="print nothing")
+    p.add_argument("--all-repos", action="store_true", help="every repo bullpen knows (the watcher's)")
+    p.set_defaults(fn=cmd_check)
+
     p = sub.add_parser("_event")
     p.add_argument("block")
     p.add_argument("state")
@@ -3017,11 +3228,11 @@ def main(argv=None):
 
     args = ap.parse_args(argv)
     try:
-        args.fn(args)
+        code = args.fn(args)
     except Fail as e:
         print(f"bullpen: {e}", file=sys.stderr)
         return 1
-    return 0
+    return code if type(code) is int else 0
 
 
 if __name__ == "__main__":

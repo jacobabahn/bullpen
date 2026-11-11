@@ -1,6 +1,6 @@
 -- bullpen watcher: forwards status changes of bullpen panes to the bullpen CLI.
 --
---   rex do --all watch.lua bin=/path/to/bullpen state=/path/to/state [quiet=30] [prs=120]
+--   rex do --all watch.lua bin=/path/to/bullpen state=/path/to/state [quiet=30] [prs=120] [check=180]
 --
 -- Only panes bullpen started (listed in <state>/blocks/) are forwarded, and
 -- only when their state changes, so a worker's stream of "working: ..."
@@ -117,6 +117,14 @@ rex.every(60, function()
   for _, p in ipairs(quiet.due(os.time(), stuck_after)) do
     call("_stuck", p.block, string.format("%d", p.minutes))
   end
+end)
+
+-- Status drift: a task whose status is out of step with what its agent is doing
+-- (an event missed across a watcher or Rex restart) is caught up, with the news
+-- the missed event would have given. With no agent running this is one quick look.
+local check_every = tonumber(rex.args.check or "") or 180 -- seconds
+rex.every(check_every, function()
+  call("check", "--fix", "--quiet", "--all-repos")
 end)
 
 print("bullpen watcher: listening")

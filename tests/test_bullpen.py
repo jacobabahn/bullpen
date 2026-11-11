@@ -3,6 +3,7 @@
 Run: python3 -m unittest discover -s tests
 """
 
+import datetime as dt
 import json
 import os
 import select
@@ -56,8 +57,14 @@ FAKE_REX = textwrap.dedent("""\
     elif a[:2] == ["block", "close"]:
         (alive / a[2]).unlink(missing_ok=True)
     elif a[0] == "capture":
-        screen = d / "screen"  # what the tests put on screen, else two lines
+        own = d / f"screen_{a[a.index('-b') + 1]}"  # one pane's screen, else every pane's
+        screen = own if own.exists() else d / "screen"  # what the tests put on screen, else two lines
         print(screen.read_text() if screen.exists() else "line one\\nline two\\n\\n")
+    elif a[:2] == ["block", "call"] and a[-1] == "program_status":
+        rec = d / f"status_{a[a.index('-b') + 1]}.json"  # the record the tests give a pane
+        if not rec.exists():
+            sys.exit("rex: no such method")  # an older Rex: bullpen goes by the screen
+        print(json.dumps({"records": [json.loads(rec.read_text())]}))
     elif a[:2] == ["api", "call"]:
         rest = a[2:]
         sid = R.get("session", "session:1")
@@ -635,6 +642,160 @@ class BullpenTest(unittest.TestCase):
 
     def news(self):
         return [l for b, l in self.typed() if b == "blk1"]
+
+    # ---------- status drift: check ----------
+
+    def agent(self, blk, state, kind="", msg="", ago=600):
+        """What Rex says the program in pane blk is doing, as of ago seconds back."""
+        at = (dt.datetime.now().astimezone() - dt.timedelta(seconds=ago)).isoformat()
+        rec = {"state": state, "app": "claude-code", "msg": msg, "updated_at": at}
+        if kind:
+            rec["kind"] = kind
+        (self.fake / f"status_{blk}.json").write_text(json.dumps(rec))
+
+    def check(self, *args):
+        p = self.bp("check", *args, ok=False)
+        self.assertIn(p.returncode, (0, 1), p.stderr)
+        return p.stdout.splitlines()
+
+    def test_check_prints_nothing_when_all_agree(self):
+        tid = self.start_task()
+        self.agent(self.block(tid), "working", msg="Reading")
+        p = self.bp("check")
+        self.assertEqual((p.returncode, p.stdout), (0, ""))
+
+    def test_check_skips_a_task_without_a_pane(self):
+        self.bp("up")
+        self.bp("add", "Later", "--brief", "x")  # todo: no pane
+        tid = self.start_task("Now")
+        blk = self.block(tid)
+        (self.fake / "alive" / blk).unlink()
+        self.bp("_gone", blk)  # stopped, its pane forgotten
+        self.assertEqual(self.show(tid)["status"], "stopped")
+        p = self.bp("check")
+        self.assertEqual((p.returncode, p.stdout), (0, ""))
+
+    def test_check_finds_a_missed_end_of_turn_and_fix_reports_it_once(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.bp("_event", blk, "working", "", "Running the tests")
+        self.agent(blk, "idle", msg="Done")
+        self.assertEqual(self.check(), [f"{tid} is marked working but its agent is idle at its prompt: "
+                                        "`bullpen peek` it"])
+        self.assertEqual(self.bp("check", ok=False).returncode, 1)
+        self.assertEqual(self.show(tid)["status"], "working")  # no --fix: nothing changes
+        before = len(self.news())
+        self.assertEqual(self.bp("check", "--fix", "--quiet").stdout, "")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("needs", "Ended its turn without saying ready"))
+        news = self.news()[before:]
+        self.assertEqual(len(news), 1)
+        self.assertIn("ended its turn without `ready`", news[0])
+        self.bp("check", "--fix", "--quiet")  # agrees now: nothing again
+        self.assertEqual(self.check(), [])
+        self.assertEqual(len(self.news()), before + 1)
+
+    def test_check_leaves_a_state_that_just_changed(self):
+        tid = self.start_task()
+        self.agent(self.block(tid), "idle", ago=5)  # the watcher reports it after its own wait
+        self.assertEqual(self.check(), [])
+
+    def test_check_finds_a_missed_permission_prompt_and_its_end(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.agent(blk, "blocked", kind="permission", msg="Allow rm?")
+        self.assertEqual(self.check(), [f"{tid} is marked working but its agent is waiting on you (permission)"])
+        self.check("--fix")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("needs", "Needs you (permission): Allow rm?"))
+        self.assertIn("needs you (permission)", self.news()[-1])
+        self.agent(blk, "working", msg="Removing")
+        self.assertEqual(self.check(), [f"{tid} is marked needs (permission) but its agent is working again"])
+        self.assertEqual(self.check("--fix"), [f"{tid} is marked needs (permission) but its agent is "
+                                               "working again (fixed)"])
+        self.assertEqual(self.show(tid)["status"], "working")
+        self.assertEqual(self.check(), [])
+
+    def test_check_finds_a_gone_pane(self):
+        tid = self.start_task()
+        (self.fake / "alive" / self.block(tid)).unlink()
+        self.assertEqual(self.check(), [f"{tid} is marked working but its pane is gone"])
+        self.check("--fix", "--quiet")
+        self.assertEqual(self.show(tid)["status"], "stopped")
+        self.assertIn("stopped before saying ready", self.news()[-1])
+        self.assertEqual(self.check(), [])
+
+    def test_check_finds_a_reviewer_idle_without_a_verdict(self):
+        tid = self.start_task()
+        reviewer = self.commit_and_ready(tid)
+        self.agent(self.block(tid), "idle")  # the worker waits: that's fine in review
+        self.agent(reviewer, "idle")
+        self.assertEqual(self.check(), [f"{tid} is in review but its reviewer is idle without a verdict"])
+        self.check("--fix", "--quiet")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("needs", "Reviewer stopped without a verdict"))
+        self.assertIn("stopped without a verdict", self.news()[-1])
+        self.assertEqual(self.check(), [])
+        self.agent(reviewer, "working")
+        self.assertEqual(self.check(), [f"{tid} is marked needs (reviewer stopped without a verdict) but "
+                                        "its reviewer is working again"])
+        self.check("--fix")
+        self.assertEqual(self.show(tid)["status"], "review")
+
+    def test_check_counts_a_background_shell_as_busy(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.bp("_event", blk, "working", "", "Running the tests")
+        self.agent(blk, "idle")
+        (self.fake / f"screen_{blk}").write_text("❯ \n  ⏵⏵ auto mode on · 1 shell · ← 1 agent\n")
+        self.assertEqual(self.check(), [])
+        # and the watcher's end of turn is held back for it: it takes another turn
+        self.bp("_event", blk, "idle", "", "Waiting for the tests")
+        self.assertEqual(self.show(tid)["status"], "working")
+        self.assertFalse([l for l in self.news() if "ended its turn" in l])
+        (self.fake / f"screen_{blk}").unlink()  # the shell ended, and so did its next turn
+        self.bp("_event", blk, "working", "", "Reading the results")
+        self.bp("_event", blk, "idle", "", "Waiting for the tests")
+        self.assertEqual(self.show(tid)["status"], "needs")
+
+    def test_check_goes_by_the_screen_without_a_status_record(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        (self.fake / f"screen_{blk}").write_text("✶ Misting… (28s)\n  ⏵⏵ auto mode on · esc to interrupt\n")
+        self.assertEqual(self.check(), [])
+        (self.fake / f"screen_{blk}").write_text("Done.\n\n❯ \n  ⏵⏵ auto mode on\n")
+        self.assertEqual(self.check(), [f"{tid} is marked working but its agent is idle at its prompt: "
+                                        "`bullpen peek` it"])
+        (self.fake / f"screen_{blk}").write_text("something else\n")  # unsure: say nothing
+        self.assertEqual(self.check(), [])
+
+    def test_check_hints_at_finished_work_that_never_ran_ready(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        wt = self.show(tid)["worktree"]
+        (Path(wt) / "fix.txt").write_text("fixed\n")
+        sh("git", "-C", wt, "add", ".")
+        sh("git", "-C", wt, "commit", "-qm", "Fix it")
+        self.bp("_event", blk, "idle", "", "")
+        self.agent(blk, "idle")
+        self.assertEqual(self.check(), [f"{tid} is idle with commits and a clean worktree but never ran "
+                                        "ready: `bullpen peek` it, then `bullpen tell` it to run ready if "
+                                        "it's done"])
+        self.assertEqual(self.bp("check").returncode, 0)  # a hint, not drift
+        (Path(wt) / "more.txt").write_text("x\n")  # still at it
+        self.assertEqual(self.check(), [])
+
+    def test_check_takes_ids_and_refuses_unknown_ones(self):
+        tid = self.start_task()
+        self.agent(self.block(tid), "idle")
+        self.assertEqual(len(self.check(tid)), 1)
+        self.assertNotEqual(self.bp("check", "BP-99", ok=False).returncode, 0)
+
+    def test_check_all_repos_is_the_watchers(self):
+        tid = self.start_task()
+        self.agent(self.block(tid), "idle")
+        self.bp("check", "--fix", "--quiet", "--all-repos", cwd=self.tmp)
+        self.assertEqual(self.show(tid)["status"], "needs")
 
     def test_a_quiet_worker_is_news_once_until_its_next_event(self):
         tid = self.start_task()
@@ -2940,6 +3101,7 @@ tick(200)
 timers[30]()                              -- no limit noted: nothing to call
 local f = io.open(args.state .. "/limit.json", "w") f:write("{}") f:close()
 timers[30]()
+timers[180]()                             -- status drift, every 3 minutes
 return table.concat(calls, "|")
 """
 
@@ -2977,6 +3139,7 @@ class WatcherTest(unittest.TestCase):
             "_stuck blk1 20",              # quiet again from minute 42
             "_gone blk1",
             "_limit",                      # only while <state>/limit.json exists
+            "check --fix --quiet --all-repos",
         ])
 
 
