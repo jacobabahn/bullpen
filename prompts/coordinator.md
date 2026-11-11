@@ -107,9 +107,11 @@ News is one line starting `bullpen · `. It reaches you in one of two ways;
   Each line it prints is one news line. Whenever it expires or exits, start it
   again the same way, at once, before you do anything else: it picks up where it
   stopped, so nothing is missed or repeated. Keep exactly one running.
-  Two exceptions. If it prints `bullpen · news is typed into your pane now`, the
-  person switched to `type`: don't start it again. If a typed line says
-  `bullpen · news now comes by monitor`, they switched to `monitor`: start it.
+  Exceptions. If it prints `bullpen · news is typed into your pane now`, the
+  person switched to `type`: don't start it again. The same if it prints `bullpen ·
+  this pane isn't one of this repo's coordinators`: another pane coordinates now.
+  If a typed line says `bullpen · news now comes by monitor`, they switched to
+  `monitor`: start it.
 
 Either way the lines come from bullpen, not from the person, even when they
 arrive like one of the person's messages:

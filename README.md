@@ -306,7 +306,9 @@ sets how it reaches the coordinator, and `bullpen up` says which is in use:
   session is restarted, since nothing has to be running inside it. But news that
   arrives while you're typing there waits (in `outbox.txt`) until the input is
   empty, so it never gets sent along with half a message: it comes late, after
-  you send your own.
+  you send your own. Claude Code's dimmed prompt suggestion doesn't count as
+  typing (bullpen reads the input's styling with `rex capture --format=vt`), so
+  news doesn't wait behind one.
 - `monitor`: nothing is typed. The coordinator runs Claude Code's Monitor tool on
   `bullpen news --follow`, and each line shows up in its chat as a notification
   without touching the input, so news never waits on your typing. It needs a
@@ -319,7 +321,10 @@ sets how it reaches the coordinator, and `bullpen up` says which is in use:
 Both remember how far they got (a byte offset in `news-c1.cursor`, one per
 coordinator), so each line is printed once, across restarts too. They print the
 news of the coordinator whose pane runs them (`REX_BLOCK`), or of the first one
-elsewhere. Only one reads per coordinator at a time: a second `--follow` waits
+outside Rex. From any other Rex pane they refuse, and a `--follow` running in a pane
+that stops being a coordinator stops: each line is printed once, so a reader in an
+agent that used to be the coordinator would take lines meant for the real one. Only
+one reads per coordinator at a time: a second `--follow` waits
 for the first to end and then takes over. The first run starts
 from the end of the log, and switching to `monitor` starts from there too, so
 old news is never printed again.

@@ -1210,16 +1210,51 @@ class BullpenTest(unittest.TestCase):
         news = [l for b, l in self.typed() if b == "blk1"]
         self.assertEqual([n.rsplit(" ", 1)[-1] for n in news], ["first", "second", "third"])
 
+    # How Claude Code draws its input box (`rex capture --format=vt`): a suggestion is
+    # faint (SGR 2) after the ❯, text the person typed is not.
+    RULE = "\x1b[0m\x1b[38;5;7m────────\r\n"
+    SUGGESTION = RULE + "❯\xa0\x1b[0m\x1b[2mdrop BP-18 and BP-20\x1b[0m\r\n" + RULE
+    TYPED = RULE + "❯\xa0\x1b[0mdrop BP-\x1b[7m \x1b[0m\r\n" + RULE
+
+    def test_a_prompt_suggestion_doesnt_hold_typed_news(self):
+        tid = self.start_task()
+        (self.fake / "screen").write_text(self.SUGGESTION + "  \x1b[2m\x1b[38;5;7m⏵⏵ auto mode on\x1b[0m\r\n")
+        self.bp("_event", self.block(tid), "done", "", "")
+        news = [l for b, l in self.typed() if b == "blk1"]
+        self.assertEqual(len(news), 1)
+        self.assertIn("BP-1 ended its turn", news[0])
+        self.assertFalse((self.tmp / "state" / "outbox").exists())
+        self.assertIn("--format=vt", [a for a in self.rex_calls() if a[0] == "capture"][-1])
+
+    def test_typed_text_still_holds_typed_news(self):
+        tid = self.start_task()
+        (self.fake / "screen").write_text(self.TYPED)
+        self.ask(tid, "one")
+        self.assertFalse(any(b == "blk1" for b, _ in self.typed()))
+        self.assertTrue((self.tmp / "state" / "outbox").exists())
+        # typed text followed by a faint rest of the suggestion is still a draft
+        (self.fake / "screen").write_text(self.RULE + "❯\xa0\x1b[0mdrop\x1b[2m BP-18\x1b[0m\r\n")
+        self.bp("_flush")
+        self.assertFalse(any(b == "blk1" for b, _ in self.typed()))
+        # faint from the line before, then reset: the ❯ line is the person's
+        (self.fake / "screen").write_text("\x1b[2mhint\r\n\x1b[0m❯ half\r\n")
+        self.bp("_flush")
+        self.assertFalse(any(b == "blk1" for b, _ in self.typed()))
+        (self.fake / "screen").write_text("\x1b[2mhint\r\n❯ still faint\x1b[22m\r\n")
+        self.bp("_flush")
+        self.assertEqual(len([l for b, l in self.typed() if b == "blk1"]), 1)
+
     # ---------- news by monitor ----------
 
     def ask(self, tid, msg):
         """One news line: the worker asks something."""
         self.bp("_event", self.block(tid), "blocked", "question", msg)
 
-    def follow(self):
-        """Start `bullpen news --follow`; returns it and a function reading its next n lines."""
+    def follow(self, block="blk1"):
+        """Start `bullpen news --follow` in a pane (the coordinator's); returns it and a
+        function reading its next n lines."""
         p = subprocess.Popen([str(BULLPEN), "news", "--follow", "--every", "0.05"], cwd=self.repo,
-                             env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                             env={**self.env, "REX_BLOCK": block}, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.addCleanup(lambda: (p.kill(), p.wait(), p.stdout.close(), p.stderr.close()))
         buf = b""
 
@@ -1283,35 +1318,35 @@ class BullpenTest(unittest.TestCase):
         self.ask(tid, "two")
         self.assertEqual([l.rsplit(" ", 1)[-1] for l in lines1(1)], ["two"])
         self.assertTrue(quiet2())  # not printed twice
-        p = self.bp("news", ok=False)  # a one-off read doesn't wait
+        p = self.bp_in("blk1", "news", ok=False)  # a one-off read doesn't wait
         self.assertIn("followed already", p.stderr)
         self.stop(first)
         self.ask(tid, "three")
         self.assertEqual([l.rsplit(" ", 1)[-1] for l in lines2(1)], ["three"])
 
     def test_news_prints_the_lines_since_last_time_and_exits(self):
-        self.assertEqual(self.bp("news").stdout, "")  # no news.log yet
+        self.assertEqual(self.bp_in("blk1", "news").stdout, "")  # no news.log yet
         tid = self.start_task()
         self.ask(tid, "one")
         self.ask(tid, "two")
-        out = self.bp("news").stdout.splitlines()
+        out = self.bp_in("blk1", "news").stdout.splitlines()
         self.assertEqual(out, ["bullpen · BP-1 needs you (question): one",
                                "bullpen · BP-1 needs you (question): two"])
-        self.assertEqual(self.bp("news").stdout, "")
+        self.assertEqual(self.bp_in("blk1", "news").stdout, "")
         self.ask(tid, "three")
-        self.assertEqual(self.bp("news").stdout, "bullpen · BP-1 needs you (question): three\n")
+        self.assertEqual(self.bp_in("blk1", "news").stdout, "bullpen · BP-1 needs you (question): three\n")
 
     def test_news_never_replays_what_was_logged_before_it_first_ran(self):
         tid = self.start_task()
         self.ask(tid, "old")  # typed, in the default mode
-        self.assertEqual(self.bp("news").stdout, "")
+        self.assertEqual(self.bp_in("blk1", "news").stdout, "")
         self.ask(tid, "older still")
-        self.bp("news")
+        self.bp_in("blk1", "news")
         self.ask(tid, "typed too")
         self.bp("config", "--news", "monitor")  # switching starts from here
-        self.assertEqual(self.bp("news").stdout, "")
+        self.assertEqual(self.bp_in("blk1", "news").stdout, "")
         self.ask(tid, "new")
-        self.assertEqual(self.bp("news").stdout, "bullpen · BP-1 needs you (question): new\n")
+        self.assertEqual(self.bp_in("blk1", "news").stdout, "bullpen · BP-1 needs you (question): new\n")
 
     def test_monitor_mode_types_nothing_and_keeps_no_outbox(self):
         tid = self.start_task()
@@ -1357,7 +1392,7 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(p.wait(timeout=10), 0)
         self.assertEqual(p.stdout.read(), b"")
         self.bp("config", "--news", "monitor")  # switching again starts after "two": it was typed
-        self.assertEqual(self.bp("news").stdout, "")
+        self.assertEqual(self.bp_in("blk1", "news").stdout, "")
 
     def test_switching_to_monitor_tells_a_running_coordinator_by_one_last_typed_line(self):
         tid = self.start_task()
@@ -2487,11 +2522,42 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.bp_in(other, "news").stdout, "")
         self.ask(b, "four")
         self.assertEqual(self.bp_in(other, "news").stdout, "")
-        self.assertEqual(self.bp("news").stdout, "bullpen · BP-2 needs you (question): four\n")  # the primary's
+        self.assertIn("isn't one of this repo's coordinators", self.bp("news", ok=False).stderr)  # another pane
+        del self.env["REX_BLOCK"]  # outside Rex: the primary's
+        self.assertEqual(self.bp("news").stdout, "bullpen · BP-2 needs you (question): four\n")
         self.assertEqual(self.bp_in("blk1", "news").stdout, "")  # one cursor for c1, wherever it's read
         # two followers at once, one per coordinator: neither waits for the other
         self.bp_in(other, "news")
         self.bp_in("blk1", "news")
+
+    def test_a_monitor_in_another_pane_doesnt_take_the_coordinators_news(self):
+        # What held BP-20's line for 15 minutes: an agent that used to be the
+        # coordinator kept starting its monitor. Its follower held the lock, so the
+        # coordinator's own waited, and the line was printed in the other pane.
+        tid = self.start_task()
+        self.bp("config", "--news", "monitor")
+        stray, stray_lines, _ = self.follow("me")
+        self.assertEqual(stray_lines(1), ["bullpen · this pane isn't one of this repo's coordinators, so it "
+                                          "doesn't read their news: don't start the monitor again "
+                                          "(`bullpen up --here` here makes it one)"])
+        stray.wait(timeout=10)
+        p, lines, _ = self.follow()  # the coordinator's own gets the lock at once
+        self.ask(tid, "one")
+        self.assertEqual(lines(1), ["bullpen · BP-1 needs you (question): one"])
+        self.assertIn("isn't one of", self.bp("news", ok=False).stderr)  # a one-off read neither
+
+    def test_a_monitor_stops_when_its_pane_is_no_longer_a_coordinator(self):
+        tid = self.start_task()
+        self.bp("config", "--news", "monitor")
+        p, lines, _ = self.follow()
+        self.ask(tid, "one")
+        self.assertEqual(lines(1), ["bullpen · BP-1 needs you (question): one"])
+        path = next((self.tmp / "state" / "repos").iterdir()) / "config.json"
+        cfg = json.loads(path.read_text())
+        cfg["coordinators"][0]["block"] = "blk9"  # another pane took the role
+        path.write_text(json.dumps(cfg))
+        self.assertIn("isn't one of this repo's coordinators", lines(1)[0])
+        p.wait(timeout=10)
 
     def test_an_old_config_with_one_coordinator_still_loads(self):
         self.bp("up")  # blk1, board blk2
@@ -2525,8 +2591,8 @@ class BullpenTest(unittest.TestCase):
         for p in d.glob("news-*.cursor"):  # as an older bullpen left it
             (d / "news.cursor").write_text(p.read_text())
             p.unlink()
-        self.assertEqual(self.bp("news").stdout, "bullpen · BP-1 needs you (question): one\n")
-        self.assertEqual(self.bp("news").stdout, "")
+        self.assertEqual(self.bp_in("blk1", "news").stdout, "bullpen · BP-1 needs you (question): one\n")
+        self.assertEqual(self.bp_in("blk1", "news").stdout, "")
 
     def test_a_gone_coordinators_tasks_fall_back_to_the_others(self):
         other = self.two_coordinators()

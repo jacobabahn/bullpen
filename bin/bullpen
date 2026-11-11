@@ -469,13 +469,55 @@ def tell_coordinator(repo, task, event, text):
 
 def has_draft(session, block):
     """Is something half-typed in the coordinator's input? Typing news there would
-    send it along. (Reads Claude Code's input box: the last line starting ❯.)"""
-    p = run([REX, "capture", *(["-s", session] if session else []), "-b", block], check=False)
-    lines = [l.strip() for l in p.stdout.splitlines() if l.strip()]
+    send it along. (Reads Claude Code's input box: the last line starting ❯. Faint
+    text there is Claude Code's suggestion or placeholder, not the person's: a
+    suggestion can show for as long as the pane is idle, so it mustn't hold news.)"""
+    p = run([REX, "capture", *(["-s", session] if session else []), "-b", block, "--format=vt"],
+            check=False)
+    state = {"faint": False}
+    lines = [styled_line(l, state) for l in p.stdout.splitlines()]
+    lines = [l for l in lines if "".join(t for t, _ in l).strip()]
     for line in reversed(lines[-10:]):
-        if line.startswith("❯"):
-            return bool(line[1:].strip())
+        text = "".join(t for t, _ in line).strip()
+        if text.startswith("❯"):
+            typed = "".join(t for t, faint in line if not faint)
+            return bool(typed.split("❯", 1)[-1].strip())
     return False
+
+
+VT_ESC = re.compile(r"\x1b\[([0-9;:]*)m|\x1b\[(\d*)C|\x1b\[[0-9;:?<=>]*[ -/]*[@-~]|\x1b[@-_]")
+
+
+def styled_line(raw, state):
+    """One line of a `rex capture --format=vt` screen as (text, faint) pieces. Faint
+    (SGR 2) carries on from line to line until reset, so state is shared: pass the
+    lines of one capture in order."""
+    out, pos = [], 0
+    for m in VT_ESC.finditer(raw):
+        out.append((raw[pos:m.start()], state["faint"]))
+        pos = m.end()
+        if m.group(1) is not None:
+            state["faint"] = sgr_faint(m.group(1), state["faint"])
+        elif m.group(2) is not None:
+            out.append((" " * int(m.group(2) or 1), state["faint"]))  # cursor forward: a gap
+    out.append((raw[pos:].replace("\r", ""), state["faint"]))
+    return [(t, f) for t, f in out if t]
+
+
+def sgr_faint(params, faint):
+    """Is text faint after this SGR (`\\x1b[<params>m`)?"""
+    ps = params.split(";") if params else ["0"]
+    i = 0
+    while i < len(ps):
+        p = ps[i].split(":")[0]
+        if p in ("", "0", "22"):
+            faint = False
+        elif p == "2":
+            faint = True
+        elif p in ("38", "48", "58") and ":" not in ps[i] and i + 1 < len(ps):
+            i += {"5": 2, "2": 4}.get(ps[i + 1], 1)  # a colour's own numbers
+        i += 1
+    return faint
 
 
 def take_lines(path):
@@ -688,6 +730,10 @@ def cmd_news(args):
     repo = Repo(repo_root())
     repo.dir.mkdir(parents=True, exist_ok=True)
     cid = news_reader(repo)
+    if not_a_reader(repo, cid):
+        if args.follow:  # the Monitor tool shows what's printed: say it there
+            return print(NOT_A_COORDINATOR, flush=True)
+        raise Fail(NOT_A_COORDINATOR.removeprefix(NEWS_MARK))
     lock = (repo.dir / (f"news-{safe(cid)}.lock" if cid else "news.lock")).open("w")
     try:
         # One reader at a time, or lines would come twice. A second follower waits
@@ -706,6 +752,8 @@ def cmd_news(args):
                 print(NEWS_MARK + "news is typed into your pane now (`bullpen config --news type`): "
                       "don't start the monitor again", flush=True)
                 return
+            if args.follow and not_a_reader(repo, cid):  # dropped while following
+                return print(NOT_A_COORDINATOR, flush=True)
             offset = print_news(repo, offset, cid)
             if not args.follow:
                 return
@@ -714,6 +762,23 @@ def cmd_news(args):
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
     except KeyboardInterrupt:
         pass
+
+
+NOT_A_COORDINATOR = (NEWS_MARK + "this pane isn't one of this repo's coordinators, so it doesn't read "
+                     "their news: don't start the monitor again (`bullpen up --here` here makes it one)")
+
+
+def not_a_reader(repo, cid):
+    """Is `bullpen news` running in a Rex pane other than coordinator cid's? Each line
+    is printed once, so a reader there (an agent that used to be the coordinator, a
+    shell) would take lines from the coordinator's own monitor. Outside Rex there's
+    no telling: it reads the primary's news, as before."""
+    block = os.environ.get("REX_BLOCK")
+    if not block or not cid:
+        return False
+    repo.cfg = load_config(repo.dir)  # read again: it can change while we follow
+    me = coordinator_at(repo, block, boards=False)
+    return not me or me["id"] != cid
 
 
 def news_by_monitor(repo):
