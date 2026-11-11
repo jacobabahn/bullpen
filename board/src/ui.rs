@@ -29,6 +29,11 @@ fn mark_style(status: &str) -> Style {
     }
 }
 
+fn spinner(app: &App) -> &'static str {
+    const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    FRAMES[(app.started.elapsed().as_millis() / 100) as usize % FRAMES.len()]
+}
+
 /// Write a line at (x, y), never into the last column.
 fn put(buf: &mut Buffer, area: Rect, y: usize, x: usize, line: impl Into<Line<'static>>) {
     let (w, h) = (area.width as usize, area.height as usize);
@@ -54,12 +59,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let (w, h) = (area.width as usize, area.height as usize);
     let buf = f.buffer_mut();
 
-    if let Mode::Overlay { title, lines } = &app.mode {
+    if let Mode::Overlay { title, lines, peek } = &app.mode {
         put(buf, area, 0, 1, span(fit(title, w.saturating_sub(2)), bold()));
         for (j, line) in lines.iter().take(h.saturating_sub(3)).enumerate() {
             put(buf, area, 2 + j, 1, fit(line, w.saturating_sub(2)));
         }
-        put(buf, area, h.saturating_sub(1), 1, span("any key returns", dim()));
+        let foot = if peek.is_some() { "live · any key returns" } else { "any key returns" };
+        put(buf, area, h.saturating_sub(1), 1, span(foot, dim()));
         return;
     }
 
@@ -139,7 +145,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         match row {
             Row::Head(text) => put(buf, area, y, 1, span(text.clone(), bold())),
             Row::Title(t) => {
-                put(buf, area, y, 1, span(model::mark(&t.status), mark_style(&t.status)));
+                // a task with a command running gets a spinner in place of its mark
+                let mark = match app.job(&t.id) {
+                    Some(_) => span(spinner(app), bold()),
+                    None => span(model::mark(&t.status), mark_style(&t.status)),
+                };
+                put(buf, area, y, 1, mark);
                 put(buf, area, y, 3, title_line(app, t, is_cur(t), w, now));
             }
             Row::Detail(t, text) => {
@@ -166,12 +177,17 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         }
     }
     let last = h.saturating_sub(1);
-    if !app.msg.is_empty() {
-        put(buf, area, h.saturating_sub(2), 1, span(fit(&app.msg, w.saturating_sub(2)), bold()));
-    }
-    if let Some(text) = &app.busy {
-        put(buf, area, last, 1, span(fit(text, w.saturating_sub(2)), bold()));
-    } else if let Mode::Tell { id, text } = &app.mode {
+    // the message line: what just happened, else what's still running
+    let line = if !app.msg.is_empty() {
+        span(fit(&app.msg, w.saturating_sub(2)), bold())
+    } else if let Some((id, job)) = app.running.last() {
+        let more = if app.running.len() > 1 { format!(" (+{} more)", app.running.len() - 1) } else { String::new() };
+        span(fit(&format!("{} {id}…{more}", job.doing()), w.saturating_sub(2)), dim())
+    } else {
+        span("", dim())
+    };
+    put(buf, area, h.saturating_sub(2), 1, line);
+    if let Mode::Tell { id, text } = &app.mode {
         let label = format!("Tell {id}:");
         let x = width(&label) + 2;
         // show the end of what's typed when it's longer than the line

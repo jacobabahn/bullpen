@@ -65,7 +65,9 @@ The keys at the bottom follow the selected task: `⏎` opens its worker (or its
 reviewer), `a` accepts and `d` drops (each asks y/n first), `t` tells, `p`
 peeks, `v` shows its diff, `s` starts, `r` resumes, `c` goes back to the
 coordinator, `n` selects the next task that needs you. `?` lists them all.
-`bullpen up --no-board` leaves the board out.
+`bullpen up --no-board` leaves the board out. Accept, drop, start and resume
+run in the background, with a spinner on the task, so the board stays usable
+meanwhile; a peek keeps updating until you press a key.
 
 Accepting or dropping from the board (or a shell) is news to the coordinator:
 `BP-3 accepted (merged PR #12, rebase)`, `BP-3 dropped`. That is how it learns

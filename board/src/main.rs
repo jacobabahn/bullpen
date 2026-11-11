@@ -3,7 +3,8 @@
 //!
 //! It reads the repo's state directory (config.json and tasks/*.json) and redraws
 //! when anything there changes. Everything it does goes through the `bullpen`
-//! command, so the board itself never changes a task.
+//! command, so the board itself never changes a task. Slow commands (accept, drop,
+//! start, resume) run in the background: the board stays usable meanwhile.
 //!
 //! Usage: bullpen-board --dir <repo state dir> --root <repo> --bullpen <bullpen program>
 
@@ -13,10 +14,10 @@ mod ui;
 use model::{Action, Config, Task};
 use notify::{RecursiveMode, Watcher};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
-use std::time::Duration;
+use std::sync::mpsc::{self, Sender};
+use std::time::{Duration, Instant};
 
 pub const BOARD_KEYS: &str = "\
 Moving
@@ -29,7 +30,7 @@ Acting on the selected task
   a            accept: merge its PR and clean up
   d            drop: close its PR, pane and worktree
   t            tell its worker something
-  p            peek at the end of its worker's screen
+  p            peek at the end of its worker's screen (live)
   s            start it
   r            resume a stopped worker
 
@@ -39,13 +40,59 @@ The board
   ?            this list
   q            quit the board";
 
+/// How often a peek reads the worker's screen again.
+const PEEK_EVERY: Duration = Duration::from_secs(1);
+
 /// What the bottom of the board is doing besides showing keys.
 pub enum Mode {
     Normal,
-    /// a full-screen text (keys, a peek) until any key
-    Overlay { title: String, lines: Vec<String> },
+    /// a full-screen text (keys, a peek) until any key; a peek at a task keeps updating
+    Overlay { title: String, lines: Vec<String>, peek: Option<String> },
     /// typing a line to tell a task's worker
     Tell { id: String, text: String },
+}
+
+/// A slow command, run in the background.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Job {
+    Accept,
+    Drop,
+    DropForce,
+    Start,
+    Resume,
+}
+
+impl Job {
+    fn args(self, id: &str) -> Vec<String> {
+        let a: &[&str] = match self {
+            Job::Accept => &["accept", id],
+            Job::Drop => &["drop", id],
+            Job::DropForce => &["drop", id, "--force"],
+            Job::Start => &["start", id],
+            Job::Resume => &["resume", id],
+        };
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// While it runs: "Accepting".
+    pub fn doing(self) -> &'static str {
+        match self {
+            Job::Accept => "Accepting",
+            Job::Drop | Job::DropForce => "Dropping",
+            Job::Start => "Starting",
+            Job::Resume => "Resuming",
+        }
+    }
+
+    /// Once it worked: "Accepted".
+    fn done(self) -> &'static str {
+        match self {
+            Job::Accept => "Accepted",
+            Job::Drop | Job::DropForce => "Dropped",
+            Job::Start => "Started",
+            Job::Resume => "Resumed",
+        }
+    }
 }
 
 pub struct App {
@@ -62,17 +109,49 @@ pub struct App {
     pub top: usize,
     /// a y/n question shown on the task's row
     pub pending: Option<(Action, String)>,
-    /// said on the bottom line while something slow runs
-    pub busy: Option<String>,
+    /// slow commands still running, by task, oldest first
+    pub running: Vec<(String, Job)>,
     pub mode: Mode,
     /// screen height, for how much a peek shows
     pub height: u16,
+    /// when the board started: spinners turn by it
+    pub started: Instant,
+    tx: Sender<Msg>,
+    /// a peek read is in flight
+    peeking: bool,
+    /// when the peek reads the screen again
+    peek_due: Instant,
 }
 
 enum Msg {
     Key(KeyEvent),
     Redraw,
     Changed,
+    Done { id: String, job: Job, ok: bool, out: String },
+    Peeked { id: String, text: String },
+}
+
+/// Run `bullpen <args>`: did it work, and what it said (stdout, else stderr).
+fn run(bullpen: &Path, root: &Path, args: &[String]) -> (bool, String) {
+    let out = Command::new(bullpen)
+        .args(args)
+        .current_dir(root)
+        // never let it read our terminal: it would wait there for keys meant for the board
+        .stdin(Stdio::null())
+        .output();
+    match out {
+        Ok(o) => {
+            let text = if o.status.success() { o.stdout } else { o.stderr };
+            (o.status.success(), String::from_utf8_lossy(&text).into_owned())
+        }
+        Err(e) => (false, format!("can't run {}: {e}", bullpen.display())),
+    }
+}
+
+/// The last line a command said, without its "bullpen: ".
+fn last_line(text: &str) -> String {
+    let last = text.trim().lines().last().unwrap_or("");
+    last.strip_prefix("bullpen: ").unwrap_or(last).to_string()
 }
 
 impl App {
@@ -92,6 +171,11 @@ impl App {
         order.iter().find(|t| Some(t.id.as_str()) == sel).or(order.first()).copied()
     }
 
+    /// What's running for a task, if anything.
+    pub fn job(&self, id: &str) -> Option<Job> {
+        self.running.iter().find(|(x, _)| x == id).map(|(_, j)| *j)
+    }
+
     /// Keep the selection on a task that's still shown.
     fn settle(&mut self) {
         let first = self.order().first().map(|t| t.id.clone());
@@ -100,36 +184,76 @@ impl App {
         }
     }
 
-    /// Run `bullpen <args>`: did it work, and the last line it said.
+    /// Run `bullpen <args>` and wait: for quick commands.
     fn bp(&self, args: &[&str]) -> (bool, String) {
-        let out = Command::new(&self.bullpen)
-            .args(args)
-            .current_dir(&self.root)
-            // never let it read our terminal: it would wait there for keys meant for the board
-            .stdin(Stdio::null())
-            .output();
-        match out {
-            Ok(o) => {
-                let text = if o.status.success() { o.stdout } else { o.stderr };
-                let text = String::from_utf8_lossy(&text);
-                let last = text.trim().lines().last().unwrap_or("");
-                (o.status.success(), last.strip_prefix("bullpen: ").unwrap_or(last).to_string())
+        let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        let (ok, out) = run(&self.bullpen, &self.root, &args);
+        (ok, last_line(&out))
+    }
+
+    fn still(&mut self, id: &str) -> bool {
+        match self.job(id) {
+            Some(j) => {
+                self.msg = format!("{id} is still {}.", j.doing().to_lowercase());
+                true
             }
-            Err(e) => (false, format!("can't run {}: {e}", self.bullpen.display())),
+            None => false,
         }
     }
 
-    /// Say what's happening, draw, then do the slow thing.
-    fn slow<T>(&mut self, term: &mut ratatui::DefaultTerminal, text: String, f: impl FnOnce(&Self) -> T) -> T {
-        self.busy = Some(text);
-        let _ = term.draw(|f| ui::draw(f, self));
-        let out = f(self);
-        self.busy = None;
-        out
+    /// Start a slow command in the background; its result comes back as Msg::Done.
+    fn spawn(&mut self, id: &str, job: Job) {
+        if self.still(id) {
+            return;
+        }
+        self.running.push((id.to_string(), job));
+        let (bullpen, root, tx, id) = (self.bullpen.clone(), self.root.clone(), self.tx.clone(), id.to_string());
+        std::thread::spawn(move || {
+            let (ok, out) = run(&bullpen, &root, &job.args(&id));
+            let _ = tx.send(Msg::Done { id, job, ok, out: last_line(&out) });
+        });
+    }
+
+    fn done(&mut self, id: String, job: Job, ok: bool, out: String) {
+        self.running.retain(|(x, _)| *x != id);
+        if job == Job::Drop && !ok && out.contains("uncommitted") && self.pending.is_none() {
+            // ask again on its row, about losing the changes this time
+            self.sel = Some(id.clone());
+            self.pending = Some((Action::DropForce, id));
+            self.msg.clear();
+        } else {
+            self.msg = if ok { format!("{} {id}.", job.done()) } else { out };
+        }
+    }
+
+    /// Read a task's screen again in the background, for a peek that's open.
+    fn peek(&mut self) {
+        let Mode::Overlay { peek: Some(id), .. } = &self.mode else { return };
+        if self.peeking || Instant::now() < self.peek_due {
+            return;
+        }
+        self.peeking = true;
+        let lines = self.height.saturating_sub(4).max(1).to_string();
+        let args = vec!["peek".into(), id.clone(), "--lines".into(), lines];
+        let (bullpen, root, tx, id) = (self.bullpen.clone(), self.root.clone(), self.tx.clone(), id.clone());
+        std::thread::spawn(move || {
+            let (_, text) = run(&bullpen, &root, &args);
+            let _ = tx.send(Msg::Peeked { id, text });
+        });
+    }
+
+    fn peeked(&mut self, id: String, text: String) {
+        self.peeking = false;
+        self.peek_due = Instant::now() + PEEK_EVERY;
+        if let Mode::Overlay { peek: Some(p), lines, .. } = &mut self.mode {
+            if *p == id {
+                *lines = text.lines().map(String::from).collect();
+            }
+        }
     }
 
     /// Handle a key. False when the board should quit.
-    fn key(&mut self, k: KeyEvent, term: &mut ratatui::DefaultTerminal) -> bool {
+    fn key(&mut self, k: KeyEvent) -> bool {
         if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
             return false;
         }
@@ -171,21 +295,12 @@ impl App {
                 self.msg = "Cancelled.".into();
                 return true;
             }
-            if action == Action::Accept {
-                let (ok, out) = self.slow(term, format!("Accepting {tid}…"), |a| a.bp(&["accept", &tid]));
-                self.msg = if ok { format!("Accepted {tid}.") } else { out };
-            } else {
-                let mut args = vec!["drop", tid.as_str()];
-                if action == Action::DropForce {
-                    args.push("--force");
-                }
-                let (ok, out) = self.slow(term, format!("Dropping {tid}…"), |a| a.bp(&args));
-                if !ok && out.contains("uncommitted") {
-                    self.pending = Some((Action::DropForce, tid));
-                } else {
-                    self.msg = if ok { format!("Dropped {tid}.") } else { out };
-                }
-            }
+            let job = match action {
+                Action::Accept => Job::Accept,
+                Action::Drop => Job::Drop,
+                Action::DropForce => Job::DropForce,
+            };
+            self.spawn(&tid, job);
             return true;
         }
 
@@ -203,6 +318,7 @@ impl App {
                 self.mode = Mode::Overlay {
                     title: "Board keys".into(),
                     lines: BOARD_KEYS.lines().map(String::from).collect(),
+                    peek: None,
                 }
             }
             (_, Some('l')) => {
@@ -224,13 +340,13 @@ impl App {
                     None => self.msg = "Nothing needs you.".into(),
                 }
             }
-            _ => self.task_key(k.code, ch, term),
+            _ => self.task_key(k.code, ch),
         }
         true
     }
 
     /// Keys about the selected task.
-    fn task_key(&mut self, code: KeyCode, ch: Option<char>, term: &mut ratatui::DefaultTerminal) {
+    fn task_key(&mut self, code: KeyCode, ch: Option<char>) {
         let Some(cur) = self.current().cloned() else { return };
         let sel = cur.id.as_str();
         match (code, ch) {
@@ -252,39 +368,51 @@ impl App {
             (_, Some('a')) => {
                 if cur.status != "ready" {
                     self.msg = "Only a task that's ready to accept can be accepted.".into();
-                } else {
+                } else if !self.still(sel) {
                     self.pending = Some((Action::Accept, sel.into()));
                 }
             }
-            (_, Some('d')) if !cur.closed() => self.pending = Some((Action::Drop, sel.into())),
-            (_, Some('s')) => {
-                let (ok, out) = self.slow(term, format!("Starting {sel}…"), |a| a.bp(&["start", sel]));
-                self.msg = if ok { format!("Started {sel}.") } else { out };
+            (_, Some('d')) if !cur.closed() => {
+                if !self.still(sel) {
+                    self.pending = Some((Action::Drop, sel.into()));
+                }
             }
-            (_, Some('r')) => {
-                let (ok, out) = self.slow(term, format!("Resuming {sel}…"), |a| a.bp(&["resume", sel]));
-                self.msg = if ok { format!("Resumed {sel}.") } else { out };
-            }
+            (_, Some('s')) => self.spawn(sel, Job::Start),
+            (_, Some('r')) => self.spawn(sel, Job::Resume),
             (_, Some('p')) => {
-                let lines = self.height.saturating_sub(4).max(1).to_string();
-                let out = Command::new(&self.bullpen)
-                    .args(["peek", sel, "--lines", &lines])
-                    .current_dir(&self.root)
-                    .stdin(Stdio::null())
-                    .output();
-                let text = match out {
-                    Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
-                    Ok(o) => String::from_utf8_lossy(&o.stderr).into_owned(),
-                    Err(e) => e.to_string(),
-                };
                 self.mode = Mode::Overlay {
                     title: format!("{sel}  {}", cur.title),
-                    lines: text.lines().map(String::from).collect(),
+                    lines: vec!["…".into()],
+                    peek: Some(sel.into()),
                 };
+                self.peek_due = Instant::now();
+                self.peek();
             }
             (_, Some('t')) => self.mode = Mode::Tell { id: sel.into(), text: String::new() },
             _ => {}
         }
+    }
+
+    /// How long the loop may wait for something to happen before redrawing.
+    fn tick(&self) -> Duration {
+        if !self.running.is_empty() {
+            Duration::from_millis(100) // spinners turn
+        } else if matches!(self.mode, Mode::Overlay { peek: Some(_), .. }) {
+            Duration::from_millis(250)
+        } else {
+            Duration::from_secs(1) // ages move on by the minute
+        }
+    }
+
+    /// Handle one message. False when the board should quit.
+    fn handle(&mut self, m: Msg) -> bool {
+        match m {
+            Msg::Key(k) => return self.key(k),
+            Msg::Done { id, job, ok, out } => self.done(id, job, ok, out),
+            Msg::Peeked { id, text } => self.peeked(id, text),
+            Msg::Redraw | Msg::Changed => {}
+        }
+        true
     }
 }
 
@@ -329,7 +457,7 @@ fn main() {
         let _ = w.watch(&dir, RecursiveMode::Recursive);
     }
 
-    let keys = tx;
+    let keys = tx.clone();
     std::thread::spawn(move || loop {
         let m = match event::read() {
             Ok(Event::Key(k)) if k.kind == KeyEventKind::Press => Msg::Key(k),
@@ -355,37 +483,46 @@ fn main() {
         msg: String::new(),
         top: 0,
         pending: None,
-        busy: None,
+        running: Vec::new(),
         mode: Mode::Normal,
         height: 0,
+        started: Instant::now(),
+        tx,
+        peeking: false,
+        peek_due: Instant::now(),
     };
 
     let mut term = ratatui::init();
-    loop {
+    'main: loop {
         app.reload();
         app.settle();
+        app.peek();
         if term.draw(|f| ui::draw(f, &mut app)).is_err() {
             break;
         }
-        // ages move on by the minute: redraw every second anyway
-        let m = match rx.recv_timeout(Duration::from_secs(1)) {
+        let m = match rx.recv_timeout(app.tick()) {
             Ok(m) => m,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
-        if let Msg::Key(k) = m {
-            if !app.key(k, &mut term) {
-                break;
-            }
+        if !app.handle(m) {
+            break;
         }
         // a burst of file events is one redraw
         while let Ok(m) = rx.try_recv() {
-            if let Msg::Key(k) = m {
-                if !app.key(k, &mut term) {
-                    ratatui::restore();
-                    return;
-                }
+            if !app.handle(m) {
+                break 'main;
             }
+        }
+    }
+    // Let a command that's still running finish: it writes to the board as it goes.
+    while !app.running.is_empty() {
+        app.msg = format!("Waiting for {} to finish…", app.running[0].0);
+        let _ = term.draw(|f| ui::draw(f, &mut app));
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(Msg::Done { id, .. }) => app.running.retain(|(x, _)| *x != id),
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            _ => {}
         }
     }
     ratatui::restore();
