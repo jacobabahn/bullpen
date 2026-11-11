@@ -42,7 +42,9 @@ fn spinner(app: &App) -> &'static str {
 /// dots, which sit evenly spaced whatever the font, and run from the mark's cell
 /// into the gap before the ID.
 fn working_mark(app: &App) -> &'static str {
-    const FRAMES: [&str; 4] = ["  ", "⡀ ", "⣀ ", "⣀⡀"];
+    // the third row of the braille cell, which is about on the text's baseline;
+    // the bottom row hangs below it, where descenders go
+    const FRAMES: [&str; 4] = ["  ", "⠄ ", "⠤ ", "⠤⠄"];
     FRAMES[(app.started.elapsed().as_millis() / 400) as usize % FRAMES.len()]
 }
 
