@@ -3644,8 +3644,14 @@ LINE_DOWN = ("j", "\x1b[B", "\x1bOB", "\x0e")  # j, ↓, ctrl+n
 LINE_UP = ("k", "\x1b[A", "\x1bOA", "\x10")  # k, ↑, ctrl+p
 PAGE_DOWN = (" ", "f", "\x1b[6~", "\x04", "\x06")  # space, f, page down, ctrl+d, ctrl+f
 PAGE_UP = ("b", "\x1b[5~", "\x15", "\x02")  # b, page up, ctrl+u, ctrl+b
-STEP_KEYS = "n next · p back · j k scroll · space page · c comment · esc close"
-END_KEYS = "s send them back · a accept · p back · esc close"
+# the keys at the foot, longest first: the first that fits is shown
+STEP_KEYS = ("n next · p back · j k scroll · c comment · t tell · v diff · ⏎ open · a accept · esc close",
+             "n next · p back · c comment · t tell · v diff · ⏎ open · a accept · esc close",
+             "n next · p back · c comment · t tell · esc close",
+             "n p · c comment · t tell · esc close")
+END_KEYS = ("s send them back · a accept · p back · t tell · v diff · ⏎ open · esc close",
+            "s send · a accept · p back · t tell · esc close",
+            "s send · a accept · p back · esc close")
 BOLD, DIM, OFF = "\x1b[1m", "\x1b[2m", "\x1b[0m"
 
 
@@ -3739,25 +3745,28 @@ class Stepper:
 
     def key(self, k, rows=20):
         """Apply one key. Returns what the stepper can't do itself: "close", "send",
-        "accept", or ("comment", text) to save; else None."""
-        if self.mode == "comment":
+        "accept", "open" or "diff" (close, then open the task's pane or diff, as the
+        board's ⏎ and v do), ("comment", text) to save or ("tell", text) to send; else None."""
+        if self.mode in ("comment", "tell"):
             return self.comment_key(k)
         sure, self.sure, self.msg = self.sure, False, ""
         if k in ("\x1b", "q", "\x03", "\x07"):
             return "close"
+        if k in ("\r", "\n"):
+            return "open"
+        if k == "v":
+            return "diff"
+        if k == "t":
+            self.mode, self.text = "tell", ""
+            return None
+        if k == "a":
+            return self.accept_key(sure)
         if self.at_end():
             if k == "s":
                 if self.comments:
                     return "send"
                 self.msg = "No comments to send: p goes back to the steps."
                 return None
-            if k == "a":
-                if self.comments and not sure:
-                    self.sure = True
-                    self.msg = (f"{plural(len(self.comments), 'comment')} not sent: a again accepts anyway, "
-                                f"s sends them back instead.")
-                    return None
-                return "accept"
         elif k == "c":
             self.mode, self.text = "comment", ""
             return None
@@ -3779,12 +3788,27 @@ class Stepper:
             self.top = 10 ** 9  # clamped when drawn
         return None
 
+    def accept_key(self, sure):
+        """a: at the end, accept (a second a when comments aren't sent); before the
+        end, a second a accepts all the same."""
+        unsent = f"{plural(len(self.comments), 'comment')} not sent: " if self.comments else ""
+        if sure or (self.at_end() and not unsent):
+            return "accept"
+        self.sure = True
+        if self.at_end():
+            self.msg = f"{unsent}a again accepts anyway, s sends them back instead."
+        else:
+            self.msg = f"{unsent}a again accepts {self.tid} before the end."
+        return None
+
     def comment_key(self, k):
+        """A key while a comment, or a line to tell the worker, is typed."""
         if k in ("\r", "\n"):
-            text, self.mode, self.text = " ".join(self.text.split()), "read", ""
-            return ("comment", text) if text else None
+            text, mode, self.mode, self.text = " ".join(self.text.split()), self.mode, "read", ""
+            return (mode, text) if text else None
         if k in ("\x1b", "\x03", "\x07"):
-            self.mode, self.text, self.msg = "read", "", "Comment not saved."
+            said = "Comment not saved." if self.mode == "comment" else "Not sent."
+            self.mode, self.text, self.msg = "read", "", said
         elif k in ("\x7f", "\x08"):
             self.text = self.text[:-1]
         elif k == "\x15":
@@ -3823,7 +3847,7 @@ class Stepper:
         return out + self.cache[(self.at, width)]
 
     def prompt(self):
-        return f"Comment on step {self.at + 1}: "
+        return f"Comment on step {self.at + 1}: " if self.mode == "comment" else f"Tell {self.tid}: "
 
     def typed(self, width):
         """The end of what's typed, as much as fits after the prompt."""
@@ -3851,13 +3875,15 @@ class Stepper:
         out += [" " + line + OFF for line in shown] + [""] * (rows - len(shown))
         out = [clip_line(line, width - 1) for line in out]
         more = len(body) - self.top - rows
-        if self.mode == "comment":
+        if self.mode in ("comment", "tell"):
             out.append(f" {BOLD}{self.prompt()}{OFF}{self.typed(width)}")
-            out.append(f" {DIM}⏎ saves · esc cancels · mention a line to point at it{OFF}")
+            out.append(f" {DIM}⏎ saves · esc cancels · mention a line to point at it{OFF}" if self.mode == "comment"
+                       else f" {DIM}⏎ sends it now · esc cancels{OFF}")
         else:
             down = f"  ↓ {more} more" if more > 0 else ""
             out.append(" " + (BOLD + self.msg + OFF if self.msg else DIM + down.strip() + OFF))
-            out.append(f" {DIM}{END_KEYS if self.at_end() else STEP_KEYS}{OFF}")
+            keys = END_KEYS if self.at_end() else STEP_KEYS
+            out.append(f" {DIM}{next((k for k in keys if len(k) <= width - 2), keys[-1])}{OFF}")
         return [clip_line(line, width - 1) + OFF for line in out]
 
 
@@ -3882,7 +3908,7 @@ def stepper_tui(st, act, moved):
             size = shutil.get_terminal_size()
             lines = st.screen(size.columns, size.lines)
             cursor = ("\x1b[?25h\x1b[{};{}H".format(*st.cursor(size.columns, len(lines)))
-                      if st.mode == "comment" else "\x1b[?25l")
+                      if st.mode in ("comment", "tell") else "\x1b[?25l")
             sys.stdout.write("\x1b[H\x1b[2J" + "\r\n".join(lines) + cursor)
             sys.stdout.flush()
             if not select.select([fd], [], [], 0.5)[0]:
@@ -3919,9 +3945,31 @@ def view_tour(repo, t, back=False):
     st = Stepper(t["id"], t["title"], tour, read_comments(repo, t)["comments"], at,
                  lambda i, w: diff_lines(step_diff(files, tour["steps"][i]), w, delta))
 
+    def bp(*args):
+        """Run bullpen: whether it worked, and its last line."""
+        p = subprocess.run([SELF, *args], cwd=repo.root, stdin=subprocess.DEVNULL, text=True, capture_output=True)
+        last = ((p.stderr or p.stdout) if p.returncode else p.stdout).strip().splitlines() or [""]
+        return p.returncode == 0, last[-1].removeprefix("bullpen: ")
+
+    left = {"for": None}  # the pane or diff the stepper closed for: the board isn't focused after
+
     def act(a):
         if a == "close":
             return True
+        if a in ("open", "diff"):
+            # as the board's ⏎ and v: the worker's pane (the reviewer's while in review), or the diff
+            args = (["diff", t["id"], "--pane"] if a == "diff"
+                    else ["go", t["id"], "--review"] if repo.task(t["id"])["status"] == "review" else ["go", t["id"]])
+            ok, said = bp(*args)
+            if ok:
+                left["for"] = a
+                return True
+            st.msg = said or f"couldn't open {t['id']}"
+            return False
+        if isinstance(a, tuple) and a[0] == "tell":
+            ok, said = bp("tell", t["id"], a[1])
+            st.msg = f"Sent to {t['id']}." if ok else said
+            return False
         if isinstance(a, tuple):
             n = add_comment(repo, repo.task(t["id"]), st.at + 1, a[1])
             st.comments = read_comments(repo, t)["comments"]
@@ -3942,16 +3990,14 @@ def view_tour(repo, t, back=False):
             size = shutil.get_terminal_size()
             sys.stdout.write("\x1b[H\x1b[2J" + "\r\n".join(st.screen(size.columns, size.lines)))
             sys.stdout.flush()
-            p = subprocess.run([SELF, "accept", t["id"]], cwd=repo.root, stdin=subprocess.DEVNULL,
-                               text=True, capture_output=True)
-            if p.returncode == 0:
+            ok, said = bp("accept", t["id"])
+            if ok:
                 return True
-            last = (p.stderr or p.stdout).strip().splitlines()
-            st.msg = (last[-1] if last else "accept failed").removeprefix("bullpen: ")
+            st.msg = said or "accept failed"
         return False
 
     stepper_tui(st, act, lambda at: save_place(repo, t, tour["commit"], at))
-    if back:
+    if back and not left["for"]:
         b = home_of(repo, t).get("board") or {}
         if rex_alive(b.get("session"), b.get("block")):
             rex_focus(b.get("session"), b["block"])

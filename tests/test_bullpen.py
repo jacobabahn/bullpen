@@ -5466,6 +5466,16 @@ class TourTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(self.show(tid)["status"], "done")
 
+    def test_the_stepper_tells_the_worker_and_v_closes_it_for_the_diff(self):
+        tid = self.toured()
+        screens, code = self.stepper_on_a_terminal(tid, ["t", *"Rename it", "\r", "v"])
+        self.assertEqual(code, 0)
+        self.assertIn("Tell BP-1:", screens[1])
+        self.assertIn("Sent to BP-1.", screens[-2])
+        self.assertIn((self.block(tid), "Rename it"), self.typed())
+        self.assertEqual(self.show(tid)["status"], "working")  # told: back to work, as from the board
+        self.assertEqual(self.api("session.new_layer")[-1]["layout"]["block"]["label"], f"bullpen: {tid} diff")
+
     def test_a_new_ready_is_not_toured_yet(self):
         tid = self.toured()
         self.stepper_on_a_terminal(tid, ["q"])
@@ -6639,6 +6649,41 @@ class HelpersTest(unittest.TestCase):
         self.assertIsNone(st.key("c"))  # no comments on the summary
         self.assertEqual(st.mode, "read")
 
+    def test_stepper_passes_the_boards_keys_through(self):
+        st = self.stepper()
+        # ⏎ and v close it and open the task's pane or diff, as on the board
+        self.assertEqual(st.key("\r"), "open")
+        self.assertEqual(st.key("v"), "diff")
+        # t types a line for the worker, sent now; esc drops it
+        self.assertIsNone(st.key("t"))
+        self.assertEqual(st.prompt(), "Tell BP-1: ")
+        for k in "Use the helper":
+            st.key(k)
+        self.assertEqual(st.key("\r"), ("tell", "Use the helper"))
+        self.assertEqual(st.mode, "read")
+        st.key("t")
+        st.key("x")
+        self.assertIsNone(st.key("\x1b"))
+        self.assertEqual((st.mode, st.msg), ("read", "Not sent."))
+        st.key("t")
+        out = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in st.screen(60, 12)]
+        self.assertEqual(out[-1].strip(), "⏎ sends it now · esc cancels")
+        st.key("\x1b")
+        # a before the end accepts too, on a second a
+        self.assertIsNone(st.key("a"))
+        self.assertEqual(st.msg, "a again accepts BP-1 before the end.")
+        self.assertEqual(st.key("a"), "accept")
+        st = self.stepper([{"id": 1, "step": 1, "title": "One", "commit": "c1", "text": "Why?"}])
+        self.assertIsNone(st.key("a"))
+        self.assertEqual(st.msg, "1 comment not sent: a again accepts BP-1 before the end.")
+        out = [re.sub(r"\x1b\[[0-9;]*m", "", line).rstrip() for line in st.screen(42, 12)]
+        self.assertEqual(out[-1], " n p · c comment · t tell · esc close")  # the shortest keys at 42
+        st.key("n")  # another key in between: it asks again
+        self.assertIsNone(st.key("a"))
+        # c and s keep their own meanings: a comment, and at the end, send
+        self.assertIsNone(st.key("c"))
+        self.assertEqual(st.mode, "comment")
+
     def test_stepper_screen(self):
         st = self.stepper([{"id": 1, "step": 1, "title": "One", "commit": "c1", "text": "Why?"},
                            {"id": 2, "step": 1, "title": "One", "commit": "c0", "text": "From an old tour."}])
@@ -6654,7 +6699,9 @@ class HelpersTest(unittest.TestCase):
         out = plain(st.screen(60, 30))
         self.assertTrue(out[0].endswith("end · 2 comments"))
         self.assertIn(" Your 2 comments, not sent yet:", out)
-        self.assertIn(" s send them back · a accept · p back · esc close", out)
+        self.assertIn(" s send · a accept · p back · t tell · esc close", out)  # the short keys at 60
+        out = plain(st.screen(100, 30))
+        self.assertIn(" s send them back · a accept · p back · t tell · v diff · ⏎ open · esc close", out)
         st.go(0)
         st.key("G")
         out = plain(st.screen(60, 12))

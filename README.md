@@ -192,7 +192,7 @@ in the order `?` lists them:
 | `d` | drop it; asks y/n first |
 | `i` | answer its question, on a task that needs you (see [Answering from the board](#answering-from-the-board)) |
 | `t` | tell its worker something |
-| `p` | peek at its worker's screen, in its colours, updating until you press a key |
+| `p` | peek at its worker's screen, in its colours, updating until `esc` or `q`; `t` `⏎` `i` `a` `d` `v` in a peek go back to the board and act on that task |
 | `v` | view its diff |
 | `g` | its guided tour (see [Guided review tours](#guided-review-tours), with the keys inside a tour) |
 | `s` | start it |
@@ -202,7 +202,7 @@ in the order `?` lists them:
 | `o` | show other coordinators' tasks too (see [Several coordinators](#several-coordinators)) |
 | `esc` | put a red message away (see below) |
 | `?` | every key, one short line each, and the marks |
-| `q` | quit the board |
+| `q` | quit the board, once you say `y` (`ctrl+c` quits at once) |
 
 The `y`/`n` question for `a` and `d` says which of the two it is, and in red,
 first, what could go wrong: checks failing or still running, changes asked for,
@@ -539,6 +539,9 @@ In the tour:
 - After the last step, the end lists your comments: `s` sends them back to the
   worker (`tour --send`), `a` accepts the task (warning first, if comments are
   unsent: `a` again accepts anyway), `esc` closes.
+- As on the board, `t` tells the worker something now (type it, `⏎` sends), `a`
+  accepts from any step (a second `a`, since you haven't reached the end), and `⏎`
+  and `v` close the tour and open the task's pane or its diff.
 
 The line with the size of a ready task's change says "Toured" once you've opened
 its tour (until a `ready` changes the code), else "Not toured yet" or "Tour written,
