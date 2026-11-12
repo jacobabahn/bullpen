@@ -108,7 +108,8 @@ A task that stops is either yours to see to or the person's:
 
 - **triage** (yours): its turn failed; it ended its turn without `ready`; review
   findings or PR feedback didn't reach its worker; it couldn't be continued after
-  the usage limit; its reviewer stopped or exited without a verdict. News about
+  the usage limit; its reviewer stopped or exited without a verdict; its
+  worktree's setup failed, so its worker never started. News about
   these starts `For the coordinator:`. The board shows them dimmed under
   "Coordinator on it", not as needing the person.
 - **needs** (the person's): its worker or reviewer is at a permission or input
@@ -129,6 +130,9 @@ What to do with each triage reason, after `bullpen peek <ID>`:
   its pane is gone.
 - Couldn't be continued after the usage limit: `bullpen resume <ID>` (or `tell`
   it to continue).
+- Setup failed: read the log its reason names. Something passing (a network
+  hiccup): `bullpen start <ID>` sets it up again and starts the worker. Anything
+  the setup script or the person's machine needs fixing: `bullpen ask` the person.
 - Reviewer stopped or exited without a verdict: `bullpen go <ID> --review` shows
   it. `bullpen review <ID>` starts a new reviewer on the task's current commit; it
   counts as a review round, and is refused once the rounds are used up (then

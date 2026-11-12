@@ -57,6 +57,8 @@ DEFAULT_CONFIG = {
     "triage_minutes": 10,    # minutes a task can wait on its coordinator before it needs the person
     "notify": "needs",       # notifications for the person: "needs" (needs you), "all" (and ready, finished,
                              # auto-accepted) or "off"
+    "setup": None,           # a command run in each new worktree before its worker starts (over .bullpen/setup.sh)
+    "teardown": None,        # one run in a worktree before it is removed (over .bullpen/teardown.sh)
 }
 
 TERMINAL = "com.superlogical.terminal.shell"
@@ -318,6 +320,7 @@ def migrate_stops(repo):
 #   pane_gone  its pane wasn't found again after a Rex restart
 #   not_sent   review findings or PR feedback didn't reach the worker
 #   limit      it couldn't be continued after the usage limit
+#   setup      its worktree's setup failed, so its worker never started
 #   other      a stop from before stops were recorded, of no known kind
 # why is the stop in words, for people and the board: nothing goes by its wording.
 # ask and ok are said of the status they were set in, and end with it.
@@ -1473,7 +1476,8 @@ def start_queued(repo, by, how):
         try:
             if not session:
                 raise Fail("no Rex session: run `bullpen up`")
-            start_task(repo, t, session)
+            if not start_task(repo, t, session):
+                continue  # its setup failed: that has its own news
         except Fail as e:
             news(repo, t, "queue", f"{t['id']} couldn't start ({why}): {clip(str(e), 200)}")
             continue
@@ -1587,7 +1591,7 @@ def cmd_rules(args):
 def cmd_start(args):
     repo = Repo(repo_root())
     t = repo.task(args.id)
-    if t["status"] not in ("todo", "stopped"):
+    if t["status"] not in ("todo", "stopped") and not (t.get("needs_setup") and t["status"] in WAITING):
         raise Fail(f"{t['id']} is {t['status']}; use `resume` or `tell`")
     deps = [] if args.force or t["status"] != "todo" else open_deps(repo, t)
     if deps:
@@ -1602,13 +1606,16 @@ def cmd_start(args):
     if not session:
         raise Fail("no Rex session: run `bullpen up` first or pass --session")
     set_auto_accept(t, args)
-    start_task(repo, t, session, args.model)
+    if not start_task(repo, t, session, args.model):
+        raise Fail(f"{t['id']}'s setup failed, so its worker didn't start: see {hook_log(repo, t, 'setup')}")
     print(f"{t['id']} started in {t['worktree']} (branch {t['branch']}, pane {t['block']})")
 
 
 def start_task(repo, t, session, model=None):
-    """Make the task's worktree and brief, and start its worker."""
+    """Make the task's worktree, set it up, write its brief and start its worker.
+    Returns False, with the task stopped (saved, news sent), if its setup failed."""
     if not t["worktree"]:
+        t["needs_setup"] = True  # until its setup succeeds: a retry runs it again
         base = t["base"]
         start_point = base
         if git(repo.root, "remote", "get-url", "origin", check=False).returncode == 0:
@@ -1620,6 +1627,8 @@ def start_task(repo, t, session, model=None):
         wt.parent.mkdir(parents=True, exist_ok=True)
         git(repo.root, "worktree", "add", "-q", "--no-track", "-b", t["branch"], str(wt), start_point)
         t["worktree"] = str(wt)
+    if t.get("needs_setup") and not set_up(repo, t):
+        return False
     brief = (repo.dir / "briefs" / f"{t['id']}.md").read_text()
     full = repo.dir / "briefs" / f"{t['id']}.full.md"
     # committed on its base, not the worktree's copy: a restarted task may have edited it
@@ -1632,6 +1641,7 @@ def start_task(repo, t, session, model=None):
     if model:
         t["worker_model"] = model  # this task's own, over the config's
     launch(repo, t, session, first, resume=False)
+    return True
 
 
 def launch(repo, t, session, first, resume):
@@ -1663,6 +1673,87 @@ def float_pane(repo, session, label, cwd, argv, t):
     r = rex_api(session, "session.new_layer", args)
     set_layer(session, r["layer_id"], "minimized")
     return r["block_ids"][0]
+
+
+# ---------- worktree hooks: setup and teardown ----------
+
+def hook_log(repo, t, name):
+    return repo.dir / "briefs" / f"{t['id']}.{name}.log"
+
+
+def hook(repo, t, name):
+    """(argv, where it came from, the other source it wins over or None) for the task's
+    setup or teardown, or None: the repo's config.json first, then .bullpen/<name>.sh
+    as committed on the task's base."""
+    ref = task_base_ref(repo, t)
+    path = f".bullpen/{name}.sh"
+    p = git(repo.root, "show", f"{ref}:{path}", check=False)
+    committed = p.stdout if p.returncode == 0 and p.stdout.strip() else None
+    cmd = repo.cfg.get(name)
+    if cmd:
+        return ["sh", "-c", cmd], f"config.json's {name}", (f"{path} on {ref}" if committed else None)
+    if not committed:
+        return None
+    script = repo.dir / "briefs" / f"{t['id']}.{name}.sh"
+    script.write_text(committed)
+    script.chmod(0o755)
+    return ([str(script)] if committed.startswith("#!") else ["sh", str(script)]), f"{path} on {ref}", None
+
+
+def run_hook(repo, t, name):
+    """Run the task's setup or teardown in its worktree, its output in <ID>.<name>.log.
+    Returns None when there is none, else (exit code, log, where it came from, what it won over)."""
+    h = hook(repo, t, name)
+    if not h:
+        return None
+    argv, source, over = h
+    log = hook_log(repo, t, name)
+    env = {**os.environ, "BULLPEN_TASK": t["id"], "BULLPEN_WORKTREE": t["worktree"],
+           "BULLPEN_MAIN": str(repo.root), "BULLPEN_BRANCH": t["branch"]}
+    with log.open("w") as f:
+        f.write(f"# {name} for {t['id']} at {now()}: {source}"
+                + (f" (over {over})" if over else "") + "\n")
+        f.flush()
+        try:
+            code = subprocess.run(argv, cwd=t["worktree"], env=env, stdin=subprocess.DEVNULL,
+                                  stdout=f, stderr=subprocess.STDOUT).returncode
+        except OSError as e:
+            f.write(f"{e}\n")
+            code = 127
+        f.write(f"# exit {code}\n")
+    return code, log, source, over
+
+
+def set_up(repo, t):
+    """Run the task's setup in its new worktree. On failure the task stops (saved, news
+    sent) and this returns False; its next start or resume sets it up again."""
+    r = run_hook(repo, t, "setup")
+    if r and r[3]:
+        print(f"{t['id']}: running {r[2]}, over {r[3]}", file=sys.stderr)
+    if r and r[0] != 0:
+        code, log = r[0], r[1]
+        stop(repo, t, "worker", "setup", f"Setup failed (exit {code}): see {log}",
+             f"{t['id']}'s setup failed (exit {code}), so its worker didn't start: see {log}. "
+             f"`bullpen start {t['id']}` sets it up again")
+        return False
+    t.pop("needs_setup", None)
+    return True
+
+
+def tear_down(repo, t):
+    """Run the task's teardown before its worktree goes. A failure is logged and said,
+    never in the way. Returns whether one ran."""
+    if not (t.get("worktree") and Path(t["worktree"]).exists()):
+        return False
+    try:
+        r = run_hook(repo, t, "teardown")
+    except (Fail, OSError) as e:
+        print(f"{t['id']}: teardown couldn't run: {e}", file=sys.stderr)
+        return False
+    if r and r[0] != 0:
+        print(f"{t['id']}: teardown failed (exit {r[0]}): see {r[1]}; removing the worktree anyway",
+              file=sys.stderr)
+    return bool(r)
 
 
 def relink(repo, session):
@@ -1801,6 +1892,12 @@ def cmd_resume(args):
         raise Fail(f"{t['id']}'s agent is still running; use `tell`")
     if not t["worktree"]:
         raise Fail(f"{t['id']} never started; use `start`")
+    if t.get("needs_setup"):  # its worker never ran: set it up and start it afresh
+        session = session_for(repo, args) or t["session"]
+        if not start_task(repo, t, session):
+            raise Fail(f"{t['id']}'s setup failed again: see {hook_log(repo, t, 'setup')}")
+        print(f"{t['id']} set up and started in pane {t['block']}")
+        return
     msg = args.message or "You were stopped before finishing. Check where you were and carry on with your brief."
     launch(repo, t, session_for(repo, args) or t["session"], msg, resume=True)
     print(f"{t['id']} resumed in pane {t['block']}")
@@ -2346,6 +2443,8 @@ def cmd_note(args):
 
 
 def remove_worktree(repo, t, force=False):
+    # what a teardown leaves behind mustn't keep the worktree (drop checked it was clean before)
+    force = tear_down(repo, t) or force
     if t.get("worktree") and Path(t["worktree"]).exists():
         git(repo.root, "worktree", "remove", *(["--force"] if force else []), t["worktree"])
     if t.get("branch"):
@@ -2664,6 +2763,11 @@ def cmd_show(args):
         kind = review_kind(r) + (f" on {r['model']}" if r.get("model") else "")
         print(f"   review: round {r.get('round')} ({kind}), {state}"
               + (f"; findings: {r['findings']}" if r.get("findings") else ""))
+    for name in ("setup", "teardown"):
+        log = hook_log(repo, t, name)
+        if log.exists():
+            failed = " (failed: the worker didn't start)" if name == "setup" and t.get("needs_setup") else ""
+            print(f"{name:>9}: {log}{failed}")
     print(f"    brief: {repo.dir / 'briefs' / (t['id'] + '.md')}")
 
 
@@ -2825,6 +2929,9 @@ def cmd_config(args):
         repo.cfg["triage_minutes"] = args.triage_minutes
     if args.notify:
         repo.cfg["notify"] = args.notify
+    for name in ("setup", "teardown"):
+        if getattr(args, name) is not None:
+            repo.cfg[name] = getattr(args, name).strip() or None  # "": back to .bullpen/<name>.sh
     repo.save()
     reindex(repo)
     models = {role: model_phrase(repo.cfg[role], repo.cfg.get(f"{role}_model"))
@@ -4204,6 +4311,12 @@ def parser():
     p.add_argument("--notify", choices=NOTIFY,
                    help="native notifications: when a task needs you (needs, the default), also when one is "
                         "ready, finished or auto-accepted (all), or none (off)")
+    p.add_argument("--setup", metavar="CMD",
+                   help="a command run in each new worktree before its worker starts, over "
+                        ".bullpen/setup.sh (\"\" clears it)")
+    p.add_argument("--teardown", metavar="CMD",
+                   help="a command run in a worktree before accept, close or drop removes it, over "
+                        ".bullpen/teardown.sh (\"\" clears it)")
     p.set_defaults(fn=cmd_config)
 
     p = sub.add_parser("news", help="print news logged since the last time; --follow keeps printing")

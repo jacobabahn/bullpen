@@ -348,7 +348,8 @@ A task that stops is either the coordinator's to see to or yours:
 - **triage**, "needs the coordinator": the worker's turn failed; it ended its
   turn without `ready`; review findings or PR feedback didn't reach it; it
   couldn't be continued after the usage limit; its reviewer stopped or exited
-  without a verdict. The news starts `For the coordinator:`. The board shows the
+  without a verdict; its worktree's setup failed (see [Worktree
+  setup](#worktree-setup)). The news starts `For the coordinator:`. The board shows the
   task dimmed under "Coordinator on it", with no amber bar, and `go --next` (and
   `n`) skip it.
 - **needs**, "needs you": the worker or the reviewer is at a permission or input
@@ -561,6 +562,30 @@ or the local base branch without a remote): an uncommitted edit in your checkout
 a task's own edit when it is started again, isn't used. `bullpen rules`
 prints the rules in effect and where each came from.
 
+### Worktree setup
+
+A new worktree has no dependencies installed, no `.env` and no build cache. A repo
+can say what to run in it: `.bullpen/setup.sh`, committed (read as committed on the
+task's base, like the rules), or a command of your own, `bullpen config --setup
+"npm ci"` (`--setup ""` clears it). With both, yours runs, and `start` says so.
+`start` runs it in the new worktree, after making it and before starting the worker,
+with these in its environment:
+
+- `BULLPEN_TASK`: the task ID
+- `BULLPEN_WORKTREE`: the worktree (also the current folder)
+- `BULLPEN_MAIN`: your main checkout, to copy `.env` from, say
+- `BULLPEN_BRANCH`: the task's branch
+
+Its output goes to `<ID>.setup.log` beside the task's brief; `bullpen show` names
+it. If it fails, the worker doesn't start: the task goes to triage (to you if no
+coordinator is running), its reason and the news line naming the log. Fix what it
+needs and `bullpen start` (or `resume`) the task: that sets it up again and starts
+the worker. A worktree that was set up is never set up again, not by `resume` either.
+
+`.bullpen/teardown.sh` (or `bullpen config --teardown "..."`) runs the same way just
+before `accept`, `close` or `drop` removes a worktree, its output in
+`<ID>.teardown.log`. A failure is said and logged, but the worktree goes anyway.
+
 ### Local mode
 
 In a repository with no `origin` remote, bullpen works locally. `ready` pushes
@@ -576,6 +601,7 @@ task ready, with its worktree and branch as they were.
 ## Where things live
 
 - Tasks, briefs, settings and your own rules: `~/.local/state/bullpen/repos/<repo>/` (`BULLPEN_STATE` moves it).
+  Setup and teardown logs are in `briefs/` there, as `<ID>.setup.log` and `<ID>.teardown.log`.
 - Worktrees: `<repo>-bullpen/<ID>` next to the repository.
 - News: `news.log` beside the tasks (each line names the coordinators it is for,
   as `[c1]`), with `news-<id>.cursor` (how far each coordinator's `bullpen news`
