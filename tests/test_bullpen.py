@@ -1800,6 +1800,14 @@ class BullpenTest(unittest.TestCase):
         p = self.bp("go", "--next", "--from", "elsewhere")
         self.assertIn("BP-2 is finished, on the board", p.stderr)
         self.assertEqual(sel.read_text(), "BP-2\n")
+        # a board that was quit starts again, on the task
+        (self.fake / "alive" / "blk2").unlink()
+        p = self.bp("go", "--next", "--from", "elsewhere")
+        self.assertIn("BP-2 is finished, on the board", p.stderr)
+        board = self.coordinators()[0]["board"]["block"]
+        self.assertNotEqual(board, "blk2")
+        self.assertEqual(self.focused()[-1], board)
+        self.assertEqual(sel.read_text(), "BP-2\n")
         # what needs you still comes first
         self.bp("_event", self.block("BP-1"), "blocked", "question", "Which?")
         self.assertEqual(json.loads(self.bp("go", "--next", "--json").stdout)["block"], self.block("BP-1"))

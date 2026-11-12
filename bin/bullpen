@@ -5327,7 +5327,10 @@ def task_board(repo, t):
     boards = [c for c in [own] + repo.cfg["coordinators"] if c.get("board")]
     if not boards:
         raise Fail("no board: run `bullpen up`")
-    c = next((c for c in boards if on_board(repo, c, t)), None)
+    shows = [c for c in boards if on_board(repo, c, t)]
+    # a board that's running first: one that was quit would only fail
+    c = next((c for c in shows if rex_alive(c["board"].get("session"), c["board"].get("block"))),
+             shows[0] if shows else None)
     if not c:
         raise Fail(f"no board shows {t['id']}: it is {own['id']}'s, which has no board (o on a board shows it)")
     return c, c["board"]
@@ -5374,6 +5377,9 @@ def cmd_go(args):
     except Fail as e:
         if not args.next or not str(e).startswith("nothing needs you"):
             raise
+        boards = any(c.get("board") for c in home.cfg["coordinators"])
+        if boards:  # a board that was quit starts again, as `go --board` does
+            home = board_for_go(home, args)
         up = next_to_accept(home, args)
         if up:
             # nothing needs you, but something is yours to accept or close: the board, on it
@@ -5381,11 +5387,10 @@ def cmd_go(args):
             name = t["id"] if r.dir == home.dir else f"{r.root.name} {t['id']}"
             print(f"bullpen: {e}; {name} is {t['status']}, on the board", file=sys.stderr)
             args.next, args.board, args.id, home = False, True, t["id"], r
-        elif any(c.get("board") for c in home.cfg["coordinators"]):
+        elif boards:
             # A key that does nothing looks broken: show the board, where that's plain.
             print(f"bullpen: {e}; showing the board", file=sys.stderr)
             args.next, args.board = False, True
-            home = board_for_go(home, args)
         else:
             raise
         repo, session, block, name = go_target(home, args)
