@@ -39,18 +39,23 @@ fn frame(app: &App, frames: &[&'static str], ms: u128) -> &'static str {
 
 /// A task with a command running (accept, drop, start, resume): a ring with a gap going round.
 fn spinner(app: &App) -> &'static str {
-    frame(app, &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"], 100)
+    frame(app, SPINNER, 100)
 }
 
 /// A working task: the six-dot snake.
 fn working_mark(app: &App) -> &'static str {
-    frame(app, &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], 100)
+    frame(app, WORKING, 100)
 }
 
 /// A task in review: a quarter arc turning.
 fn review_mark(app: &App) -> &'static str {
-    frame(app, &["◜", "◝", "◞", "◟"], 150)
+    frame(app, REVIEW, 150)
 }
+
+const SPINNER: &[&str] = &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
+
+const WORKING: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const REVIEW: &[&str] = &["◜", "◝", "◞", "◟"];
 
 /// Write a line at (x, y), never into the last column.
 fn put(buf: &mut Buffer, area: Rect, y: usize, x: usize, line: impl Into<Line<'static>>) {
@@ -137,7 +142,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let full = f.area();
     let buf = f.buffer_mut();
 
-    if matches!(app.mode, Mode::Overlay { .. } | Mode::Answer { .. }) {
+    if matches!(app.mode, Mode::Overlay { .. } | Mode::Answer { .. } | Mode::Help { .. }) {
         // the title, a blank line, at least one line and the foot
         let h = full.height as usize;
         app.height = (h - bottom_gap(app, h, 4)) as u16;
@@ -150,6 +155,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         }
         let foot = if peek.is_some() { "live · any key returns" } else { "any key returns" };
         put(buf, area, h.saturating_sub(1), 1, span(foot, dim()));
+        return;
+    }
+    if let Mode::Help { top } = &mut app.mode {
+        *top = draw_help(buf, full, app.height as usize, *top);
         return;
     }
     if let Mode::Answer { title, prompt, .. } = &app.mode {
@@ -358,19 +367,101 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         };
         put(buf, area, last, 1, span(fit(&format!("y {verb}   any other key cancels"), w.saturating_sub(2)), bold()));
     } else {
-        // the task's keys on the left; "? keys" at the right edge when there's room
-        let keys = key_line(&model::task_keys(cur));
-        let help = key_line(&[("?", "keys")]);
-        let x = w.saturating_sub(2 + help.width());
-        if keys.width() == 0 {
-            put(buf, area, last, 1, help);
-        } else {
-            if 1 + keys.width() + 3 <= x {
-                put(buf, area, last, x, help);
-            }
-            put(buf, area, last, 1, keys);
-        }
+        put(buf, area, last, 1, key_row(model::task_keys(cur), w));
     }
+}
+
+/// The key line: the task's keys, then `?` at the right edge. `?` is never dropped:
+/// with no room for "? keys" it goes bare, and then the task's last keys go first.
+fn key_row(mut keys: Vec<(&str, &str)>, w: usize) -> Line<'static> {
+    let room = w.saturating_sub(2); // from column 1, never into the last column
+    let help = key_line(&[("?", "keys")]);
+    if keys.is_empty() {
+        return help;
+    }
+    let line = |keys: &[(&str, &str)], help: Line<'static>, gap: usize| {
+        let left = key_line(keys);
+        let fill = room.saturating_sub(left.width() + help.width());
+        if fill < gap && !keys.is_empty() {
+            return None;
+        }
+        let mut spans = left.spans;
+        spans.push(span(" ".repeat(fill), Style::new()));
+        spans.extend(help.spans);
+        Some(Line::from(spans))
+    };
+    if let Some(l) = line(&keys, help, 3) {
+        return l;
+    }
+    loop {
+        if let Some(l) = line(&keys, Line::from(span("?", bold())), 2) {
+            return l;
+        }
+        keys.pop();
+    }
+}
+
+/// The `?` list's lines at width w: headings bold; each key bold in its column,
+/// what it does wrapped under itself; then the marks.
+fn help_lines(w: usize) -> Vec<Line<'static>> {
+    const KEY: usize = 4; // the key column, then two spaces
+    let mut out = Vec::new();
+    let mut section = |heading: &str, entries: Vec<(String, &str, Style)>| {
+        if !out.is_empty() {
+            out.push(Line::default());
+        }
+        out.push(Line::from(span(fit(heading, w), bold())));
+        for (key, what, key_style) in entries {
+            let wrapped = model::wrap(what, w.saturating_sub(2 + KEY + 2), usize::MAX);
+            for (i, text) in wrapped.into_iter().enumerate() {
+                let key = if i == 0 { pad(&key, KEY) } else { " ".repeat(KEY) };
+                out.push(Line::from(vec![span("  ", Style::new()), span(key, key_style), span(format!("  {text}"), Style::new())]));
+            }
+        }
+    };
+    for (heading, keys) in crate::BOARD_KEYS {
+        section(heading, keys.iter().map(|(k, d)| (k.to_string(), *d, bold())).collect());
+    }
+    // each mark as the board draws it, in its colour
+    let m = |st: &str, what: &'static str| (model::mark(st).to_string(), what, mark_style(st));
+    section("Marks", vec![
+        m("needs", "needs you"),
+        m("stopped", "stopped: its agent exited"),
+        m("triage", "the coordinator is on it"),
+        m("ready", "ready to accept"),
+        m("finished", "finished, nothing to merge"),
+        (format!("{} {}", REVIEW[0], model::mark("review")), "in review (it turns)", mark_style("review")),
+        (format!("{} {}", WORKING[0], model::mark("working")), "working (it turns)", Style::new()),
+        m("todo", "queued, not started"),
+        m("done", "accepted"),
+        m("dropped", "dropped"),
+        (SPINNER[0].to_string(), "a command or its tour running", bold()),
+        ("▌".to_string(), "needs you; red: stopped", Style::new().fg(AMBER)),
+    ]);
+    out
+}
+
+/// The `?` list from line `top`, with a foot saying how to scroll when it doesn't
+/// all fit. Returns `top`, kept in range.
+fn draw_help(buf: &mut Buffer, area: Rect, h: usize, top: usize) -> usize {
+    let w = area.width as usize;
+    let lines = help_lines(w.saturating_sub(2));
+    let room = h.saturating_sub(3).max(1); // the title, a blank line, the foot
+    let top = top.min(lines.len().saturating_sub(room));
+    put(buf, area, 0, 1, span(fit("Board keys", w.saturating_sub(2)), bold()));
+    for (j, line) in lines.iter().skip(top).take(room).enumerate() {
+        put(buf, area, 2 + j, 1, line.clone());
+    }
+    if top > 0 {
+        put(buf, area, 1, w.saturating_sub(3), span("↑", dim()));
+    }
+    let more = top + room < lines.len();
+    if more {
+        put(buf, area, h.saturating_sub(2), w.saturating_sub(3), span("↓", dim()));
+    }
+    let foot = if more || top > 0 { "j k space scroll · esc returns" } else { "any key returns" };
+    put(buf, area, h.saturating_sub(1), 1, span(fit(foot, w.saturating_sub(2)), dim()));
+    top
 }
 
 /// The prompt a task's agent is at: the end of its screen, then its options, one a
@@ -680,6 +771,65 @@ mod tests {
         let s = screen(&mut a, 70, 10);
         assert_eq!(row(&s, 2), " BP-1's tour is stale: the code changed since it was written.");
         assert_eq!(row(&s, 1), " n new tour   o the old one   esc cancels");
+    }
+
+    #[test]
+    fn the_help_fits_a_narrow_board_and_scrolls_to_its_end() {
+        let mut a = app(vec![ready("BP-1")], 1, Layout::Grouped);
+        a.mode = Mode::Help { top: 0 };
+        let s = screen(&mut a, 42, 24);
+        assert_eq!(s[..6], [
+            " Board keys",
+            "",
+            " Moving",
+            "   j k   select a task (↑ ↓ too)",
+            "   n     the next task that needs you",
+            "   ⏎     open its pane, or its reviewer's",
+        ].map(String::from), "{s:#?}");
+        // one short line per key: nothing is cut or wrapped at 42 columns
+        assert!(!s.iter().any(|r| r.ends_with('…')), "{s:#?}");
+        assert!(s.iter().all(|r| !r.starts_with("        ")), "{s:#?}");
+        assert!(row(&s, 2).ends_with("↓"), "{s:#?}");
+        assert_eq!(row(&s, 1), " j k space scroll · esc returns");
+        assert_eq!(row(&s, 0), "", "the gap for Rex's capsules");
+
+        // scrolled past the end, it stops at the last line: the marks' legend
+        a.mode = Mode::Help { top: 999 };
+        let s = screen(&mut a, 42, 24);
+        let Mode::Help { top } = a.mode else { panic!() };
+        assert!(top < 999 && top > 0);
+        assert!(s[1].ends_with("↑"), "{s:#?}");
+        assert_eq!(row(&s, 2), "   ▌     needs you; red: stopped", "{s:#?}");
+        for line in ["   ●     needs you", "   ✔     ready to accept", "   ◜ ◐   in review (it turns)", "   ✓     accepted"] {
+            assert!(s.contains(&line.to_string()), "{line}: {s:#?}");
+        }
+
+        // narrower, a long line wraps under its own text
+        a.mode = Mode::Help { top: 0 };
+        let s = screen(&mut a, 30, 24);
+        let i = s.iter().position(|r| r.starts_with("   ⏎")).unwrap();
+        assert_eq!(s[i..i + 2], ["   ⏎     open its pane, or", "         its reviewer's"].map(String::from), "{s:#?}");
+
+        // tall enough for all of it: no scrolling to offer
+        let s = screen(&mut a, 42, 80);
+        assert_eq!(row(&s, 1), " any key returns");
+        assert!(!s.iter().any(|r| r.ends_with('↓') || r.ends_with('↑')), "{s:#?}");
+    }
+
+    #[test]
+    fn the_key_line_never_drops_its_question_mark() {
+        let keys = |t: &Task, w: u16| {
+            let mut a = app(vec![t.clone()], 0, Layout::Grouped);
+            a.sel = Some("BP-1".into());
+            row(&screen(&mut a, w, 12), 0).to_string()
+        };
+        let t = Task { status: "ready".into(), worktree: Some("/w".into()), ..ready("BP-1") };
+        assert_eq!(keys(&t, 60), format!(" a accept  g tour  d drop  ⏎ open  v diff{}? keys", " ".repeat(12)));
+        // no room for "? keys": a bare ? at the right edge
+        assert_eq!(keys(&t, 46), " a accept  g tour  d drop  ⏎ open  v diff   ?");
+        // less room: the task's last keys go, never the ?
+        assert_eq!(keys(&t, 42), " a accept  g tour  d drop  ⏎ open       ?");
+        assert_eq!(keys(&t, 20), " a accept         ?");
     }
 
     #[test]

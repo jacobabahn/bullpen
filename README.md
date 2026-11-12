@@ -143,7 +143,10 @@ shows its diff, `g` opens its guided tour (see [Guided review tours](#guided-rev
 selects the next task that needs you. On a task that needs you, `i` answers it
 from the board (see [Answering from the board](#answering-from-the-board)). Once an accept or close goes through, the
 next task that needs you is selected, so you can run down a queue of ready tasks
-with `a`, `y`. `?` lists them all.
+with `a`, `y`. `?` lists every key, one short line each, and what the marks
+mean; on a narrow or short board `j` `k` `space` `b` scroll it, and any other key
+closes it. The key line always ends in `?`: when the task's keys fill it, its
+last keys give way, not `?`.
 `bullpen up --no-board` leaves the board out. Accept, drop, start and resume
 run in the background, with a spinner on the task, so the board stays usable
 meanwhile; a peek keeps the worker's colours and updates until you press a key.

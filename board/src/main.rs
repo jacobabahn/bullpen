@@ -22,42 +22,42 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Sender};
 use std::time::{Duration, Instant};
 
-pub const BOARD_KEYS: &str = "\
-Moving
-  j k  ↑ ↓     select a task
-  n            select the next task that needs you
-  ⏎            open the worker's pane (the reviewer's, in review)
-  c            back to the coordinator, panes put away
-
-Acting on the selected task
-  a            accept: merge its PR (or local branch) and clean up;
-               on a finished task (nothing to merge), close it:
-               remove its worktree, branch and pane. Then the next
-               task that needs you is selected
-  d            drop: close its PR, pane and worktree
-  i            answer what it needs you for, here: its agent's
-               prompt (shown live: press an option's number, or
-               y or n), or its coordinator's question (type the
-               answer: it goes to the coordinator, not the worker)
-  t            tell its worker something
-  p            peek at the end of its worker's screen (live)
-  v            view its diff against its base (q closes it)
-  g            a guided tour of its change, on a task that's ready
-               or in review: opens it in a large pane, or (with
-               none yet) has one written, and it opens when it's
-               done. In it: n p step, j k space scroll, c comment
-               on the step; at the end s sends the comments back
-               to the worker, a accepts, esc closes
-  s            start it
-  r            resume a stopped worker
-
-The board
-  l            switch layout (grouped, compact)
-  f            show closed tasks too (accepted, closed, dropped)
-  o            show other coordinators' tasks too, dimmed and
-               labelled with their coordinator (with several)
-  ?            this list
-  q            quit the board";
+/// The `?` list: a heading, then one short line per key. The board wraps it to its
+/// width; the long explanations are in the README.
+pub const BOARD_KEYS: &[(&str, &[(&str, &str)])] = &[
+    ("Moving", &[
+        ("j k", "select a task (↑ ↓ too)"),
+        ("n", "the next task that needs you"),
+        ("⏎", "open its pane, or its reviewer's"),
+        ("c", "back to the coordinator"),
+    ]),
+    ("The selected task", &[
+        ("a", "accept and merge, or close"),
+        ("d", "drop it"),
+        ("i", "answer its question"),
+        ("t", "tell its worker something"),
+        ("p", "peek at its worker's screen"),
+        ("v", "view its diff"),
+        ("g", "guided tour of its change"),
+        ("s", "start it"),
+        ("r", "resume a stopped worker"),
+    ]),
+    ("The board", &[
+        ("l", "switch layout"),
+        ("f", "show closed tasks too"),
+        ("o", "other coordinators' tasks too"),
+        ("?", "this list"),
+        ("q", "quit the board"),
+    ]),
+    ("In a tour", &[
+        ("n p", "next, previous step"),
+        ("j k", "scroll (space b too)"),
+        ("c", "comment on the step"),
+        ("s", "at the end: send the comments"),
+        ("a", "at the end: accept"),
+        ("esc", "close it"),
+    ]),
+];
 
 /// How often a peek reads the worker's screen again.
 const PEEK_EVERY: Duration = Duration::from_secs(1);
@@ -65,8 +65,10 @@ const PEEK_EVERY: Duration = Duration::from_secs(1);
 /// What the bottom of the board is doing besides showing keys.
 pub enum Mode {
     Normal,
-    /// a full-screen text (keys, a peek) until any key; a peek at a task keeps updating
+    /// a full-screen text (a peek) until any key; a peek at a task keeps updating
     Overlay { title: String, lines: Vec<String>, peek: Option<String> },
+    /// the `?` list, scrolled to its top line; scroll keys scroll, any other key closes
+    Help { top: usize },
     /// typing a line to tell a task's worker, or with reply, to answer its coordinator's question
     Tell { id: String, text: String, reply: bool },
     /// the prompt a task's agent is at, read again every second (None until first read),
@@ -518,6 +520,18 @@ impl App {
                 self.mode = Mode::Normal;
                 return true;
             }
+            Mode::Help { top } => {
+                // the draw keeps it in range: it knows how many lines the list wraps to
+                let page = usize::from(self.height.saturating_sub(4)).max(1);
+                match k.code {
+                    KeyCode::Down | KeyCode::Char('j') => *top += 1,
+                    KeyCode::Up | KeyCode::Char('k') => *top = top.saturating_sub(1),
+                    KeyCode::PageDown | KeyCode::Char(' ') => *top += page,
+                    KeyCode::PageUp | KeyCode::Char('b') => *top = top.saturating_sub(page),
+                    _ => self.mode = Mode::Normal,
+                }
+                return true;
+            }
             Mode::Answer { .. } => {
                 self.answer_key(k.code);
                 return true;
@@ -584,11 +598,7 @@ impl App {
                 self.sel = ids.get(i.saturating_sub(1)).cloned();
             }
             (_, Some('?')) => {
-                self.mode = Mode::Overlay {
-                    title: "Board keys".into(),
-                    lines: BOARD_KEYS.lines().map(String::from).collect(),
-                    peek: None,
-                }
+                self.mode = Mode::Help { top: 0 }
             }
             (_, Some('l')) => {
                 let layout = self.cfg.layout.other();
@@ -1004,6 +1014,34 @@ mod tests {
             id: Some("ab12".into()),
             screen: vec!["touch hello.txt".into()],
         }
+    }
+
+    #[test]
+    fn the_help_scrolls_and_any_other_key_closes_it_without_quitting() {
+        let mut a = app(vec![task("BP-1", "ready")]);
+        a.height = 14;
+        press(&mut a, '?');
+        assert!(matches!(a.mode, Mode::Help { top: 0 }));
+        press(&mut a, 'j');
+        press(&mut a, 'j');
+        press(&mut a, 'k');
+        assert!(matches!(a.mode, Mode::Help { top: 1 }));
+        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert!(matches!(a.mode, Mode::Help { top: 2 }));
+        press(&mut a, ' '); // a page: the height less the title, gap, foot and gap
+        assert!(matches!(a.mode, Mode::Help { top: 12 }));
+        press(&mut a, 'b');
+        press(&mut a, 'b');
+        assert!(matches!(a.mode, Mode::Help { top: 0 }));
+        // q closes the list; it doesn't quit the board
+        assert!(a.key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)));
+        assert!(matches!(a.mode, Mode::Normal));
+        for close in [KeyCode::Esc, KeyCode::Char('?'), KeyCode::Char('a')] {
+            press(&mut a, '?');
+            a.key(KeyEvent::new(close, KeyModifiers::NONE));
+            assert!(matches!(a.mode, Mode::Normal), "{close:?}");
+        }
+        assert!(a.pending.is_none(), "the key that closes it does nothing else");
     }
 
     #[test]
