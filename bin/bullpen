@@ -4366,14 +4366,22 @@ def listed(repo, args):
     return [t for t in repo.tasks() if args.all or t["status"] not in CLOSED]
 
 
+SENTENCE_ROOM = 24  # columns a cut line must leave for the board's sentence, or ls takes two rows
+
+
 def ls_lines(repo, tasks, width=None, color=False):
     """`ls`'s lines, in the board's order: one task_line each, whole when piped (width
-    None). On a terminal too narrow for every line, the board's two rows each."""
+    None), cut to the width on a terminal. When a line would leave under SENTENCE_ROOM
+    columns for some task's sentence (a narrow terminal, a long title), the board's
+    two rows each instead."""
     every = {t["id"]: t for t in repo.tasks()}
     idw = max((len(t["id"]) for t in tasks), default=0)
     tasks = board_order(tasks)
-    if width is None or all(text_width(task_line(repo, t, every, idw)) < width for t in tasks):
+    if width is None:
         return [task_line(repo, t, every, idw, color=color) for t in tasks]
+    room = lambda t: width - 1 - (2 + idw + 2) - text_width(t["title"]) - (len(ago(t)) + 2 if ago(t) else 0) - 2
+    if all(room(t) >= SENTENCE_ROOM or text_width(task_line(repo, t, every, idw)) < width for t in tasks):
+        return [task_line(repo, t, every, idw, width - 1, color) for t in tasks]
     return [row for t in tasks for row in task_rows(repo, t, every, idw, width, color)]
 
 

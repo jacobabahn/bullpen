@@ -5888,6 +5888,10 @@ class HelpersTest(unittest.TestCase):
         self.assertTrue(all(len(l) <= 41 for l in self.bp.ls_lines(r, [b, a], 42)))
         self.assertEqual(len(list(self.bp.ls_lines(r, [b, a], 200))), 2)  # wide: one line each
         self.assertEqual(len(list(self.bp.ls_lines(r, [b, a]))), 2)  # piped: whole
+        wide = list(self.bp.ls_lines(r, [b, a], 80))  # room for the sentence: one cut line each, not rows
+        self.assertEqual(wide, ["● BP-3   Fix the login redirect after sign-in  12m  Asks: python3 or python? T…",
+                                "◌ BP-16  Emails: digest  1m  Not started. s starts it."])
+        self.assertTrue(all(len(l) <= 79 for l in wide))
         c = {"id": "BP-5", "status": "todo", "title": "Later", "note": "One two three four five six seven eight"}
         self.assertEqual(len(self.bp.task_rows(self.repo(c), c, width=20)), 2)  # the board's one line
         self.assertEqual(len(self.bp.task_rows(self.repo(c), c, width=20, lines=99)), 5)  # show's: all of it

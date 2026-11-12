@@ -124,8 +124,9 @@ board does: its mark (● needs you, ■ stopped, ◎ coordinator on it, ✔ rea
 finished, ◐ in review, ○ working, ◌ queued, ✓ accepted or closed, – dropped), its
 ID, title and age, then the board's line for it, needs-you first as on the board.
 Piped, `ls` prints each task whole on one line; on a terminal it is in colour and
-fits the width, and when one line per task doesn't fit, it takes the board's two
-rows: title and age, then the line under it. `--json` keeps the raw status.
+each line is cut to the width. When that would leave too little room for the line
+(a narrow terminal like the board's), it takes the board's two rows: title and
+age, then the line under it. `--json` keeps the raw status.
 `show` starts with that line and ends with `next:`, what you can do now
 (`next: bullpen reply BP-3 <answer>, or i on the board`).
 
