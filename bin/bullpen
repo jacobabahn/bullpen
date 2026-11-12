@@ -325,7 +325,7 @@ class Repo:
         tid = self.norm(tid)
         t = read_json(self.task_path(tid))
         if t is None:
-            raise Fail(f"no task {tid} in {self.root}")
+            raise Fail(f"no task {tid} in {home(self.root)}: `bullpen ls --all` lists them")
         return t
 
     def norm(self, tid):
@@ -1786,7 +1786,7 @@ def check_after(repo, tid, after):
         if d == tid:
             raise Fail(f"{tid} can't wait on itself")
         if d not in tasks:
-            raise Fail(f"no task {d} in {repo.root}")
+            raise Fail(f"no task {d} in {home(repo.root)}: `bullpen ls --all` lists them")
         if tasks[d]["status"] == "dropped":
             raise Fail(f"{d} was dropped: {tid} would wait on it forever")
         path = dep_path(tasks, d, tid)
@@ -1834,7 +1834,7 @@ def cmd_after(args):
     if args.none == bool(args.deps):
         raise Fail("give the tasks it waits on, or --none")
     if t["status"] in CLOSED:
-        raise Fail(f"{t['id']} is {t['status']}")
+        raise Fail(is_status(t))
     after = [] if args.none else check_after(repo, t["id"], dep_ids(repo, args.deps))
     if after:
         t["after"] = after
@@ -1857,7 +1857,7 @@ def cmd_model(args):
     if args.clear == bool(args.model):
         raise Fail("give the model (an alias like opus, or a model ID), or --clear")
     if t["status"] in CLOSED:
-        raise Fail(f"{t['id']} is {t['status']}")
+        raise Fail(is_status(t))
     if args.clear:
         t.pop("worker_model", None)
     else:
@@ -2020,10 +2020,10 @@ def cmd_start(args):
     repo = Repo(repo_root())
     t = repo.task(args.id)
     if t["status"] not in ("todo", "stopped") and not (t.get("needs_setup") and t["status"] in WAITING):
-        raise Fail(f"{t['id']} is {t['status']}; use `resume` or `tell`")
+        raise Fail(f"{is_status(t)}: `start` is for a queued or stopped task; use `resume` or `tell`")
     deps = [] if args.force or t["status"] != "todo" else open_deps(repo, t)
     if deps:
-        raise Fail(f"{t['id']} waits on " + ", ".join(f"{d} ({st or 'no such task'})" for d, st in deps)
+        raise Fail(f"{t['id']} waits on " + ", ".join(f"{d} ({status_words(st) if st else 'no such task'})" for d, st in deps)
                    + f": it starts by itself once they're accepted; `start {t['id']} --force` starts it now")
     lim = None if args.force else limit_active()
     if lim:
@@ -2641,7 +2641,7 @@ def cmd_finish(args):
     repo = Repo(repo_root())
     t = repo.task(args.id)
     if t["status"] in CLOSED:
-        raise Fail(f"{t['id']} is {t['status']}")
+        raise Fail(is_status(t))
     wt = t["worktree"]
     if not wt:
         raise Fail(f"{t['id']} has no worktree")
@@ -2676,8 +2676,8 @@ def cmd_close(args):
     repo = Repo(repo_root())
     t = repo.task(args.id)
     if t["status"] != "finished":
-        hint = ": `accept` a ready one" if t["status"] == "ready" else ""
-        raise Fail(f"{t['id']} is {t['status']}, not finished{hint}")
+        hint = f": `accept {t['id']}` merges it" if t["status"] == "ready" else ""
+        raise Fail(f"{is_status(t)}, not finished{hint}")
     close_task(repo, t)
 
 
@@ -3459,7 +3459,7 @@ def step_files(step):
 
 def tour_status(t):
     if t["status"] not in ("ready", "review"):
-        raise Fail(f"{t['id']} is {status_words(t['status'])}: a tour is only for a task that is "
+        raise Fail(f"{is_status(t)}: a tour is only for a task that is "
                    f"ready or in review, whose code isn't changing")
 
 
@@ -4193,7 +4193,7 @@ def cmd_accept(args):
     if t["status"] == "finished" and not merged_outside:
         return close_task(repo, t)  # the person's yes on work with nothing to merge
     if t["status"] != "ready" and not merged_outside:
-        raise Fail(f"{t['id']} is {t['status']}, not ready or finished")
+        raise Fail(f"{is_status(t)}: only a task that's ready to accept or finished can be accepted")
     keys = keys_hash()
     if t.get("pr"):
         p = None if merged_outside else run(
@@ -4839,6 +4839,19 @@ def status_words(status):
     return words if status in words else f"{words} ({status})"
 
 
+def is_status(t):
+    """ "BP-3 is queued (todo)", "BP-3 needs you (stopped)": a task's status in the
+    board's words, for errors."""
+    words = status_words(t["status"])
+    return f"{t['id']} {words}" if words.startswith("needs") else f"{t['id']} is {words}"
+
+
+def home(path):
+    """A path with $HOME as ~, for people to read."""
+    path, h = str(path), str(Path.home())
+    return "~" + path[len(h):] if h != "/" and (path == h or path.startswith(h + "/")) else path
+
+
 def cmd_ls(args):
     if args.all_repos:
         return ls_repos(args)
@@ -4999,7 +5012,7 @@ def cmd_diff(args):
     t = repo.task(args.id)
     wt = t.get("worktree")
     if not wt or not Path(wt).is_dir():
-        raise Fail(f"{t['id']} has no worktree (it is {t['status']}), so there's nothing to diff")
+        raise Fail(f"{is_status(t)}, with no worktree, so there's nothing to diff")
     if args.pane:
         return diff_pane(repo, t, args)
     base_ref = task_base_ref(repo, t)
@@ -5075,7 +5088,7 @@ def cmd_review_mode(args):
     repo = Repo(repo_root())
     t = repo.task(args.id)
     if t["status"] in CLOSED:
-        raise Fail(f"{t['id']} is {t['status']}")
+        raise Fail(is_status(t))
     if args.mode == "auto":
         t.pop("review_mode", None)
     else:
@@ -5306,8 +5319,9 @@ def pane_target(repo, args):
     if args.id:
         t = repo.task(args.id)
         if not t.get("block"):
-            hint = f"`bullpen resume {t['id']}`" if t["status"] == "stopped" else f"it is {t['status']}"
-            raise Fail(f"{t['id']} has no pane ({hint})")
+            hint = f"`bullpen resume {t['id']}` starts it again" if t["status"] == "stopped" else \
+                is_status(t).replace(f"{t['id']} ", "it ", 1)
+            raise Fail(f"{t['id']} has no pane: {hint}")
         return t["session"], t["block"], t["id"]
     c = coordinator_for(repo, args.from_block)
     if not c:
@@ -6354,7 +6368,7 @@ def cmd_ask(args):
     repo = Repo(repo_root())
     t = repo.task(args.id)
     if t["status"] in CLOSED:
-        raise Fail(f"{t['id']} is {t['status']}")
+        raise Fail(is_status(t))
     question = " ".join(" ".join(args.question).split())
     if not question:
         raise Fail("give the question to ask")
@@ -6369,7 +6383,7 @@ def cmd_ok(args):
     repo = Repo(repo_root())
     t = repo.task(args.id)
     if t["status"] != "triage":
-        raise Fail(f"{t['id']} is {t['status']}, not waiting on its coordinator")
+        raise Fail(f"{is_status(t)}, not waiting on its coordinator")
     if reviewers_stop(t):
         r = t.get("review") or {}
         if not rex_alive(r.get("session") or t.get("session"), r.get("block")):
@@ -6390,11 +6404,11 @@ def cmd_review(args):
     t = repo.task(args.id)
     r = t.get("review") or {}
     if t["status"] in CLOSED or not t.get("worktree"):
-        raise Fail(f"{t['id']} is {t['status']}" + ("" if t.get("worktree") else ", with no worktree"))
+        raise Fail(is_status(t) + ("" if t.get("worktree") else ", with no worktree"))
     if not r:
         raise Fail(f"{t['id']} has had no review: its worker starts one with `ready`")
     if r.get("verdict") or not (t["status"] == "review" or on_reviewer(t)):
-        raise Fail(f"{t['id']} isn't waiting on a reviewer (it is {t['status']})")
+        raise Fail(f"{is_status(t)}, not waiting on a reviewer")
     rounds = repo.cfg.get("review_rounds", 2)
     if r.get("round", 0) >= rounds and r.get("kind") != "tour":
         raise Fail(f"{t['id']} has used its {rounds} review rounds: `bullpen ask {t['id']}` the person")
