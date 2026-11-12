@@ -1861,6 +1861,30 @@ class BullpenTest(unittest.TestCase):
         shutil.rmtree(shop)  # a repository whose checkout is gone is left out, and with one repo, no names
         self.assertEqual(pick("")[0], "◌ BP-1  Fix the login redirect")
 
+    def test_pick_lists_what_needs_you_then_what_is_ready_first(self):
+        for title in ("Migrate sessions table", "Emails: digest", "Rate-limit resets", "Docs", "Logs"):
+            self.bp("add", title, "--brief", "x")
+        d = next((self.tmp / "state").rglob("config.json")).parent
+        for tid, status in {"BP-1": "working", "BP-2": "ready", "BP-3": "triage", "BP-4": "stopped",
+                            "BP-5": "needs"}.items():
+            f = d / "tasks" / f"{tid}.json"
+            f.write_text(json.dumps({**json.loads(f.read_text()), "status": status}))
+        pick = lambda q: [l.split()[1] for l in self.bp("pick", "--filter", q, "--from", "nowhere").stdout.splitlines()]
+        self.assertEqual(pick(""), ["BP-4", "BP-5", "BP-2", "BP-3", "BP-1"])  # triage is the coordinator's
+        self.assertEqual(pick("digest"), ["BP-2"])  # not "miGrate sEssionS Table"
+        self.assertEqual(pick("rl"), ["BP-3"])  # in one word: "Rate-limit"
+        self.assertEqual(pick("lgs"), ["BP-5"])
+
+    def test_go_board_with_a_task_selects_it_on_its_board(self):
+        self.start_task()
+        self.bp("add", "Later", "--brief", "x")
+        sel = next((self.tmp / "state").rglob("config.json")).parent / "select" / "c1"
+        self.bp("go", "BP-2", "--board", "--json")
+        self.assertFalse(sel.exists())  # --json only says where
+        self.bp("go", "bp-2", "--board")
+        self.assertEqual(self.focused()[-1], "blk2")
+        self.assertEqual(sel.read_text(), "BP-2\n")
+
     def test_go_repo_goes_to_a_task_of_another_repo(self):
         here = self.start_task("Here")
         shop = self.other_repo("shop")
@@ -1928,6 +1952,14 @@ class BullpenTest(unittest.TestCase):
         before = len(self.api("session.set_layer_state"))
         self.assertEqual(self.pick_on_a_terminal(["x", "\x1b"]), 0)  # esc: nothing happens
         self.assertEqual(len(self.api("session.set_layer_state")), before)
+
+    def test_pick_opens_the_board_on_a_task_with_no_pane(self):
+        self.start_task("Here")
+        self.bp("add", "Queued", "--brief", "x")
+        self.assertEqual(self.pick_on_a_terminal(["q", "u", "e", "\r"]), 0)  # it closes: not a dead end
+        self.assertEqual(self.focused()[-1], "blk2")  # the board
+        sel = next((self.tmp / "state").rglob("config.json")).parent / "select" / "c1"
+        self.assertEqual(sel.read_text(), "BP-2\n")  # with BP-2 selected
 
     def test_board_repos_is_a_setting_global_too(self):
         cfg = lambda: json.loads(self.bp("config", "--json").stdout)
@@ -6196,11 +6228,14 @@ class HelpersTest(unittest.TestCase):
         self.assertIsNone(f("ngl", "Fix the login redirect"))  # out of order
         self.assertIsNotNone(f("redirect fix", "Fix the login redirect"))  # words in any order
         self.assertIsNone(f("fix logout", "Fix the login redirect"))  # every word must match
+        self.assertIsNone(f("digest", "Migrate sessions table"))  # each word in one word
+        self.assertIsNotNone(f("rl", "Rate-limit the endpoint"))
         self.assertEqual(f("", "anything"), 0)
 
     def test_fuzzy_ranks_letters_together_and_word_starts_first(self):
         pf = self.bp.pick_filter
-        self.assertEqual(pf("log", ["l o g", "a login"]), [1, 0])  # together
+        self.assertEqual(pf("log", ["lxoxg", "a login"]), [1, 0])  # together
+        self.assertEqual(pf("log", ["l o g", "a login"]), [1])  # not across words
         self.assertEqual(pf("re", ["more", "redirect"]), [1, 0])  # the start of a word
         self.assertEqual(pf("42", ["BP-142", "BP-42"]), [1, 0])
         self.assertEqual(pf("bp", ["BP-1", "BP-2"]), [0, 1])  # ties keep their order
@@ -6244,6 +6279,13 @@ class HelpersTest(unittest.TestCase):
         self.assertIn("10/10", out[1])
         self.assertEqual(out[2:], ["  BP-5  queu…", "  BP-6  queu…", "\x1b[7m> BP-7  queu…\x1b[0m"])
         self.assertIn("no open tasks in any repository", self.bp.Picker([]).screen(80, 5)[1])
+
+    def test_picker_says_a_failure_in_the_normal_weight_after_the_count(self):
+        p = self.bp.Picker(["◌ BP-1  Fix login", "◌ BP-2  Cover logout"])
+        self.assertEqual(p.screen(42, 5)[1], "\x1b[2m2/2  ⏎ go · esc close · ↑↓ move\x1b[0m")
+        p.msg = "no board: run `bullpen up`"
+        self.assertEqual(p.screen(42, 5)[1], "\x1b[2m2/2\x1b[0m  no board: run `bullpen up`")
+        self.assertEqual(p.screen(20, 5)[1], "\x1b[2m2/2\x1b[0m  no board: run …")  # cut to the width
 
     def stepper(self, comments=()):
         tour = {"commit": "c1", "steps": [{"title": "One", "note": "Why one.", "hunks": [{"file": "a", "lines": [1, 2]}]},

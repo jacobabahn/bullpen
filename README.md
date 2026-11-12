@@ -186,11 +186,16 @@ four actions, also in the command palette under Bullpen, and binds:
 - `cmd+;` then `j`: jump to any open task. A picker opens in the middle of the
   window, listing every open task (the repository's name when there is more
   than one, then its mark in the board's colour, ID and title) of every
-  repository bullpen knows, this one's first, each in the board's order. Type part of it: each word you type must be in the line, its
-  letters in order but not necessarily together (`lgn` finds "login"), and the
-  closest matches come first. `↑` `↓` (or `ctrl+p` `ctrl+n`) move, `⏎` goes to
-  that task as `bullpen go` does, and `esc` closes the picker. A task without a
-  pane (queued, say) says so and the picker stays open. It works from any pane
+  repository bullpen knows, this one's first, each with what needs you first,
+  then what's ready, then the rest in the board's order. Type part of it: each
+  word you type must be in one word of the line, its letters in order but not
+  necessarily together (`lgn` finds "login", `rl` finds "Rate-limit", but
+  "digest" doesn't find "Migrate sessions table"), and the closest matches come
+  first. `↑` `↓` (or `ctrl+p` `ctrl+n`) move, `⏎` goes to that task as
+  `bullpen go` does, and `esc` closes the picker. A task without a pane (queued
+  or stopped, say) opens its board with that task selected, where its keys
+  (`s`, `r`, `i`) are. If even that fails, the picker says why after the count
+  and stays open. It works from any pane
   (`bullpen pick --pane`; `bullpen pick` runs it in the terminal you're in).
 
 And in a worker's or reviewer's floating pane, `ctrl+escape` puts it back into its
@@ -227,6 +232,7 @@ bullpen go BP-1       # focus its pane (`go` alone: the coordinator; --next: nex
                       #   --board: the board, started first if none runs)
 bullpen go --next --all-repos   # the next task needing you in any repository
 bullpen go BP-1 --repo ~/shop   # a task of another repository
+bullpen go BP-1 --board         # its board, with BP-1 selected
 bullpen pick          # type part of any open task, in any repository, and go to it (the cmd+; j picker)
 bullpen pick --filter "lgn"   # just print the open tasks matching, best first
 bullpen tell BP-1 "Also cover the logout path"

@@ -267,6 +267,26 @@ impl App {
         } else {
             self.others = Default::default();
         }
+        self.take_select();
+    }
+
+    /// Select the task `bullpen go <id> --board` asked this board to (the picker does,
+    /// for a task with no pane): select/<this board's coordinator> holds its ID. One
+    /// older than 30 seconds is left over (no board read it then) and is dropped.
+    fn take_select(&mut self) {
+        let path = self.dir.join("select").join(self.me.as_deref().unwrap_or("board"));
+        let Ok(text) = std::fs::read_to_string(&path) else { return };
+        let fresh = std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age < Duration::from_secs(30));
+        let _ = std::fs::remove_file(&path);
+        let id = text.trim();
+        if fresh && self.tasks.iter().any(|t| t.id == id) && self.sel.as_deref() != Some(id) {
+            self.sel = Some(id.to_string());
+            self.pending = None; // a question about the task that was selected
+        }
     }
 
     /// The groups the board shows: without the tasks it hides.
@@ -1145,6 +1165,35 @@ mod tests {
         let mut a = app(vec![task("BP-1", "ready")]);
         a.done("BP-1".into(), Job::Accept, true, "BP-1 done (merged into main: 0123456789ab)".into());
         assert_eq!(a.msg, "Accepted BP-1.");
+    }
+
+    #[test]
+    fn go_board_selects_a_task_through_the_select_file() {
+        let d = Scratch::new("select");
+        let mut a = app(vec![owned("BP-1", "needs", "c1"), owned("BP-2", "todo", "c1")]);
+        (a.dir, a.me) = (d.0.clone(), Some("c1".into()));
+        a.settle();
+        a.pending = Some((Action::Accept, "BP-1".into()));
+        let file = d.0.join("select").join("c1");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let ask = |id: &str| std::fs::write(&file, format!("{id}\n")).unwrap();
+        ask("BP-2");
+        a.take_select();
+        assert_eq!(a.sel.as_deref(), Some("BP-2"));
+        assert!(a.pending.is_none()); // the question was about BP-1
+        assert!(!file.exists()); // read once
+        ask("BP-9"); // a task it doesn't have: stays put
+        a.take_select();
+        assert_eq!(a.sel.as_deref(), Some("BP-2"));
+        ask("BP-1"); // left over from long ago: dropped
+        let old = std::time::SystemTime::now() - Duration::from_secs(60);
+        std::fs::File::options().write(true).open(&file).unwrap().set_modified(old).unwrap();
+        a.take_select();
+        assert_eq!(a.sel.as_deref(), Some("BP-2"));
+        assert!(!file.exists());
+        std::fs::write(d.0.join("select").join("c2"), "BP-1").unwrap(); // another coordinator's board's
+        a.take_select();
+        assert_eq!(a.sel.as_deref(), Some("BP-2"));
     }
 
     /// A scratch folder of its own for a test, removed at the end.

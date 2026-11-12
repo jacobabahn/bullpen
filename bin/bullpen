@@ -4979,6 +4979,9 @@ def go_target(repo, args):
 
 def pane_target(repo, args):
     """(session, block, name) of a task's pane, its reviewer's, the coordinator's or the board's."""
+    if args.id and args.board:
+        _, b = task_board(repo, repo.task(args.id))
+        return b.get("session"), b["block"], "board"
     if args.id and args.review:
         t = repo.task(args.id)
         r = t.get("review") or {}
@@ -5000,6 +5003,25 @@ def pane_target(repo, args):
             raise Fail("no board: run `bullpen up`")
         return b.get("session"), b["block"], "board"
     return c.get("session"), c["block"], "coordinator"
+
+
+def task_board(repo, t):
+    """(coordinator, board) of the board a task is on: its owner's, else any."""
+    own = home_of(repo, t)
+    for c in [own] + repo.cfg["coordinators"]:
+        if c.get("board"):
+            return c, c["board"]
+    raise Fail("no board: run `bullpen up`")
+
+
+def select_on_board(repo, tid):
+    """Ask the board the task is on to select it. The board reads select/<its
+    coordinator> when the state directory changes, selects the task and removes the
+    file; it ignores one older than 30 seconds (no board read it then)."""
+    c, _ = task_board(repo, repo.task(tid))
+    path = repo.dir / "select" / safe(c.get("id") or "board")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(repo.task(tid)["id"] + "\n")
 
 
 def coordinator_for(repo, block):
@@ -5049,6 +5071,8 @@ def cmd_go(args):
     if args.json:
         print(json.dumps({"session": session, "block": block, "name": name}))
     else:
+        if args.board and args.id:
+            select_on_board(repo, args.id)
         show_pane(repo, session, block)
 
 
@@ -5128,13 +5152,20 @@ PICK_LABEL = "bullpen: jump"
 PICK_BOUNDS = [0.15, 0.12, 0.7, 0.6]  # the middle of the window: x, y, w, h
 
 
+# what the picker lists first: what needs you, then what's ready, then the board's order
+PICK_FIRST = {"needs": 0, "stopped": 0, "ready": 1, "finished": 1}
+
+
 def pick_items(home=None):
     """(repo, task) of every open task bullpen knows: home's first, then the other
-    repositories', each in `ls` order."""
+    repositories', each with what needs you first, then what's ready, then the rest in
+    the board's order."""
     repos = known_repos()
     if home:
         repos = [home] + [r for r in repos if r.dir != home.dir]
-    return [(r, t) for r in repos for t in board_order(r.tasks()) if t["status"] not in CLOSED]
+    first = lambda t: PICK_FIRST.get(t["status"], 2)
+    return [(r, t) for r in repos for t in sorted(board_order(r.tasks()), key=first)
+            if t["status"] not in CLOSED]
 
 
 def pick_lines(items):
@@ -5150,11 +5181,12 @@ def pick_lines(items):
 
 def fuzzy_score(query, text):
     """How well text matches query, or None when it doesn't. Each word of the query must
-    be in text, its letters in order but not necessarily together (case ignored).
+    be in one word of text, its letters in order but not necessarily together (case
+    ignored): "lgn" finds "login", but "digest" doesn't find "Migrate sessions table".
     Letters together, and at the start of a word, score higher."""
-    low, total = text.lower(), 0
+    words, total = text.lower().split(), 0
     for word in query.lower().split():
-        scores = [s for start, c in enumerate(low) if c == word[0]
+        scores = [s for low in words for start, c in enumerate(low) if c == word[0]
                   for s in [word_score(word, low, start)] if s is not None]
         if not scores:
             return None
@@ -5229,8 +5261,11 @@ class Picker:
         """The picker's lines: the query, a hint, then the matching tasks around the selected one."""
         rows = max(height - 2, 1)
         first = max(0, self.sel - rows + 1)
-        out = [f"jump to> {self.query}",
-               f"\x1b[2m{self.msg or f'{len(self.shown)}/{len(self.lines)}  {PICK_HINT}'}\x1b[0m"]
+        count = f"{len(self.shown)}/{len(self.lines)}"
+        # a failure in the normal weight, after the count; else the keys, dim
+        hint = (f"\x1b[2m{count}\x1b[0m  {fit(self.msg, max(width - len(count) - 2, 0))}" if self.msg
+                else f"\x1b[2m{fit(f'{count}  {PICK_HINT}', width)}\x1b[0m")
+        out = [f"jump to> {self.query}", hint]
         for n, i in enumerate(self.shown[first:first + rows], first):
             line = self.paint(fit(self.lines[i], max(width - 2, 0)), i)
             out.append(f"\x1b[7m> {line}\x1b[0m" if n == self.sel else f"  {line}")
@@ -5309,10 +5344,16 @@ def cmd_pick(args):
         raise Fail("pick needs a terminal (--filter prints the matching tasks instead)")
 
     def choose(i):
+        """Go to the task's pane; with none (queued, stopped, a pane that's gone), to
+        its board with the task selected; failing both, why it couldn't go there."""
         r, t = items[i]
-        p = subprocess.run([SELF, "go", t["id"], "--repo", str(r.root),
-                            *(["--session", args.session] if args.session else [])],
-                           stdin=subprocess.DEVNULL, text=True, capture_output=True)
+        go = lambda *more: subprocess.run(
+            [SELF, "go", t["id"], "--repo", str(r.root), *more,
+             *(["--session", args.session] if args.session else [])],
+            stdin=subprocess.DEVNULL, text=True, capture_output=True)
+        p = go()
+        if p.returncode and go("--board").returncode == 0:
+            return None
         return None if p.returncode == 0 else (p.stderr.strip().removeprefix("bullpen: ") or "couldn't go there")
 
     pick_tui(Picker(lines, [mark_color(t) for _, t in items]), choose)
@@ -6965,7 +7006,8 @@ def parser():
     p.add_argument("--next", action="store_true", help="the next task that needs you")
     p.add_argument("--all-repos", action="store_true",
                    help="with --next: in any repository bullpen knows, not just this one")
-    p.add_argument("--board", action="store_true", help="the task board")
+    p.add_argument("--board", action="store_true",
+                   help="the task board (with an ID: the task's board, with that task selected)")
     p.add_argument("--review", action="store_true", help="the task's reviewer, not its worker")
     p.add_argument("--from", dest="from_block", default=os.environ.get("REX_BLOCK"),
                    help="the pane you're in (default: this one)")
