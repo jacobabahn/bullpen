@@ -238,7 +238,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 let text = if doing.is_empty() { model::detail_with_auto(t, &app.cfg, now) } else { doing };
                 for d in model::wrap(&text, detail_w, lines) {
                     if !d.is_empty() {
-                        rows.push(Row::Detail(t, d, t.needs_you()));
+                        // another coordinator's task stays dim, as its title is
+                        rows.push(Row::Detail(t, d, t.needs_you() && !app.cfg.theirs(t, app.me.as_deref())));
                     }
                 }
                 let stat = model::stat_line(t);
@@ -917,6 +918,25 @@ mod tests {
         ].map(String::from), "{s:#?}");
         assert_eq!(s[8], "▌● BP-3  Architecture round 2: review", "{s:#?}");
         assert_eq!(s[15], "▌  undo.", "{s:#?}");
+    }
+
+    #[test]
+    fn another_coordinators_question_stays_dim() {
+        let c = |id: &str, who: &str| Task { coordinator: Some(who.into()), ..asking(id) };
+        let mut a = app(vec![c("BP-1", "c1"), c("BP-2", "c2")], 0, Layout::Grouped);
+        a.cfg.coordinators = vec!["c1".into(), "c2".into()];
+        a.cfg.board_others = vec!["c1".into()];
+        a.me = Some("c1".into());
+        a.sel = Some("BP-2".into());
+        let mut term = Terminal::new(TestBackend::new(42, 24)).unwrap();
+        term.draw(|f| draw(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let s: Vec<String> = (0..24).map(|y| (0..42).map(|x| buf[(x, y)].symbol()).collect::<String>().trim_end().to_string()).collect();
+        let mine = s.iter().position(|r| r.contains("BP-1")).unwrap() + 1;
+        let theirs = s.iter().position(|r| r.contains("BP-2")).unwrap() + 1;
+        assert!(s[theirs].starts_with("▌  Pick:"), "{s:#?}");
+        assert!(!buf[(3, mine as u16)].modifier.contains(Modifier::DIM), "{s:#?}");
+        assert!(buf[(3, theirs as u16)].modifier.contains(Modifier::DIM), "{s:#?}");
     }
 
     #[test]
