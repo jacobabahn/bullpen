@@ -281,6 +281,16 @@ def reindex(repo):
             write_json(p, {**entry, "stuck_after": repo.cfg["stuck_after"]})
 
 
+def mark_compacting(block, on):
+    """Note in the pane's index entry that its agent is compacting, so the watcher
+    passes on its next working event (the one that may start a real turn)."""
+    path = STATE / "blocks" / f"{safe(block)}.json"
+    entry = read_json(path) if block else None
+    if entry and bool(entry.get("compacting")) != on:
+        entry.pop("compacting", None)
+        write_json(path, {**entry, "compacting": True} if on else entry)
+
+
 def unindex_block(block):
     if block:
         (STATE / "blocks" / f"{safe(block)}.json").unlink(missing_ok=True)
@@ -2814,6 +2824,20 @@ def cmd_event(args):
     woke = unstick(t, "worker")
     if state in LIMIT_STATES and (limited(t, "worker") or limit_hit(repo, t, "worker", args)):
         return
+    if state == "working" and t["status"] != "working" and compacting(t.get("session"), t["block"], msg):
+        # Claude Code compacting the conversation by itself: not a new turn
+        if not t.get("compacting"):
+            t["compacting"] = now()
+            mark_compacting(args.block, True)
+        repo.save_task(t)
+        return
+    if t.pop("compacting", None):
+        mark_compacting(args.block, False)
+        if state in ("done", "idle") and t["status"] != "working":
+            # the compaction is over: its end is no end of a turn
+            t["last"] = key
+            repo.save_task(t)
+            return
     if state == "working":
         if t["status"] in (*WAITING, "stopped") or limit_over(t):
             t.update(status="working", why=None)
@@ -2911,6 +2935,10 @@ def review_event(repo, t, args):
     woke = unstick(t, "reviewer")
     if state in LIMIT_STATES and (limited(t, "reviewer") or limit_hit(repo, t, "reviewer", args)):
         return
+    if state == "working" and stuck and compacting(r.get("session") or t.get("session"), r["block"], msg):
+        if woke:
+            repo.save_task(t)
+        return  # compacting by itself: it stays where its coordinator or the person has it
     if state == "working":
         back, was_ok = limit_over(t), t.pop("ok", None)
         if stuck or back:
@@ -3040,6 +3068,19 @@ def screen(session, block):
 def shell_running(text):
     """Does Claude Code's footer say a background shell of its own still runs?"""
     return any(SHELL_RE.search(l) for l in text.splitlines()[-6:])
+
+
+COMPACT_RE = re.compile(r"^\W{0,2}\s*(?:Compacting conversation|Running Pre-?Compact hooks)")
+
+
+def compacting(session, block, msg=""):
+    """Is Claude Code compacting its conversation (auto-compaction)? Its status record
+    says only that it's working, so this goes by its spinner line: "✽ Compacting
+    conversation…" (or the PreCompact hooks it runs first)."""
+    if re.match(r"(?:Compacting conversation|Running Pre-?Compact hooks)", msg or ""):
+        return True
+    lines = [l.strip() for l in screen(session, block).splitlines() if l.strip()][-12:]
+    return any(COMPACT_RE.match(l) for l in lines)
 
 
 def program_status(session, block):
@@ -3228,6 +3269,8 @@ def check_repo(repo, ids, fix, out):
         a = agent_state(session, block)
         if not a:
             continue
+        if a["state"] == "working" and compacting(session, block, a["msg"]):
+            continue  # compacting by itself: no turn, so no drift
         limit = repo.cfg.get("stuck_after") or DEFAULT_CONFIG["stuck_after"]
         found = (worker_drift if who == "worker" else reviewer_drift)(t, a, limit)
         if found:

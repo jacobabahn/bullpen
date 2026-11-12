@@ -3452,6 +3452,114 @@ class BullpenTest(unittest.TestCase):
         self.assertIn("run `finish` (or `ready`) again", self.news()[-1])
         self.assertIn("not finished", self.bp("close", tid, ok=False).stderr)
 
+    COMPACTING = "● Done.\n\n✽ Compacting conversation… (12s · esc to interrupt)\n\n❯ \n  ⏵⏵ auto mode on\n"
+
+    def compact(self, blk):
+        """Claude Code auto-compacts in pane blk: it says it's working, and its spinner
+        says what at."""
+        (self.fake / f"screen_{blk}").write_text(self.COMPACTING)
+        self.bp("_event", blk, "working", "", "")
+
+    def compacted(self, blk, state="idle"):
+        (self.fake / f"screen_{blk}").write_text("✻ Conversation compacted\n\n❯ \n  ⏵⏵ auto mode on\n")
+        self.bp("_event", blk, state, "", "")
+
+    def test_compaction_leaves_a_ready_task_ready_with_its_approval(self):
+        tid = self.approved_task()
+        blk = self.block(tid)
+        self.bp("_event", blk, "idle", "", "")
+        before = len(self.news())
+        self.compact(blk)
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["review"]["verdict"]), ("ready", "approved"))
+        self.assertIn('"compacting": true', (self.tmp / "state" / "blocks" / f"{blk}.json").read_text())
+        self.compacted(blk)
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["review"]["verdict"]), ("ready", "approved"))
+        self.assertNotIn("compacting", t)
+        self.assertNotIn("compacting", (self.tmp / "state" / "blocks" / f"{blk}.json").read_text())
+        self.assertEqual(len(self.news()), before)  # no "working again", no "ended its turn"
+        self.bp("accept", tid)  # its approval still counts
+
+    def test_compaction_leaves_a_finished_task_finished(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.bp("_event", blk, "working", "", "Writing notes")
+        self.finish(tid)
+        self.bp("_event", blk, "done", "", "")
+        before = len(self.news())
+        self.compact(blk)
+        self.assertEqual(self.show(tid)["status"], "finished")
+        self.compacted(blk, "done")
+        t = self.show(tid)
+        self.assertEqual(t["status"], "finished")
+        self.assertIn("Saved to ~/Movies/demo.mov.", t["summary"])
+        self.assertEqual(len(self.news()), before)
+
+    def test_compaction_leaves_a_triage_task_in_triage(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.bp("_event", blk, "working", "", "Fixing")
+        self.bp("_event", blk, "idle", "", "")
+        self.assertEqual(self.show(tid)["status"], "triage")
+        before = len(self.news())
+        self.compact(blk)
+        self.compacted(blk)
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("triage", "Ended its turn without saying ready"))
+        self.assertEqual(len(self.news()), before)
+
+    def test_a_real_turn_after_compaction_still_counts(self):
+        tid = self.approved_task()
+        blk = self.block(tid)
+        self.bp("_event", blk, "idle", "", "")
+        self.compact(blk)
+        (self.fake / f"screen_{blk}").write_text("✶ Misting… (3s · esc to interrupt)\n")
+        self.bp("_event", blk, "working", "", "The person asked for more")
+        self.assertEqual(self.show(tid)["status"], "working")
+        self.assertIn("BP-1 was ready, but its worker started working again", self.news()[-1])
+        self.commit_file(tid, "more.txt", "more\n")
+        self.bp("_event", blk, "idle", "", "")
+        self.assertEqual(self.show(tid)["status"], "triage")
+        self.assertIn("ended its turn without `ready`", self.news()[-1])
+
+    def test_compaction_then_a_turn_from_tell_still_counts(self):
+        tid = self.approved_task()
+        blk = self.block(tid)
+        self.bp("_event", blk, "idle", "", "")
+        self.compact(blk)
+        self.bp("tell", tid, "Handle the empty case too.")
+        self.assertEqual(self.show(tid)["status"], "working")
+        self.compacted(blk)  # the turn tell started ends: not a compaction's end
+        self.assertEqual(self.show(tid)["status"], "triage")  # as after any told turn: its next ready decides
+        self.assertIn("ended its turn without `ready`", self.news()[-1])
+
+    def test_check_leaves_a_compacting_agent_alone(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.bp("_event", blk, "working", "", "Fixing")
+        self.bp("_event", blk, "idle", "", "")
+        self.assertEqual(self.show(tid)["status"], "triage")
+        self.agent(blk, "working")
+        (self.fake / f"screen_{blk}").write_text(self.COMPACTING)
+        self.assertEqual(self.check(), [])
+        self.assertEqual(self.check("--fix"), [])
+        self.assertEqual(self.show(tid)["status"], "triage")
+        (self.fake / f"screen_{blk}").write_text("✶ Misting… (3s · esc to interrupt)\n")
+        self.assertEqual(self.check(), [f"{tid} is marked triage (ended its turn without saying ready) "
+                                        "but its agent is working again"])
+
+    def test_a_compacting_reviewer_stays_where_it_is(self):
+        tid = self.start_task()
+        self.commit_and_ready(tid)
+        reviewer = self.show(tid)["review"]["block"]
+        self.bp("_event", reviewer, "idle", "", "")
+        self.assertEqual(self.show(tid)["status"], "triage")
+        self.compact(reviewer)
+        self.assertEqual(self.show(tid)["status"], "triage")
+        self.agent(reviewer, "working")
+        self.assertEqual(self.check(), [])
+
     def test_the_workers_instructions_say_when_to_finish(self):
         tid = self.start_task()
         brief = self.full_brief(tid)
@@ -4056,6 +4164,23 @@ class WatcherTest(unittest.TestCase):
 
     def test_a_quiet_spell_is_due_once(self):
         self.assertEqual(self.lua(STUCK_LUA, lib=ROOT / "lua" / "stuck.lua"), "ok")
+
+    def test_the_watcher_passes_working_events_on_while_compacting(self):
+        state = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, state, ignore_errors=True)
+        (state / "blocks").mkdir()
+        entry = state / "blocks" / "blk1.json"
+        entry.write_text(json.dumps({"repo": "/r", "role": "BP-1", "stuck_after": 20}, indent=2))
+        script = WATCH_LUA.split("status(\"blk1\", \"working\", \"Reading\", 0)")[0] + """
+status("blk1", "working", "", 0)
+status("blk1", "working", "Dropped", 1)
+local f = io.open(args.state .. "/blocks/blk1.json", "w")
+f:write('{"repo": "/r", "role": "BP-1", "compacting": true}') f:close()
+status("blk1", "working", "Passed on", 2)
+return table.concat(calls, "|")
+"""
+        calls = self.lua(script, watch=ROOT / "lua" / "watch.lua", state=state).split("|")
+        self.assertEqual(calls, ["_event blk1 working  ", "_event blk1 working  Passed on"])
 
     def test_the_watcher_reports_and_clears_a_quiet_pane(self):
         state = Path(tempfile.mkdtemp())

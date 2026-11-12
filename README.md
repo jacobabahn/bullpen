@@ -379,6 +379,14 @@ watch) would hide it, so once it has been idle that way for `--stuck-after` minu
 (20 by default), `check` reports it, and the news says a shell still runs. `check` also hints at an idle worker with
 commits and a clean worktree that never ran `ready`; that one it leaves to you.
 
+An agent that compacts its conversation by itself (Claude Code's auto-compaction:
+`✽ Compacting conversation…` on its screen) says it's working, but that's no new
+turn. Bullpen goes by the screen and leaves the task as it was: a ready or finished
+task stays so, with its approval and summary, and a task in triage or waiting on you
+stays there. When the compaction ends, its end of turn gives no news either, and
+`check` sees no drift while it lasts. A real turn after it (typed input, `tell`, or
+the agent going on by itself) counts as usual.
+
 ### Usage limit
 
 All of bullpen's agents share one Claude subscription. When it runs out, a

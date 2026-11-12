@@ -43,6 +43,14 @@ local function stuck_after(block)
   return tonumber(e:match('"stuck_after":%s*(%d+)')) or 20
 end
 
+-- bullpen notes in the entry that the pane's agent is compacting its conversation
+-- (Claude Code calls that working): its working events go through then, as one of
+-- them may be the start of a real turn.
+local function compacting(block)
+  local e = entry(block)
+  return e ~= nil and e:match('"compacting":%s*true') ~= nil
+end
+
 local function call(...)
   local r, err = rex.exec({ "env", "BULLPEN_STATE=" .. state_dir, bin, ... })
   if not r then
@@ -63,7 +71,8 @@ rex.on("terminal.program_status_changed", function(ctx, ev)
   local woke = quiet.event(block, state == "working", os.time())
   -- working -> working with a new message is noise; a new blocked reason is not.
   -- But the first event after a reported quiet spell goes through, to clear it.
-  if not woke and prev and prev.state == state and (state ~= "blocked" or prev.msg == r.msg) then return end
+  if not woke and prev and prev.state == state and (state ~= "blocked" or prev.msg == r.msg)
+      and not (state == "working" and compacting(block)) then return end
   local n = (prev and prev.n or 0) + 1
   last[block] = { state = state, msg = r.msg, n = n }
   if state == "done" or state == "idle" then
