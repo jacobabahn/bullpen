@@ -6228,6 +6228,15 @@ class PushRemoteTest(unittest.TestCase):
         p = self.bp("config", "--global", "--unset", "push_remote", ok=False)
         self.assertIn("push_remote is this repository's own", p.stderr)
 
+    def test_doctor_writes_home_as_a_tilde_on_the_push_line(self):
+        self.env["HOME"] = str(self.tmp)
+        self.backup.rename(self.tmp / "moved.git")  # the remote's path, gone
+        _, lines = self.doctor()
+        self.assertEqual(lines["push"][0], "FAIL")
+        self.assertIn("~/backup.git", lines["push"][1])
+        self.assertNotIn(str(self.tmp), lines["push"][1])
+        self.assertRegex(self.bp("config").stdout, r"Tasks\n(  .*\n)*  push_remote +backup +repo\n")
+
     def test_a_missing_remote_in_doctor(self):
         self.bp("config", "--push-remote", "nope")
         _, lines = self.doctor()

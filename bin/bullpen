@@ -5267,7 +5267,7 @@ def config_value(v):
 # `config` lists the settings in these groups, in this order; one not named here goes
 # under "Other".
 CONFIG_GROUPS = [
-    ("Tasks", ["prefix", "base", "max_running", "merge", "rebase_others", "auto_accept",
+    ("Tasks", ["prefix", "base", "max_running", "merge", "rebase_others", "push_remote", "auto_accept",
                "setup", "teardown", "gh"]),
     ("Agents", ["worker", "coordinator_cmd", "reviewer", "tour", "workers", "worker_model",
                 "reviewer_model", "reviewer_followup_model", "tour_model"]),
