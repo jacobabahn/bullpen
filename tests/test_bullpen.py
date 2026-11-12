@@ -4564,6 +4564,272 @@ class BullpenTest(unittest.TestCase):
         self.assertIn("oops", log.read_text())
 
 
+FAKE_TOUR = textwrap.dedent("""\
+    #!/usr/bin/env python3
+    import os, sys
+    from pathlib import Path
+    d = Path(os.environ["FAKE_DIR"])
+    (d / "tour_prompt.md").write_text(sys.stdin.read())  # the prompt comes on stdin
+    with open(d / "tour.log", "a") as f:
+        f.write(" ".join(sys.argv[1:]) + "\\n")
+    out = d / "tour_out"  # what the tests make the agent answer
+    sys.stdout.write(out.read_text() if out.exists() else "")
+    sys.exit(int((d / "tour_exit").read_text()) if (d / "tour_exit").exists() else 0)
+""")
+
+
+class TourTest(unittest.TestCase):
+    """Guided review tours: the tour agent (a fake), the tour file, comments sent back."""
+
+    setUp_bullpen = BullpenTest.setUp
+    bp = BullpenTest.bp
+    rex_calls = BullpenTest.rex_calls
+    api = BullpenTest.api
+    typed = BullpenTest.typed
+    show = BullpenTest.show
+    start_task = BullpenTest.start_task
+    block = BullpenTest.block
+    commit_and_ready = BullpenTest.commit_and_ready
+    verdict = BullpenTest.verdict
+    news = BullpenTest.news
+    commit_file = BullpenTest.commit_file
+    ready = BullpenTest.ready
+
+    def setUp(self):
+        self.setUp_bullpen()
+        agent = self.fake / "tour-agent"
+        agent.write_text(FAKE_TOUR)
+        agent.chmod(0o755)
+        (self.tmp / "xdg" / "bullpen").mkdir(parents=True)
+        (self.tmp / "xdg" / "bullpen" / "config.json").write_text(json.dumps({"tour": [str(agent)]}))
+
+    def answer(self, steps):
+        (self.fake / "tour_out").write_text(json.dumps({"steps": steps}))
+
+    def agent_runs(self):
+        log = self.fake / "tour.log"
+        return len(log.read_text().splitlines()) if log.exists() else 0
+
+    def two_file_task(self):
+        """An approved task changing two files: a.txt in two hunks, b.txt in one."""
+        lines = [f"line {i}" for i in range(1, 31)]
+        (self.repo / "a.txt").write_text("\n".join(lines) + "\n")
+        sh("git", "-C", str(self.repo), "add", ".")
+        sh("git", "-C", str(self.repo), "commit", "-qm", "a.txt")
+        sh("git", "-C", str(self.repo), "push", "-q", "origin", "main")
+        tid = self.start_task()
+        lines[1], lines[25] = "line 2, changed", "line 26, changed"
+        self.commit_file(tid, "a.txt", "\n".join(lines) + "\n")
+        self.commit_and_ready(tid)  # adds fix1.txt
+        self.verdict(tid, "approve")
+        return tid
+
+    def tour_file(self, tid):
+        return json.loads(next((self.tmp / "state").rglob(f"{tid}.tour.json")).read_text())
+
+    def test_a_tour_of_a_ready_task_covers_every_hunk(self):
+        tid = self.two_file_task()
+        self.answer([{"title": "The fix", "note": "Why it changed.", "hunks": [{"file": "fix1.txt", "lines": [1, 1]}]},
+                     {"title": "The top of a.txt", "note": "Line 2.", "hunks": [{"file": "a.txt", "lines": [2, 2]},
+                                                                               {"file": "nope.txt", "lines": [1, 2]}]}])
+        path = self.bp("tour", tid, "--wait").stdout.strip()
+        self.assertTrue(path.endswith(f"{tid}.tour.json"))
+        tour = self.tour_file(tid)
+        wt = self.show(tid)["worktree"]
+        self.assertEqual(tour["commit"], sh("git", "-C", wt, "rev-parse", "HEAD").strip())
+        self.assertTrue(tour["patch"])
+        self.assertEqual(tour["model"], None)  # not claude: no --model
+        self.assertEqual([s["title"] for s in tour["steps"]], ["The fix", "The top of a.txt", "Other changes"])
+        self.assertEqual(tour["steps"][1]["hunks"], [{"file": "a.txt", "lines": [2, 2]}])  # nope.txt left out
+        self.assertEqual(tour["steps"][2]["hunks"], [{"file": "a.txt", "lines": [23, 29]}])  # the hunk at line 26
+        prompt = (self.fake / "tour_prompt.md").read_text()
+        for given in ("Make it work.", "Did it.", "Looks right.", "+line 26, changed", "- a.txt: 1-5, 23-29"):
+            self.assertIn(given, prompt)
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["tour"]["state"]), ("ready", "written"))
+        # a current tour: its path, and no new agent
+        self.assertEqual(self.bp("tour", tid).stdout.strip(), path)
+        self.assertEqual(self.agent_runs(), 1)
+        shown = json.loads(self.bp("tour", tid, "--show", "--json").stdout)
+        self.assertEqual((shown["state"], len(shown["steps"])), ("current", 3))
+        self.assertEqual(shown["steps"][2]["files"], "a.txt 23-29")
+        step = self.bp("tour", tid, "--step", "3").stdout
+        self.assertIn("diff --git a/a.txt b/a.txt", step)
+        self.assertIn("+line 26, changed", step)
+        self.assertNotIn("line 2, changed", step)  # step 2's hunk, from git
+        step = json.loads(self.bp("tour", tid, "--step", "2", "--json").stdout)
+        self.assertEqual((step["title"], step["note"]), ("The top of a.txt", "Line 2."))
+        self.assertIn("+line 2, changed", step["diff"])
+        self.assertEqual(self.news()[-1], "bullpen · BP-1 is ready (2 commits, PR #7), approved by "
+                         "light review (5 lines in 2 files): Fix the thing")  # a tour is no news
+
+    def test_a_tour_is_refused_while_the_task_is_working(self):
+        tid = self.start_task()
+        p = self.bp("tour", tid, ok=False)
+        self.assertIn("is working: a tour is only for a task that is ready or in review", p.stderr)
+        self.assertEqual(self.agent_runs(), 0)
+        self.assertNotIn("tour", self.show(tid))
+
+    def test_a_tour_of_a_task_in_review_runs_in_the_background(self):
+        tid = self.start_task()
+        self.commit_and_ready(tid)
+        self.assertEqual(self.show(tid)["status"], "review")
+        self.answer([{"title": "All of it", "note": "n", "hunks": [{"file": "fix1.txt"}]}])
+        self.assertIn("writing a tour of BP-1 in the background", self.bp("tour", tid).stdout)
+        for _ in range(100):
+            if self.show(tid)["tour"]["state"] != "writing":
+                break
+            time.sleep(0.1)
+        self.assertEqual(self.show(tid)["tour"]["state"], "written")
+        self.assertEqual([s["title"] for s in self.tour_file(tid)["steps"]], ["All of it"])
+        self.assertEqual(self.show(tid)["status"], "review")
+
+    def test_a_tour_stays_current_after_a_clean_rebase_and_goes_stale_when_the_code_changes(self):
+        tid = self.two_file_task()
+        self.answer([{"title": "All", "note": "n", "hunks": [{"file": "a.txt"}, {"file": "fix1.txt"}]}])
+        path = self.bp("tour", tid, "--wait").stdout.strip()
+        wt = self.show(tid)["worktree"]
+        (self.repo / "other.txt").write_text("other\n")
+        sh("git", "-C", str(self.repo), "add", ".")
+        sh("git", "-C", str(self.repo), "commit", "-qm", "Other work")
+        sh("git", "-C", str(self.repo), "push", "-q", "origin", "main")
+        sh("git", "-C", wt, "fetch", "-q", "origin")
+        sh("git", "-C", wt, "rebase", "-q", "origin/main")
+        self.assertNotEqual(sh("git", "-C", wt, "rev-parse", "HEAD").strip(), self.tour_file(tid)["commit"])
+        shown = json.loads(self.bp("tour", tid, "--show", "--json").stdout)
+        self.assertEqual(shown["state"], "current")  # the same patch
+        self.assertIn("+line 26, changed", self.bp("tour", tid, "--step", "1").stdout)
+        self.commit_file(tid, "fix1.txt", "fixed better\n")
+        shown = json.loads(self.bp("tour", tid, "--show", "--json").stdout)
+        self.assertEqual(shown["state"], "stale")
+        self.assertIn("the code changed since the tour was written", shown["why"])
+        p = self.bp("tour", tid)
+        self.assertEqual(p.stdout.strip(), path)  # the old one, said to be stale
+        self.assertIn("is stale", p.stderr)
+        self.assertIn(f"`bullpen tour {tid} --new`", p.stderr)
+        self.assertEqual(self.agent_runs(), 1)
+        self.bp("tour", tid, "--new", "--wait")
+        self.assertEqual(self.agent_runs(), 2)
+        self.assertEqual(json.loads(self.bp("tour", tid, "--show", "--json").stdout)["state"], "current")
+
+    def test_a_failed_tour_is_a_line_on_the_board_and_g_retries(self):
+        tid = self.two_file_task()
+        before = len(self.typed())
+        (self.fake / "tour_out").write_text("Here is your tour! It's great.")
+        p = self.bp("tour", tid, "--wait", ok=False)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("doesn't parse", p.stderr)
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["tour"]["state"]), ("ready", "failed"))
+        self.assertTrue(t["note"].startswith("tour failed: its tour doesn't parse"))
+        self.assertIn("Here is your tour!", next((self.tmp / "state").rglob(f"{tid}.tour.log")).read_text())
+        self.assertEqual(len(self.typed()), before)  # no news
+        (self.fake / "tour_out").write_text('{"steps": [{"title": "x", "note": "y", "hunks": "a.txt"}]}')
+        self.assertIn("isn't in the format: step 1's note must be text and its hunks a list",
+                      self.bp("tour", tid, "--wait", ok=False).stderr)
+        (self.fake / "tour_exit").write_text("3")
+        self.assertIn("the agent exited with 3", self.bp("tour", tid, "--wait", ok=False).stderr)
+        (self.fake / "tour_exit").unlink()
+        self.answer([{"title": "x", "note": "y", "hunks": []}])
+        self.bp("tour", tid, "--wait")
+        t = self.show(tid)
+        self.assertEqual((t["tour"]["state"], t["note"]), ("written", None))
+        self.assertEqual([s["title"] for s in self.tour_file(tid)["steps"]], ["x", "Other changes"])
+        # a writer that died is a failure too, not a tour forever being written
+        state = next((self.tmp / "state").rglob(f"tasks/{tid}.json"))
+        t = json.loads(state.read_text())
+        state.write_text(json.dumps({**t, "tour": {"state": "writing", "pid": 999999999}}))
+        shown = json.loads(self.bp("tour", tid, "--show", "--json").stdout)
+        self.assertEqual(shown["state"], "failed")
+        self.assertIn("stopped before the tour was written", shown["why"])
+
+    def toured(self):
+        tid = self.two_file_task()
+        self.answer([{"title": "The fix", "note": "n", "hunks": [{"file": "fix1.txt", "lines": [1, 1]}]},
+                     {"title": "a.txt", "note": "n", "hunks": [{"file": "a.txt", "lines": [2, 2]},
+                                                              {"file": "a.txt", "lines": [26, 26]}]}])
+        self.bp("tour", tid, "--wait")
+        return tid
+
+    def test_comments_are_drafts_until_sent_back_to_the_worker(self):
+        tid = self.toured()
+        worker = self.block(tid)
+        self.assertEqual(self.bp("tour-comment", tid, "1", "Say", "why", "fixed.").stdout.strip(), "1")
+        self.bp("tour-comment", tid, "2", "Line 26 should stay as it was.")
+        self.bp("tour-comment", tid, "2", "A typo.")
+        self.bp("tour-comment", tid, "--remove", "3")
+        listed = json.loads(self.bp("tour-comment", tid, "--json").stdout)
+        self.assertEqual([(c["id"], c["step"], c["text"]) for c in listed],
+                         [(1, 1, "Say why fixed."), (2, 2, "Line 26 should stay as it was.")])
+        self.assertIn("steps 1 to 2", self.bp("tour-comment", tid, "5", "x", ok=False).stderr)
+        shown = json.loads(self.bp("tour", tid, "--show", "--json").stdout)
+        self.assertEqual((shown["comments"], [s["comments"] for s in shown["steps"]]), (2, [1, 1]))
+        self.assertIn("sent 2 comments", self.bp("tour", tid, "--send").stdout)
+        t = self.show(tid)
+        self.assertEqual(t["status"], "working")
+        sent = Path(t["tour_sent"]["file"])
+        self.assertEqual(sent.name, "BP-1.tour-1.comments.md")
+        text = sent.read_text()
+        self.assertIn("## Comment 1: step 1, The fix\n\nFiles: fix1.txt 1-1", text)
+        self.assertIn("## Comment 2: step 2, a.txt\n\nFiles: a.txt 2-2, a.txt 26-26", text)
+        self.assertIn("Line 26 should stay as it was.", text)
+        block, line = self.typed()[-2]
+        self.assertEqual(block, worker)
+        self.assertIn(f"Read {sent}, address each comment", line)
+        self.assertEqual(self.news()[-1], "bullpen · BP-1 sent back by the person after the tour: 2 comments")
+        self.assertEqual(json.loads(self.bp("tour-comment", tid, "--json").stdout), [])  # no drafts left
+        self.assertIn("is working", self.bp("tour", tid, "--send", ok=False).stderr)
+
+    def test_the_review_of_the_persons_comments_doesnt_count_toward_the_rounds(self):
+        tid = self.toured()  # round 1 approved
+        self.bp("config", "--review-rounds", "1")
+        self.bp("tour-comment", tid, "2", "Keep line 26.")
+        self.bp("tour", tid, "--send")
+        self.commit_file(tid, "a.txt", "".join(f"line {i}\n" for i in range(1, 31)).replace("line 2\n", "line 2, changed\n"))
+        self.assertIn("checks that the person's comments are addressed", self.ready(tid).stdout)
+        r = self.show(tid)["review"]
+        self.assertEqual((r["round"], r["kind"], r["tour"]), (1, "tour", 1))  # still round 1
+        prompt = next((self.tmp / "state").rglob(f"{tid}.tour-1.review.md")).read_text()
+        self.assertIn("Keep line 26.", prompt)
+        self.assertIn("-line 26, changed", prompt)  # what changed since they were sent
+        self.assertIn("confirm that each of the person's comments is addressed", prompt)
+        # round 1 of 1 is used, yet its changes go back to the worker
+        self.verdict(tid, "changes", "Line 26 still differs.")
+        t = self.show(tid)
+        self.assertEqual(t["status"], "working")
+        self.assertNotIn("tour_sent", t)
+        self.assertIn("BP-1.tour-1.review.findings.md", self.typed()[-1][1])
+        self.assertIn("the person's comments aren't all addressed", self.typed()[-1][1])
+        # the next ready is a follow-up of that review, and counts
+        self.commit_file(tid, "fix1.txt", "fixed again\n")
+        self.ready(tid)
+        r = self.show(tid)["review"]
+        self.assertEqual((r["round"], r["kind"]), (2, "followup"))
+        self.verdict(tid, "approve")
+        self.assertIn("approved by follow-up review", self.news()[-1])
+
+    def test_an_approved_review_of_the_comments_makes_it_ready(self):
+        tid = self.toured()
+        self.bp("tour-comment", tid, "1", "Fine, but say why.")
+        self.bp("tour", tid, "--send")
+        self.ready(tid)  # the worker disagreed and changed nothing: still reviewed
+        r = self.show(tid)["review"]
+        self.assertEqual((r["round"], r["kind"]), (1, "tour"))
+        self.verdict(tid, "approve")
+        t = self.show(tid)
+        self.assertEqual(t["status"], "ready")
+        self.assertIn("approved by review of the person's comments", self.news()[-1])
+
+    def test_tour_model_is_a_layered_setting(self):
+        self.assertEqual(json.loads(self.bp("config", "--json").stdout)["tour_model"], "sonnet")
+        self.bp("config", "--global", "--tour-model", "haiku")
+        cfg = json.loads(self.bp("config", "--json").stdout)
+        self.assertEqual((cfg["tour_model"], cfg["sources"]["tour_model"]), ("haiku", "global"))
+        self.bp("config", "--tour-model", "opus")
+        cfg = json.loads(self.bp("config", "--json").stdout)
+        self.assertEqual((cfg["tour_model"], cfg["sources"]["tour_model"]), ("opus", "repo"))
+
+
 class LocalModeTest(unittest.TestCase):
     """A repository without an origin remote: no push, no gh; accept merges locally."""
 

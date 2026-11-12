@@ -99,6 +99,16 @@ anything against its base. The person reads the summary and closes the task
 pane. A finished task whose worker starts working again is working again, and
 has to run `finish` (or `ready`) again.
 
+The person can ask for a guided tour of a ready task (or one in review): `bullpen
+tour <ID>` starts a cheap agent that writes the change out in reading order, one
+step per logical change with a note on each. They step through it, comment on
+steps, and send the comments back (`bullpen tour <ID> --send`): the task goes back
+to working, its worker gets them as a findings-style file, and you get a news line
+for information only ("BP-3 sent back by the person after the tour: 2 comments").
+Nothing to do: its next `ready` gets a review of the person's comments, which
+doesn't count toward the review rounds. Don't start tours yourself unless the
+person asks, and a failed tour is no news (the board shows it).
+
 The person can accept (or close a finished task) and drop from the task board
 too (`a`, `d`); `c` there only brings them back to you. News tells you when they
 do (see below).

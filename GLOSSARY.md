@@ -34,3 +34,10 @@ _Avoid_: reason (for the recorded stop), needs (for any stop).
 **Ok**: the coordinator has seen to a triage stop (`bullpen ok`). The task goes back to working, or to review for a reviewer's stop, and its idle agent isn't a stop again until its next turn.
 
 **Hand back**: give the worker a message to act on (review findings, a rebase conflict, PR feedback, carrying on after the usage limit), typing it into its pane or resuming it in a new one. The task is working again once the message reaches the worker.
+
+## Reviewing a change
+
+**Tour**: a guided walk through a ready (or in-review) task's change, written on request by a cheap headless agent (`bullpen tour`): its steps in reading order, tied to the commit it was written on. It is **current** while the patch is the same, else **stale**. The person's comments on it go back to the worker with `tour --send`.
+_Avoid_: walkthrough, guide (the coordinator's guide is `bullpen guide`).
+
+**Step**: one logical change in a tour: a title, a note on why it changed and what to look at, and the hunks it covers (file and line ranges), shown from git. A last step, "Other changes", holds any hunk no other step covers. A comment is on one step.

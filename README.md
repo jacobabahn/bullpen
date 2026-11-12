@@ -403,6 +403,61 @@ A reviewer whose turn ends while a background shell of its own still runs (the t
 say) is busy, not stopped, like a worker: it stays in review. Past `stuck_after`
 minutes with the shell still running, `check` counts it as stopped without a verdict.
 
+### Guided review tours
+
+A larger change reads better in order. `bullpen tour BP-3` asks a cheap agent for a
+**tour** of a ready task (or one in review): the change in reading order, one
+**step** per logical change, each with a title, a note on why it changed and what
+to look at, and the hunks it covers. The design is in
+[docs/prd/guided-review.md](docs/prd/guided-review.md); the board's stepper (`g`,
+`c`) comes in its part 2.
+
+```sh
+bullpen tour BP-3             # with a current tour, its path; else start writing one
+bullpen tour BP-3 --wait      # write it now, and print its path
+bullpen tour BP-3 --new       # a new tour, even though there is one
+bullpen tour BP-3 --show      # its state (writing, failed, current, stale or none) and steps; --json
+bullpen tour BP-3 --step 2    # step 2's hunks, from git, as a patch (--json: with its title and note)
+bullpen tour-comment BP-3 2 "Line 40 should log the error."   # a draft comment on step 2
+bullpen tour-comment BP-3     # the drafts (--json); --remove N removes one
+bullpen tour BP-3 --send      # send the drafts back to the worker
+```
+
+- **Only on request**, and only for a task that is ready or in review: a working
+  task's code is still changing. `tour` starts the agent in the background (with a
+  note on the task that it's being written, for the board) and returns.
+- **The agent** runs headless (`claude -p`) in the task's worktree, on `tour_model`
+  (`config --tour-model`, sonnet by default; `--global` for every repository). Its
+  command is `tour` in `config.json` (`claude`). It gets the diff against the base,
+  the brief, the worker's summary and the review findings, may only read files and
+  run `git diff`, `log` and `show`, and answers with the tour as JSON: bullpen writes
+  the file. It doesn't count toward `max_running`.
+- **The tour file** is `briefs/<ID>.tour.json`: the commit and patch-id it was
+  written on, and its steps, each `{"title", "note", "hunks": [{"file", "lines":
+  [start, end]}]}` (lines in the new file; a binary file has none). Hunks that
+  match nothing in the diff are left out, and any hunk no step covers goes into a
+  last step, "Other changes". Code is always shown from git (`--step`), never from
+  the agent's text.
+- **Current or stale.** A tour stays current while the patch is the same: the same
+  commit, or the same patch-id after a clean rebase, as review approvals carry over.
+  Otherwise it is stale: `tour` prints the old one's path and says so, and `--new`
+  writes another.
+- **A failed tour** (the agent failed, or its answer isn't a tour) is a line on the
+  task on the board, "tour failed: <why>", with the agent's output in
+  `briefs/<ID>.tour.log`. No news, no triage: `tour` again retries.
+- **Comments** are drafts per task and step (`briefs/<ID>.tour-comments.json`), each
+  keeping its step's title, files and lines. `tour --send` writes them to
+  `briefs/<ID>.tour-<n>.comments.md`, one section per comment with its step, files
+  and lines, tells the worker to read it and address each one, and puts the task
+  back to working (closing a reviewer that was on it). The coordinator gets a news
+  line for information: `BP-3 sent back by the person after the tour: 2 comments`.
+- **Their review.** The worker's next `ready` gets a review of the person's comments
+  (with review on): the reviewer gets the comments and the diff since they were sent,
+  and checks that each is addressed. It keeps the round it follows, so it doesn't count
+  toward `review_rounds`, and its findings always go back to the worker; a later round
+  follows up on them as usual. An approval doesn't carry it over: the comments are
+  reviewed even if the code didn't change.
+
 ### Finish with nothing to merge
 
 Some tasks leave nothing in the repository: a video, research notes, an answer.
@@ -741,7 +796,9 @@ Boards started before this change don't reload themselves: close them and run
 
 - Tasks, briefs, settings and your own rules: `~/.local/state/bullpen/repos/<repo>/` (`BULLPEN_STATE` moves it).
 - Settings for every repository: `~/.config/bullpen/config.json` (`XDG_CONFIG_HOME` moves it). See [Settings](#settings).
-  Setup and teardown logs are in `briefs/` there, as `<ID>.setup.log` and `<ID>.teardown.log`.
+  Setup and teardown logs are in `briefs/` there, as `<ID>.setup.log` and `<ID>.teardown.log`,
+  and tours with their drafts and logs as `<ID>.tour.json`, `<ID>.tour-comments.json` and
+  `<ID>.tour.log` (see [Guided review tours](#guided-review-tours)).
 - Worktrees: `<repo>-bullpen/<ID>` next to the repository.
 - News: `news.log` beside the tasks (each line names the coordinators it is for,
   as `[c1]`), with `news-<id>.cursor` (how far each coordinator's `bullpen news`
@@ -773,7 +830,7 @@ bullpen config --global --unset merge    # and the global one back to the defaul
 `review_rounds`). `--global` works outside a repository too. The prefix, the base
 branch, the news mode and the coordinators belong to one repository, so `--global`
 refuses `--prefix`, `--base`, `--news` and `--board-others`. The commands
-(`worker`, `reviewer`, `coordinator_cmd`) and `rebase_others` have no flags: set them
+(`worker`, `reviewer`, `coordinator_cmd`, `tour`) and `rebase_others` have no flags: set them
 in either `config.json` by hand.
 
 A repository's `config.json` holds only what it sets itself. One from before the
@@ -802,7 +859,8 @@ there stops `accept` rebasing the other open tasks (see [After accept](#after-ac
 
 `bullpen config --model opus` sets the model for workers and reviewers (follow-up
 and light reviews too); `--worker-model`, `--reviewer-model` and
-`--reviewer-followup-model` set one each. It takes anything `claude --model`
+`--reviewer-followup-model` set one each (`--tour-model` the tour agent's, see
+[Guided review tours](#guided-review-tours)). It takes anything `claude --model`
 does (an alias like `opus`, or a full model ID), and `default` lets Claude Code pick
 again. Bullpen adds `--model` when it starts an agent, in place of any `--model` in its
 command; it leaves other agents' commands alone. (To use a `--model` written in the

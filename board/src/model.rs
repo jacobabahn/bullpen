@@ -52,7 +52,7 @@ pub struct Limit {
 pub struct Review {
     pub round: Option<u32>,
     pub verdict: Option<String>,
-    /// "full", "light" or "followup"
+    /// "full", "light", "followup" or "tour" (of the person's comments after a tour)
     #[serde(default, deserialize_with = "lenient")]
     pub kind: Option<String>,
     /// the reviewer's pane
@@ -132,6 +132,7 @@ impl Review {
             Some("full") => "full review",
             Some("light") => "light review",
             Some("followup") => "follow-up review",
+            Some("tour") => "review of your comments",
             _ => "review",
         }
     }
@@ -1355,6 +1356,8 @@ pub(crate) mod tests {
         assert_eq!(task_detail(&t, 2, now()), "Light review on round 1 of 2.");
         let t = Task { review: Some(kind("followup", None)), ..task("BP-1", "review") };
         assert_eq!(task_detail(&t, 2, now()), "Follow-up review on round 1 of 2.");
+        let t = Task { review: Some(kind("tour", None)), ..task("BP-1", "review") };
+        assert_eq!(task_detail(&t, 2, now()), "Review of your comments on round 1 of 2.");
         let t = Task { pr: Some("https://x/pull/4".into()), review: Some(kind("full", Some("approved"))), ..task("BP-1", "ready") };
         assert_eq!(task_detail(&t, 2, now()), "PR #4, approved by full review.");
         let t = Task { pr: Some("https://x/pull/4".into()), review: Some(kind("light", Some("approved"))), ..task("BP-1", "ready") };

@@ -56,6 +56,8 @@ DEFAULT_CONFIG = {
     "worker_model": None,    # claude's --model for workers ("default": none; None: the command's own)
     "reviewer_model": None,  # the same for reviewers (a full first review)
     "reviewer_followup_model": "sonnet",  # for later rounds and light reviews (None: reviewer_model)
+    "tour": ["claude"],      # the agent that writes guided review tours, run headless (claude -p)
+    "tour_model": "sonnet",  # its --model ("default": none)
     "light_review_lines": 40,  # a change this small (lines, in at most 2 files) gets a light review
     "auto_accept": False,    # accept a task by itself once review approves it
     "triage_minutes": 10,    # minutes a task can wait on its coordinator before it needs the person
@@ -2265,6 +2267,8 @@ def cmd_ready(args):
     t.pop("rebased", None)  # what the board says of a rebase after an accept
     t.pop("from_ready", None)
     local = not repo.has_origin()
+    if not repo.cfg.get("review", True):
+        t.pop("tour_sent", None)  # no reviewer checks the person's comments with review off
     base_ref = task_base_ref(repo, t)
     ahead = int(git(wt, "rev-list", "--count", f"{base_ref}..HEAD").stdout.strip())
     if ahead == 0:
@@ -2389,6 +2393,11 @@ def review_at_ready(repo, t, base_ref):
     """ready with review on: keep an approval that still covers the code, leave a reviewer
     that is on this very commit, or start a review. Returns what to tell the worker."""
     r = t.get("review") or {}
+    if t.get("tour_sent"):
+        # the person sent comments back after a tour: a review checks them, whatever the code
+        start_review(repo, t, base_ref)
+        return (f"A reviewer checks that the person's comments are addressed now: end your turn, and "
+                f"you'll hear back if it asks for changes.")
     kept = approval_kept(t, base_ref)
     if kept:
         keep_approval(t, base_ref)
@@ -2503,7 +2512,8 @@ def review_kind(r):
     kind = r.get("kind")
     if not kind:
         return "review"
-    word = {"full": "full review", "light": "light review", "followup": "follow-up review"}[kind]
+    word = {"full": "full review", "light": "light review", "followup": "follow-up review",
+            "tour": "review of the person's comments"}[kind]
     return word + (f" ({r['why']})" if r.get("why") else "")
 
 
@@ -2561,17 +2571,22 @@ def review_label(t):
 def start_review(repo, t, base_ref):
     """Start a reviewer agent on the task's branch, in its own capsule. The first round is
     a full review, or a light one for a small change; later rounds follow up on the last
-    verdict: its findings and what changed since."""
+    verdict: its findings and what changed since. Comments the person sent back after a
+    tour (tour_sent) get a review of their own, which keeps the round it follows: it
+    doesn't count toward review_rounds."""
     old = t.get("review") or {}
     close_reviewer(t)
-    n = old.get("round", 0) + 1
+    sent = t.get("tour_sent")
+    n = old.get("round", 0) + (0 if sent else 1)
     rounds = repo.cfg.get("review_rounds", 2)
     briefs = repo.dir / "briefs"
     wt = t["worktree"]
     # the round the next one follows up on: the last one with a verdict
     prev = ({k: old.get(k) for k in ("round", "commit", "base", "findings", "verdict")}
             if old.get("verdict") else old.get("prev"))
-    if prev and prev.get("commit"):
+    if sent:
+        kind, why = "tour", None
+    elif prev and prev.get("commit"):
         kind, why = "followup", None
     else:
         prev = None
@@ -2579,7 +2594,12 @@ def start_review(repo, t, base_ref):
     vals = dict(id=t["id"], title=t["title"], round=n, rounds=rounds, brief=briefs / f"{t['id']}.md",
                 worktree=wt, branch=t["branch"], base_ref=base_ref, bin=SELF,
                 summary=t.get("summary") or "(none)", rules=review_rules(repo, t), why=why or "")
-    if prev:
+    if sent:
+        since, diff = since_last(wt, base_ref, sent)
+        f = Path(sent["file"])
+        vals.update(since=since, diff=diff, comments_file=f, count=sent["count"],
+                    comments=f.read_text().strip() if f.is_file() else "(the file is gone)")
+    elif prev:
         since, diff = since_last(wt, base_ref, prev)
         f = Path(prev["findings"]) if prev.get("findings") else None
         vals.update(prev_round=prev["round"], since=since, diff=diff, findings_file=f or "(none)",
@@ -2587,7 +2607,7 @@ def start_review(repo, t, base_ref):
                     prev_said="approved the change. Its notes" if prev["verdict"] == "approved"
                     else "asked for changes. Its findings")
     look = (PROMPTS / f"review-{kind}.md").read_text().format(**vals)
-    prompt = briefs / f"{t['id']}.review-{n}.md"
+    prompt = briefs / (f"{t['id']}.tour-{sent['n']}.review.md" if sent else f"{t['id']}.review-{n}.md")
     prompt.write_text((PROMPTS / "reviewer.md").read_text().format(
         **vals, kind=review_kind({"kind": kind, "why": why}), look=look))
     first = f"You are the reviewer for bullpen task {t['id']}. Read {prompt} and follow it."
@@ -2602,7 +2622,7 @@ def start_review(repo, t, base_ref):
     set_status(t, "review")
     t.update(review={
         "round": n, "block": block, "session": session, "verdict": None, "findings": None,
-        "kind": kind, "why": why, "model": model, "prev": prev,
+        "kind": kind, "why": why, "model": model, "prev": prev, **({"tour": sent["n"]} if sent else {}),
         "commit": head(wt), "base": merge_base(wt, base_ref), "patch": patch_id(wt, base_ref)})
     repo.save_task(t)
 
@@ -2631,7 +2651,9 @@ def cmd_verdict(args):
     if t["status"] not in ("review", *WAITING) or not r.get("block"):
         raise Fail(f"{t['id']} isn't in review")
     text = summary_text(args, "findings")
-    findings = repo.dir / "briefs" / f"{t['id']}.review-{r['round']}.findings.md"
+    tour = r.get("kind") == "tour"
+    findings = repo.dir / "briefs" / (f"{t['id']}.tour-{r['tour']}.review.findings.md" if tour
+                                      else f"{t['id']}.review-{r['round']}.findings.md")
     findings.write_text(text + "\n")
     rounds = repo.cfg.get("review_rounds", 2)
     r.update(verdict="approved" if args.verdict == "approve" else "changes", findings=str(findings))
@@ -2640,6 +2662,8 @@ def cmd_verdict(args):
     r["block"] = None
     pr = where(t)
     t.pop("auto_wait", None)  # a new verdict decides again
+    if tour:
+        t.pop("tour_sent", None)  # reviewed: the next review follows up on this one
     if args.verdict == "approve":
         set_status(t, "ready")
         repo.save_task(t)
@@ -2648,10 +2672,11 @@ def cmd_verdict(args):
         else:
             news(repo, t, "ready", f"{t['id']} is ready ({commits(t.get('commits') or 0)}, {pr}), "
                  f"approved by {review_kind(r)}: {t['title']}")
-    elif r["round"] < rounds:
-        msg = (f"The reviewer asked for changes (review round {r['round']} of {rounds}). Read "
-               f"{findings}, fix what you agree with, commit, and run your ready command again. "
-               f"If you disagree with a finding, say why in your ready summary.")
+    elif tour or r["round"] < rounds:
+        said = ("The reviewer says the person's comments aren't all addressed yet" if tour else
+                f"The reviewer asked for changes (review round {r['round']} of {rounds})")
+        msg = (f"{said}. Read {findings}, fix what you agree with, commit, and run your ready command "
+               f"again. If you disagree with a finding, say why in your ready summary.")
         if t.get("gh"):
             t["gh"].pop("sent", None)  # it's the review it is fixing now, not GitHub
         try:
@@ -2672,6 +2697,576 @@ def cmd_verdict(args):
     print(f"verdict recorded: {args.verdict}")
     sys.stdout.flush()
     rex_close(*reviewer)  # last: this closes the pane we may be running in
+
+
+# ---------- guided review tours ----------
+#
+# On request (`bullpen tour BP-3`, the board's g), a cheap headless agent writes a
+# tour of a ready or in-review task's change: its steps in reading order, each a
+# title, a note and the hunks it covers (file and line ranges). The agent only reads:
+# it prints the tour as JSON and bullpen writes the file (briefs/<ID>.tour.json),
+# adding a last step, "Other changes", for any hunk no step covers. Code is always
+# shown from git, never from the agent's text. A tour is tied to the commit it was
+# written on: it stays current while the patch is the same (as approvals do), and is
+# stale otherwise. The person's comments on its steps are drafts
+# (briefs/<ID>.tour-comments.json) until `tour --send` sends them to the worker as a
+# findings-style file; its next ready gets a review of them that doesn't count toward
+# review_rounds. t["tour"] says whether a tour is being written ("writing", with the
+# pid writing it), was written, or failed (with why).
+
+TOUR_TOOLS = ["Read", "Grep", "Glob", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
+              "Bash(git status:*)", "Bash(git blame:*)", "Bash(git ls-files:*)"]
+TOUR_TIMEOUT = 20 * 60  # seconds before a tour agent counts as failed
+MAX_TOUR_DIFF_LINES = 3000  # longer, and the agent reads the diff with git itself
+OTHER_CHANGES = "Other changes"
+
+
+def tour_path(repo, t):
+    return repo.dir / "briefs" / f"{t['id']}.tour.json"
+
+
+def tour_log(repo, t):
+    return repo.dir / "briefs" / f"{t['id']}.tour.log"
+
+
+def comments_path(repo, t):
+    return repo.dir / "briefs" / f"{t['id']}.tour-comments.json"
+
+
+HUNK_RE = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+
+def git_path(line, prefix):
+    """The path in a `--- a/x` or `+++ b/x` line, or None for /dev/null."""
+    p = line[4:].rstrip("\t")
+    return p[len(prefix):] if p.startswith(prefix) else None
+
+
+def diff_files(wt, base, commit):
+    """The diff from base to commit as a list of files, each {"file", "head": its header
+    lines, "hunks": [{"old": (start, count), "new": (start, count), "text"}], "deleted"}.
+    A binary file has a header and no hunks."""
+    text = git(wt, "-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff",
+               "--src-prefix=a/", "--dst-prefix=b/", base, commit).stdout
+    files = []
+    for line in text.split("\n"):
+        if line.startswith("diff --git "):
+            s = line[len("diff --git a/"):]
+            half = (len(s) - 3) // 2
+            files.append({"file": s[:half] if s[half:half + 3] == " b/" else s, "head": [line],
+                          "hunks": [], "deleted": False})
+            continue
+        if not files:
+            continue
+        f = files[-1]
+        m = HUNK_RE.match(line)
+        if m:
+            o, oc, n, nc = m.groups()
+            f["hunks"].append({"old": (int(o), int(1 if oc is None else oc)),
+                               "new": (int(n), int(1 if nc is None else nc)), "text": [line]})
+        elif f["hunks"]:
+            f["hunks"][-1]["text"].append(line)
+        else:
+            f["head"].append(line)
+            if line.startswith("+++ "):
+                f["file"] = git_path(line, "b/") or f["file"]
+            elif line.startswith("rename to "):
+                f["file"] = line[len("rename to "):]
+            elif line.startswith("deleted file"):
+                f["deleted"] = True
+    for f in files:
+        for h in f["hunks"]:
+            while h["text"] and h["text"][-1] == "":
+                h["text"].pop()  # the diff's last newline
+            h["text"] = "\n".join(h["text"])
+    return files
+
+
+def span(start_count):
+    start, count = start_count
+    start = max(start, 1)
+    return start, start + max(count, 1) - 1
+
+
+def lines_of(f, h):
+    """The lines a hunk covers, as the tour names them: in the new file, or in the old
+    one for a deleted file."""
+    return list(span(h["old"] if f["deleted"] else h["new"]))
+
+
+def covers(ref, f, h):
+    """Does a tour's hunk reference {"file", "lines"} cover hunk h of file f?"""
+    if ref["file"] != f["file"]:
+        return False
+    if not ref.get("lines"):
+        return True  # the whole file
+    a, b = ref["lines"]
+    sides = [h["new"]] if not f["deleted"] else []
+    if f["deleted"] or h["new"][1] == 0:
+        sides.append(h["old"])  # lines it only removes are named by their old numbers
+    return any(a <= hi and lo <= b for lo, hi in map(span, sides))
+
+
+def ref_lines(v):
+    """A hunk reference's lines, as [start, end]: from [a, b], [a], a or "a-b". None for
+    the whole file. Raises ValueError for anything else."""
+    if v is None:
+        return None
+    if isinstance(v, str):
+        v = [int(x) for x in v.split("-", 1)]
+    if isinstance(v, int) and not isinstance(v, bool):
+        v = [v]
+    if not isinstance(v, list) or not 1 <= len(v) <= 2 or not all(type(x) is int for x in v):
+        raise ValueError(f"lines must be [start, end], not {json.dumps(v)}")
+    a, b = v[0], v[-1]
+    return [min(a, b), max(a, b)]
+
+
+def tour_json(text):
+    """The tour object in an agent's output: the whole of it, else the outermost {...}
+    in it (an agent may wrap it in a code fence or a sentence)."""
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except ValueError:
+        pass
+    a, b = text.find("{"), text.rfind("}")
+    if a < 0 or b < a:
+        raise ValueError("no JSON object in its output")
+    return json.loads(text[a:b + 1])
+
+
+def tour_steps(data, files):
+    """The steps of an agent's tour, checked, with only the hunk references that match
+    the diff, then "Other changes" for each hunk no step covers. Raises ValueError for
+    a tour that isn't the format. Returns (steps, references dropped)."""
+    steps = data.get("steps") if isinstance(data, dict) else None
+    if not isinstance(steps, list) or not steps:
+        raise ValueError("it has no list of steps")
+    out, dropped, covered = [], [], set()
+    for i, s in enumerate(steps, 1):
+        if not isinstance(s, dict) or not isinstance(s.get("title"), str) or not s["title"].strip():
+            raise ValueError(f"step {i} has no title")
+        if not isinstance(s.get("note", ""), str) or not isinstance(s.get("hunks", []), list):
+            raise ValueError(f"step {i}'s note must be text and its hunks a list")
+        refs = []
+        for r in s.get("hunks", []):
+            if not isinstance(r, dict) or not isinstance(r.get("file"), str):
+                raise ValueError(f"step {i} has a hunk with no file")
+            try:
+                ref = {"file": r["file"], "lines": ref_lines(r.get("lines"))}
+            except ValueError as e:
+                raise ValueError(f"step {i}: {e}")
+            hit = {(fi, hi) for fi, f in enumerate(files) for hi, h in enumerate(f["hunks"] or [None])
+                   if (covers(ref, f, h) if h else ref["file"] == f["file"])}
+            if not hit:
+                dropped.append(f"step {i}: {r['file']} {ref['lines'] or ''}".rstrip())
+                continue
+            covered |= hit
+            refs.append(ref if ref["lines"] else {"file": ref["file"]})
+        out.append({"title": " ".join(s["title"].split()), "note": s.get("note", "").strip(), "hunks": refs})
+    rest = []
+    for fi, f in enumerate(files):
+        if not f["hunks"]:
+            if (fi, 0) not in covered:
+                rest.append({"file": f["file"]})
+            continue
+        rest += [{"file": f["file"], "lines": lines_of(f, h)} for hi, h in enumerate(f["hunks"])
+                 if (fi, hi) not in covered]
+    if rest:
+        out.append({"title": OTHER_CHANGES, "note": "The changes no step above covers.", "hunks": rest})
+    return out, dropped
+
+
+def tour_inputs(repo, t, base_ref, files):
+    """What the tour agent is given (PRD 7): the brief, the worker's summary, the review
+    findings, the diff (or how to get it) and its hunks."""
+    briefs = repo.dir / "briefs"
+    brief = briefs / f"{t['id']}.md"
+    findings = sorted(briefs.glob(f"{t['id']}.review-*.findings.md"),
+                      key=lambda p: int(re.search(r"review-(\d+)", p.name).group(1)))
+    found = "\n\n".join(f"### {p.name}\n\n{p.read_text().strip()}" for p in findings) or "(none)"
+    wt = t["worktree"]
+    diff = git(wt, "diff", "--no-color", f"{base_ref}...HEAD").stdout.rstrip("\n")
+    if len(diff.split("\n")) > MAX_TOUR_DIFF_LINES:
+        diff = f"({len(diff.splitlines())} lines, too long to include: run the command)"
+    hunks = "\n".join(f"- {f['file']}" + (" (binary)" if not f["hunks"] else
+                                          ": " + ", ".join("{}-{}".format(*lines_of(f, h)) for h in f["hunks"]))
+                      for f in files)
+    return dict(id=t["id"], title=t["title"], worktree=wt, base_ref=base_ref,
+                brief=brief.read_text().strip() if brief.exists() else "(none)",
+                summary=t.get("summary") or "(none)", findings=found, diff=diff, hunks=hunks)
+
+
+def tour_command(repo):
+    """The tour agent's argv: headless, on tour_model, with read-only tools."""
+    cmd = with_model(repo.cfg.get("tour") or ["claude"], repo.cfg.get("tour_model"))
+    if not is_claude(cmd):
+        return resolve(cmd)
+    return resolve(cmd) + ["-p", "--output-format", "json", "--no-session-persistence",
+                           "--permission-mode", "dontAsk", "--tools", "Read,Grep,Glob,Bash",
+                           "--allowedTools", *TOUR_TOOLS]
+
+
+def agent_result(out):
+    """The text of a headless claude's answer: its --output-format json result, or the
+    output as it is from another agent. Raises ValueError for an agent error."""
+    try:
+        r = json.loads(out)
+    except ValueError:
+        return out
+    if isinstance(r, dict) and r.get("type") == "result":
+        if r.get("is_error"):
+            raise ValueError(f"the agent failed: {clip(str(r.get('result') or r.get('subtype')), 160)}")
+        return r.get("result") or ""
+    return out
+
+
+def write_tour(repo, tid):
+    """Run the tour agent on the task's code now and write its tour. Returns the tour
+    file, or raises Fail with why it failed (the task records that)."""
+    t = repo.task(tid)
+    wt = t.get("worktree")
+    log = tour_log(repo, t)
+    try:
+        if not wt or not Path(wt).is_dir():
+            raise ValueError("the task has no worktree")
+        base_ref = task_base_ref(repo, t)
+        commit, base = head(wt), merge_base(wt, base_ref)
+        files = diff_files(wt, base, commit)
+        if not files:
+            raise ValueError(f"it has no changes against {base_ref}")
+        prompt = (PROMPTS / "tour.md").read_text().format(**tour_inputs(repo, t, base_ref, files))
+        argv = tour_command(repo)
+        with log.open("w") as f:
+            f.write(f"{now()} {shlex.join(argv)}\n(the prompt on stdin: {len(prompt)} characters)\n\n")
+        try:
+            p = subprocess.run(argv, cwd=wt, input=prompt, text=True, capture_output=True,
+                               timeout=TOUR_TIMEOUT)
+        except FileNotFoundError:
+            raise ValueError(f"{argv[0]} isn't installed")
+        except subprocess.TimeoutExpired:
+            raise ValueError(f"the agent took over {TOUR_TIMEOUT // 60} minutes")
+        with log.open("a") as f:
+            f.write(f"exit {p.returncode}\n--- stdout\n{p.stdout}\n--- stderr\n{p.stderr}\n")
+        if p.returncode != 0:
+            last = (p.stderr or p.stdout).strip().splitlines()
+            raise ValueError(f"the agent exited with {p.returncode}: {clip(last[-1] if last else 'no output', 120)}")
+        try:
+            data = tour_json(agent_result(p.stdout))
+        except ValueError as e:
+            raise ValueError(f"its tour doesn't parse ({clip(str(e), 120)})")
+        try:
+            steps, dropped = tour_steps(data, files)
+        except ValueError as e:
+            raise ValueError(f"its tour isn't in the format: {e}")
+        if dropped:
+            with log.open("a") as f:
+                f.write("hunks that match nothing in the diff, left out: " + "; ".join(dropped) + "\n")
+    except ValueError as e:
+        tour_failed(repo, tid, str(e))
+        raise Fail(f"{tid}'s tour failed: {e} (log: {log})")
+    path = tour_path(repo, t)
+    write_json(path, {"task": t["id"], "commit": commit, "base": base, "base_ref": base_ref,
+                      "patch": patch_id(wt, base_ref), "written": now(),
+                      "model": model_in(tour_command(repo)), "steps": steps})
+    t = repo.task(tid)  # read again: it may have changed while the agent ran
+    t["tour"] = {"state": "written", "at": now(), "commit": commit}
+    if (t.get("note") or "").startswith("tour failed"):
+        t["note"] = None
+    write_json(repo.task_path(tid), t)  # not save_task: the status didn't change
+    return path
+
+
+def tour_failed(repo, tid, why):
+    """The tour wasn't written: a line on the board and in the log. No news, no triage."""
+    t = repo.task(tid)
+    t["tour"] = {"state": "failed", "at": now(), "why": why}
+    t["note"] = f"tour failed: {why}"
+    write_json(repo.task_path(tid), t)
+    with tour_log(repo, t).open("a") as f:
+        f.write(f"{now()} failed: {why}\n")
+
+
+def pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except (OSError, TypeError):
+        return False
+    return True
+
+
+def tour_state(repo, t):
+    """(state, tour, why): "writing", "failed" (why), "current", "stale" (why) or "none".
+    A tour being written whose writer is gone has failed."""
+    run_ = t.get("tour") or {}
+    if run_.get("state") == "writing":
+        if pid_alive(run_.get("pid")):
+            return "writing", None, None
+        tour_failed(repo, t["id"], "its writer stopped before the tour was written")
+        t.update(repo.task(t["id"]))
+        run_ = t["tour"]
+    if run_.get("state") == "failed":
+        return "failed", read_json(tour_path(repo, t)), run_.get("why")
+    tour = read_json(tour_path(repo, t))
+    if not tour:
+        return "none", None, None
+    stale = tour_stale(repo, t, tour)
+    return ("stale", tour, stale) if stale else ("current", tour, None)
+
+
+def tour_stale(repo, t, tour):
+    """Why the tour no longer shows the task's code, or None while it does: the same
+    commit, or the same patch (after a clean rebase, as approvals carry over)."""
+    wt = t.get("worktree")
+    if not wt or not Path(wt).is_dir():
+        return None  # nothing to compare with: the tour is all there is
+    if head(wt) == tour["commit"] or patch_id(wt, task_base_ref(repo, t)) == tour.get("patch"):
+        return None
+    return f"the code changed since the tour was written (on {tour['commit'][:12]})"
+
+
+def has_commit(wt, c):
+    return bool(c) and git(wt, "cat-file", "-e", f"{c}^{{commit}}", check=False).returncode == 0
+
+
+def tour_diff(repo, t, tour):
+    """The diff the tour was written on, as diff_files: from its own commits, else (they're
+    gone after a rebase) from the task's code now."""
+    wt = t["worktree"]
+    if has_commit(wt, tour["commit"]) and has_commit(wt, tour.get("base")):
+        return diff_files(wt, tour["base"], tour["commit"])
+    base_ref = task_base_ref(repo, t)
+    return diff_files(wt, merge_base(wt, base_ref), head(wt))
+
+
+def step_diff(files, step):
+    """A step's hunks from git, as a patch: each file the step names, in the step's order,
+    with its header and the hunks the step covers."""
+    out = []
+    names = list(dict.fromkeys(r["file"] for r in step["hunks"]))
+    for name in names:
+        for f in files:
+            if f["file"] != name:
+                continue
+            refs = [r for r in step["hunks"] if r["file"] == name]
+            hunks = [h["text"] for h in f["hunks"] if any(covers(r, f, h) for r in refs)]
+            if hunks or not f["hunks"]:
+                out.append("\n".join(f["head"] + hunks))
+    return "\n".join(out) + ("\n" if out else "")
+
+
+def step_files(step):
+    """ "bin/bullpen 120-140, README.md": a step's files and lines, for people."""
+    return ", ".join(r["file"] + (" {}-{}".format(*r["lines"]) if r.get("lines") else "")
+                     for r in step["hunks"]) or "(no code)"
+
+
+def tour_status(t):
+    if t["status"] not in ("ready", "review"):
+        raise Fail(f"{t['id']} is {status_words(t['status'])}: a tour is only for a task that is "
+                   f"ready or in review, whose code isn't changing")
+
+
+def start_tour(repo, t, wait):
+    """Write a tour of the task: now (wait), or by a process of its own in the background.
+    t["tour"] says it's being written, with that process's pid, so the board can show it."""
+    if not t.get("worktree") or not Path(t["worktree"]).is_dir():
+        raise Fail(f"{t['id']} has no worktree, so there's nothing to tour")
+    t["tour"] = {"state": "writing", "at": now(), "pid": os.getpid()}
+    if (t.get("note") or "").startswith("tour failed"):
+        t["note"] = None
+    write_json(repo.task_path(t["id"]), t)
+    if wait:
+        return write_tour(repo, t["id"])
+    p = subprocess.Popen([SELF, "_tour", t["id"]], cwd=repo.root, start_new_session=True,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    t["tour"]["pid"] = p.pid
+    write_json(repo.task_path(t["id"]), t)
+    return None
+
+
+def cmd_tour(args):
+    """A tour of a task's change: print the current one's path, or start writing one."""
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    if args.send:
+        return send_comments(repo, t)
+    if args.show or args.step is not None:
+        return show_tour(repo, t, args)
+    tour_status(t)
+    state, tour, why = tour_state(repo, t)
+    path = tour_path(repo, t)
+    if state == "writing" and not args.wait:
+        print(f"{t['id']}'s tour is being written: {path} once it's done")
+        return
+    if state == "writing":
+        while tour_state(repo, t)[0] == "writing":
+            time.sleep(1)
+            t = repo.task(t["id"])
+        state, tour, why = tour_state(repo, t)
+        if state == "failed":
+            raise Fail(f"{t['id']}'s tour failed: {why} (log: {tour_log(repo, t)})")
+        print(path)
+        return
+    if state == "current" and not args.new:
+        print(path)
+        return
+    if state == "stale" and not args.new:
+        print(f"{t['id']}'s tour is stale: {why}. `bullpen tour {t['id']} --new` writes a new "
+              f"one; this is the old one:", file=sys.stderr)
+        print(path)
+        return
+    out = start_tour(repo, t, args.wait)
+    if out:
+        print(out)
+    else:
+        print(f"writing a tour of {t['id']} in the background ({repo.cfg.get('tour_model') or 'default model'}); "
+              f"`bullpen tour {t['id']}` prints its path once it's done")
+
+
+def cmd_tour_bg(args):
+    """(bullpen) write a task's tour, away from whoever asked for it."""
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    t.setdefault("tour", {})["pid"] = os.getpid()  # this process writes it, whoever started it
+    write_json(repo.task_path(t["id"]), t)
+    try:
+        write_tour(repo, args.id)
+    except Fail:
+        return 1  # recorded on the task
+    except Exception as e:  # anything else is a failure too, never a tour left "writing"
+        tour_failed(repo, args.id, clip(f"{type(e).__name__}: {e}", 160))
+        return 1
+
+
+def show_tour(repo, t, args):
+    """The tour as it is, for the board: its state and steps (--json), or one step's
+    hunks from git (--step N), as a patch for delta or a pager."""
+    state, tour, why = tour_state(repo, t)
+    if args.step is None:
+        drafts = read_comments(repo, t)["comments"]
+        out = {"id": t["id"], "state": state, "why": why, "path": str(tour_path(repo, t)) if tour else None,
+               "commit": tour and tour["commit"], "written": tour and tour.get("written"),
+               "comments": len(drafts),
+               "steps": [{"n": i, "title": s["title"], "note": s["note"], "hunks": s["hunks"],
+                          "files": step_files(s), "comments": sum(c["step"] == i for c in drafts)}
+                         for i, s in enumerate(tour["steps"], 1)] if tour else []}
+        if args.json:
+            print(json.dumps(out, indent=2))
+            return
+        print(f"{t['id']}'s tour: {state}" + (f" ({why})" if why else ""))
+        for s in out["steps"]:
+            print(f"{s['n']:>3}. {s['title']}  [{s['files']}]" +
+                  (f"  ({s['comments']} comment{'s' if s['comments'] != 1 else ''})" if s["comments"] else ""))
+        return
+    if not tour:
+        raise Fail(f"{t['id']} has no tour: `bullpen tour {t['id']}` writes one")
+    if not 1 <= args.step <= len(tour["steps"]):
+        raise Fail(f"{t['id']}'s tour has steps 1 to {len(tour['steps'])}")
+    step = tour["steps"][args.step - 1]
+    diff = step_diff(tour_diff(repo, t, tour), step) if t.get("worktree") and Path(t["worktree"]).is_dir() else ""
+    if args.json:
+        print(json.dumps({"n": args.step, "of": len(tour["steps"]), "title": step["title"],
+                          "note": step["note"], "hunks": step["hunks"], "files": step_files(step),
+                          "diff": diff}, indent=2))
+        return
+    sys.stdout.write(diff)
+
+
+# ---------- the person's comments on a tour ----------
+
+def read_comments(repo, t):
+    return read_json(comments_path(repo, t)) or {"next": 1, "comments": []}
+
+
+def cmd_tour_comment(args):
+    """Draft comments on a tour's steps: add one, list them, or remove one."""
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    c = read_comments(repo, t)
+    if args.remove is not None:
+        left = [x for x in c["comments"] if x["id"] != args.remove]
+        if len(left) == len(c["comments"]):
+            raise Fail(f"{t['id']} has no draft comment {args.remove}")
+        c["comments"] = left
+        write_json(comments_path(repo, t), c)
+        print(f"removed comment {args.remove} from {t['id']}")
+        return
+    if args.step is None:
+        if args.json:
+            print(json.dumps(c["comments"], indent=2))
+            return
+        for x in c["comments"]:
+            print(f"{x['id']:>3}. step {x['step']} ({x['title']}): {x['text']}")
+        if not c["comments"]:
+            print(f"{t['id']} has no draft comments")
+        return
+    text = " ".join(args.text or []).strip()
+    if not text:
+        raise Fail("say what the comment is")
+    tour = read_json(tour_path(repo, t))
+    if not tour:
+        raise Fail(f"{t['id']} has no tour to comment on: `bullpen tour {t['id']}` writes one")
+    if not 1 <= args.step <= len(tour["steps"]):
+        raise Fail(f"{t['id']}'s tour has steps 1 to {len(tour['steps'])}")
+    s = tour["steps"][args.step - 1]
+    # the step as it was: a new tour may number its steps differently
+    c["comments"].append({"id": c["next"], "step": args.step, "title": s["title"], "hunks": s["hunks"],
+                          "commit": tour["commit"], "text": text, "at": now()})
+    c["next"] += 1
+    write_json(comments_path(repo, t), c)
+    print(c["next"] - 1)
+
+
+def comments_text(t, comments, k):
+    """The findings-style file of the person's comments: each one with its step, files and lines."""
+    parts = [f"# The person's comments on {t['id']}, after a guided tour of the change\n\n"
+             f"Each comment is on one step of the tour: the step's title, the files and lines it covers "
+             f"(in the code the tour was written on), then the comment. A line the person points at "
+             f"is in the comment's text."]
+    for i, c in enumerate(comments, 1):
+        parts.append(f"## Comment {i}: step {c['step']}, {c['title']}\n\n"
+                     f"Files: {step_files(c)} (commit {c['commit'][:12]})\n\n{c['text']}")
+    return "\n\n".join(parts) + "\n"
+
+
+def send_comments(repo, t):
+    """Send the person's draft comments to the worker, as a findings-style file: the task
+    goes back to working, and its next ready gets a review of them."""
+    tour_status(t)
+    drafts = read_comments(repo, t)["comments"]
+    if not drafts:
+        raise Fail(f"{t['id']} has no draft comments to send: `bullpen tour-comment {t['id']} STEP TEXT` adds one")
+    k = (t.get("tours_sent") or 0) + 1
+    path = repo.dir / "briefs" / f"{t['id']}.tour-{k}.comments.md"
+    path.write_text(comments_text(t, drafts, k))
+    wt = t["worktree"]
+    base_ref = task_base_ref(repo, t)
+    n = len(drafts)
+    said = f"{n} comment{'s' if n != 1 else ''}"
+    t["tours_sent"] = k
+    t["tour_sent"] = {"n": k, "file": str(path), "count": n, "at": now(),
+                      "commit": head(wt), "base": merge_base(wt, base_ref)}
+    if t["status"] == "review":
+        close_reviewer(t)  # it reviews code the person has just sent back
+    msg = (f"The person went through your change with a guided tour and sent back {said}. Read {path}, "
+           f"address each comment, commit, and run your ready command again. If you disagree with a "
+           f"comment, say why in your ready summary.")
+    try:
+        failed = hand_back(repo, t, msg)
+    except Fail as e:
+        failed = clip(str(e), 160)
+    comments_path(repo, t).unlink(missing_ok=True)  # sent: in the file now, no longer drafts
+    if failed:
+        stop(repo, t, "worker", "not_sent", "The person's tour comments didn't reach its worker",
+             f"{t['id']} was sent back by the person after the tour ({said}), but the message didn't "
+             f"reach its worker ({failed}). The comments are in {path}: `bullpen tell {t['id']}` it "
+             f"to read them", "not-sent")
+        print(f"{said} written to {path}, but they didn't reach {t['id']}'s worker: its coordinator is told")
+        return
+    tell_coordinator(repo, t, "tour-sent", f"{t['id']} sent back by the person after the tour: {said}")
+    print(f"sent {said} to {t['id']}'s worker ({path})")
 
 
 # ---------- auto-accept ----------
@@ -3239,6 +3834,8 @@ def config_changes(args):
             ch[f"{role}_model"] = model  # "default" too: it drops the command's own --model
     if args.reviewer_followup_model or args.model:
         ch["reviewer_followup_model"] = args.reviewer_followup_model or args.model
+    if args.tour_model:
+        ch["tour_model"] = args.tour_model
     for name in ("setup", "teardown"):
         if getattr(args, name) is not None:
             ch[name] = getattr(args, name).strip() or None  # "": back to .bullpen/<name>.sh
@@ -4347,7 +4944,7 @@ def cmd_review(args):
     if r.get("verdict") or not (t["status"] == "review" or on_reviewer(t)):
         raise Fail(f"{t['id']} isn't waiting on a reviewer (it is {t['status']})")
     rounds = repo.cfg.get("review_rounds", 2)
-    if r.get("round", 0) >= rounds:
+    if r.get("round", 0) >= rounds and r.get("kind") != "tour":
         raise Fail(f"{t['id']} has used its {rounds} review rounds: `bullpen ask {t['id']}` the person")
     start_review(repo, t, task_base_ref(repo, t))
     print(f"{t['id']}: a new reviewer started (round {t['review']['round']} of {rounds})")
@@ -5459,6 +6056,25 @@ def parser():
     p.add_argument("--force", action="store_true", help="drop it even with uncommitted changes in its worktree")
     p.set_defaults(fn=cmd_drop)
 
+    p = sub.add_parser("tour", help="a guided tour of a ready task's change: its path, or start writing one")
+    p.add_argument("id", help="the task, like BP-3")
+    p.add_argument("--wait", action="store_true", help="write it now and print its path, not in the background")
+    p.add_argument("--new", action="store_true", help="write a new tour even though there is one")
+    p.add_argument("--show", action="store_true", help="the tour's state and steps, starting nothing")
+    p.add_argument("--step", type=int, metavar="N", help="step N's hunks from git, as a patch")
+    p.add_argument("--json", action="store_true", help="with --show or --step: as JSON (for the board)")
+    p.add_argument("--send", action="store_true",
+                   help="send your draft comments to the worker: the task goes back to working")
+    p.set_defaults(fn=cmd_tour)
+
+    p = sub.add_parser("tour-comment", help="draft comments on a tour's steps: add, list (no STEP) or remove")
+    p.add_argument("id", help="the task, like BP-3")
+    p.add_argument("step", nargs="?", type=int, help="the step the comment is on")
+    p.add_argument("text", nargs="*", help="the comment (mention a line in it to point at one)")
+    p.add_argument("--remove", type=int, metavar="N", help="remove draft comment N")
+    p.add_argument("--json", action="store_true", help="list them as JSON")
+    p.set_defaults(fn=cmd_tour_comment)
+
     p = sub.add_parser("ls", help="list tasks")
     p.add_argument("--all", action="store_true", help="closed tasks too (done and dropped)")
     p.add_argument("--all-repos", action="store_true",
@@ -5506,6 +6122,8 @@ def parser():
     p.add_argument("--reviewer-model", metavar="MODEL", help="the same, for reviewers only (a full first review)")
     p.add_argument("--reviewer-followup-model", metavar="MODEL",
                    help="the same, for later review rounds and light reviews (default sonnet)")
+    p.add_argument("--tour-model", metavar="MODEL",
+                   help="claude's --model for the agent that writes guided review tours (default sonnet)")
     p.add_argument("--light-review-lines", type=int, metavar="LINES",
                    help="a change of at most this many lines in at most 2 files gets a light review (default 40)")
     p.add_argument("--board-layout", choices=["grouped", "compact"], help="how the board lists tasks")
@@ -5590,6 +6208,10 @@ def parser():
     p = sub.add_parser("_build_board")
     p.add_argument("--lock-fd", type=int, required=True)
     p.set_defaults(fn=cmd_build_board_bg)
+
+    p = sub.add_parser("_tour")
+    p.add_argument("id")
+    p.set_defaults(fn=cmd_tour_bg)
 
     p = sub.add_parser("_auto_accept")
     p.add_argument("id", help="the task, like BP-3")
