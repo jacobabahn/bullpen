@@ -111,7 +111,8 @@ A task that stops is either yours to see to or the person's:
   "Coordinator on it", not as needing the person.
 - **needs** (the person's): its worker or reviewer is at a permission or input
   prompt, or you ran `bullpen ask`. News says it needs the person. Tell them, in
-  one full question if there's one to answer.
+  one full question if there's one to answer. Bullpen also sends them a notification
+  (unless `config --notify off`), so a short `ask` question reads well on its own.
 
 What to do with each triage reason, after `bullpen peek <ID>`:
 

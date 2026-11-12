@@ -502,6 +502,9 @@ sets how it reaches the coordinator, and `bullpen up` says which is in use:
   monitor and start it again every 30 minutes, when it expires; its guide tells
   it to. News logged while no monitor runs is not lost: the next one prints it.
 
+News is for the coordinator. You hear of a task that needs you by a notification
+(see [Notifications](#notifications)).
+
 `bullpen news` prints the lines logged since the last time and exits;
 `bullpen news --follow` keeps running and prints each new line as it is logged.
 Both remember how far they got (a byte offset in `news-c1.cursor`, one per
@@ -523,6 +526,22 @@ exit, so the coordinator stops restarting it and no line arrives twice; in `type
 mode `--follow` always does that, and plain `bullpen news` still works. News
 logged in `monitor` mode but not yet read when you switch back is not typed:
 `bullpen news` prints it.
+
+### Notifications
+
+When a task comes to need you (its worker or reviewer is at a prompt, the
+coordinator ran `bullpen ask`, or triage went to you), you get a native
+notification, titled `bullpen · <repo>`: "BP-3 needs you: <the question>".
+`bullpen config --notify all` also sends one when a task is ready ("BP-3 is ready:
+<title>"), finished, or auto-accepted; `--notify off` sends none; `needs` is the
+default. Each goes out once, when the task's status changes, and not while the
+task's own pane or its coordinator's board has focus in Rex.
+
+Bullpen writes the notification (OSC 777) to the terminal of the task's pane, or of
+its board, or its coordinator, when the task's has none, and Rex for Mac shows it:
+clicking it opens that pane's tab. Turn on Settings > Notifications > System
+Notifications > Terminal notifications in Rex for Mac. Each one, and why one wasn't
+sent, is logged in `notify.log` beside the tasks.
 
 ### Rules
 
@@ -558,6 +577,7 @@ task ready, with its worktree and branch as they were.
   as `[c1]`), with `news-<id>.cursor` (how far each coordinator's `bullpen news`
   has read) and `outbox-<id>.txt` (typed news waiting for an empty input). See
   [News](#news).
+- Notifications: `notify.log` beside the tasks. See [Notifications](#notifications).
 
 `bullpen config --auto-accept on` accepts approved tasks by themselves (off by
 default; see [Auto-accept](#auto-accept)). `bullpen config --news monitor` changes how news reaches the coordinator (`type`
@@ -566,6 +586,9 @@ by default). `bullpen config --merge squash` changes how `accept` merges (`rebas
 working agent can show no progress before you hear of it (20 by default, `0` for
 never). `bullpen config --triage-minutes 15` sets how long a task can wait on its
 coordinator before it goes to you (10 by default; see [Triage](#triage)). `bullpen config
+--notify all` sends you a notification when a task is ready, finished or auto-accepted
+too, and `off` none (`needs`, when a task needs you, by default; see
+[Notifications](#notifications)). `bullpen config
 --board-bottom-gap 0` lets the board use its bottom row (1 empty row by default, for
 Rex's capsules). `bullpen config --board-others on --coordinator c1` makes c1's
 board show the other coordinators' tasks too (see [Several

@@ -60,6 +60,11 @@ FAKE_REX = textwrap.dedent("""\
         own = d / f"screen_{a[a.index('-b') + 1]}"  # one pane's screen, else every pane's
         screen = own if own.exists() else d / "screen"  # what the tests put on screen, else two lines
         print(screen.read_text() if screen.exists() else "line one\\nline two\\n\\n")
+    elif a[:2] == ["block", "call"] and a[-1] == "process":
+        pid = d / f"pid_{a[a.index('-b') + 1]}"  # a process the tests run on a terminal of their own
+        if not pid.exists():
+            sys.exit("rex: no such block")
+        print(json.dumps({"child": {"pid": int(pid.read_text())}}))
     elif a[:2] == ["block", "call"] and a[-1] == "program_status":
         rec = d / f"status_{a[a.index('-b') + 1]}.json"  # the record the tests give a pane
         if not rec.exists():
@@ -111,7 +116,15 @@ FAKE_REX = textwrap.dedent("""\
                     else:
                         tiled["blocks"].append(entry)
                 windows.append({"window_id": w, "layers": layers})
-            print(json.dumps({"session_id": sid, "label": "main", "windows": windows}))
+            view = {"session_id": sid, "label": "main", "windows": windows}
+            focused = d / "focused"  # the block the tests say has focus, in the active window
+            if focused.exists():
+                b = focused.read_text()
+                view["active_window_id"] = R["blocks"][b]["window"]
+                for w in windows:
+                    if w["window_id"] == view["active_window_id"]:
+                        w["focused_block_id"] = b
+            print(json.dumps(view))
     reg.write_text(json.dumps(R))
 """)
 
@@ -1813,6 +1826,14 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(len(self.merges()), 1)
         self.assertIn("bullpen · BP-1 approved by review and auto-accepted (merged PR #7, rebase)",
                       self.news_lines())
+
+    def test_auto_accept_notifies_with_notify_all(self):
+        read = self.terminal("blk2")  # the board: the worker's pane closes on accept
+        self.bp("config", "--notify", "all")
+        tid, _ = self.approved_with_auto_accept()
+        self.assertEqual(self.show(tid)["status"], "done")
+        self.assertEqual(read(), "\x1b]777;notify;bullpen · proj;BP-1 is ready: Fix the thing\x07"
+                                 "\x1b]777;notify;bullpen · proj;BP-1 was auto-accepted: Fix the thing\x07")
 
     def test_auto_accept_waits_for_running_checks_then_merges(self):
         self.github(statusCheckRollup=self.RUNNING)
@@ -3653,6 +3674,98 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.show(tid)["status"], "needs")
         self.assertEqual({t["status"] for t in json.loads(self.bp("ls", "--json").stdout)}, {"needs", "todo"})
 
+    # ---------- notifications for the person ----------
+
+    def terminal(self, blk):
+        """Give pane blk a real terminal, with a process on it; returns a function that
+        reads what was written to it since."""
+        import pty
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.execvp("sleep", ["sleep", "60"])
+        def done():
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+            os.close(fd)
+        self.addCleanup(done)
+        (self.fake / f"pid_{blk}").write_text(str(pid))
+
+        def read():
+            out = b""
+            while select.select([fd], [], [], 0.2)[0]:
+                try:
+                    out += os.read(fd, 4096)
+                except OSError:
+                    break
+            return out.decode()
+        return read
+
+    def notified(self):
+        log = next((self.tmp / "state").rglob("notify.log"), None)
+        return [l.split(" ", 1)[1] for l in log.read_text().splitlines()] if log else []
+
+    def test_a_task_that_needs_you_sends_a_notification_from_its_pane(self):
+        self.assertEqual(json.loads(self.bp("config").stdout)["notify"], "needs")  # the default
+        tid = self.start_task()
+        blk = self.block(tid)
+        read = self.terminal(blk)
+        self.bp("_event", blk, "blocked", "permission", "Allow rm?")
+        self.assertEqual(read(), "\x1b]777;notify;bullpen · proj;BP-1 needs you (permission): Allow rm?\x07")
+        self.bp("_event", blk, "blocked", "permission", "Allow rm?")  # the same prompt: once
+        self.assertEqual(read(), "")
+        self.bp("_event", blk, "working", "", "")
+        self.bp("_event", blk, "idle", "", "")  # triage: the coordinator's, not the person's
+        self.assertEqual(read(), "")
+        self.bp("ask", tid, "Use SQLite?")
+        self.assertEqual(read(), "\x1b]777;notify;bullpen · proj;BP-1 needs you: Use SQLite?\x07")
+        self.assertEqual(self.notified(), [f"BP-1 sent to {blk}: BP-1 needs you (permission): Allow rm?",
+                                           f"BP-1 sent to {blk}: BP-1 needs you: Use SQLite?"])
+
+    def test_notify_needs_leaves_ready_out_and_all_sends_it(self):
+        self.bp("config", "--review", "off")
+        tid = self.start_task()
+        read = self.terminal(self.block(tid))
+        self.commit_and_ready_no_review(tid)
+        self.assertEqual((self.show(tid)["status"], read()), ("ready", ""))
+        tid2 = self.bp("add", "Second thing", "--brief", "x").stdout.strip()
+        self.bp("start", tid2)
+        read2 = self.terminal(self.block(tid2))
+        self.bp("config", "--notify", "all")
+        wt = self.show(tid2)["worktree"]
+        (Path(wt) / "two.txt").write_text("two\n")
+        sh("git", "-C", wt, "add", ".")
+        sh("git", "-C", wt, "commit", "-qm", "Two")
+        self.bp("ready", tid2, "--summary", "Did it.", cwd=wt)
+        self.assertEqual(read2(), "\x1b]777;notify;bullpen · proj;BP-2 is ready: Second thing\x07")
+
+    def test_notify_off_sends_nothing(self):
+        tid = self.start_task()
+        read = self.terminal(self.block(tid))
+        self.bp("config", "--notify", "off")
+        self.bp("_event", self.block(tid), "blocked", "permission", "Allow rm?")
+        self.assertEqual((read(), self.notified()), ("", []))
+        self.assertNotEqual(self.bp("config", "--notify", "loud", ok=False).returncode, 0)
+
+    def test_no_notification_while_the_person_looks_at_the_task_or_its_board(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        read = self.terminal(blk)
+        (self.fake / "focused").write_text("blk2")  # the board
+        self.bp("_event", blk, "blocked", "permission", "Allow rm?")
+        self.assertEqual(read(), "")
+        self.assertEqual(self.notified(), ["BP-1 not sent: the person is looking: "
+                                           "BP-1 needs you (permission): Allow rm?"])
+        self.bp("_event", blk, "working", "", "")
+        (self.fake / "focused").write_text("blk1")  # the coordinator: it doesn't show the task
+        self.bp("_event", blk, "blocked", "permission", "Allow rm?")
+        self.assertIn("needs you (permission)", read())
+
+    def test_a_task_without_a_terminal_sends_from_its_board(self):
+        tid = self.start_task()
+        read = self.terminal("blk2")  # the worker's pane has none Rex can tell
+        self.bp("_event", self.block(tid), "blocked", "permission", "Allow rm?")
+        self.assertIn("BP-1 needs you (permission)", read())
+
 
 class LocalModeTest(unittest.TestCase):
     """A repository without an origin remote: no push, no gh; accept merges locally."""
@@ -4149,6 +4262,29 @@ class HelpersTest(unittest.TestCase):
         self.assertFalse(idle(self.stopped("needs", "worker", "prompt", why="Delete it?", ask=True)))
         self.assertTrue(idle({"status": "needs", "why": "Delete it?", "ask": True}))
         self.assertTrue(idle(self.stopped("stopped", "worker", "exited")))
+
+    def test_what_a_status_change_tells_the_person(self):
+        n = self.bp.notice
+        t = lambda status, **more: {"id": "BP-3", "title": "Fix it", "status": status, **more}
+        self.assertEqual(n(t("needs", why="Needs you (permission): Allow rm?"), t("working")),
+                         ("needs", "BP-3 needs you (permission): Allow rm?"))
+        self.assertEqual(n(t("needs", why="Reviewer needs you (input)"), t("review")),
+                         ("needs", "BP-3's reviewer needs you (input)"))
+        self.assertEqual(n(t("needs", why="Failed: boom (coordinator didn't resolve it)"), t("triage")),
+                         ("needs", "BP-3 needs you: Failed: boom (coordinator didn't resolve it)"))
+        prompt = t("needs", why="Needs you (permission): Allow rm?")
+        self.assertIsNone(n(prompt, prompt))  # no change
+        asked = t("needs", why="Use SQLite?", ask=True)
+        self.assertEqual(n(asked, prompt), ("needs", "BP-3 needs you: Use SQLite?"))  # asked at a prompt
+        self.assertIsNone(n(asked, asked))
+        self.assertEqual(n(t("needs", why="Or Postgres?", ask=True), asked), ("needs", "BP-3 needs you: Or Postgres?"))
+        self.assertIsNone(n(t("triage", why="Ended its turn without saying ready"), t("working")))
+        self.assertEqual(n(t("ready"), t("review")), ("news", "BP-3 is ready: Fix it"))
+        self.assertIsNone(n(t("ready"), t("ready")))
+        self.assertEqual(n(t("finished"), t("working")), ("news", "BP-3 finished: Fix it"))
+        self.assertEqual(n(t("done", auto_accepted=True), t("ready")), ("news", "BP-3 was auto-accepted: Fix it"))
+        self.assertIsNone(n(t("done", auto_accepted=False), t("ready")))  # the person accepted it
+        self.assertIsNone(n(t("working"), {}))
 
     def test_a_task_is_on_its_reviewer_by_its_stop(self):
         on = self.bp.on_reviewer

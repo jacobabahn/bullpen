@@ -55,6 +55,8 @@ DEFAULT_CONFIG = {
     "light_review_lines": 40,  # a change this small (lines, in at most 2 files) gets a light review
     "auto_accept": False,    # accept a task by itself once review approves it
     "triage_minutes": 10,    # minutes a task can wait on its coordinator before it needs the person
+    "notify": "needs",       # notifications for the person: "needs" (needs you), "all" (and ready, finished,
+                             # auto-accepted) or "off"
 }
 
 TERMINAL = "com.superlogical.terminal.shell"
@@ -247,6 +249,7 @@ class Repo:
         write_json(self.task_path(t["id"]), t)
         if followed(t):
             mark_following()
+        notify(self, t, old)
 
     def tasks(self):
         d = self.dir / "tasks"
@@ -652,6 +655,126 @@ def type_news(repo, line, to=None):
             f.write(line + "\n")
     if not deliver(repo):
         (STATE / "outbox").touch()  # the watcher retries while this exists
+
+
+# ---------- notifications for the person ----------
+#
+# A task that comes to need the person (a prompt, `ask`, a triage escalated), and with
+# notify "all" one that is ready, finished or auto-accepted, gets a native notification:
+# OSC 777 written to the terminal of the task's pane (else its board's, else its
+# coordinator's), which Rex for Mac shows, and opens that pane's tab when clicked. It
+# goes out when the change is saved (save_task), so once per change, from whatever made
+# it: mostly the watcher's calls, and `ask`, `ready`, `verdict`.
+
+NOTIFY = ("all", "needs", "off")
+
+
+def notice(t, old):
+    """(kind, text) of the notification the task's change from old (as it was saved)
+    deserves, kind "needs" or "news", else None."""
+    s, was = t["status"], old.get("status")
+    asked = t.get("ask") and not (old.get("ask") and old.get("why") == t.get("why"))
+    if s == "needs" and (was != "needs" or asked):
+        why = t.get("why") or "it is stopped"
+        m = re.match(r"(Reviewer )?[Nn]eeds you\b:?\s*", why)
+        if m:
+            who = f"{t['id']}'s reviewer" if m.group(1) else t["id"]
+            rest = why[m.end():]
+            return "needs", f"{who} needs you" + (f" {rest}" if rest.startswith("(") else f": {rest}" if rest else "")
+        return "needs", f"{t['id']} needs you: {why}"
+    if s == was:
+        return None
+    if s == "ready":
+        return "news", f"{t['id']} is ready: {t['title']}"
+    if s == "finished":
+        return "news", f"{t['id']} finished: {t['title']}"
+    if s == "done" and t.get("auto_accepted"):
+        return "news", f"{t['id']} was auto-accepted: {t['title']}"
+    return None
+
+
+def notify(repo, t, old):
+    """Tell the person of the task's change, if notify says to and they aren't looking.
+    Never fails: a notification that can't go out is noted in notify.log."""
+    n = notice(t, old)
+    level = repo.cfg.get("notify") or "needs"
+    if not n or level == "off" or (level == "needs" and n[0] != "needs"):
+        return
+    try:
+        if looking(repo, t):
+            return log_notify(repo, t, n[1], "not sent: the person is looking")
+        title = f"{NEWS_MARK}{repo.root.name}"
+        for session, block in notify_panes(repo, t):
+            tty = pane_tty(session, block)
+            if tty and send_osc(tty, title, n[1]):
+                return log_notify(repo, t, n[1], f"sent to {block}")
+        log_notify(repo, t, n[1], "not sent: no pane to send it from")
+    except (OSError, ValueError, subprocess.SubprocessError) as e:
+        log_notify(repo, t, n[1], f"not sent: {e}")
+
+
+def notify_panes(repo, t):
+    """(session, block) of the panes a notification can come from, best first: the task's
+    reviewer if it is what needs the person, its worker, its coordinator's board, its
+    coordinator. Clicking it opens the pane's tab."""
+    r = t.get("review") or {}
+    c = home_of(repo, t)
+    b = c.get("board") or {}
+    out = [(r.get("session") or t.get("session"), r.get("block")) if on_reviewer(t) else (None, None),
+           (t.get("session"), t.get("block")), (b.get("session"), b.get("block")),
+           (c.get("session"), c.get("block"))]
+    return [p for p in out if p[1]]
+
+
+def looking(repo, t):
+    """Has the task's worker or reviewer pane, or its coordinator's board, focus in its
+    session's active window? Then the person sees it already. (Rex can't say whether
+    its app is in front, so this goes by the session alone.)"""
+    r = t.get("review") or {}
+    b = home_of(repo, t).get("board") or {}
+    panes = [(t.get("session"), t.get("block")), (r.get("session") or t.get("session"), r.get("block")),
+             (b.get("session"), b.get("block"))]
+    blocks = {blk for _, blk in panes if blk}
+    for session in {s for s, blk in panes if blk}:
+        v = rex_view(session) or {}
+        for w in v.get("windows", []):
+            if w.get("window_id") == v.get("active_window_id") and w.get("focused_block_id") in blocks:
+                return True
+    return False
+
+
+def pane_tty(session, block):
+    """The terminal device of a pane's program, or None."""
+    p = run([REX, "block", "call", *(["-s", session] if session else []), "-b", block, "process"], check=False)
+    if p.returncode != 0 or not p.stdout.strip():
+        return None
+    pid = (json.loads(p.stdout).get("child") or {}).get("pid")
+    if not pid:
+        return None
+    tty = run(["ps", "-o", "tty=", "-p", str(pid)], check=False).stdout.strip()
+    return None if not tty or tty.startswith("?") else (tty if tty.startswith("/") else f"/dev/{tty}")
+
+
+def send_osc(tty, title, body):
+    """Write a notification (OSC 777) to a terminal device. False if it can't be opened."""
+    def clean(text, n, also=""):
+        return clip(re.sub(f"[\\x00-\\x1f\\x7f{also}]", " ", text), n)
+    # the title ends at the first ";": the body may have them
+    data = f"\x1b]777;notify;{clean(title, 60, ';')};{clean(body, 240)}\x07".encode()
+    try:
+        fd = os.open(tty, os.O_WRONLY | os.O_NOCTTY | os.O_NONBLOCK)
+    except OSError:
+        return False
+    try:
+        os.write(fd, data)  # in one write, so it lands between two of the program's own
+    finally:
+        os.close(fd)
+    return True
+
+
+def log_notify(repo, t, text, how):
+    with (repo.dir / "notify.log").open("a") as f:
+        f.write(f"{now()} {t['id']} {how}: {text}\n")
 
 
 def calling_coordinator(repo):
@@ -1846,7 +1969,7 @@ def close_task(repo, t, auto=False, first=None):
         git(repo.root, "push", "-q", "origin", "--delete", t["branch"], check=False)
     remove_worktree(repo, t, force=True)
     set_status(t, "done", t.get("why"))
-    t.update(closed=True, block=None, worktree=None)
+    t.update(closed=True, block=None, worktree=None, auto_accepted=auto)
     repo.save_task(t)
     if auto:
         news(repo, t, "closed", f"{t['id']} finished (nothing to merge) and was closed by auto-accept: {first}")
@@ -2250,7 +2373,7 @@ def cmd_accept(args):
     close_reviewer(t)
     remove_worktree(repo, t, force=True)
     set_status(t, "done", t.get("why"))
-    t.update(block=None, worktree=None)
+    t.update(block=None, worktree=None, auto_accepted=bool(getattr(args, "auto", False)))
     repo.save_task(t)
     mode = repo.cfg.get("merge", "rebase")
     if t.get("pr"):
@@ -2697,6 +2820,8 @@ def cmd_config(args):
         if args.triage_minutes < 0:
             raise Fail("--triage-minutes takes minutes")
         repo.cfg["triage_minutes"] = args.triage_minutes
+    if args.notify:
+        repo.cfg["notify"] = args.notify
     repo.save()
     reindex(repo)
     models = {role: model_phrase(repo.cfg[role], repo.cfg.get(f"{role}_model"))
@@ -4073,6 +4198,9 @@ def parser():
                    help="accept (merge) a task by itself once review approves it (default off)")
     p.add_argument("--triage-minutes", type=int, metavar="MINUTES",
                    help="how long a task can wait on its coordinator before it needs the person (default 10)")
+    p.add_argument("--notify", choices=NOTIFY,
+                   help="native notifications: when a task needs you (needs, the default), also when one is "
+                        "ready, finished or auto-accepted (all), or none (off)")
     p.set_defaults(fn=cmd_config)
 
     p = sub.add_parser("news", help="print news logged since the last time; --follow keeps printing")
