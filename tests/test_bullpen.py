@@ -1145,6 +1145,16 @@ class BullpenTest(unittest.TestCase):
         entry2 = self.tmp / "state" / "blocks" / f"{self.block(tid2)}.json"
         self.assertEqual(json.loads(entry2.read_text())["stuck_after"], 45)
 
+    def test_the_doing_folder_is_there_for_the_watcher_and_a_panes_file_goes_with_it(self):
+        tid = self.start_task()
+        doing = self.tmp / "state" / "doing"
+        self.assertTrue(doing.is_dir())
+        note = doing / f"{self.block(tid)}.json"
+        note.write_text('{"state": "working", "text": "Reading", "at": 1}')
+        self.assertTrue(note.exists())
+        self.bp("drop", tid, "--force")
+        self.assertFalse(note.exists())
+
     def test_a_quiet_reviewer_is_news_in_its_own_words(self):
         tid = self.start_task()
         reviewer = self.commit_and_ready(tid)
