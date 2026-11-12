@@ -835,8 +835,10 @@ impl App {
     /// How long the loop may wait for something to happen before redrawing.
     fn tick(&self) -> Duration {
         let moving = |t: &Task| matches!(t.status.as_str(), "working" | "review");
-        if !self.running.is_empty() || self.tasks.iter().any(|t| moving(t) || t.tour_writing()) {
-            Duration::from_millis(50) // spinners and the marks of working tasks turn
+        if !self.running.is_empty() || self.tasks.iter().any(|t| t.tour_writing()) {
+            Duration::from_millis(50) // a command's spinner turns fast
+        } else if self.tasks.iter().any(moving) {
+            Duration::from_millis(100) // the marks of working tasks turn twice a second
         } else if matches!(self.mode, Mode::Overlay { peek: Some(_), .. } | Mode::Answer { .. }) {
             Duration::from_millis(250)
         } else {

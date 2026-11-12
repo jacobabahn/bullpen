@@ -43,15 +43,19 @@ fn spinner(app: &App) -> &'static str {
     frame(app, SPINNER, 100)
 }
 
-/// A working task: the six-dot snake.
+/// A working task: the six-dot snake, at two frames a second. It says "nothing for you
+/// here", so it moves slowly; the command spinner is feedback and stays fast.
 fn working_mark(app: &App) -> &'static str {
-    frame(app, WORKING, 100)
+    frame(app, WORKING, MARK_MS)
 }
 
-/// A task in review: a quarter arc turning.
+/// A task in review: a quarter arc turning, as slowly as the working mark.
 fn review_mark(app: &App) -> &'static str {
-    frame(app, REVIEW, 150)
+    frame(app, REVIEW, MARK_MS)
 }
+
+/// How long the working and review marks hold each frame.
+pub const MARK_MS: u128 = 500;
 
 const SPINNER: &[&str] = &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
 
@@ -262,8 +266,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 let text = if doing.is_empty() { model::detail_with_auto(t, &app.cfg, now) } else { doing };
                 for d in model::wrap(&text, detail_w, lines) {
                     if !d.is_empty() {
-                        // another coordinator's task stays dim, as its title is
-                        rows.push(Row::Detail(t, d, t.needs_you() && !app.cfg.theirs(t, app.me.as_deref())));
+                        rows.push(Row::Detail(t, d, loud_detail(app, t)));
                     }
                 }
                 let stat = model::stat_line(t);
@@ -585,6 +588,13 @@ fn draw_answer(buf: &mut Buffer, area: Rect, h: usize, title: &str, prompt: Opti
     put(buf, area, h.saturating_sub(1), 1, span(fit(foot, w.saturating_sub(2)), dim()));
 }
 
+/// Is a task's detail at normal weight? What you read and act on is (needs you, stopped,
+/// ready, finished); background is dim (working, queued, in review, the coordinator's,
+/// closed), and so is all of another coordinator's task, as its title is.
+fn loud_detail(app: &App, t: &Task) -> bool {
+    matches!(t.status.as_str(), "needs" | "stopped" | "ready" | "finished") && !app.cfg.theirs(t, app.me.as_deref())
+}
+
 /// A task's line: its ID, title and age, or the y/n question it's waiting on.
 fn title_line(app: &App, t: &Task, selected: bool, w: usize, idw: usize, now: chrono::DateTime<chrono::FixedOffset>) -> Line<'static> {
     let id = pad(&t.id, idw);
@@ -606,7 +616,7 @@ fn title_line(app: &App, t: &Task, selected: bool, w: usize, idw: usize, now: ch
     let age = model::ago(t.stamp(), now);
     let title = fit(&model::shown_title(t, &app.cfg, app.me.as_deref()), width_all.saturating_sub(width(&left) + width(&age) + 2));
     let middle = pad(&format!("  {title}"), width_all.saturating_sub(idw + width(&age)));
-    let stale = t.status == "needs" && model::seconds_in_status(t, now) >= STALE;
+    let stale = t.needs_you() && model::seconds_in_status(t, now) >= STALE;
     // the ID in reverse video, off the tint: that shows in any theme. Dim text is hard
     // to read on the tint, so the rest of the row drops it
     let (id_style, title_style, age_style) = if selected {
@@ -1082,12 +1092,12 @@ mod tests {
             "▌  sees to a task), 3 (reviews that ask…",
             "",
         ].map(String::from), "{s:#?}");
-        // what needs you is at normal weight; a ready task's detail stays dim
+        // what needs you is at normal weight, and so is what a ready task says
         assert!(!buf[(3, 4)].modifier.contains(Modifier::DIM));
         assert!(!buf[(3, 12)].modifier.contains(Modifier::DIM)); // stopped
         assert!(!buf[(3, 14)].modifier.contains(Modifier::DIM));
         let done = s.iter().position(|r| r == "   Done.").unwrap();
-        assert!(buf[(3, done as u16)].modifier.contains(Modifier::DIM));
+        assert!(!buf[(3, done as u16)].modifier.contains(Modifier::DIM));
 
         // selecting another task gives it the room, and BP-1 goes back to two lines
         a.sel = Some("BP-3".into());
@@ -1160,13 +1170,13 @@ mod tests {
             assert_eq!(buf[(0, y)].fg, AMBER);
             assert_eq!(buf[(0, y)].bg, Color::Reset);
         }
-        // another task: no reverse, no tint, its details dim
+        // another task: no reverse, no tint; a ready task's details at normal weight
         let other = s.iter().position(|r| r.contains("BP-12")).unwrap() as u16;
         assert!(!buf[(3, other)].modifier.contains(Modifier::REVERSED));
         for y in other..other + 3 {
             assert!((0..42).all(|x| buf[(x, y)].bg == Color::Reset), "row {y}");
         }
-        assert!(buf[(3, other + 1)].modifier.contains(Modifier::DIM));
+        assert!(!buf[(3, other + 1)].modifier.contains(Modifier::DIM));
 
         // in the compact layout, the title row alone, the same way
         a.cfg.layout = Layout::Compact;
@@ -1226,6 +1236,77 @@ mod tests {
         assert_eq!(s[i + 2], "   the demo video.", "{s:#?}");
         // a needs task without a question: ⏎ opens it, and says so
         assert!(row(&s, 1).starts_with(" ⏎ open  t tell  p peek"), "{s:#?}");
+    }
+
+    #[test]
+    fn only_background_details_are_dim_and_a_stopped_tasks_age_turns_red() {
+        let ago = |m| (model::now() - chrono::Duration::minutes(m)).to_rfc3339();
+        let t = |id: &str, st: &str, m| Task {
+            title: format!("Task {id}"),
+            why: matches!(st, "stopped" | "needs" | "triage").then(|| "Failed (exit 1)".into()),
+            since: Some(ago(m)),
+            ..Task { id: id.into(), status: st.into(), ..Default::default() }
+        };
+        let mut a = app(vec![
+            t("BP-1", "needs", 2),
+            t("BP-2", "stopped", 6),
+            t("BP-3", "stopped", 4),
+            t("BP-4", "ready", 9),
+            t("BP-5", "finished", 9),
+            Task { since: Some(ago(9)), ..busy("BP-6", "working", "Running the tests") },
+            t("BP-7", "todo", 9),
+            t("BP-8", "triage", 1),
+            t("BP-9", "review", 9),
+            t("BP-10", "done", 9),
+        ], 1, Layout::Grouped);
+        a.finished = true; // closed tasks shown
+        a.sel = Some("BP-1".into());
+        let mut term = Terminal::new(TestBackend::new(42, 48)).unwrap();
+        term.draw(|f| draw(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let s: Vec<String> = (0..48).map(|y| (0..42).map(|x| buf[(x, y)].symbol()).collect::<String>().trim_end().to_string()).collect();
+        let title = |id: &str| s.iter().position(|r| r.contains(&format!("{id} "))).unwrap_or_else(|| panic!("{id}: {s:#?}")) as u16;
+        let dim_detail = |id: &str| {
+            let y = title(id) + 1;
+            assert!(s[y as usize].len() > 3 && s[y as usize][..].contains(|c: char| c.is_alphanumeric()), "{id} has no detail: {s:#?}");
+            buf[(3, y)].modifier.contains(Modifier::DIM)
+        };
+        // what you read and act on at normal weight
+        for id in ["BP-2", "BP-3", "BP-4", "BP-5"] {
+            assert!(!dim_detail(id), "{id}: {s:#?}");
+        }
+        // the background dim: working, queued, the coordinator's, in review, closed
+        for id in ["BP-6", "BP-7", "BP-8", "BP-9", "BP-10"] {
+            assert!(dim_detail(id), "{id}: {s:#?}");
+        }
+        // a stopped task's age is red after 5 minutes, as a needs task's is; not before
+        let age = |id: &str| buf[(39, title(id))].clone();
+        assert_eq!(s[title("BP-2") as usize].trim_end().rsplit(' ').next(), Some("6m"), "{s:#?}");
+        assert_eq!(age("BP-2").fg, Color::Red);
+        assert!(!age("BP-2").modifier.contains(Modifier::DIM));
+        assert_ne!(age("BP-3").fg, Color::Red);
+        assert!(age("BP-3").modifier.contains(Modifier::DIM));
+        assert_ne!(age("BP-6").fg, Color::Red); // a working task's age never is
+    }
+
+    #[test]
+    fn the_working_and_review_marks_turn_twice_a_second_and_a_command_spinner_fast() {
+        let working = Task { status: "working".into(), ..ready("BP-1") };
+        let review = Task { status: "review".into(), ..ready("BP-2") };
+        let mut a = app(vec![working, review, ready("BP-3")], 0, Layout::Grouped);
+        let marks = |a: &mut App, ms: u64| {
+            a.started = Instant::now() - std::time::Duration::from_millis(ms);
+            let s = screen(a, 42, 24);
+            ["BP-1", "BP-2"].map(|id| s.iter().find(|r| r.contains(id)).unwrap().chars().nth(1).unwrap())
+        };
+        // the same frame through the first half second, the next one after it
+        assert_eq!(marks(&mut a, 0), marks(&mut a, 450));
+        let (first, later) = (marks(&mut a, 0), marks(&mut a, 550));
+        assert_ne!(first[0], later[0]);
+        assert_ne!(first[1], later[1]);
+        // a command's spinner is feedback: it moves every tenth of a second
+        a.started = Instant::now();
+        assert_ne!(spinner(&a), { a.started = Instant::now() - std::time::Duration::from_millis(150); spinner(&a) });
     }
 
     #[test]

@@ -130,8 +130,8 @@ Each task starts with its mark, the same one `?` shows under "Marks":
 | `◎` dim | the coordinator is on it |
 | `✔` green | ready to accept |
 | `◆` green | finished, nothing to merge |
-| `◜` blue, turning (`◐` still) | in review |
-| `⠋` turning (`○` still) | working |
+| `◜` blue, turning slowly (`◐` still) | in review |
+| `⠋` turning slowly (`○` still) | working |
 | `◌` dim | queued, not started |
 | `·` dim | accepted or closed |
 | `–` dim | dropped |
@@ -140,12 +140,16 @@ Each task starts with its mark, the same one `?` shows under "Marks":
 
 A turning mark stands still, in amber, when its agent has shown no progress for
 a while (see [No progress](#no-progress)), and in its own colour at the usage
-limit. Each task shows how long it has been there; a task that needs you turns
-its age red after 5 minutes. On the lines under it (from under its ID) it shows
+limit. The working and review marks turn twice a second, so they stay quiet in
+the corner of your eye; a command's spinner turns fast. Each task shows how long
+it has been there; a task that needs you or stopped turns its age red after 5
+minutes. On the lines under it (from under its ID) it shows
 what it needs or where it stands ("Asks: python3 or python?", "PR #4, approved
 by light review.", "Follow-up review on round 2 of 2."): one or two lines, cut
-to fit, and for the selected task all of it, up to eight lines. What a task that
-needs you or stopped says is at normal weight; the rest is dimmed. The selected
+to fit, and for the selected task all of it, up to eight lines. The lines of a task
+that needs you, stopped, is ready or finished are at normal weight; the rest
+(working, queued, in review, the coordinator's, closed, and a change's size) are
+dimmed. The selected
 task has its ID in reverse video, which shows in any theme, and a tint under its
 whole block, title and lines. A working task shows there, dimmed, what
 its worker is doing now, and a task in review what its reviewer is doing: the
