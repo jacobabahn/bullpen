@@ -84,13 +84,12 @@ class HelpersTest(unittest.TestCase):
         # ready and closed are told apart
         self.assertEqual((self.bp.MARKS["ready"], self.bp.MARKS["done"]), ("✔", "·"))
 
-    def test_the_readme_tables_are_the_boards(self):
-        # the README's marks and keys tables say what the board's `?` list says
-        readme = (ROOT / "README.md").read_text()
-        use = readme[readme.index("## Use"):readme.index("### Keys")]
+    def test_the_docs_tables_are_the_boards(self):
+        # docs/board.md's marks and keys tables say what the board's `?` list says
+        use = (ROOT / "docs" / "board.md").read_text()
         rows = [r.split(" | ") for r in re.findall(r"^\| (.+) \|$", use, re.M)]
         cells = {r[1]: r[0] for r in rows if len(r) == 2}
-        # every still mark, each in the README beside its words
+        # every still mark, each in docs/board.md beside its words
         for st, mark in self.bp.MARKS.items():
             self.assertTrue(any(f"`{mark}`" in c for c in cells.values()), (st, mark))
         for words in ("needs you", "ready to accept", "dropped", "in review", "working"):

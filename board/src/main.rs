@@ -23,7 +23,7 @@ use std::sync::mpsc::{self, Sender};
 use std::time::{Duration, Instant};
 
 /// The `?` list: a heading, then one short line per key. The board wraps it to its
-/// width; the long explanations are in the README.
+/// width; the long explanations are in docs/board.md.
 pub const BOARD_KEYS: &[(&str, &[(&str, &str)])] = &[
     ("Moving", &[
         ("j k", "select a task (↑ ↓ too)"),

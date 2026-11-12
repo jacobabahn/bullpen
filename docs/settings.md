@@ -1,0 +1,75 @@
+# Settings
+
+`bullpen config` lists the settings in groups (tasks, agents, review, board, news),
+each with its value and where that comes from:
+`repo` (this repository's `config.json`), `global` (the one for every repository,
+`~/.config/bullpen/config.json`, or `$XDG_CONFIG_HOME/bullpen/config.json`) or
+`default` (bullpen's own). A repository's own value wins over the global one, and
+the global one over the default. `bullpen config --json` prints the same as JSON,
+with each setting's source under `"sources"`.
+
+Every flag below changes this repository's value. With `--global` it changes the
+global one instead, so every repository that doesn't set its own gets it:
+
+```sh
+bullpen config --global --model opus --merge squash --max-running 4
+bullpen config --unset merge             # this repo goes back to the global merge
+bullpen config --global --unset merge    # and the global one back to the default
+```
+
+`--unset` takes the setting's name as `config.json` has it (`worker_model`,
+`review_rounds`). `--global` works outside a repository too. The prefix, the base
+branch, the news mode, the push remote and the coordinators belong to one repository,
+so `--global` refuses `--prefix`, `--base`, `--news`, `--push-remote` and `--board-others`. The commands
+(`worker`, `reviewer`, `coordinator_cmd`, `tour`) have no flags: set them in either
+`config.json` by hand. `bullpen config --help` gives each flag's default; the defaults
+are in one table at the top of `bin/bullpen` (`SETTINGS`), with each setting's kind and
+whether only a repository can hold it.
+
+A repository's `config.json` holds only what it sets itself. One from before the
+global file held every setting: the first time bullpen reads it, it drops the
+values that are just the default, so the global ones apply there.
+
+`bullpen config --auto-accept on` accepts approved tasks by themselves (off by
+default; see [Auto-accept](accept.md#auto-accept)). `bullpen config --news monitor` changes how news reaches the coordinator (`type`
+by default). `bullpen config --merge squash` changes how `accept` merges (`rebase` by default;
+`squash` or `merge`). `bullpen config --stuck-after 45` sets how many minutes a
+working agent can show no progress before you hear of it (20 by default, `0` for
+never). `bullpen config --triage-minutes 15` sets how long a task can wait on its
+coordinator before it goes to you (10 by default; see [Triage](triage.md)). `bullpen config
+--notify all` sends you a notification when a task is ready, finished or auto-accepted
+too, and `off` none (`needs`, when a task needs you, by default; see
+[Notifications](notifications.md)). `bullpen config
+--board-bottom-gap 0` lets the board use its bottom row (1 empty row by default, for
+Rex's capsules). `bullpen config --board-others on --coordinator c1` makes c1's
+board show the other coordinators' tasks too (see [Several
+coordinators](several-coordinators.md); the board's `o`). `bullpen config --board-repos off`
+takes the other repositories off the board's top line (on by default; see [Several
+repositories](several-repositories.md)). `bullpen config --prefix XY --base develop` changes the task prefix (default `BP`)
+and the base branch (default: origin's default branch). `bullpen config --push-remote
+github` pushes the base branch to the `github` remote after each accept, in local mode
+only (see [Local mode](local-mode.md)). The worker and coordinator
+commands are in that folder's `config.json` (`worker`, `coordinator_cmd`). `bullpen config
+--rebase-others off` stops `accept` rebasing the other open tasks (see [After
+accept](accept.md#after-accept)), and `--gh PATH` runs that gh instead of the one on PATH
+(`BULLPEN_GH` wins over both).
+
+`bullpen config --model opus` sets the model for workers and reviewers (follow-up
+and light reviews too); `--worker-model`, `--reviewer-model` and
+`--reviewer-followup-model` set one each (`--tour-model` the tour agent's, see
+[Guided review tours](tours.md)). It takes anything `claude --model`
+does (an alias like `opus`, or a full model ID), and `default` lets Claude Code pick
+again. Bullpen adds `--model` when it starts an agent, in place of any `--model` in its
+command; it leaves other agents' commands alone. (To use a `--model` written in the
+command instead, set `worker_model` or `reviewer_model` back to `null` in `config.json`,
+or `bullpen config --unset worker_model` when it was only set for this repository.) `bullpen config` shows the models in
+use, and `bullpen show BP-3` the one a worker was started with.
+
+A task can have a worker model of its own, over the config's: `bullpen add "..."
+--model sonnet` gives it one from the start, so a task that starts by itself (after
+its dependencies are accepted, or when a slot frees up) uses it. `bullpen model BP-3
+sonnet` sets or changes it later, and `bullpen model BP-3 --clear` goes back to the
+config's. A running worker isn't restarted: the change takes effect at its next start
+or resume. `bullpen start BP-3 --model sonnet` picks one as it starts, and keeps it
+for later resumes. `ls`, `show` and the board name a task's model when it isn't the
+config's.
