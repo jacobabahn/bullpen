@@ -456,8 +456,9 @@ Review costs only what it has to:
   commit it looked at and a patch-id of the task's diff against its base (`git diff
   base...HEAD | git patch-id --stable`). When the worker runs `ready` again on the
   same commit, or on the same patch after a clean rebase, the task is ready at once
-  with its approval, and news says why: `BP-3 is ready (2 commits, PR #12), its
-  approval carried over (the same patch after a clean rebase onto origin/main)`.
+  with its approval, and news says why: `BP-3 is ready again after a rebase: Fix
+  login redirect (2 commits, PR #12, its approval carried over: the same patch
+  after a clean rebase onto origin/main)`.
   A changed patch, or a rebase conflict bullpen sent back (resolved by hand), is
   reviewed again. `ready` run again while a reviewer is already on that very commit
   leaves it be.
@@ -769,6 +770,13 @@ sets how it reaches the coordinator, and `bullpen up` says which is in use:
 News is for the coordinator. You hear of a task that needs you by a notification
 (see [Notifications](#notifications)).
 
+Each line starts with the task's ID and what happened, so the start is what
+counts when a narrow pane cuts it: `BP-3 is ready: Fix login redirect (2 commits,
+PR #12, approved by full review)`, `BP-4 is at a permission prompt: Allow npm
+install?`, ``BP-5 is working again (was ready): it must run `ready` again``. A task
+ready a second time is "ready again" ("ready again after a rebase" when its base
+moved), and a line word for word the last one about its task isn't sent.
+
 `bullpen news` prints the lines logged since the last time and exits;
 `bullpen news --follow` keeps running and prints each new line as it is logged.
 Both remember how far they got (a byte offset in `news-c1.cursor`, one per
@@ -829,7 +837,11 @@ notification, titled `bullpen · <repo>`: "BP-3 needs you: <the question>".
 `bullpen config --notify all` also sends one when a task is ready ("BP-3 is ready:
 <title>"), finished, or auto-accepted; `--notify off` sends none; `needs` is the
 default. Each goes out once, when the task's status changes, and not while the
-task's own pane or its coordinator's board has focus in Rex.
+task's own pane or its coordinator's board has focus in Rex. When several tasks
+come to need you at once (within 10 seconds of a notification for another), the
+first is sent as usual and the rest wait for a 3-second lull, then go out as one:
+"3 tasks need you: BP-3, BP-4, BP-5" (a single one goes out as it was). The
+watcher sends it, on the round that types waiting news.
 
 Bullpen writes the notification (OSC 777) to the terminal of the task's pane, or of
 its board, or its coordinator, when the task's has none, and Rex for Mac shows it:
@@ -879,8 +891,8 @@ before `accept`, `close` or `drop` removes a worktree, its output in
 
 In a repository with no `origin` remote, bullpen works locally. `ready` pushes
 nothing and opens no pull request: it checks the branch against the local base
-branch and starts the reviewer as usual, and news says "local branch" where it
-would name a PR. `accept` merges the task's branch into the local base branch
+branch and starts the reviewer as usual, and news names no PR (nor the local
+branch: in this repo they all are). `accept` merges the task's branch into the local base branch
 itself (rebase, squash or merge, as `config --merge` says). Where the base branch
 is checked out, it is fast-forwarded with `git merge --ff-only`, so uncommitted
 changes to other files survive. If anything stands in the way (a conflict, or an

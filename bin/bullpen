@@ -10,6 +10,7 @@ or logged for it to follow with `bullpen news --follow`.
 
 import argparse
 import codecs
+import contextlib
 import datetime as dt
 import difflib
 import fcntl
@@ -726,14 +727,46 @@ def pr_short(url):
 
 
 def where(t):
-    """What to call the task's work in news and on the board: its PR, or its local
-    branch when the repo has no remote (local mode), else ""."""
-    if t.get("pr"):
-        return pr_short(t["pr"])
-    return "local branch" if t.get("local") else ""
+    """What to call the task's work in news: its PR, else "" (a local branch, in a repo
+    with no remote, goes without saying)."""
+    return pr_short(t["pr"]) if t.get("pr") and not t.get("local") else ""
 
 
 NEWS_MARK = "bullpen · "
+
+
+def ready_news(repo, t, facts=(), then="", again=False):
+    """The news that the task is ready: `BP-3 is ready: <title> (<facts>)<then>`, the
+    title second, where a long line is cut last. A task that was ready before is
+    "ready again", "after a rebase" if its base moved since; a line word for word the
+    one before it about the task isn't sent again."""
+    wt = t.get("worktree")
+    base = merge_base(wt, task_base_ref(repo, t)) if wt and Path(wt).is_dir() else None
+    told = t.get("ready_told")
+    if told is not None or again:
+        again = " again after a rebase" if told and base and told != base else " again"
+    t["ready_told"] = base or ""
+    write_json(repo.task_path(t["id"]), t)  # not save_task: the status didn't change here
+    facts = ", ".join(f for f in facts if f)
+    text = f"{t['id']} is ready{again or ''}: {t['title']}" + (f" ({facts})" if facts else "") + then
+    if last_news(repo, t["id"]) == NEWS_MARK + " ".join(text.split()):
+        return
+    news(repo, t, "ready", text)
+
+
+def last_news(repo, tid):
+    """The last line of news about task tid, as it was logged, or None."""
+    log = repo.dir / "news.log"
+    if not log.exists():
+        return None
+    with log.open("rb") as f:
+        f.seek(max(0, log.stat().st_size - 65536))
+        lines = f.read().decode(errors="replace").splitlines()
+    for line in reversed(lines):
+        m = re.match(r"\S+(?: \[[^\]]*\])? (\S+) [^ :]+: (.*)$", line)
+        if m and m.group(1) == tid:
+            return m.group(2)
+    return None
 
 
 def news(repo, task, event, text, everyone=False, skip=None, typed=None, to=None, more=()):
@@ -810,8 +843,15 @@ def type_news(repo, line, to=None):
 # coordinator's), which Rex for Mac shows, and opens that pane's tab when clicked. It
 # goes out when the change is saved (save_task), so once per change, from whatever made
 # it: mostly the watcher's calls, and `ask`, `ready`, `verdict`.
+#
+# Several tasks that come to need the person at once (within NOTIFY_BURST seconds of
+# a notification for another task) get one more between them, not one each: they wait
+# in notify.json, and once none has come for NOTIFY_QUIET seconds the watcher's
+# outbox round (`_flush`) sends "3 tasks need you: BP-3, BP-4, BP-5".
 
 NOTIFY = ("all", "needs", "off")
+NOTIFY_BURST = 10  # seconds
+NOTIFY_QUIET = 3
 
 
 def notice(t, old):
@@ -848,14 +888,74 @@ def notify(repo, t, old):
     try:
         if looking(repo, t):
             return log_notify(repo, t, n[1], "not sent: the person is looking")
-        title = f"{NEWS_MARK}{repo.root.name}"
-        for session, block in notify_panes(repo, t):
-            tty = pane_tty(session, block)
-            if tty and send_osc(tty, title, n[1]):
-                return log_notify(repo, t, n[1], f"sent to {block}")
-        log_notify(repo, t, n[1], "not sent: no pane to send it from")
+        if n[0] == "needs" and held(repo, t, n[1]):
+            return log_notify(repo, t, n[1], "held: another task needs you too")
+        send_notification(repo, t, n[1])
     except (OSError, ValueError, subprocess.SubprocessError) as e:
         log_notify(repo, t, n[1], f"not sent: {e}")
+
+
+def send_notification(repo, t, text):
+    title = f"{NEWS_MARK}{repo.root.name}"
+    for session, block in notify_panes(repo, t):
+        tty = pane_tty(session, block)
+        if tty and send_osc(tty, title, text):
+            return log_notify(repo, t, text, f"sent to {block}")
+    log_notify(repo, t, text, "not sent: no pane to send it from")
+
+
+@contextlib.contextmanager
+def notify_state(repo):
+    """notify.json, locked against the other bullpen processes the same burst runs:
+    {"at": when the last went out, "ids": the tasks it and those held since were
+    for, "held": [[ID, text], ...] waiting, "last": when the last was held}."""
+    repo.dir.mkdir(parents=True, exist_ok=True)
+    with (repo.dir / "notify.lock").open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        path = repo.dir / "notify.json"
+        st = read_json(path, {}) or {}
+        yield st
+        write_json(path, st)
+
+
+def held(repo, t, text):
+    """Hold a task's needs-you notification if one for another task went out in the
+    last NOTIFY_BURST seconds; else note that this one goes out now. True if held."""
+    with notify_state(repo) as st:
+        clock = time.time()
+        ids = st.get("ids") or []
+        if clock - st.get("at", 0) < NOTIFY_BURST and any(i != t["id"] for i in ids):
+            st["held"] = [h for h in st.get("held") or [] if h[0] != t["id"]] + [[t["id"], text]]
+            st.update(ids=ids + [t["id"]] * (t["id"] not in ids), last=clock)
+            (STATE / "outbox").touch()  # the watcher's outbox round sends it
+            return True
+        if clock - st.get("at", 0) >= NOTIFY_BURST:
+            ids = []
+        st.update(at=clock, ids=ids + [t["id"]] * (t["id"] not in ids))
+        return False
+
+
+def flush_notifications(repo):
+    """Send the held notifications once none has come for NOTIFY_QUIET seconds: one,
+    for all the tasks of the burst. False while some still wait."""
+    if not (repo.dir / "notify.json").exists():
+        return True
+    with notify_state(repo) as st:
+        hold = st.get("held") or []
+        if not hold:
+            return True
+        if time.time() - st.get("last", 0) < NOTIFY_QUIET:
+            return False
+        ids = st.get("ids") or []
+        text = hold[0][1] if len(hold) == 1 else f"{len(ids)} tasks need you: {', '.join(ids)}"
+        st.update(held=[], at=time.time())
+    try:
+        t = repo.task(hold[-1][0])
+        send_notification(repo, t, text)
+    except (Fail, OSError, ValueError, subprocess.SubprocessError) as e:
+        with (repo.dir / "notify.log").open("a") as f:
+            f.write(f"{now()} {hold[-1][0]} not sent: {e}: {text}\n")
+    return True
 
 
 def notify_panes(repo, t):
@@ -1034,13 +1134,19 @@ def deliver(repo):
 
 
 def cmd_flush(args):
-    """(watcher) deliver news that had to wait."""
+    """(watcher) deliver news, and send notifications, that had to wait."""
     waiting = False
     for d in {p.parent for p in (STATE / "repos").glob("*/outbox*.txt")}:
         repo = Repo(read_json(d / "config.json", {}).get("root") or "/")
         repo.dir = d
         repo.cfg = load_config(d)
         if not deliver(repo):
+            waiting = True
+    for d in {p.parent for p in (STATE / "repos").glob("*/notify.json")}:
+        repo = Repo(read_json(d / "config.json", {}).get("root") or "/")
+        repo.dir = d
+        repo.cfg = load_config(d)
+        if not flush_notifications(repo):
             waiting = True
     if not waiting:
         (STATE / "outbox").unlink(missing_ok=True)
@@ -2484,7 +2590,7 @@ def ready(repo, t, args):
         set_status(t, "ready", "Nothing to merge (no commits)")
         t.update(summary=summary.strip() or None, diffstat=None)
         repo.save_task(t)
-        news(repo, t, "ready", f"{t['id']} is ready with nothing to merge: {t['title']}")
+        ready_news(repo, t, ["nothing to merge"])
         print("no commits: marked ready with nothing to merge")
         return
     t["diffstat"] = shortstat(wt, base_ref)  # for the board, worked out once per ready
@@ -2498,7 +2604,7 @@ def ready(repo, t, args):
             return
         set_status(t, "ready")
         repo.save_task(t)
-        news(repo, t, "ready", f"{t['id']} is ready ({commits(ahead)}, local branch): {t['title']}")
+        ready_news(repo, t, [commits(ahead)])
         print(f"local branch {t['branch']} is ready ({commits(ahead)} ahead of {base_ref})")
         return
     git(wt, "push", "-q", "--force-with-lease", "-u", "origin", f"HEAD:refs/heads/{t['branch']}")
@@ -2516,7 +2622,7 @@ def ready(repo, t, args):
         return
     set_status(t, "ready")
     repo.save_task(t)
-    news(repo, t, "ready", f"{t['id']} is ready ({commits(ahead)}, {pr_short(t['pr'])}): {t['title']}")
+    ready_news(repo, t, [commits(ahead), pr_short(t["pr"])])
     print(f"pushed {t['branch']}; pull request: {t['pr']}")
 
 
@@ -2618,8 +2724,7 @@ def review_at_ready(repo, t, base_ref):
             subprocess.Popen([SELF, "_auto_accept", t["id"]], cwd=repo.root, start_new_session=True,
                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
-            news(repo, t, "ready", f"{t['id']} is ready ({commits(t.get('commits') or 0)}, {where(t)}), "
-                 f"its approval carried over ({kept}): {t['title']}")
+            ready_news(repo, t, [commits(t.get("commits") or 0), where(t), f"its approval carried over: {kept}"])
         return f"Its review approval carries over ({kept}), so there's no new review: end your turn."
     if (t["status"] == "review" and r.get("block") and r.get("commit") == head(t["worktree"])
             and rex_alive(r.get("session"), r["block"])):
@@ -2880,8 +2985,9 @@ def cmd_verdict(args):
         if auto_accepts(repo, t):
             auto_accept(repo, t)
         else:
-            news(repo, t, "ready", f"{t['id']} is ready ({commits(t.get('commits') or 0)}, {pr}), "
-                 f"approved by {review_kind(r)}: {t['title']}")
+            why = f": {r['why']}" if r.get("why") else ""  # last, so not in brackets in brackets
+            ready_news(repo, t, [commits(t.get("commits") or 0), pr,
+                                 f"approved by {review_kind({**r, 'why': None})}{why}"])
     elif tour or r["round"] < rounds:
         said = ("The reviewer says the person's comments aren't all addressed yet" if tour else
                 f"The reviewer asked for changes (review round {r['round']} of {rounds})")
@@ -2902,8 +3008,8 @@ def cmd_verdict(args):
     else:
         set_status(t, "ready", f"Review still asks for changes after {rounds} rounds")
         repo.save_task(t)
-        news(repo, t, "ready", f"{t['id']} is ready ({pr}), but review still asks for changes "
-             f"after {rounds} rounds: findings in {findings}: {t['title']}")
+        ready_news(repo, t, [pr], f", but review still asks for changes after {rounds} rounds: "
+                   f"findings in {findings}")
     print(f"verdict recorded: {args.verdict}")
     sys.stdout.flush()
     rex_close(*reviewer)  # last: this closes the pane we may be running in
@@ -3972,15 +4078,15 @@ def auto_accept(repo, t):
     if t.get("pr") and not t.get("local"):
         state = pr_checks_now(repo, t)
         if state == "failing":
-            news(repo, t, "ready", f"{t['id']} is ready ({pr_short(t['pr'])}), approved by review, "
-                 f"but not auto-accepted: its PR's checks are failing: {t['title']}")
+            ready_news(repo, t, [pr_short(t["pr"]), "approved by review"],
+                       ", but not auto-accepted: its PR's checks are failing")
             start_queued(repo, t, "ready")  # its worker is done: its slot is free
             return
         if state == "running":
             t["auto_wait"] = True
             write_json(repo.task_path(t["id"]), t)  # not save_task: the status didn't change
-            news(repo, t, "ready", f"{t['id']} is ready ({pr_short(t['pr'])}), approved by review; "
-                 f"it auto-accepts once its PR's checks pass: {t['title']}")
+            ready_news(repo, t, [pr_short(t["pr"]), "approved by review"],
+                       "; it auto-accepts once its PR's checks pass")
             start_queued(repo, t, "ready")
             return
     run_auto_accept(repo, t)
@@ -4006,8 +4112,8 @@ def run_auto_accept(repo, t):
         t = repo.task(t["id"])
         t.pop("auto_wait", None)
         write_json(repo.task_path(t["id"]), t)
-        news(repo, t, "ready", f"{t['id']} is ready ({where(t)}), approved by review, but the "
-             f"auto-accept was refused: {e}. Send it back to rebase: {t['title']}")
+        ready_news(repo, t, [where(t), "approved by review"],
+                   f", but the auto-accept was refused: {e}. Send it back to rebase")
         start_queued(repo, t, "ready")
 
 
@@ -6110,13 +6216,12 @@ def cmd_event(args):
             approved = (t.get("review") or {}).get("verdict") == "approved"
             if approved:
                 t["from_ready"] = True  # an end of turn that changed no code makes it ready again
-            news(repo, t, "working", f"{t['id']} was ready, but its worker started working again, so "
-                 f"it is working again: it has to run `ready` again" +
-                 (", and its approval holds only if the code doesn't change" if approved else ""))
+            news(repo, t, "working", f"{t['id']} is working again (was ready): it must run `ready` again" +
+                 ("; its approval holds if the code doesn't change" if approved else ""))
         elif t["status"] == "finished" and not (t.get("last") or "").startswith("working|"):
             back_to_work(t)
-            news(repo, t, "working", f"{t['id']} was finished, but its worker started working again, so "
-                 f"it is working again: it has to run `finish` (or `ready`) again")
+            news(repo, t, "working", f"{t['id']} is working again (was finished): it must run `finish` "
+                 f"(or `ready`) again")
         t.pop("ok", None)
         t["last"] = key
         repo.save_task(t)
@@ -6127,9 +6232,9 @@ def cmd_event(args):
         return
     t["last"] = key
     if state == "blocked":
-        kind = args.kind or "input"
+        kind, msg = args.kind or "input", prompt_msg(args.kind or "input", msg)
         stop(repo, t, "worker", "prompt", f"Needs you ({kind})" + (f": {msg}" if msg else ""),
-             f"{t['id']} needs the person ({kind})" + (f": {msg}" if msg else ""), "needs-you")
+             prompt_news(t["id"], kind, msg), "needs-you")
     elif state == "error":
         stop(repo, t, "worker", "failed", "Failed" + (f": {msg}" if msg else ""),
              f"{t['id']}'s turn failed" + (f": {msg}" if msg else "") +
@@ -6152,6 +6257,19 @@ def cmd_event(args):
         repo.save_task(t)
 
 
+def prompt_msg(kind, msg):
+    """What Rex said of a prompt, unless it only names its kind ("permission prompt")."""
+    msg = (msg or "").strip()
+    return "" if msg.lower() in (kind.lower(), f"{kind.lower()} prompt") else msg
+
+
+def prompt_news(who, kind, msg):
+    """The news that a task's agent is at a prompt, which needs the person: "BP-3 is at
+    a permission prompt: Allow rm?", "BP-3's reviewer is at a prompt (question): ..."."""
+    at = "a permission prompt" if kind == "permission" else f"a prompt ({kind})"
+    return f"{who} is at {at}" + (f": {msg}" if msg else "")
+
+
 def ready_again(repo, t):
     """A ready task's worker took a turn and ended it without ready. If the code is as it
     was approved (committed, the same patch), it is ready again with its approval. True
@@ -6165,8 +6283,8 @@ def ready_again(repo, t):
     keep_approval(t, ref)
     set_status(t, "ready")
     repo.save_task(t)
-    news(repo, t, "ready", f"{t['id']} is ready again: its worker's turn left the code as approved "
-         f"({kept}), so the approval carried over. `bullpen peek {t['id']}` if it said something: {t['title']}")
+    ready_news(repo, t, [f"its worker's turn left the code as approved: {kept}"],
+               f". `bullpen peek {t['id']}` if it said something", again=True)
     start_queued(repo, t, "ready")  # it worked again, and took a slot: now it's free
     return True
 
@@ -6205,9 +6323,9 @@ def review_event(repo, t, args):
         if stuck or woke or back or was_ok:
             repo.save_task(t)
     elif state == "blocked":
-        kind = args.kind or "input"
+        kind, msg = args.kind or "input", prompt_msg(args.kind or "input", msg)
         stop(repo, t, "reviewer", "prompt", f"Reviewer needs you ({kind})" + (f": {msg}" if msg else ""),
-             f"{t['id']}'s reviewer needs the person ({kind})" + (f": {msg}" if msg else ""), "needs-you")
+             prompt_news(f"{t['id']}'s reviewer", kind, msg), "needs-you")
     elif state in ("done", "idle", "error") and t["status"] == "review":
         if (state != "error" and getattr(args, "shell_min", None) is None
                 and shell_running(screen(r.get("session") or t.get("session"), r["block"]))):
