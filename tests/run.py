@@ -48,6 +48,15 @@ class Result(unittest.TestResult):
         super().__init__()
         self.buffer = True  # a passing test's prints stay quiet
         self.bad = []
+        self.times = {}
+
+    def startTest(self, test):
+        self.started = time.monotonic()
+        super().startTest(test)
+
+    def stopTest(self, test):
+        super().stopTest(test)
+        self.times[test.id()] = time.monotonic() - self.started
 
     def addError(self, test, err):
         super().addError(test, err)
@@ -73,15 +82,16 @@ def run_chunk(names):
         suite = unittest.defaultTestLoader.loadTestsFromNames(names)
         result = Result()
         suite.run(result)
-        return names, result.testsRun, len(result.skipped), result.bad
+        return result.testsRun, len(result.skipped), result.bad, result.times
     except Exception:
-        return names, 0, 0, [("ERROR", " ".join(names), traceback.format_exc())]
+        return 0, 0, [("ERROR", " ".join(names), traceback.format_exc())], {}
 
 
 def main():
     ap = argparse.ArgumentParser(description="Run the tests across CPUs.")
     ap.add_argument("only", nargs="*", help="run only tests whose ID has one of these words")
     ap.add_argument("-j", "--jobs", type=int, default=os.cpu_count() or 1)
+    ap.add_argument("--slowest", type=int, default=0, metavar="N", help="list the N slowest tests")
     args = ap.parse_args()
     loader = unittest.TestLoader()
     suite = loader.discover(str(HERE), top_level_dir=str(HERE))
@@ -92,17 +102,20 @@ def main():
         sys.exit(f"no tests match {' '.join(args.only)}")
     start = time.monotonic()
     ran = skipped = 0
-    bad = []
+    bad, times = [], {}
     with multiprocessing.get_context("fork" if hasattr(os, "fork") else "spawn").Pool(
             min(args.jobs, len(names))) as pool:
-        for _, n, s, b in pool.imap_unordered(run_chunk, chunks(names)):
+        for n, s, b, t in pool.imap_unordered(run_chunk, chunks(names)):
             ran, skipped = ran + n, skipped + s
             bad += b
+            times.update(t)
             marks = "".join("F" if k == "FAIL" else "E" for k, _, _ in b)
             print("." * max(0, n - len(b)) + marks, end="", flush=True)
     print()
     for kind, name, tb in bad:
         print("=" * 70, f"{kind}: {name}", "-" * 70, tb, sep="\n")
+    for name, secs in sorted(times.items(), key=lambda x: -x[1])[:args.slowest]:
+        print(f"{secs:6.2f}s  {name}")
     print("-" * 70)
     print(f"Ran {ran} tests in {time.monotonic() - start:.1f}s ({min(args.jobs, len(names))} processes)")
     print(f"\nFAILED ({len(bad)} failing)" if bad else "\nOK" + (f" (skipped={skipped})" if skipped else ""))
