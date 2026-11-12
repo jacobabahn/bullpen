@@ -486,15 +486,20 @@ on that base up to date, and they don't drift behind and conflict later:
 - Between turns (needs you, triage, stopped, ready): bullpen rebases its branch itself,
   if its worktree is clean, and pushes it to the PR (`--force-with-lease`). The
   status stays; a ready task says "Rebased onto main." on the board until its
-  next `ready`. An approved task keeps its approval when the rebase left its patch
-  as it was (the same patch-id); if the patch changed, a reviewer checks it again
-  (a follow-up round). If the rebase conflicts, it is undone, the branch stays as it was,
-  and the task goes back to its worker with the conflicting files (resumed if its
-  pane is gone). Uncommitted changes: skipped.
+  next `ready`. An approved task keeps its approval when the rebase left the task's
+  own lines as they were (only the base moved, see [Review](#review)); if they
+  changed, a reviewer checks it again (a follow-up round). If the rebase conflicts
+  only where both sides added lines at the same place, in a doc (under `docs/` or
+  `prompts/`, or a `.md` file) or a test file (under `tests/`, or `test_*`),
+  bullpen keeps both sides, the base's lines first, and goes on. Any other conflict
+  undoes the rebase, the branch stays as it was, and the task goes back to its
+  worker with the conflicting files (resumed if its pane is gone). Uncommitted
+  changes: skipped.
 
-One news line sums it up: `After BP-4: BP-5 told to rebase; BP-8 rebased; BP-9
-conflicts in bin/bullpen, sent back.` `bullpen config --rebase-others off` turns this
-off.
+One news line sums it up: `After BP-4: BP-5 told to rebase; BP-8 rebased; BP-6
+rebased, keeping both sides of a conflict in README.md; its approval carried over
+(only the base moved); BP-9 conflicts in bin/bullpen, sent back.` `bullpen config
+--rebase-others off` turns this off.
 
 ### Review
 
@@ -524,15 +529,26 @@ Review costs only what it has to:
   --reviewer-followup-model`, sonnet by default; `null` in `config.json` uses the
   reviewer model).
 - **An approval is kept while the code doesn't change.** Each review records the
-  commit it looked at and a patch-id of the task's diff against its base (`git diff
-  base...HEAD | git patch-id --stable`). When the worker runs `ready` again on the
-  same commit, or on the same patch after a clean rebase, the task is ready at once
-  with its approval, and news says why: `BP-3 is ready again after a rebase: Fix
-  login redirect (2 commits, PR #12, its approval carried over: the same patch
-  after a clean rebase onto origin/main)`.
-  A changed patch, or a rebase conflict bullpen sent back (resolved by hand), is
-  reviewed again. `ready` run again while a reviewer is already on that very commit
-  leaves it be.
+  commit it looked at, a patch-id of the task's diff against its base (`git diff
+  base...HEAD | git patch-id --stable`), and the task's own lines: what it adds
+  and removes in each file, without context lines or line numbers (`git diff -U0`).
+  When the worker runs `ready` again on the same commit, on the same patch, or
+  after a rebase with the same own lines (only the base moved: even if the base
+  changed lines next to the task's, or a conflict was resolved by keeping both
+  sides), the task is ready at once with its approval, and news says why: `BP-3 is
+  ready again after a rebase: Fix login redirect (2 commits, PR #12, its approval
+  carried over: only the base moved)`. `ready` run again while a reviewer is
+  already on that very commit leaves it be.
+- **A rebase check, after a conflict.** When a rebase conflicted (bullpen sent it
+  back, or kept both sides itself) and the task's own lines changed only in the
+  files that conflicted, a **rebase check** looks at the resolution: a short review
+  on the follow-up model, given the conflicts as the rebase met them, those files'
+  change now and the range-diff, asking whether the resolution is right and keeps
+  both sides. It doesn't count as a round. Its approval says `a rebase check
+  approved the conflict resolution`; if it asks for changes, they go back to the
+  worker, and the next `ready` is a follow-up round. Own lines that changed
+  anywhere else (the worker changed more than the resolution) get a follow-up
+  review, as any change does.
 
 The board, `show` and the ready news say which kind of review it was ("approved by
 light review (12 lines in 1 file)").

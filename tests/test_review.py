@@ -9,7 +9,7 @@ from support import setUpModule, tearDownModule, sh, BullpenTest  # a temp folde
 
 
 class ReviewTest(BullpenTest):
-    def review_prompt(self, tid, n):
+    def review_prompt(self, tid, n):  # n: 2, or "1.rebase" for a rebase check
         return next((self.tmp / "state").rglob(f"{tid}.review-{n}.md")).read_text()
 
     def test_an_approval_is_kept_when_ready_runs_again_on_the_same_commit(self):
@@ -225,55 +225,130 @@ class ReviewTest(BullpenTest):
         self.bp("accept", tid)
         t = self.show("BP-2")
         self.assertEqual((t["status"], t["review"]["round"]), ("ready", 1))
-        self.assertIn("BP-2 rebased, its approval kept (the same patch after a clean rebase onto origin/main)",
-                      self.news()[-1])
+        self.assertIn("BP-2 rebased; its approval carried over (the same patch after a clean rebase onto "
+                      "origin/main)", self.news()[-1])
 
-    def test_after_accept_a_rebase_that_changes_the_patch_is_reviewed_again(self):
-        (self.repo / "list.txt").write_text("a\nb\nc\nd\ne\nf\n")
+    def base_file(self, name, text):
+        """A file on origin's main, before the tasks start."""
+        (self.repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / name).write_text(text)
         sh("git", "-C", str(self.repo), "add", ".")
-        sh("git", "-C", str(self.repo), "commit", "-qm", "A list")
+        sh("git", "-C", str(self.repo), "commit", "-qm", f"Add {name}")
         sh("git", "-C", str(self.repo), "push", "-q", "origin", "main")
+
+    def two_approved(self, name, first, second):
+        """BP-1 and BP-2 each change file name (to first, second) and are approved, BP-2's
+        worker idle; then BP-1 is accepted, which rebases BP-2. Returns BP-2's worktree."""
         tid = self.start_task()
-        self.commit_file(tid, "list.txt", "A\nb\nc\nd\ne\nf\n")
+        self.commit_file(tid, name, first)
         self.ready(tid)
         self.verdict(tid, "approve")
-        # two lines down: it rebases cleanly, but BP-1's line is in its patch's context
         self.bp("add", "Second", "--brief", "x")
         self.bp("start", "BP-2")
-        self.commit_file("BP-2", "list.txt", "a\nb\nc\nD\ne\nf\n")
-        self.ready("BP-2")
-        self.verdict("BP-2", "approve")
-        self.merge_on_github(tid)
-        self.bp("accept", tid)
-        t = self.show("BP-2")
-        self.assertEqual((t["status"], t["review"]["round"], t["review"]["kind"]), ("review", 2, "followup"))
-        self.assertIn("BP-2 rebased, but its patch changed: a reviewer checks it again", self.news()[-1])
-        self.assertIn("range-diff", self.review_prompt("BP-2", 2))
-
-    def test_after_accept_a_conflict_resolved_by_hand_is_reviewed_again(self):
-        tid = self.approved_task()
-        self.bp("add", "Second", "--brief", "x")
-        self.bp("start", "BP-2")
-        wt = self.show("BP-2")["worktree"]
         self.bp("_event", self.block("BP-2"), "working", "", "")
-        self.commit_file("BP-2", "fix1.txt", "mine\n")
+        wt = self.commit_file("BP-2", name, second)
         self.ready("BP-2")
         self.verdict("BP-2", "approve")
         self.bp("_event", self.block("BP-2"), "idle", "", "")
         self.merge_on_github(tid)
         self.bp("accept", tid)
-        t = self.show("BP-2")
-        self.assertEqual((t["status"], t["review"]["verdict"], t["review"]["conflict"]), ("working", "approved", True))
+        return wt
+
+    def resolve(self, wt, files, more=None):
+        """The worker rebases BP-2 onto origin/main by hand and resolves the conflict:
+        {path: text}; more is a file it changes besides."""
         sh("git", "-C", wt, "fetch", "-q", "origin")
         p = subprocess.run(["git", "-C", wt, "rebase", "origin/main"], capture_output=True, text=True)
         self.assertNotEqual(p.returncode, 0)
-        (Path(wt) / "fix1.txt").write_text("mine\n")
+        for name, text in files.items():
+            (Path(wt) / name).write_text(text)
         sh("git", "-C", wt, "add", ".")
         subprocess.run(["git", "-C", wt, "-c", "core.editor=true", "rebase", "--continue"], check=True,
-                       capture_output=True, env=self.env)
+                       capture_output=True, env={**self.env, "GIT_EDITOR": "true"})
+        if more:
+            self.commit_file("BP-2", more, "more\n")
+
+    def test_after_accept_a_rebase_that_changes_only_context_keeps_the_approval(self):
+        self.base_file("list.txt", "a\nb\nc\nd\ne\nf\n")
+        # two lines apart: it rebases cleanly, but BP-1's line is in BP-2's patch's context
+        self.two_approved("list.txt", "A\nb\nc\nd\ne\nf\n", "a\nb\nc\nD\ne\nf\n")
+        t = self.show("BP-2")
+        self.assertEqual((t["status"], t["review"]["round"], t["review"]["verdict"]), ("ready", 1, "approved"))
+        self.assertEqual(list((self.tmp / "state").rglob("BP-2.review-2*")), [])  # no reviewer
+        self.assertIn("BP-2 rebased; its approval carried over (only the base moved)", self.news()[-1])
+
+    def test_after_accept_a_conflict_resolved_by_keeping_both_sides_keeps_the_approval(self):
+        self.base_file("list.txt", "a\nb\n")
+        wt = self.two_approved("list.txt", "a\nb\nc\n", "a\nb\nd\n")
+        t = self.show("BP-2")
+        self.assertEqual((t["status"], t["review"]["conflict"]), ("working", ["list.txt"]))
+        self.resolve(wt, {"list.txt": "a\nb\nc\nd\n"})
+        self.assertIn("approval carries over (only the base moved)", self.ready("BP-2").stdout)
+        t = self.show("BP-2")
+        self.assertEqual((t["status"], t["review"]["round"]), ("ready", 1))
+        self.assertNotIn("conflict", t["review"])
+        self.assertIn("BP-2 is ready again after a rebase: Second (1 commit, PR #7, its approval carried over: "
+                      "only the base moved)", self.news()[-1])
+
+    def test_after_accept_a_conflict_resolved_by_hand_gets_a_rebase_check(self):
+        self.base_file("list.txt", "a\nb\n")
+        wt = self.two_approved("list.txt", "a\nb\nc\n", "a\nb\nd\n")
+        self.resolve(wt, {"list.txt": "a\nb\nd\n"})  # drops BP-1's line: its own lines changed there
+        self.assertIn("A reviewer checks it now (rebase check)", self.ready("BP-2").stdout)
+        r = self.show("BP-2")["review"]
+        self.assertEqual((r["round"], r["kind"], r["model"], r["rebase"]), (1, "rebase", "sonnet", ["list.txt"]))
+        prompt = self.review_prompt("BP-2", "1.rebase")
+        self.assertIn("round 1 of 2 (rebase check)", prompt)
+        self.assertIn("This is a rebase check", prompt)
+        self.assertIn("conflicts were resolved", prompt)
+        self.assertIn("<<<<<<<", prompt)  # the conflicts as the rebase met them
+        self.assertIn(" b\n-c\n+d", prompt)  # the change in list.txt now
+        self.assertIn("range-diff", prompt)
+        self.verdict("BP-2", "approve")
+        t = self.show("BP-2")
+        self.assertEqual((t["status"], t["review"]["round"]), ("ready", 1))
+        self.assertIn("a rebase check approved the conflict resolution", self.news()[-1])
+
+    def test_a_rebase_check_that_asks_for_changes_sends_it_back_without_a_round(self):
+        self.base_file("list.txt", "a\nb\n")
+        wt = self.two_approved("list.txt", "a\nb\nc\n", "a\nb\nd\n")
+        self.resolve(wt, {"list.txt": "a\nb\nd\n"})
+        self.ready("BP-2")
+        self.verdict("BP-2", "changes", "BP-1's c is gone.")
+        t = self.show("BP-2")
+        self.assertEqual((t["status"], t["review"]["round"]), ("working", 1))
+        self.assertIn("A rebase check says the conflict resolution isn't right", self.typed()[-1][1])
+        self.commit_file("BP-2", "list.txt", "a\nb\nc\nd\n")
         self.ready("BP-2")
         r = self.show("BP-2")["review"]
-        self.assertEqual((r["round"], r["kind"], r["verdict"]), (2, "followup", None))
+        self.assertEqual((r["round"], r["kind"]), (2, "followup"))
+
+    def test_after_accept_a_worker_that_changed_more_than_the_conflict_gets_a_follow_up(self):
+        self.base_file("list.txt", "a\nb\n")
+        wt = self.two_approved("list.txt", "a\nb\nc\n", "a\nb\nd\n")
+        self.resolve(wt, {"list.txt": "a\nb\nc\nd\n"}, more="other.txt")
+        self.assertIn("A reviewer checks it now (follow-up review)", self.ready("BP-2").stdout)
+        r = self.show("BP-2")["review"]
+        self.assertEqual((r["round"], r["kind"]), (2, "followup"))
+
+    def test_after_accept_both_sides_adding_to_a_doc_are_kept_by_bullpen(self):
+        self.base_file("docs/notes.md", "# Notes\n\nOne\n=======\n")
+        wt = self.two_approved("docs/notes.md", "# Notes\n\nOne\n=======\nFrom BP-1\n",
+                               "# Notes\n\nOne\n=======\nFrom BP-2\n")
+        t = self.show("BP-2")
+        self.assertEqual((t["status"], t["review"]["round"], t["review"]["verdict"]), ("ready", 1, "approved"))
+        self.assertEqual((Path(wt) / "docs/notes.md").read_text(),
+                         "# Notes\n\nOne\n=======\nFrom BP-1\nFrom BP-2\n")
+        self.assertEqual(sh("git", "-C", wt, "status", "--porcelain").strip(), "")
+        self.assertIn("BP-2 rebased, keeping both sides of a conflict in docs/notes.md; its approval carried "
+                      "over (only the base moved)", self.news()[-1])
+
+    def test_after_accept_a_doc_both_sides_changed_goes_back_to_the_worker(self):
+        self.base_file("docs/notes.md", "# Notes\n\nOne\n")
+        wt = self.two_approved("docs/notes.md", "# Notes\n\nOne by BP-1\n", "# Notes\n\nOne by BP-2\n")
+        self.assertEqual(self.show("BP-2")["status"], "working")
+        self.assertEqual(sh("git", "-C", wt, "status", "--porcelain").strip(), "")
+        self.assertIn("BP-2 conflicts in docs/notes.md, sent back", self.news()[-1])
 
     def test_an_approval_carried_over_frees_a_slot_while_auto_accept_waits(self):
         self.bp("config", "--auto-accept", "on")

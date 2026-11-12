@@ -2860,7 +2860,8 @@ def review_at_ready(repo, t, base_ref):
         start_review(repo, t, base_ref)
         return (f"A reviewer checks that the person's comments are addressed now: end your turn, and "
                 f"you'll hear back if it asks for changes.")
-    kept = approval_kept(t, base_ref)
+    check = rebase_check(t, base_ref)
+    kept = check[1] if check and check[0] == "kept" else None
     if kept:
         keep_approval(t, base_ref)
         set_status(t, "ready")
@@ -2877,7 +2878,7 @@ def review_at_ready(repo, t, base_ref):
         repo.save_task(t)
         return ("A reviewer is already checking this commit: end your turn, and you'll hear back "
                 "if it asks for changes.")
-    start_review(repo, t, base_ref)
+    start_review(repo, t, base_ref, rebase=check[1] if check else None)
     return (f"A reviewer checks it now ({review_kind(t['review'])}): end your turn, and you'll "
             f"hear back if it asks for changes.")
 
@@ -2892,10 +2893,15 @@ def cmd_auto_accept(args):
 
 # ---------- what a review covers ----------
 #
-# A review records what it looked at: the commit, the base it was on (merge-base) and
-# a patch-id of the task's diff against that base. An approval holds while the code
-# doesn't change: the same commit, or the same patch-id (reworded commits, or a rebase
-# that had no conflicts). A conflict bullpen sent back drops it whatever the patch-id.
+# A review records what it looked at: the commit, the base it was on (merge-base), a
+# patch-id of the task's diff against that base, and the task's own lines (own_lines:
+# what it added and removed, file by file, without context or line numbers). An
+# approval holds while the code doesn't change: the same commit, the same patch-id
+# (reworded commits), or the same own lines after a rebase (only the base moved, even
+# where it changed the context, or where a conflict was resolved by keeping both
+# sides). After a rebase that conflicted, own lines that changed only in the files
+# that conflicted get a rebase check (a short review of the resolution, which doesn't
+# count as a round); a change anywhere else gets a follow-up review.
 
 
 def head(wt):
@@ -2911,30 +2917,64 @@ def patch_id(wt, base_ref):
     return out[0] if out else None
 
 
+def own_lines(wt, base_ref):
+    """The branch's own added and removed lines, file by file ({path: hash}), without
+    context or line numbers: what stays the same when only the base moved under it."""
+    out = git(wt, "diff", "-U0", "--binary", "--no-color", "--no-ext-diff", "--no-renames",
+              f"{base_ref}...HEAD").stdout
+    files, h = {}, None
+    for line in out.split("\n"):
+        if line.startswith("diff --git "):
+            pair = line[len("diff --git "):]  # "a/<path> b/<path>", the same path twice
+            h = files[pair[2:2 + (len(pair) - 5) // 2]] = hashlib.sha1()
+        elif h and not line.startswith(("index ", "@@")):
+            h.update(line.encode() + b"\n")
+    return {path: h.hexdigest() for path, h in files.items()}
+
+
 def merge_base(wt, base_ref):
     return git(wt, "merge-base", base_ref, "HEAD", check=False).stdout.strip() or None
 
 
-def approval_kept(t, base_ref):
-    """Why the task's approval still covers its code, in a few words, or None if it doesn't."""
+def rebase_check(t, base_ref):
+    """What the task's approval needs now: ("kept", why) when it still covers the code,
+    ("rebase", files) when its own lines changed only in the files a rebase conflicted
+    in (a rebase check looks at the resolution), or None (a normal review)."""
     r = t.get("review") or {}
     wt = t.get("worktree")
-    if r.get("verdict") != "approved" or not r.get("patch") or r.get("conflict") or not wt:
+    if r.get("verdict") != "approved" or not r.get("patch") or not wt:
         return None
-    now_head = head(wt)
-    if now_head == r.get("commit"):
-        return "the same commit"
-    if patch_id(wt, base_ref) != r["patch"]:
-        return None
-    if merge_base(wt, base_ref) != r.get("base"):
-        return f"the same patch after a clean rebase onto {base_ref}"
-    return "the same patch, in other commits"
+    if head(wt) == r.get("commit"):
+        return "kept", "the same commit"
+    moved = merge_base(wt, base_ref) != r.get("base")
+    if not r.get("conflict") and patch_id(wt, base_ref) == r["patch"]:
+        return "kept", (f"the same patch after a clean rebase onto {base_ref}" if moved
+                        else "the same patch, in other commits")
+    if r.get("own") is None:
+        return None  # reviewed before bullpen kept own lines
+    own = own_lines(wt, base_ref)
+    changed = {p for p in set(own) | set(r["own"]) if own.get(p) != r["own"].get(p)}
+    if not changed:
+        return "kept", "only the base moved" if moved else "the same lines, in other commits"
+    conflicted = r["conflict"] if isinstance(r.get("conflict"), list) else []
+    if moved and changed <= set(conflicted):
+        return "rebase", sorted(changed)
+    return None
+
+
+def approval_kept(t, base_ref):
+    """Why the task's approval still covers its code, in a few words, or None if it doesn't."""
+    check = rebase_check(t, base_ref)
+    return check[1] if check and check[0] == "kept" else None
 
 
 def keep_approval(t, base_ref):
     """The approval now covers the task's current commit."""
-    r = t["review"]
-    r.update(commit=head(t["worktree"]), base=merge_base(t["worktree"], base_ref))
+    r, wt = t["review"], t["worktree"]
+    r.update(commit=head(wt), base=merge_base(wt, base_ref), patch=patch_id(wt, base_ref),
+             own=own_lines(wt, base_ref))
+    r.pop("conflict", None)
+    r.pop("conflict_diff", None)
     r["kept"] = r.get("kept", 0) + 1
 
 
@@ -2974,7 +3014,7 @@ def review_kind(r):
     if not kind:
         return "review"
     word = {"full": "full review", "light": "light review", "followup": "follow-up review",
-            "tour": "review of the person's comments"}[kind]
+            "tour": "review of the person's comments", "rebase": "rebase check"}[kind]
     return word + (f" ({r['why']})" if r.get("why") else "")
 
 
@@ -3006,6 +3046,24 @@ def since_last(wt, base_ref, prev):
     return cmd, "\n".join(lines)
 
 
+def clipped_diff(text, cmd):
+    """A diff for a reviewer's brief, or what to run when it's empty or too long."""
+    if not text.strip():
+        return "(no changes)"
+    lines = text.rstrip("\n").split("\n")
+    if len(lines) > MAX_DIFF_LINES:
+        return f"({len(lines)} lines, too long to include: run `{cmd}`)"
+    return "\n".join(lines)
+
+
+def conflict_text(path):
+    """The conflicts a rebase met, as saved when it stopped, for a rebase check."""
+    f = Path(path) if path else None
+    if not f or not f.is_file():
+        return "(not saved: the range-diff below shows how they were resolved)"
+    return clipped_diff(f.read_text(), f"cat {f}")
+
+
 def task_base_ref(repo, t):
     """What the task's branch is compared with: origin's copy of its base branch when
     there is one, else the local base branch (local mode)."""
@@ -3029,16 +3087,18 @@ def review_label(t):
     return f"bullpen: {t['id']} review"
 
 
-def start_review(repo, t, base_ref):
+def start_review(repo, t, base_ref, rebase=None):
     """Start a reviewer agent on the task's branch, in its own capsule. The first round is
     a full review, or a light one for a small change; later rounds follow up on the last
     verdict: its findings and what changed since. Comments the person sent back after a
-    tour (tour_sent) get a review of their own, which keeps the round it follows: it
-    doesn't count toward review_rounds."""
+    tour (tour_sent) get a review of their own, and an approved change whose own lines
+    changed only where a rebase conflicted (rebase: those files) a rebase check of the
+    resolution. Both keep the round they follow: they don't count toward review_rounds."""
     old = t.get("review") or {}
     close_reviewer(t)
     sent = t.get("tour_sent")
-    n = old.get("round", 0) + (0 if sent else 1)
+    rebase = None if sent else rebase
+    n = old.get("round", 0) + (0 if sent or rebase else 1)
     rounds = repo.cfg["review_rounds"]
     briefs = repo.dir / "briefs"
     wt = t["worktree"]
@@ -3047,6 +3107,8 @@ def start_review(repo, t, base_ref):
             if old.get("verdict") else old.get("prev"))
     if sent:
         kind, why = "tour", None
+    elif rebase:
+        kind, why = "rebase", None
     elif prev and prev.get("commit"):
         kind, why = "followup", None
     else:
@@ -3067,8 +3129,14 @@ def start_review(repo, t, base_ref):
                     findings=(f.read_text().strip() if f and f.is_file() else "(none)"),
                     prev_said="approved the change. Its notes" if prev["verdict"] == "approved"
                     else "asked for changes. Its findings")
+    if rebase:
+        vals.update(conflict_files=", ".join(f"`{f}`" for f in rebase),
+                    conflicts=conflict_text(old.get("conflict_diff")),
+                    now=clipped_diff(git(wt, "diff", f"{base_ref}...HEAD", "--", *rebase, check=False).stdout,
+                                     f"git -C {wt} diff {base_ref}...HEAD -- {' '.join(rebase)}"))
     look = (PROMPTS / f"review-{kind}.md").read_text().format(**vals)
-    prompt = briefs / (f"{t['id']}.tour-{sent['n']}.review.md" if sent else f"{t['id']}.review-{n}.md")
+    prompt = briefs / (f"{t['id']}.tour-{sent['n']}.review.md" if sent else
+                       f"{t['id']}.review-{n}.rebase.md" if rebase else f"{t['id']}.review-{n}.md")
     prompt.write_text((PROMPTS / "reviewer.md").read_text().format(
         **vals, kind=review_kind({"kind": kind, "why": why}), look=look))
     first = f"You are the reviewer for bullpen task {t['id']}. Read {prompt} and follow it."
@@ -3084,7 +3152,9 @@ def start_review(repo, t, base_ref):
     t.update(review={
         "round": n, "block": block, "session": session, "verdict": None, "findings": None,
         "kind": kind, "why": why, "model": model, "prev": prev, **({"tour": sent["n"]} if sent else {}),
-        "commit": head(wt), "base": merge_base(wt, base_ref), "patch": patch_id(wt, base_ref)})
+        **({"rebase": rebase} if rebase else {}),
+        "commit": head(wt), "base": merge_base(wt, base_ref), "patch": patch_id(wt, base_ref),
+        "own": own_lines(wt, base_ref)})
     repo.save_task(t)
 
 
@@ -3112,8 +3182,9 @@ def cmd_verdict(args):
     if t["status"] not in ("review", *WAITING) or not r.get("block"):
         raise Fail(f"{t['id']} isn't in review")
     text = summary_text(args, "findings")
-    tour = r.get("kind") == "tour"
-    findings = repo.dir / "briefs" / (f"{t['id']}.tour-{r['tour']}.review.findings.md" if tour
+    tour, rebase = r.get("kind") == "tour", r.get("kind") == "rebase"
+    findings = repo.dir / "briefs" / (f"{t['id']}.tour-{r['tour']}.review.findings.md" if tour else
+                                      f"{t['id']}.review-{r['round']}.rebase.findings.md" if rebase
                                       else f"{t['id']}.review-{r['round']}.findings.md")
     findings.write_text(text + "\n")
     rounds = repo.cfg["review_rounds"]
@@ -3133,9 +3204,11 @@ def cmd_verdict(args):
         else:
             why = f": {r['why']}" if r.get("why") else ""  # last, so not in brackets in brackets
             ready_news(repo, t, [commits(t.get("commits") or 0), pr,
+                                 "a rebase check approved the conflict resolution" if rebase else
                                  f"approved by {review_kind({**r, 'why': None})}{why}"])
-    elif tour or r["round"] < rounds:
+    elif tour or rebase or r["round"] < rounds:
         said = ("The reviewer says the person's comments aren't all addressed yet" if tour else
+                "A rebase check says the conflict resolution isn't right" if rebase else
                 f"The reviewer asked for changes (review round {r['round']} of {rounds})")
         msg = (f"{said}. Read {findings}, fix what you agree with, commit, and run your ready command "
                f"again. If you disagree with a finding, say why in your ready summary.")
@@ -4520,10 +4593,18 @@ def rebase_other(repo, t, accepted):
     if git(wt, "status", "--porcelain").stdout.strip():
         return f"{t['id']} has uncommitted changes, not rebased"
     p = git(wt, "rebase", "-q", ref, check=False)
-    if p.returncode != 0:
+    both = []  # files where bullpen kept both sides of a conflict
+    while p.returncode != 0:
         files = git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split()
-        git(wt, "rebase", "--abort", check=False)
-        return rebase_conflict(repo, t, accepted, ref, files)
+        shown = git(wt, "diff", check=False).stdout  # the conflicts, before anything is resolved
+        if not files or not all(keep_both_sides(wt, f) for f in files):
+            git(wt, "rebase", "--abort", check=False)
+            return rebase_conflict(repo, t, accepted, ref, files, shown)
+        git(wt, "add", "--", *files)
+        both += [f for f in files if f not in both]
+        save_conflicts(repo, t, files, shown)
+        p = subprocess.run(["git", "-C", str(wt), "rebase", "--continue"], env={**os.environ, "GIT_EDITOR": "true"},
+                           stdin=subprocess.DEVNULL, text=True, capture_output=True)
     if t.get("pr"):
         p = git(wt, "push", "-q", "--force-with-lease", "origin", f"HEAD:refs/heads/{t['branch']}",
                 check=False)
@@ -4532,17 +4613,20 @@ def rebase_other(repo, t, accepted):
     t["rebased"] = t["base"]
     if t["status"] == "ready" and t.get("diffstat"):
         t["diffstat"] = shortstat(wt, ref)
+    rebased = f"{t['id']} rebased" + (f", keeping both sides of a conflict in {', '.join(both)}" if both else "")
     if (t.get("review") or {}).get("verdict") == "approved":
-        kept = approval_kept(t, ref)
-        if kept:
+        check = rebase_check(t, ref)
+        if check and check[0] == "kept":
             keep_approval(t, ref)
             repo.save_task(t)
-            return f"{t['id']} rebased, its approval kept ({kept})"
+            return f"{rebased}; its approval carried over ({check[1]})"
         if t["status"] == "ready" and repo.cfg["review"]:
-            start_review(repo, t, ref)
-            return f"{t['id']} rebased, but its patch changed: a reviewer checks it again"
+            start_review(repo, t, ref, rebase=check[1] if check else None)
+            if check:
+                return f"{rebased}; a rebase check looks at the resolution"
+            return f"{rebased}, but its patch changed: a reviewer checks it again"
     repo.save_task(t)  # same status: it stays where it was
-    return f"{t['id']} rebased"
+    return rebased
 
 
 # ---------- the push remote: a backup of the base branch, in local mode ----------
@@ -4684,12 +4768,75 @@ def onto(ref):
     return f"rebase your branch onto {ref}"
 
 
-def rebase_conflict(repo, t, accepted, ref, files):
+def save_conflicts(repo, t, files, shown):
+    """Note on the task's review the files a rebase conflicted in (adding to any noted
+    before), and keep the conflicts as git showed them, for a rebase check."""
+    r = t.get("review")
+    if not r:
+        return
+    r["conflict"] = sorted(set(r["conflict"] if isinstance(r.get("conflict"), list) else []) | set(files))
+    f = repo.dir / "briefs" / f"{t['id']}.rebase-conflicts.diff"
+    old = f.read_text() if r.get("conflict_diff") and f.is_file() else ""
+    f.write_text(old + shown)
+    r["conflict_diff"] = str(f)
+
+
+CONFLICT = re.compile(r"^(<{7}|\|{7}|={7}|>{7})( |$)")
+
+
+def keep_both_sides(wt, path):
+    """Resolve a trivial conflict mid-rebase: in a doc or test file that both sides
+    changed, every conflict is lines both sides added at the same place (nothing in
+    the base between them). Writes the file with the base's lines, then the task's, and
+    returns True; returns False, leaving it be, for anything else."""
+    if not (is_doc(path) or path.startswith("tests/") or "/tests/" in path or
+            Path(path).name.startswith("test_")):
+        return False
+    stages = {row.split()[2] for row in git(wt, "ls-files", "-u", "--", path).stdout.splitlines()}
+    if stages != {"1", "2", "3"}:
+        return False  # added on both sides, deleted on one, ...
+    if git(wt, "checkout", "--conflict=diff3", "--", path, check=False).returncode != 0:
+        return False
+    file = Path(wt) / path
+    try:
+        lines = file.read_text().splitlines(keepends=True)
+    except (OSError, UnicodeDecodeError):
+        return False
+    out, part, sides, found = [], None, {}, False
+    for line in lines:
+        m = CONFLICT.match(line.rstrip("\r\n"))
+        mark = m.group(1)[0] if m else None
+        if part is None:
+            if mark == "<":
+                part, sides, found = "ours", {"ours": [], "base": [], "theirs": []}, True
+            else:
+                out.append(line)  # outside a conflict, "=======" is just a line
+        elif mark is None:
+            sides[part].append(line)
+        elif (part, mark) == ("ours", "|"):
+            part = "base"
+        elif (part, mark) == ("base", "="):
+            part = "theirs"
+        elif (part, mark) == ("theirs", ">"):
+            if sides["base"]:
+                return False  # one side changed lines the other kept or changed
+            out += sides["ours"] + sides["theirs"]
+            part = None
+        else:
+            return False  # a marker out of place
+    if part or not found:
+        return False
+    file.write_text("".join(out))
+    return True
+
+
+def rebase_conflict(repo, t, accepted, ref, files, shown=""):
     """The task's branch doesn't rebase onto the moved base: it's left as it was, and
     the conflict goes to its worker, like review findings do."""
     names = ", ".join(files) or "some files"
-    if t.get("review"):
-        t["review"]["conflict"] = True  # resolved by hand: its next ready is reviewed again
+    # resolved by hand: its next ready keeps the approval if its own lines are the same,
+    # gets a rebase check if they changed only in these files, else a follow-up review
+    save_conflicts(repo, t, files, shown)
     msg = (f"{t['base']} moved ({accepted['id']} was accepted) and your branch doesn't rebase "
            f"cleanly onto it: conflicts in {names}. Your branch is as it was. Now "
            f"{onto(ref)}, fix the conflicts, rerun the tests, commit, and run your ready "
@@ -4794,7 +4941,7 @@ def doing_now(t, at=None):
 
 
 BOARD_KINDS = {"full": "full review", "light": "light review", "followup": "follow-up review",
-               "tour": "review of your comments"}
+               "tour": "review of your comments", "rebase": "rebase check"}
 
 
 def first_sentence(summary):

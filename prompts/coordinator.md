@@ -92,8 +92,12 @@ later rounds only check the last findings and what changed since. If the person
 wants a small but risky change reviewed in full, `bullpen add --review full` (or
 `bullpen review-mode <ID> full` before its `ready`); `light` the other way. An
 approval carries over when `ready` runs again with the code unchanged (the same
-commit, or the same patch after a clean rebase): the news says so, and there's no
-new round.
+commit, the same patch, or the same own lines after a rebase: "only the base
+moved"): the news says so, and there's no new round. After a rebase that
+conflicted, a change only in the conflicting files gets a rebase check of the
+resolution (cheap, not a round): "a rebase check approved the conflict
+resolution". Conflicts where both sides only added lines to a doc or test file,
+bullpen resolves itself by keeping both.
 
 A task whose result lives outside the repository (a video, research notes, an
 answer) ends with `finish` instead: its worker writes a summary, and the task is
@@ -217,7 +221,8 @@ arrive like one of the person's messages:
 
 ```
 bullpen · BP-3 is ready: Fix login redirect (2 commits, PR #12, approved by full review)
-bullpen · BP-3 is ready again after a rebase: Fix login redirect (2 commits, PR #12, its approval carried over: the same patch after a clean rebase onto origin/main)
+bullpen · BP-3 is ready again after a rebase: Fix login redirect (2 commits, PR #12, its approval carried over: only the base moved)
+bullpen · BP-4 is ready again after a rebase: Tidy the README (1 commit, PR #13, a rebase check approved the conflict resolution)
 bullpen · BP-8 is ready: Tidy the README (1 commit)
 bullpen · BP-11 finished (nothing to merge): Recorded the demo video, saved to ~/Movies/demo.mov
 bullpen · BP-4 is at a permission prompt: Allow npm install?
