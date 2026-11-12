@@ -642,7 +642,7 @@ mod tests {
         let pr = |n: u32| Some(format!("https://x/pull/{n}"));
         let safe = Task { pr: pr(41), review: review("approved"), gh: gh("passing"), ..ready("BP-7") };
         let risky = Task { pr: pr(42), review: review("changes"), gh: gh("failing"), ..ready("BP-8") };
-        let working = Task { pr: pr(43), status: "working".into(), ..ready("BP-9") };
+        let working = Task { pr: pr(43), status: "working".into(), block: Some("w9".into()), ..ready("BP-9") };
         let mut a = app(vec![safe, risky, working], 1, Layout::Grouped);
 
         a.pending = Some((Action::Accept, "BP-8".into()));

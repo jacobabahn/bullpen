@@ -1145,11 +1145,18 @@ pub fn confirm_risks(action: Action, t: &Task, cfg: &Config) -> Vec<(&'static st
                 _ => {}
             }
         }
-        Action::Drop => match t.status.as_str() {
-            "working" | "needs" => risks.push(("Its worker is still running", "Worker running")),
-            "review" => risks.push(("Its reviewer is still running", "Reviewer running")),
-            _ => {}
-        },
+        Action::Drop => {
+            // only while its pane is open: bullpen clears the block when the pane goes
+            let open = |b: Option<&str>| b.is_some_and(|b| !b.is_empty());
+            let reviewer = t.review.as_ref().and_then(|r| r.block.as_deref());
+            if t.status == "review" || t.on_reviewer() {
+                if open(reviewer) {
+                    risks.push(("Its reviewer is still running", "Reviewer running"));
+                }
+            } else if matches!(t.status.as_str(), "working" | "needs" | "triage") && open(t.block.as_deref()) {
+                risks.push(("Its worker is still running", "Worker running"));
+            }
+        }
         Action::Close | Action::DropForce => {}
     }
     risks
@@ -1902,7 +1909,13 @@ pub(crate) mod tests {
     fn a_drop_names_the_agent_it_stops() {
         let cfg = merge("rebase");
         let pr = Some("https://x/pull/42".into());
-        let t = Task { pr: pr.clone(), ..task("BP-3", "working") };
+        let worker = |st: &str| Task { block: Some("w3".into()), ..task("BP-3", st) };
+        let reviewer = |st: &str, why: &str| Task {
+            why: Some(why.into()),
+            review: Some(Review { block: Some("r3".into()), ..Default::default() }),
+            ..worker(st)
+        };
+        let t = Task { pr: pr.clone(), ..worker("working") };
         assert_eq!(
             confirm_texts(Action::Drop, &t, &cfg),
             vec![
@@ -1913,10 +1926,20 @@ pub(crate) mod tests {
                 "Worker running.",
             ]
         );
-        assert_eq!(confirm_text(Action::Drop, &task("BP-3", "needs"), &cfg), "Its worker is still running. Drop it?");
-        assert_eq!(confirm_text(Action::Drop, &task("BP-3", "review"), &cfg), "Its reviewer is still running. Drop it?");
-        for st in ["stopped", "ready", "todo", "triage"] {
-            assert_eq!(confirm_text(Action::Drop, &task("BP-3", st), &cfg), "Drop it?", "{st}");
+        for st in ["needs", "triage"] {
+            assert_eq!(confirm_text(Action::Drop, &worker(st), &cfg), "Its worker is still running. Drop it?", "{st}");
+        }
+        // stopped on its reviewer: the reviewer is the one a drop stops
+        for st in ["review", "needs", "triage"] {
+            let t = reviewer(st, "Reviewer needs you: a prompt");
+            assert_eq!(confirm_text(Action::Drop, &t, &cfg), "Its reviewer is still running. Drop it?", "{st}");
+        }
+        // its pane closed: nothing running to name
+        assert_eq!(confirm_text(Action::Drop, &task("BP-3", "working"), &cfg), "Drop it?");
+        let exited = Task { review: Some(Review::default()), ..reviewer("triage", "Reviewer exited without a verdict") };
+        assert_eq!(confirm_text(Action::Drop, &exited, &cfg), "Drop it?");
+        for st in ["stopped", "ready", "todo"] {
+            assert_eq!(confirm_text(Action::Drop, &worker(st), &cfg), "Drop it?", "{st}");
         }
         assert_eq!(first_fit(&confirm_texts(Action::Drop, &t, &cfg), 23), "Worker running. Drop?");
         assert_eq!(first_fit(&confirm_texts(Action::Drop, &t, &cfg), 24), "Worker running. Drop it?");
