@@ -185,7 +185,7 @@ in the order `?` lists them:
 | Key | Does |
 | --- | --- |
 | `j` `k` (`↑` `↓`) | select a task |
-| `n` | select the next task that needs you |
+| `n` | select the next task that needs you; once nothing does, the next one ready to accept, then finished ("Nothing needs you: BP-3 is ready.") |
 | `⏎` | open its worker's pane, or its reviewer's |
 | `c` | back to the coordinator |
 | `a` | accept a ready task (merge it), or close a finished one; asks y/n first |
@@ -207,8 +207,9 @@ in the order `?` lists them:
 The `y`/`n` question for `a` and `d` says which of the two it is, and in red,
 first, what could go wrong: checks failing or still running, changes asked for,
 not reviewed, a worker or reviewer still running; a drop is always red. Once
-an accept or close goes through, the next task that needs you is selected, so
-you can run down a queue of ready tasks with `a`, `y`. On a narrow or short
+an accept or close goes through, the next task that needs you is selected, else
+the next one ready or finished, so you can run down a queue of ready tasks with
+`a`, `y`. On a narrow or short
 board, `j` `k` `space` `b` scroll the `?` list and any other key closes it. The
 key line always ends in `?`: when the task's keys fill it, its last keys give
 way, not `?`. `bullpen up --no-board` leaves the board out. Accept, drop, start
@@ -236,7 +237,9 @@ reloads). If the config already loads another bullpen's `keys.lua`, it says so
 and changes nothing: edit that line. `bullpen keys` only prints the line. It defines
 four actions, also in the command palette under Bullpen, and binds:
 
-- `cmd+;` then `n`: the next task that needs you. Again: the one after it.
+- `cmd+;` then `n`: the next task that needs you. Again: the one after it. Once
+  nothing needs you, the board, with the task ready to accept (else finished) that
+  has waited longest selected.
 - `cmd+;` then `b`: the board.
 - `cmd+;` then `c`: the coordinator.
 - `cmd+;` then `j`: jump to any open task. A picker opens in the middle of the
@@ -656,8 +659,9 @@ A task that stops is either the coordinator's to see to or yours:
   couldn't be continued after the usage limit; its reviewer stopped or exited
   without a verdict; its worktree's setup failed (see [Worktree
   setup](#worktree-setup)). The news starts `For the coordinator:`. The board shows the
-  task dimmed under "Coordinator on it", with no amber bar, and `go --next` (and
-  `n`) skip it.
+  task dimmed under "Coordinator on it", with no amber bar, and when it comes to you
+  if the coordinator doesn't settle it first ("Ended its turn without ready. Yours
+  in 7 min."); `go --next` (and `n`) skip it.
 - **needs**, "needs you": the worker or the reviewer is at a permission or input
   prompt, or the coordinator ran `bullpen ask BP-3 "question"`, which shows the
   question on the board. The news says it needs the person.

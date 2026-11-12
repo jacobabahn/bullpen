@@ -1777,6 +1777,33 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(nxt(first), self.block(a))
         self.assertEqual(nxt(self.block(a)), self.block(b))  # wraps around
 
+    def test_go_next_falls_through_to_a_ready_task_on_the_board(self):
+        self.start_task("Working")
+        for title in ("Finished", "Ready", "Ready too"):
+            self.bp("add", title, "--brief", "x")
+        d = next((self.tmp / "state").rglob("config.json")).parent
+        for tid, status, since in (("BP-2", "finished", "2026-01-01T00:00:00+00:00"),
+                                   ("BP-3", "ready", "2026-01-03T00:00:00+00:00"),
+                                   ("BP-4", "ready", "2026-01-02T00:00:00+00:00")):
+            f = d / "tasks" / f"{tid}.json"
+            f.write_text(json.dumps({**json.loads(f.read_text()), "status": status, "since": since}))
+        sel = d / "select" / "c1"
+        # nothing needs you: the board, on the ready task that has waited longest
+        p = self.bp("go", "--next", "--from", "elsewhere")
+        self.assertIn("nothing needs you; BP-4 is ready, on the board", p.stderr)
+        self.assertEqual(self.focused()[-1], "blk2")
+        self.assertEqual(sel.read_text(), "BP-4\n")
+        self.assertEqual(json.loads(self.bp("go", "--next", "--json", "--from", "x").stdout)["block"], "blk2")
+        # a finished one once nothing is ready
+        for tid in ("BP-3", "BP-4"):
+            self.bp("drop", tid)
+        p = self.bp("go", "--next", "--from", "elsewhere")
+        self.assertIn("BP-2 is finished, on the board", p.stderr)
+        self.assertEqual(sel.read_text(), "BP-2\n")
+        # what needs you still comes first
+        self.bp("_event", self.block("BP-1"), "blocked", "question", "Which?")
+        self.assertEqual(json.loads(self.bp("go", "--next", "--json").stdout)["block"], self.block("BP-1"))
+
     def other_repo(self, name):
         """A second repository, with no remote (local mode), bullpen's state beside proj's."""
         d = self.tmp / name

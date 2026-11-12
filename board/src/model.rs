@@ -366,6 +366,9 @@ pub struct Config {
     pub other_repos: bool,
     /// a reviewer checks each task before it's ready (`bullpen config --review`)
     pub review: bool,
+    /// minutes a task waits on its coordinator before it needs you
+    /// (`bullpen config --triage-minutes`)
+    pub triage_minutes: u64,
 }
 
 impl Config {
@@ -474,6 +477,7 @@ impl Config {
             bottom_gap: v["board_bottom_gap"].as_u64().unwrap_or(1) as usize,
             other_repos: v["board_repos"].as_bool().unwrap_or(true),
             review: v["review"].as_bool().unwrap_or(true),
+            triage_minutes: v["triage_minutes"].as_u64().unwrap_or(10),
         }
     }
 }
@@ -986,11 +990,28 @@ pub fn tour_phrase(t: &Task) -> &'static str {
     }
 }
 
-/// task_detail, then what auto-accept does with it and the model it chose.
+/// When a task its coordinator is on comes to you, if its coordinator doesn't settle
+/// it first: "Yours in 7 min.", "Yours any moment." (bullpen moves it then), or ""
+/// for a task that isn't waiting on its coordinator. `minutes` is the config's
+/// triage_minutes.
+pub fn yours_phrase(t: &Task, minutes: u64, at: DateTime<FixedOffset>) -> String {
+    let Some(since) = t.stamp().and_then(parse).filter(|_| t.triage()) else { return String::new() };
+    let left = minutes as i64 * 60 - (at - since).num_seconds();
+    let m = (left + 59) / 60; // a part of a minute counts as one
+    match m {
+        ..=0 => "Yours any moment.".into(),
+        1..=119 => format!("Yours in {m} min."),
+        _ => format!("Yours in {} h.", m / 60),
+    }
+}
+
+/// task_detail, then when a task its coordinator is on comes to you, what
+/// auto-accept does with it and the model it chose.
 pub fn detail_with_auto(t: &Task, cfg: &Config, at: DateTime<FixedOffset>) -> String {
     let text = task_detail(t, cfg.review_rounds, at);
+    let yours = yours_phrase(t, cfg.triage_minutes, at);
     let model = model_phrase(t, cfg);
-    let parts = [text.as_str(), auto_phrase(t, cfg.auto_accept), model.as_str()];
+    let parts = [text.as_str(), yours.as_str(), auto_phrase(t, cfg.auto_accept), model.as_str()];
     parts.iter().filter(|p| !p.is_empty()).copied().collect::<Vec<_>>().join(" ").trim().to_string()
 }
 
@@ -1047,8 +1068,8 @@ fn status_detail(t: &Task, rounds: u32, at: DateTime<FixedOffset>) -> String {
         "review" => format!("Reviewer on round {round} of {rounds}."),
         "ready" if why.starts_with("Nothing to merge") => "Done, with nothing to merge.".into(),
         "finished" => match first_line(t.summary.as_deref()).as_str() {
-            "" => "Finished, nothing to merge. a closes it.".into(),
-            line => format!("Finished, nothing to merge: {line} a closes it."),
+            "" => "Finished, nothing to merge.".into(),
+            line => format!("Finished, nothing to merge: {line}"),
         },
         "ready" => match &t.rebased {
             Some(base) => format!("{} Rebased onto {base}.", ready_detail(&pr, &r)),
@@ -1099,10 +1120,12 @@ pub fn stat_line(t: &Task) -> String {
 /// The keys that make sense for this task, for the footer: (key, what it does).
 pub fn task_keys(t: Option<&Task>) -> Vec<(&'static str, &'static str)> {
     let Some(t) = t else { return Vec::new() };
+    // ⏎ opens the pane the task is stopped on: its reviewer's, else its worker's
+    let enter = if t.on_reviewer() { "reviewer" } else { "open" };
     let mut keys: Vec<(&str, &str)> = match t.status.as_str() {
-        "needs" if t.question().is_some() => vec![("i", "answer"), ("⏎", "open"), ("t", "tell"), ("p", "peek")],
-        "needs" => vec![("⏎", "answer"), ("t", "tell"), ("p", "peek")],
-        "triage" => vec![("⏎", "open"), ("p", "peek"), ("t", "tell")],
+        "needs" if t.question().is_some() => vec![("i", "answer"), ("⏎", enter), ("t", "tell"), ("p", "peek")],
+        "needs" => vec![("⏎", enter), ("t", "tell"), ("p", "peek")],
+        "triage" => vec![("⏎", enter), ("p", "peek"), ("t", "tell")],
         "stopped" => vec![("r", "resume"), ("p", "peek"), ("d", "drop")],
         "review" => vec![("⏎", "reviewer"), ("g", "tour"), ("p", "peek")],
         "ready" => vec![("a", "accept"), ("g", "tour"), ("d", "drop"), ("⏎", "open")],
@@ -1335,6 +1358,7 @@ pub(crate) mod tests {
                 bottom_gap: 1,
                 other_repos: true,
                 review: true,
+                triage_minutes: 10,
             }
         }
     }
@@ -1765,8 +1789,9 @@ pub(crate) mod tests {
         assert_eq!(heads, vec!["Ready to accept", "Finished", "Working"]);
         assert_eq!(mark("finished"), "◆");
         assert!(!t.needs_you() && !t.flagged() && !t.closed());
-        assert_eq!(task_detail(&t, 2, now()), "Finished, nothing to merge: Recorded the demo video. a closes it.");
-        assert_eq!(task_detail(&task("BP-3", "finished"), 2, now()), "Finished, nothing to merge. a closes it.");
+        // the key row says a closes it: the detail doesn't spend its room on that
+        assert_eq!(task_detail(&t, 2, now()), "Finished, nothing to merge: Recorded the demo video.");
+        assert_eq!(task_detail(&task("BP-3", "finished"), 2, now()), "Finished, nothing to merge.");
         assert_eq!(task_keys(Some(&t))[0], ("a", "close"));
         assert!(task_keys(Some(&t)).contains(&("v", "diff")));
         assert_eq!(confirm_text(Action::Close, &t, &merge("rebase")), "Close it and remove its worktree?");
@@ -1778,7 +1803,38 @@ pub(crate) mod tests {
         link_waits(&mut ts);
         assert!(ts[1].waits.is_empty());
         let t: Task = serde_json::from_str(r#"{"id":"BP-3","status":"finished","summary":"Notes in ~/n.md"}"#).unwrap();
-        assert_eq!(task_detail(&t, 2, now()), "Finished, nothing to merge: Notes in ~/n.md. a closes it.");
+        assert_eq!(task_detail(&t, 2, now()), "Finished, nothing to merge: Notes in ~/n.md.");
+    }
+
+    #[test]
+    fn a_task_its_coordinator_is_on_says_when_it_comes_to_you() {
+        let since = |m| Task { since: Some(minutes_ago(m)), why: Some("Ended its turn without saying ready".into()), ..task("BP-1", "triage") };
+        let cfg = Config::default_for_test(); // triage_minutes: 10
+        assert_eq!(detail_with_auto(&since(3), &cfg, now()), "Ended its turn without ready. Yours in 7 min.");
+        assert_eq!(yours_phrase(&since(0), 10, now()), "Yours in 10 min.");
+        assert_eq!(yours_phrase(&since(10), 10, now()), "Yours any moment."); // bullpen moves it on its next look
+        assert_eq!(yours_phrase(&since(30), 10, now()), "Yours any moment.");
+        assert_eq!(yours_phrase(&since(0), 180, now()), "Yours in 3 h.");
+        let at = now() - chrono::Duration::seconds(30);
+        let half = Task { since: Some(at.to_rfc3339()), ..since(0) };
+        assert_eq!(yours_phrase(&half, 1, now()), "Yours in 1 min."); // part of a minute left
+        // the config's triage_minutes, else bullpen's 10
+        assert_eq!(Config::from_value(&serde_json::json!({"triage_minutes": 4})).triage_minutes, 4);
+        assert_eq!(Config::from_value(&serde_json::json!({})).triage_minutes, 10);
+        // only a task waiting on its coordinator, and one with no time is left as it is
+        let needs = Task { status: "needs".into(), ..since(3) };
+        assert_eq!(yours_phrase(&needs, 10, now()), "");
+        assert_eq!(yours_phrase(&task("BP-1", "triage"), 10, now()), "");
+    }
+
+    #[test]
+    fn the_top_line_counts_in_the_order_of_the_groups() {
+        // what the top line counts, in the order the board lists their groups
+        let groups: Vec<&str> = GROUPS.iter().flat_map(|(_, sts)| sts.iter().copied()).collect();
+        let counted: Vec<&str> = act_parts(1, 1, true).into_iter().map(|(_, st)| st).collect();
+        let at: Vec<usize> = counted.iter().map(|st| groups.iter().position(|g| g == st).unwrap()).collect();
+        assert!(at.windows(2).all(|w| w[0] < w[1]), "{counted:?} against {groups:?}");
+        assert_eq!(counted, ["needs", "ready"]);
     }
 
     #[test]
@@ -1817,9 +1873,15 @@ pub(crate) mod tests {
     #[test]
     fn keys_fit_the_task() {
         assert_eq!(task_keys(Some(&task("BP-1", "ready")))[0], ("a", "accept"));
-        assert_eq!(task_keys(Some(&task("BP-1", "needs")))[0], ("⏎", "answer"));
+        // ⏎ opens the pane, with a question or without: it says so for both
+        assert_eq!(task_keys(Some(&task("BP-1", "needs")))[0], ("⏎", "open"));
         let asked = Task { ask: Some(true), ..task("BP-1", "needs") };
         assert_eq!(task_keys(Some(&asked))[..2], [("i", "answer"), ("⏎", "open")]);
+        // stopped on its reviewer, ⏎ opens the reviewer, as in review
+        let on_reviewer = |st: &str| Task { why: Some("Reviewer ended its turn without a verdict".into()), ..task("BP-1", st) };
+        assert_eq!(task_keys(Some(&on_reviewer("needs")))[0], ("⏎", "reviewer"));
+        assert_eq!(task_keys(Some(&on_reviewer("triage")))[0], ("⏎", "reviewer"));
+        assert_eq!(task_keys(Some(&task("BP-1", "triage")))[0], ("⏎", "open"));
         assert!(task_keys(None).is_empty());
         let wt = |st: &str| Task { worktree: Some("/w".into()), ..task("BP-1", st) };
         assert_eq!(task_keys(Some(&wt("working"))).last(), Some(&("v", "diff")));

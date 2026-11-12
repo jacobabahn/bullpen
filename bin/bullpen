@@ -5272,6 +5272,26 @@ def go_target(repo, args):
     return (repo, *pane_target(repo, args))
 
 
+def next_to_accept(repo, args):
+    """`go --next` once nothing needs you: (repo, task) of the task ready to accept, else
+    finished, that has waited longest, on a board (the pane's coordinator's, in this
+    repository), or None."""
+    c = pane_coordinator(repo, args.from_block)
+    found = [(repo, t) for t in repo.tasks() if t["status"] in ("ready", "finished") and on_board(repo, c, t)]
+    if args.all_repos:
+        found += [(r, t) for r in known_repos() if r.dir != repo.dir
+                  for t in r.tasks() if t["status"] in ("ready", "finished")]
+
+    def boarded(r, t):
+        try:
+            return bool(task_board(r, t))
+        except Fail:
+            return False
+    found = [(r, t) for r, t in found if boarded(r, t)]
+    found.sort(key=lambda rt: (rt[1]["status"] != "ready", rt[1].get("since") or rt[1].get("updated") or ""))
+    return found[0] if found else None
+
+
 def pane_target(repo, args):
     """(session, block, name) of a task's pane, its reviewer's, the coordinator's or the board's."""
     if args.id and args.board:
@@ -5352,13 +5372,22 @@ def cmd_go(args):
     try:
         repo, session, block, name = go_target(home, args)
     except Fail as e:
-        if not (args.next and str(e).startswith("nothing needs you")
-                and any(c.get("board") for c in home.cfg["coordinators"])):
+        if not args.next or not str(e).startswith("nothing needs you"):
             raise
-        # A key that does nothing looks broken: show the board, where that's plain.
-        print(f"bullpen: {e}; showing the board", file=sys.stderr)
-        args.next, args.board = False, True
-        home = board_for_go(home, args)
+        up = next_to_accept(home, args)
+        if up:
+            # nothing needs you, but something is yours to accept or close: the board, on it
+            r, t = up
+            name = t["id"] if r.dir == home.dir else f"{r.root.name} {t['id']}"
+            print(f"bullpen: {e}; {name} is {t['status']}, on the board", file=sys.stderr)
+            args.next, args.board, args.id, home = False, True, t["id"], r
+        elif any(c.get("board") for c in home.cfg["coordinators"]):
+            # A key that does nothing looks broken: show the board, where that's plain.
+            print(f"bullpen: {e}; showing the board", file=sys.stderr)
+            args.next, args.board = False, True
+            home = board_for_go(home, args)
+        else:
+            raise
         repo, session, block, name = go_target(home, args)
     if not rex_alive(session, block):
         # after a Rex restart its ID changed (and maybe its session's)
@@ -7366,7 +7395,8 @@ def parser():
 
     p = sub.add_parser("go", help="focus a task's pane (or the coordinator's, or the board's)")
     p.add_argument("id", nargs="?", help="the task (default: the coordinator)")
-    p.add_argument("--next", action="store_true", help="the next task that needs you")
+    p.add_argument("--next", action="store_true",
+                   help="the next task that needs you; once none does, the board on one ready to accept")
     p.add_argument("--all-repos", action="store_true",
                    help="with --next: in any repository bullpen knows, not just this one")
     p.add_argument("--board", action="store_true",

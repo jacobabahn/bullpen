@@ -247,13 +247,14 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             if layout == Layout::Grouped {
                 // a working or in-review task: what its agent is doing now, on one line
                 let doing = model::doing_now(t, now);
-                // what a task needs from you, GitHub said, or the usage limit gets two lines;
-                // anything else one; the selected task all it has to say, up to SELECTED_LINES
+                // what a task needs from you, GitHub said, or the usage limit gets two lines,
+                // as does one its coordinator is on (when it comes to you); anything else
+                // one; the selected task all it has to say, up to SELECTED_LINES
                 let lines = if is_cur(t) {
                     SELECTED_LINES
                 } else if !doing.is_empty() {
                     1
-                } else if t.flagged() || t.is_limited() || t.status == "finished" || !model::pr_phrase(t).is_empty() {
+                } else if t.flagged() || t.is_limited() || t.triage() || t.status == "finished" || !model::pr_phrase(t).is_empty() {
                     2
                 } else {
                     1
@@ -1199,6 +1200,35 @@ mod tests {
     }
 
     #[test]
+    fn the_details_at_42_columns_say_when_a_task_comes_to_you_and_open_for_needs() {
+        let ago = |m| (model::now() - chrono::Duration::minutes(m)).to_rfc3339();
+        let t = |id: &str, st: &str, title: &str, why: &str, m| Task {
+            title: title.into(),
+            why: Some(why.into()).filter(|w: &String| !w.is_empty()),
+            since: Some(ago(m)),
+            ..Task { id: id.into(), status: st.into(), ..Default::default() }
+        };
+        let finished = Task { summary: Some("# Recorded the demo video".into()), ..t("BP-64", "finished", "Record the demo video", "", 30) };
+        let mut a = app(vec![
+            t("BP-61", "needs", "Fix the login redirect", "Failed (coordinator didn't resolve it)", 4),
+            t("BP-62", "triage", "Retry flaky upload test", "Ended its turn without saying ready", 3),
+            finished,
+        ], 1, Layout::Grouped);
+        a.settle();
+        let s = screen(&mut a, 42, 24);
+        let at = |head: &str| s.iter().position(|r| r.contains(head)).unwrap();
+        // not selected, a task its coordinator is on still gets room for when it's yours
+        let i = at("BP-62");
+        assert_eq!(s[i + 1..i + 3], ["   Ended its turn without ready. Yours", "   in 7 min."].map(String::from), "{s:#?}");
+        // a finished task doesn't spend its two lines on "a closes it": the key row says that
+        let i = at("BP-64");
+        assert_eq!(s[i + 1], "   Finished, nothing to merge: Recorded", "{s:#?}");
+        assert_eq!(s[i + 2], "   the demo video.", "{s:#?}");
+        // a needs task without a question: ⏎ opens it, and says so
+        assert!(row(&s, 1).starts_with(" ⏎ open  t tell  p peek"), "{s:#?}");
+    }
+
+    #[test]
     fn the_help_fits_a_narrow_board_and_scrolls_to_its_end() {
         let mut a = app(vec![ready("BP-1")], 1, Layout::Grouped);
         a.mode = Mode::Help { top: 0 };
@@ -1208,7 +1238,7 @@ mod tests {
             "",
             " Moving",
             "   j k   select a task (↑ ↓ too)",
-            "   n     the next task that needs you",
+            "   n     next that needs you, else ready",
             "   ⏎     open its pane, or its reviewer's",
         ].map(String::from), "{s:#?}");
         // one short line per key: nothing is cut or wrapped at 42 columns

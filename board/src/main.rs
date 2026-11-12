@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 pub const BOARD_KEYS: &[(&str, &[(&str, &str)])] = &[
     ("Moving", &[
         ("j k", "select a task (↑ ↓ too)"),
-        ("n", "the next task that needs you"),
+        ("n", "next that needs you, else ready"),
         ("⏎", "open its pane, or its reviewer's"),
         ("c", "back to the coordinator"),
     ]),
@@ -449,12 +449,18 @@ impl App {
         });
     }
 
-    /// The next task after position `i` that needs you (wrapping round), other than `skip`.
-    fn next_needing(&self, i: usize, skip: Option<&str>) -> Option<String> {
+    /// The next task after position `i` that needs you (wrapping round), other than
+    /// `skip`; once nothing needs you, the next that's ready to accept or finished
+    /// (to close). The bool says it needs you.
+    fn next_up(&self, i: usize, skip: Option<&str>) -> Option<(String, bool)> {
         let order = self.order();
-        let needs: Vec<usize> =
-            (0..order.len()).filter(|&j| order[j].needs_you() && Some(order[j].id.as_str()) != skip).collect();
-        needs.iter().find(|&&j| j > i).or(needs.first()).map(|&j| order[j].id.clone())
+        let after = |pick: &dyn Fn(&Task) -> bool| {
+            let js: Vec<usize> =
+                (0..order.len()).filter(|&j| pick(order[j]) && Some(order[j].id.as_str()) != skip).collect();
+            js.iter().find(|&&j| j > i).or(js.first()).map(|&j| order[j].id.clone())
+        };
+        let yours = |t: &Task| matches!(t.status.as_str(), "ready" | "finished");
+        after(&|t: &Task| t.needs_you()).map(|id| (id, true)).or_else(|| after(&yours).map(|id| (id, false)))
     }
 
     fn done(&mut self, id: String, job: Job, ok: bool, out: String) {
@@ -463,7 +469,7 @@ impl App {
         // (unless the selection already moved off it)
         if ok && matches!(job, Job::Accept | Job::Close) && self.sel.as_deref() == Some(id.as_str()) {
             let i = self.order().iter().position(|t| t.id == id).unwrap_or(0);
-            if let Some(next) = self.next_needing(i, Some(&id)) {
+            if let Some((next, _)) = self.next_up(i, Some(&id)) {
                 self.sel = Some(next);
             }
         }
@@ -750,8 +756,13 @@ impl App {
                 let (ok, out) = self.bp(&["go"]);
                 self.msg = Note::of(ok, "Opened the coordinator.", out);
             }
-            (_, Some('n')) => match self.next_needing(i, None) {
-                Some(id) => self.sel = Some(id),
+            (_, Some('n')) => match self.next_up(i, None) {
+                Some((id, true)) => self.sel = Some(id),
+                Some((id, false)) => {
+                    let st = self.tasks.iter().find(|t| t.id == id).map_or("", |t| t.status.as_str());
+                    self.msg = Note::info(format!("Nothing needs you: {id} is {}.", if st == "ready" { "ready" } else { "finished" }));
+                    self.sel = Some(id);
+                }
                 None => self.msg = Note::info("Nothing needs you."),
             },
             _ => self.task_key(k.code, ch),
@@ -1253,6 +1264,33 @@ mod tests {
     }
 
     #[test]
+    fn n_goes_to_what_needs_you_then_to_what_is_ready() {
+        let mut a = app(vec![task("BP-1", "working"), task("BP-2", "triage"), task("BP-3", "ready"), task("BP-4", "finished"), task("BP-5", "needs")]);
+        a.settle();
+        assert_eq!(a.sel.as_deref(), Some("BP-5")); // the board's first: needs you
+        press(&mut a, 'n');
+        assert_eq!((a.sel.as_deref(), a.msg.text.as_str()), (Some("BP-5"), ""));
+        // nothing needs you: ready, then finished, round again, saying why
+        a.tasks.retain(|t| t.id != "BP-5");
+        a.settle();
+        press(&mut a, 'n');
+        assert_eq!((a.sel.as_deref(), a.msg.text.as_str()), (Some("BP-3"), "Nothing needs you: BP-3 is ready."));
+        press(&mut a, 'n');
+        assert_eq!((a.sel.as_deref(), a.msg.text.as_str()), (Some("BP-4"), "Nothing needs you: BP-4 is finished."));
+        press(&mut a, 'n');
+        assert_eq!(a.sel.as_deref(), Some("BP-3"));
+        // a stopped task needs you too
+        a.tasks.push(task("BP-6", "stopped"));
+        press(&mut a, 'n');
+        assert_eq!((a.sel.as_deref(), a.msg.text.as_str()), (Some("BP-6"), ""));
+        // nothing to do at all
+        let mut a = app(vec![task("BP-1", "working"), task("BP-2", "triage")]);
+        a.settle();
+        press(&mut a, 'n');
+        assert_eq!(a.msg, "Nothing needs you.");
+    }
+
+    #[test]
     fn after_an_accept_the_next_task_that_needs_you_is_selected() {
         let mut a = app(vec![task("BP-1", "ready"), task("BP-2", "needs"), task("BP-3", "ready"), task("BP-4", "finished")]);
         a.sel = Some("BP-3".into());
@@ -1260,7 +1298,16 @@ mod tests {
         a.done("BP-3".into(), Job::Accept, true, String::new());
         assert_eq!(a.msg, "Accepted BP-3.");
         assert_eq!(a.sel.as_deref(), Some("BP-2"));
-        // a closed one too; with nothing needing you the selection stays
+        // with nothing needing you, the next one ready to accept, then a finished one,
+        // even past "Coordinator on it" and a task in review
+        let mut a = app(vec![task("BP-1", "ready"), task("BP-2", "triage"), task("BP-3", "ready"), task("BP-4", "finished"), task("BP-5", "review")]);
+        a.sel = Some("BP-1".into());
+        a.settle();
+        a.done("BP-1".into(), Job::Accept, true, String::new());
+        assert_eq!(a.sel.as_deref(), Some("BP-3"));
+        a.done("BP-3".into(), Job::Accept, true, String::new());
+        assert_eq!(a.sel.as_deref(), Some("BP-4")); // BP-1's still listed until the board reads again
+        // a closed one too; with nothing else to accept or close the selection stays
         let mut a = app(vec![task("BP-4", "finished")]);
         a.sel = Some("BP-4".into());
         a.done("BP-4".into(), Job::Close, true, String::new());
