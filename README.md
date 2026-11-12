@@ -14,6 +14,20 @@ lines starting `bullpen · `, when a worker needs you, ends its turn, fails,
 stops, runs into the usage limit or shows no progress for a long time. News is typed into the coordinator's
 pane, or the coordinator follows it with Claude Code's Monitor tool (see [News](#news)).
 
+## Quick start
+
+```sh
+./install.sh          # link bullpen into ~/.local/bin and build the board
+bullpen keys          # prints a line: add it to your Rex config (init.lua),
+rex config reload     #   then reload, for the cmd+; keys
+bullpen up            # in a Rex pane in your repository: the coordinator and its board
+```
+
+Then tell the coordinator what you want ("fix the login redirect and cover it
+with a test"). It adds tasks and starts a worker for each. Watch the board: `n`
+selects the next task that needs you, `⏎` opens its pane, and `a` accepts (merges)
+a ready one. The words used here are in [GLOSSARY.md](GLOSSARY.md).
+
 ## Install
 
 ```sh
@@ -84,6 +98,57 @@ coordinator's own pane, `accept` and `drop` post nothing: it already knows.
 Tasks that waited on the accepted one start by themselves (see
 [Dependencies](#dependencies)).
 
+### Keys
+
+`bullpen keys` prints a line to add to your Rex config (`init.lua`). It defines
+three actions, also in the command palette under Bullpen, and binds:
+
+- `cmd+;` then `n`: the next task that needs you. Again: the one after it.
+- `cmd+;` then `b`: the board.
+- `cmd+;` then `c`: the coordinator.
+
+And in a worker's or reviewer's floating pane, `ctrl+escape` puts it back into its
+capsule and returns you to the board (`bullpen hide`); elsewhere the key goes
+through.
+
+`setup{ prefix = "ctrl+b" }` moves them behind another key, and
+`keys = { next = "cmd+shift+j" }` sets single ones. Run `rex config reload` after.
+
+Then tell the coordinator what you want. To drive it by hand:
+
+```sh
+bullpen add "Fix login redirect" --brief-file brief.md   # prints BP-1
+bullpen add "Cover logout" --brief-file b2.md --after BP-1 # BP-2 starts once BP-1 is accepted
+bullpen after BP-2 --none   # change (or clear) what a task waits on
+bullpen model BP-2 sonnet   # the worker model it starts and resumes with (--clear: the config's)
+bullpen review-mode BP-2 full  # its first review: full, light or auto (by the size of the change)
+bullpen start BP-1    # worktree + branch + a Rex pane running the worker
+bullpen ls            # open tasks, in the board's words (--json: the raw status)
+bullpen peek BP-1     # the end of the worker's screen
+bullpen diff BP-1     # its changes against its base, in a pager (--stat: just the files)
+bullpen check         # tasks whose status is out of step with their agent; --fix catches up
+bullpen go BP-1       # focus its pane (`go` alone: the coordinator; --next: next needing you)
+bullpen tell BP-1 "Also cover the logout path"
+bullpen resume BP-1   # restart a stopped worker, continuing its conversation
+bullpen ask BP-1 "..."   # (coordinator) BP-1 needs you: the question shows on the board
+bullpen ok BP-1       # (coordinator) a task in triage is seen to: back to work, nothing typed
+bullpen review BP-1   # (coordinator) a new reviewer for one that stopped without a verdict
+bullpen note BP-1 "..."   # an informational line on the board
+bullpen accept BP-1   # merge its PR (or local branch; rebase), close its pane, remove its worktree
+bullpen close BP-1    # a finished task (nothing to merge): remove its worktree, branch and pane
+bullpen drop BP-1     # close its PR, pane and worktree without merging
+```
+
+`bullpen diff BP-1` shows `git diff <base>...HEAD` from the task's worktree, then
+any changes not committed yet, in `delta` if it's installed, else `less -R`. The
+base is `origin/<base>` when there's a remote, the local base branch when there
+isn't. On the board, `v` opens the same view in a floating pane; `q` closes it and
+takes you back to the board.
+
+A worker finishes with `bullpen ready <ID> --summary-file <file>`, which refuses
+uncommitted changes, pushes the branch and opens (or updates) the pull request, or,
+when the task leaves nothing to merge, with `bullpen finish <ID> --summary-file <file>`.
+
 ### Several coordinators
 
 A repository can have more than one coordinator at a time, each an agent in its
@@ -125,6 +190,10 @@ from elsewhere to the first one.
 A config from before this, with one coordinator, loads as coordinator `c1`, and
 its tasks (which name no coordinator) are news for every coordinator until one
 adopts them.
+
+## How it behaves
+
+What bullpen does by itself as tasks move along, and the settings for it.
 
 ### Dependencies
 
@@ -468,57 +537,6 @@ The repository's file is read as committed on the task's base branch (`origin/<b
 or the local base branch without a remote): an uncommitted edit in your checkout, or
 a task's own edit when it is started again, isn't used. `bullpen rules`
 prints the rules in effect and where each came from.
-
-### Keys
-
-`bullpen keys` prints a line to add to your Rex config (`init.lua`). It defines
-three actions, also in the command palette under Bullpen, and binds:
-
-- `cmd+;` then `n`: the next task that needs you. Again: the one after it.
-- `cmd+;` then `b`: the board.
-- `cmd+;` then `c`: the coordinator.
-
-And in a worker's or reviewer's floating pane, `ctrl+escape` puts it back into its
-capsule and returns you to the board (`bullpen hide`); elsewhere the key goes
-through.
-
-`setup{ prefix = "ctrl+b" }` moves them behind another key, and
-`keys = { next = "cmd+shift+j" }` sets single ones. Run `rex config reload` after.
-
-Then tell the coordinator what you want. To drive it by hand:
-
-```sh
-bullpen add "Fix login redirect" --brief-file brief.md   # prints BP-1
-bullpen add "Cover logout" --brief-file b2.md --after BP-1 # BP-2 starts once BP-1 is accepted
-bullpen after BP-2 --none   # change (or clear) what a task waits on
-bullpen model BP-2 sonnet   # the worker model it starts and resumes with (--clear: the config's)
-bullpen review-mode BP-2 full  # its first review: full, light or auto (by the size of the change)
-bullpen start BP-1    # worktree + branch + a Rex window running the worker
-bullpen ls            # todo, working, triage, needs, stopped, review, ready, finished
-bullpen peek BP-1     # the end of the worker's screen
-bullpen diff BP-1     # its changes against its base, in a pager (--stat: just the files)
-bullpen check         # tasks whose status is out of step with their agent; --fix catches up
-bullpen go BP-1       # focus its pane (`go` alone: the coordinator; --next: next needing you)
-bullpen tell BP-1 "Also cover the logout path"
-bullpen resume BP-1   # restart a stopped worker, continuing its conversation
-bullpen ask BP-1 "..."   # (coordinator) BP-1 needs you: the question shows on the board
-bullpen ok BP-1       # (coordinator) a task in triage is seen to: back to work, nothing typed
-bullpen review BP-1   # (coordinator) a new reviewer for one that stopped without a verdict
-bullpen note BP-1 "..."   # an informational line on the board
-bullpen accept BP-1   # merge its PR (or local branch; rebase), close its pane, remove its worktree
-bullpen close BP-1    # a finished task (nothing to merge): remove its worktree, branch and pane
-bullpen drop BP-1     # close its PR, window and worktree without merging
-```
-
-`bullpen diff BP-1` shows `git diff <base>...HEAD` from the task's worktree, then
-any changes not committed yet, in `delta` if it's installed, else `less -R`. The
-base is `origin/<base>` when there's a remote, the local base branch when there
-isn't. On the board, `v` opens the same view in a floating pane; `q` closes it and
-takes you back to the board.
-
-A worker finishes with `bullpen ready <ID> --summary-file <file>`, which refuses
-uncommitted changes, pushes the branch and opens (or updates) the pull request, or,
-when the task leaves nothing to merge, with `bullpen finish <ID> --summary-file <file>`.
 
 ### Local mode
 

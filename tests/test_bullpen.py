@@ -3630,6 +3630,29 @@ class BullpenTest(unittest.TestCase):
         self.assertIn(f"finish {tid} --summary-file", brief)
         self.assertIn(f"ready {tid} --summary-file", brief)
 
+    # ----- help and ls -----
+
+    def test_help_leaves_out_the_internal_commands(self):
+        out = self.bp("--help").stdout
+        for name in ("_event", "_stuck", "_flush", "_prs", "_limit", "_gone", "_auto_accept"):
+            self.assertNotIn(name, out)
+        self.assertIn("{up,go,hide,", out)
+        self.assertIn("accept", out)
+        self.bp("_flush")  # still there for the watcher
+        self.bp("_limit")
+        self.bp("_prs")
+
+    def test_ls_uses_the_boards_words(self):
+        tid = self.start_task()
+        self.bp("add", "Later", "--brief", "Then this.")
+        out = self.bp("ls").stdout
+        self.assertRegex(out, rf"(?m)^{tid} +working +Fix the thing")
+        self.assertRegex(out, r"(?m)^BP-2 +queued \(todo\) +Later")
+        self.bp("_event", self.block(tid), "blocked", "permission", "Allow rm?")
+        self.assertRegex(self.bp("ls").stdout, rf"(?m)^{tid} +needs you +Fix the thing")
+        self.assertEqual(self.show(tid)["status"], "needs")
+        self.assertEqual({t["status"] for t in json.loads(self.bp("ls", "--json").stdout)}, {"needs", "todo"})
+
 
 class LocalModeTest(unittest.TestCase):
     """A repository without an origin remote: no push, no gh; accept merges locally."""
@@ -4081,6 +4104,31 @@ class HelpersTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.bp = cls.cli()
+
+    # ---------- help and ls ----------
+
+    def test_every_command_and_option_has_help_but_the_internal_ones(self):
+        sub = next(a for a in self.bp.parser()._actions if a.choices)
+        listed = {a.dest for a in sub._choices_actions}
+        for name, p in sub.choices.items():
+            self.assertEqual(name in listed, not name.startswith("_"), name)
+            if name.startswith("_"):
+                continue
+            for a in p._actions:
+                if a.dest != "help" and a.help != self.bp.argparse.SUPPRESS:
+                    self.assertTrue(a.help, f"{name} {a.option_strings or a.dest}")
+
+    def test_status_words_are_the_boards(self):
+        w = self.bp.status_words
+        self.assertEqual(w("needs"), "needs you")
+        self.assertEqual(w("stopped"), "needs you (stopped)")
+        self.assertEqual(w("triage"), "coordinator on it (triage)")
+        self.assertEqual(w("review"), "in review")
+        self.assertEqual(w("ready"), "ready to accept")
+        self.assertEqual(w("todo"), "queued (todo)")
+        self.assertEqual(w("dropped"), "closed (dropped)")
+        self.assertEqual(set(self.bp.BOARD_WORDS), {"todo", "working", "review", "ready", "finished",
+                                                   "triage", "needs", "stopped", "done", "dropped"})
 
     # ---------- the task lifecycle ----------
 

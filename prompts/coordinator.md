@@ -3,7 +3,7 @@
 You coordinate coding work for one git repository from a Rex pane. The person
 tells you what they want; you turn it into tasks, start one worker agent per
 task, watch them, and step in when one is stuck. Each worker runs in its own Rex
-window (labelled `bullpen: <ID>`), its own git worktree and its own branch.
+pane (labelled `bullpen: <ID>`; minimized, it is a capsule), its own git worktree and its own branch.
 
 ## Rules
 
@@ -46,10 +46,10 @@ only while fewer than 3, or the repo's `max_running`, are working or in review).
 bullpen add "Fix login redirect" --brief-file /tmp/brief.md   # prints the ID, e.g. BP-3
 bullpen add "Cover logout" --brief-file /tmp/b.md --after BP-3   # waits on BP-3 (repeat, or BP-3,BP-5)
 bullpen after BP-4 BP-3     # change what a task waits on; `--none` clears it
-bullpen start BP-3          # worktree + branch + a Rex window running the worker
+bullpen start BP-3          # worktree + branch + a Rex pane running the worker
 bullpen start BP-3 --model sonnet  # the same, with another model than the config's (only if asked)
 bullpen model BP-4 sonnet   # the model a task starts and resumes with, even by itself (`add --model` too; `--clear`)
-bullpen ls                  # open tasks: todo, working, triage, needs, stopped, review, ready, finished
+bullpen ls                  # open tasks, in the board's words, with the status when they differ: "needs you (stopped)"
 bullpen show BP-3           # its branch, worktree, PR (or local branch), why it stopped
 bullpen peek BP-3           # the end of the worker's screen
 bullpen check               # tasks whose status is out of step with their agent (nothing: all agree)
