@@ -19,8 +19,9 @@ fn rev() -> Style {
     Style::new().add_modifier(Modifier::REVERSED)
 }
 const AMBER: Color = Color::Yellow;
-/// The selected task's row: a tint from the terminal's own palette, so status
-/// colours still show on it.
+/// Under the selected task's rows: a tint from the terminal's own palette, so status
+/// colours still show on it. Some themes make it the background colour, so the ID
+/// in reverse video is what says which task is selected in every theme.
 const TINT: Color = Color::DarkGray;
 
 fn mark_style(status: &str) -> Style {
@@ -310,6 +311,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 put(buf, area, y, 1, mark);
                 put(buf, area, y, 3, title_line(app, t, is_cur(t), w, idw, now));
             }
+            // the selected task's lines sit on the tint, its whole block, and drop dim as its title does
+            Row::Detail(t, text, _) if is_cur(t) => {
+                put(buf, area, y, 3, span(pad(&fit(text, detail_w), detail_w), Style::new().bg(TINT)));
+            }
             Row::Detail(_, text, loud) => {
                 put(buf, area, y, 3, span(fit(text, detail_w), if *loud { Style::new() } else { dim() }));
             }
@@ -579,15 +584,18 @@ fn title_line(app: &App, t: &Task, selected: bool, w: usize, idw: usize, now: ch
     let title = fit(&model::shown_title(t, &app.cfg, app.me.as_deref()), width_all.saturating_sub(width(&left) + width(&age) + 2));
     let middle = pad(&format!("  {title}"), width_all.saturating_sub(idw + width(&age)));
     let stale = t.status == "needs" && model::seconds_in_status(t, now) >= STALE;
-    // dim text is hard to read on the tint, so the selected row drops it
+    // the ID in reverse video, off the tint: that shows in any theme. Dim text is hard
+    // to read on the tint, so the rest of the row drops it
     let (id_style, title_style, age_style) = if selected {
         let on = Style::new().bg(TINT);
-        (on.add_modifier(Modifier::BOLD), on, if stale { on.fg(Color::Red).add_modifier(Modifier::BOLD) } else { on })
+        (rev().add_modifier(Modifier::BOLD), on, if stale { on.fg(Color::Red).add_modifier(Modifier::BOLD) } else { on })
     } else {
         let title = if t.closed() || t.triage() || app.cfg.theirs(t, app.me.as_deref()) { dim() } else { Style::new() };
         (dim(), title, if stale { bold().fg(Color::Red) } else { dim() })
     };
-    Line::from(vec![span(id, id_style), span(middle, title_style), span(age, age_style)])
+    // the ID's padding goes with the title, so only the ID itself is reversed
+    let id_pad = id[t.id.len()..].to_string();
+    Line::from(vec![span(t.id.clone(), id_style), span(id_pad + &middle, title_style), span(age, age_style)])
 }
 
 #[cfg(test)]
@@ -1055,11 +1063,11 @@ mod tests {
     #[test]
     fn another_coordinators_question_stays_dim() {
         let c = |id: &str, who: &str| Task { coordinator: Some(who.into()), ..asking(id) };
-        let mut a = app(vec![c("BP-1", "c1"), c("BP-2", "c2")], 0, Layout::Grouped);
+        let mut a = app(vec![c("BP-1", "c1"), c("BP-2", "c2"), ready("BP-3")], 0, Layout::Grouped);
         a.cfg.coordinators = vec!["c1".into(), "c2".into()];
         a.cfg.board_others = vec!["c1".into()];
         a.me = Some("c1".into());
-        a.sel = Some("BP-2".into());
+        a.sel = Some("BP-3".into());
         let mut term = Terminal::new(TestBackend::new(42, 24)).unwrap();
         term.draw(|f| draw(f, &mut a)).unwrap();
         let buf = term.backend().buffer().clone();
@@ -1069,6 +1077,65 @@ mod tests {
         assert!(s[theirs].starts_with("▌  Pick:"), "{s:#?}");
         assert!(!buf[(3, mine as u16)].modifier.contains(Modifier::DIM), "{s:#?}");
         assert!(buf[(3, theirs as u16)].modifier.contains(Modifier::DIM), "{s:#?}");
+
+        // selected, it's on the tint like any selected task, and not dim there
+        a.sel = Some("BP-2".into());
+        let mut term = Terminal::new(TestBackend::new(42, 24)).unwrap();
+        term.draw(|f| draw(f, &mut a)).unwrap();
+        let cell = &term.backend().buffer()[(3, theirs as u16)];
+        assert!(!cell.modifier.contains(Modifier::DIM));
+        assert_eq!(cell.bg, TINT);
+    }
+
+    #[test]
+    fn the_selected_task_has_its_id_reversed_and_its_whole_block_tinted() {
+        let mut a = app(vec![asking("BP-1"), ready("BP-12")], 0, Layout::Grouped);
+        a.sel = Some("BP-1".into());
+        let mut term = Terminal::new(TestBackend::new(42, 24)).unwrap();
+        term.draw(|f| draw(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let s: Vec<String> = (0..24).map(|y| (0..42).map(|x| buf[(x, y)].symbol()).collect::<String>().trim_end().to_string()).collect();
+        let title = s.iter().position(|r| r.contains("BP-1 ")).unwrap() as u16;
+        assert_eq!(s[title as usize], "▌● BP-1   Architecture round 2: review", "{s:#?}");
+        // the ID itself in reverse video, and not its padding: that shows in any theme
+        for x in 3..7 {
+            assert!(buf[(x, title)].modifier.contains(Modifier::REVERSED | Modifier::BOLD), "column {x}");
+            assert_eq!(buf[(x, title)].bg, Color::Reset, "column {x}");
+        }
+        assert!(!buf[(7, title)].modifier.contains(Modifier::REVERSED));
+        // the rest of its title row and every detail row on the tint, from column 3
+        // to the right edge, so the whole block reads as selected
+        let details = (title + 1..24).take_while(|&y| s[y as usize].starts_with("▌  ")).count() as u16;
+        assert_eq!(details, 7, "{s:#?}");
+        for y in title..=title + details {
+            let from = if y == title { 7 } else { 3 };
+            for x in from..40 {
+                assert_eq!(buf[(x, y)].bg, TINT, "row {y}, column {x}: {s:#?}");
+                assert!(!buf[(x, y)].modifier.contains(Modifier::DIM), "row {y}, column {x}");
+            }
+            assert_eq!(buf[(40, y)].bg, Color::Reset, "row {y}");
+            // the amber bar stays as it is
+            assert_eq!(buf[(0, y)].symbol(), "▌");
+            assert_eq!(buf[(0, y)].fg, AMBER);
+            assert_eq!(buf[(0, y)].bg, Color::Reset);
+        }
+        // another task: no reverse, no tint, its details dim
+        let other = s.iter().position(|r| r.contains("BP-12")).unwrap() as u16;
+        assert!(!buf[(3, other)].modifier.contains(Modifier::REVERSED));
+        for y in other..other + 3 {
+            assert!((0..42).all(|x| buf[(x, y)].bg == Color::Reset), "row {y}");
+        }
+        assert!(buf[(3, other + 1)].modifier.contains(Modifier::DIM));
+
+        // in the compact layout, the title row alone, the same way
+        a.cfg.layout = Layout::Compact;
+        let mut term = Terminal::new(TestBackend::new(42, 24)).unwrap();
+        term.draw(|f| draw(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let y = (0..24).find(|&y| buf[(3, y)].symbol() == "B" && buf[(6, y)].symbol() == "1").unwrap();
+        assert!(buf[(3, y)].modifier.contains(Modifier::REVERSED));
+        assert_eq!(buf[(10, y)].bg, TINT);
+        assert_eq!(buf[(10, y + 1)].bg, Color::Reset);
     }
 
     #[test]

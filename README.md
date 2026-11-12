@@ -112,7 +112,9 @@ the closed ones (accepted, closed, dropped). Each task shows how long it has bee
 lines under it (from under its ID), what it needs or where it stands ("Asks: python3 or python?", "PR #4,
 approved by light review.", "Follow-up review on round 2 of 2."): one or two lines,
 cut to fit, and for the selected task all of it, up to eight lines. What a task that
-needs you or stopped says is at normal weight; the rest is dimmed. A working
+needs you or stopped says is at normal weight; the rest is dimmed. The selected
+task has its ID in reverse video, which shows in any theme, and a tint under its
+whole block, title and lines. A working
 task shows there, dimmed, what its worker is doing now, and a task in review what
 its reviewer is doing: the text of the agent's `working: ...` status, cut to fit
 and updated as it changes. With no such text, or text from before the task's
