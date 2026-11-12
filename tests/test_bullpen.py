@@ -63,9 +63,13 @@ FAKE_REX = textwrap.dedent("""\
         print(screen.read_text() if screen.exists() else "line one\\nline two\\n\\n")
     elif a[:2] == ["block", "call"] and a[-1] == "process":
         pid = d / f"pid_{a[a.index('-b') + 1]}"  # a process the tests run on a terminal of their own
-        if not pid.exists():
+        prog = d / f"prog_{a[a.index('-b') + 1]}"  # the program the tests say a pane runs
+        if not pid.exists() and not prog.exists():
             sys.exit("rex: no such block")
-        print(json.dumps({"child": {"pid": int(pid.read_text())}}))
+        child = {"pid": int(pid.read_text())} if pid.exists() else {}
+        if prog.exists():
+            child.update(path=prog.read_text(), invoked_path=prog.read_text(), argv0=prog.read_text())
+        print(json.dumps({"child": child}))
     elif a[:2] == ["block", "call"] and a[-1] == "program_status":
         rec = d / f"status_{a[a.index('-b') + 1]}.json"  # the record the tests give a pane
         if not rec.exists():
@@ -4300,6 +4304,51 @@ class BullpenTest(unittest.TestCase):
         self.assertIn("from an older watch.lua or bullpen", lines["watcher"][1])
         self.assertIn("c1's pane (blk1) is gone", lines["coordinators"][1])
 
+    def test_a_board_from_an_older_build_is_caught_and_up_restarts_it(self):
+        self.healthy()
+        # c1's board (blk2) runs the program `bullpen board` runs now: it reloads by itself
+        (self.fake / "prog_blk2").write_text(self.env["BULLPEN_BOARD"])
+        _, lines = self.doctor()
+        self.assertEqual(lines["coordinators"][0], "ok")
+        # one from an older install's path never reloads
+        (self.fake / "prog_blk2").write_text(str(self.tmp / "old" / "release" / "bullpen-board"))
+        _, lines = self.doctor()
+        self.assertEqual(lines["coordinators"],
+                         ("FAIL", "c1's board is from an older build: `bullpen up` restarts it"))
+        out = self.bp("up").stdout
+        self.assertIn("board restarted (it ran an older build): blk4", out)
+        self.assertFalse((self.fake / "alive" / "blk2").exists())
+        self.assertEqual(json.loads(self.bp("config", "--json").stdout)["coordinators"][0]["board"]["block"],
+                         "blk4")
+        _, lines = self.doctor()
+        self.assertEqual(lines["coordinators"][0], "ok")
+        self.assertNotIn("board", self.bp("up").stdout)  # nothing to restart now
+
+    def test_doctor_says_to_reload_when_only_some_keys_are_loaded(self):
+        self.healthy()
+        (self.fake / "actions.json").write_text(json.dumps({"actions": [
+            {"name": n, "source": "/x/lua/keys.lua:62"}
+            for n in ("bullpen_next", "bullpen_board", "bullpen_coordinator")]}))
+        _, lines = self.doctor()
+        self.assertEqual(lines["keys"],
+                         ("FAIL", "bullpen_jump missing: Rex loaded an older keys.lua. Run `rex config reload`"))
+
+    def test_go_board_starts_a_board_when_none_runs(self):
+        self.bp("up")
+        (self.fake / "alive" / "blk2").unlink()  # c1's board, quit
+        p = self.bp("go", "--board")
+        self.assertIn("board started: blk4", p.stderr)
+        self.assertEqual(self.focused(), ["blk4"])
+        self.bp("go", "--board")  # running now: just shown
+        self.assertEqual(self.focused(), ["blk4", "blk4"])
+
+    def test_go_board_starts_one_for_a_coordinator_without_one(self):
+        self.bp("up", "--no-board")  # the coordinator (blk1) and the watcher (blk2)
+        self.bp("go", "--board")
+        self.assertEqual(self.focused(), ["blk3"])
+        self.assertEqual(json.loads(self.bp("config", "--json").stdout)["coordinators"][0]["board"]["block"],
+                         "blk3")
+
     def test_doctor_when_rex_has_no_server(self):
         self.healthy()
         (self.fake / "server_down").write_text("")
@@ -5718,6 +5767,29 @@ class BoardBuildTest(unittest.TestCase):
         self.settle()
         self.assertEqual(self.builds(), 2)
         self.assertIn("accepted()", self.board())
+
+    def test_an_accept_that_changes_the_keys_says_to_reload_once(self):
+        self.bp("build-board")
+        self.bp("config", "--review", "off")
+        tid = self.start_task()
+        wt = Path(self.show(tid)["worktree"])
+        with (wt / "lua" / "keys.lua").open("a") as f:
+            f.write("-- a new key\n")
+        sh("git", "-C", str(wt), "commit", "-qam", "Key change")
+        self.bp("ready", tid, "--summary", "Changed a key.", cwd=wt)
+        out = self.bp("accept", tid).stdout
+        self.assertEqual(out.splitlines()[-1], "Keys changed: run `rex config reload`")  # the board's line
+        self.assertEqual(self.news_log().count("Keys changed: run `rex config reload`"), 1)
+        # an accept that leaves keys.lua be says nothing of it
+        self.bp("add", "Other", "--brief", "x")
+        self.bp("start", "BP-2")
+        wt = Path(self.show("BP-2")["worktree"])
+        (wt / "fix.txt").write_text("fixed\n")
+        sh("git", "-C", str(wt), "add", ".")
+        sh("git", "-C", str(wt), "commit", "-qm", "Fix")
+        self.bp("ready", "BP-2", "--summary", "Fixed.", cwd=wt)
+        self.assertNotIn("Keys changed", self.bp("accept", "BP-2").stdout)
+        self.assertEqual(self.news_log().count("Keys changed"), 1)
 
     def test_accept_in_another_repo_never_builds(self):
         self.bp("build-board")

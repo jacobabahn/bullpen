@@ -208,6 +208,12 @@ fn run(bullpen: &Path, root: &Path, args: &[String]) -> (bool, String) {
     }
 }
 
+/// An accept that changed bullpen's keys.lua ends by saying so: that, not "Accepted",
+/// is the line to show, since Rex runs the old keys until its config is reloaded.
+fn keys_changed(job: Job, out: &str) -> bool {
+    job == Job::Accept && out.starts_with("Keys changed")
+}
+
 /// The last line a command said, without its "bullpen: ".
 fn last_line(text: &str) -> String {
     let last = text.trim().lines().last().unwrap_or("");
@@ -364,7 +370,7 @@ impl App {
             self.pending = Some((Action::DropForce, id));
             self.msg.clear();
         } else {
-            self.msg = if ok { format!("{} {id}.", job.done()) } else { out };
+            self.msg = if !ok || keys_changed(job, &out) { out } else { format!("{} {id}.", job.done()) };
         }
     }
 
@@ -1128,6 +1134,17 @@ mod tests {
         assert_eq!(a.sel.as_deref(), Some("BP-1"));
         a.done("BP-3".into(), Job::Accept, true, String::new());
         assert_eq!(a.sel.as_deref(), Some("BP-1"));
+    }
+
+    #[test]
+    fn an_accept_that_changed_the_keys_says_so_in_place_of_accepted() {
+        let mut a = app(vec![task("BP-1", "ready")]);
+        a.done("BP-1".into(), Job::Accept, true, "Keys changed: run `rex config reload`".into());
+        assert_eq!(a.msg, "Keys changed: run `rex config reload`");
+        // any other last line is still "Accepted"
+        let mut a = app(vec![task("BP-1", "ready")]);
+        a.done("BP-1".into(), Job::Accept, true, "BP-1 done (merged into main: 0123456789ab)".into());
+        assert_eq!(a.msg, "Accepted BP-1.");
     }
 
     /// A scratch folder of its own for a test, removed at the end.

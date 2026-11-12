@@ -1355,11 +1355,15 @@ def cmd_up(args):
     print(news_mode_line(repo))
 
 
-def ensure_board(repo, session, c):
-    """Coordinator c's task board, in a narrow pane to its right."""
+def ensure_board(repo, session, c, out=sys.stdout):
+    """Coordinator c's task board, in a narrow pane to its right. A board running an
+    older build than `bullpen board` runs now (old_board) is replaced: it never reloads."""
     b = c.get("board")
+    old = None
     if b and rex_alive(b.get("session"), b.get("block")):
-        return
+        if not old_board(b):
+            return
+        old = b
     p = run([REX, "split", "--json", "--focus=false", "-s", session, "-b", c["block"],
              "--split=right", "--ratio", "35", "--label", board_label(repo),
              "-c", str(repo.root), "--", *with_state([SELF, "board", "--coordinator", c["id"]])])
@@ -1369,7 +1373,40 @@ def ensure_board(repo, session, c):
     c["board"] = {"block": block, "session": session}
     index_block(block, repo, "board")
     repo.save()
-    print(f"board started: {block}")
+    if old:  # only once the new one is up
+        rex_close(old.get("session"), old["block"])
+        print(f"board restarted (it ran an older build): {block}", file=out)
+    else:
+        print(f"board started: {block}", file=out)
+
+
+def board_program(b):
+    """The program a board's pane runs, as it was started (the path a board reloads
+    from), or None when Rex can't say or it isn't the board yet."""
+    p = run([REX, "block", "call", *(["-s", b["session"]] if b.get("session") else []), "-b", b["block"],
+             "process"], check=False)
+    if p.returncode != 0:
+        return None
+    try:
+        child = json.loads(p.stdout).get("child") or {}
+    except (ValueError, AttributeError):
+        return None
+    prog = child.get("invoked_path") or child.get("argv0") or ""
+    if not os.path.isabs(prog):
+        prog = child.get("path") or ""
+    if not prog or Path(prog).name not in ("bullpen-board", board_exe().name):
+        return None  # still `bullpen board`, about to exec it, or Rex doesn't say
+    return prog
+
+
+def old_board(b):
+    """A running board's program, when it isn't the one `bullpen board` runs now: an
+    older install's path, which a rebuild never replaces, so the board never reloads.
+    (A board on the right path whose file was rebuilt reloads by itself.) Else None."""
+    prog = board_program(b)
+    if prog and os.path.realpath(prog) != os.path.realpath(board_exe()):
+        return prog
+    return None
 
 
 def file_hash(path):
@@ -3856,6 +3893,7 @@ def cmd_accept(args):
         return close_task(repo, t)  # the person's yes on work with nothing to merge
     if t["status"] != "ready" and not merged_outside:
         raise Fail(f"{t['id']} is {t['status']}, not ready or finished")
+    keys = keys_hash()
     if t.get("pr"):
         p = None if merged_outside else run(
             [repo.gh(), "pr", "merge", t["pr"], f"--{repo.cfg.get('merge', 'rebase')}"],
@@ -3897,6 +3935,22 @@ def cmd_accept(args):
         said = rebuild_board_if_stale(repo)
         if said:
             print(said)
+    if keys_hash() != keys:  # last: the line the board shows
+        news(repo, t, "keys", KEYS_CHANGED, everyone=True)
+        print(KEYS_CHANGED)
+
+
+KEYS_LUA = HOME / "lua" / "keys.lua"
+KEYS_CHANGED = "Keys changed: run `rex config reload`"
+
+
+def keys_hash():
+    """keys.lua as it is, which Rex reads only when its config loads: an accept that
+    changes it says to reload."""
+    try:
+        return file_hash(KEYS_LUA)
+    except OSError:
+        return None
 
 
 def checked_out_at(repo, branch):
@@ -4826,6 +4880,8 @@ def cmd_go(args):
     if args.all_repos and not args.next:
         raise Fail("--all-repos goes with --next")
     home = go_home(args)
+    if args.board and not args.id:
+        home = board_for_go(home, args)
     try:
         repo, session, block, name = go_target(home, args)
     except Fail as e:
@@ -4835,6 +4891,7 @@ def cmd_go(args):
         # A key that does nothing looks broken: show the board, where that's plain.
         print(f"bullpen: {e}; showing the board", file=sys.stderr)
         args.next, args.board = False, True
+        home = board_for_go(home, args)
         repo, session, block, name = go_target(home, args)
     if not rex_alive(session, block):
         # after a Rex restart its ID changed (and maybe its session's)
@@ -4847,6 +4904,23 @@ def cmd_go(args):
         print(json.dumps({"session": session, "block": block, "name": name}))
     else:
         show_pane(repo, session, block)
+
+
+def board_for_go(repo, args):
+    """`go --board`: when the board it would show isn't running, start the pane's
+    coordinator's (as `up` would), rather than refuse. The repo, read again if a Rex
+    restart had to be caught up with."""
+    c = coordinator_for(repo, args.from_block)
+    if c and not alive(c):  # after a Rex restart its ID changed (and maybe its session's)
+        relink(repo, args.session or os.environ.get("REX_SESSION") or c.get("session"))
+        repo = Repo(repo.root)
+        c = coordinator_for(repo, args.from_block)
+    if not alive(c):
+        return repo  # go_target says why
+    b = c.get("board") or next((o["board"] for o in repo.cfg["coordinators"] if o.get("board")), None)
+    if not (b and rex_alive(b.get("session"), b.get("block"))):
+        ensure_board(repo, c["session"], c, out=sys.stderr)
+    return repo
 
 
 def go_home(args):
@@ -5340,7 +5414,7 @@ def cmd_build_board_bg(args):
 
 
 def cmd_keys(args):
-    keys = HOME / "lua" / "keys.lua"
+    keys = KEYS_LUA
     opts = f'bin = "{SELF}"'
     if os.environ.get("BULLPEN_STATE"):
         opts += f', state = "{STATE}"'
@@ -5456,6 +5530,10 @@ def check_keys():
         return "skip", "can't tell: `rex actions --json` didn't list the actions"
     have = {a.get("name"): a for a in actions}
     missing = [a for a in KEY_ACTIONS if a not in have]
+    if missing and len(missing) < len(KEY_ACTIONS):
+        # the line is in the config, but Rex loaded keys.lua before it had these
+        return "fail", (f"{', '.join(missing)} missing: Rex loaded an older keys.lua. "
+                        f"Run `rex config reload`")
     if missing:
         return "fail", (f"not in your Rex config ({', '.join(missing)} missing): run `bullpen keys`, "
                         f"add the line it prints to init.lua, then `rex config reload`")
@@ -5594,7 +5672,7 @@ def check_coordinators(repo, why_not=None):
         return "skip", f"can't tell: {why_not}"
     if not repo or not repo.cfg["coordinators"]:
         return "skip", "none yet: run `bullpen up`"
-    gone, ok_ = [], []
+    gone, old, ok_ = [], [], []
     for c in repo.cfg["coordinators"]:
         if not alive(c):
             gone.append(f"{c['id']}'s pane ({c.get('block')}) is gone")
@@ -5602,10 +5680,16 @@ def check_coordinators(repo, why_not=None):
         b = c.get("board") or {}
         if b.get("block") and not rex_alive(b.get("session"), b["block"]):
             gone.append(f"{c['id']}'s board ({b['block']}) is gone")
+        elif b.get("block") and old_board(b):
+            old.append(f"{c['id']}'s board is from an older build")
         else:
             ok_.append(f"{c['id']} ({c['block']})")
-    if gone:
-        return "fail", "; ".join(gone) + ": run `bullpen up`, which drops gone coordinators and reopens boards"
+    if gone or old:
+        return "fail", "; ".join(
+            ([("; ".join(gone) + ": run `bullpen up`, which drops gone coordinators and reopens boards")]
+             if gone else [])
+            + ([", ".join(old) + ": `bullpen up` restarts " + ("it" if len(old) == 1 else "them")]
+               if old else []))
     return "ok", ", ".join(ok_)
 
 

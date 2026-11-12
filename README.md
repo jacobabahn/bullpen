@@ -56,7 +56,9 @@ non-zero when anything fails. It checks:
   (with the log), `board/` has uncommitted changes, or it just hasn't been rebuilt
   yet; `bullpen build-board` fixes each
 - the keys are in your Rex config: Rex lists the `bullpen_next`, `bullpen_board`,
-  `bullpen_coordinator` and `bullpen_jump` actions (`rex actions`)
+  `bullpen_coordinator` and `bullpen_jump` actions (`rex actions`). With some of them
+  listed and one missing, the line is there but Rex loaded an older `keys.lua`: the
+  fix is `rex config reload`
 - the watcher is running, from the current `watch.lua` and `bin/bullpen` (the hashes
   in `watcher.json`)
 - the state folder is writable, and this repo's `config.json` parses
@@ -67,7 +69,11 @@ non-zero when anything fails. It checks:
   the `config --setup` command (it parses, and its program is found). A
   `.bullpen/setup.sh` that is there but not committed on the base is a failure: it
   wouldn't run.
-- the coordinators in `config.json` still have their panes and boards
+- the coordinators in `config.json` still have their panes and boards, and each
+  running board runs the program `bullpen board` runs now (Rex says which program a
+  pane runs). One from an older install's path never reloads by itself: "c1's board
+  is from an older build: `bullpen up` restarts it". `up` opens a new board in its
+  place and closes the old one
 
 `bullpen up` runs the quick checks (not `gh`, which needs the network, nor the
 watcher and coordinators, which `up` sees to itself) and, if any fail, prints one
@@ -189,6 +195,12 @@ through.
 `setup{ prefix = "ctrl+b" }` moves them behind another key, and
 `keys = { next = "cmd+shift+j", jump = "cmd+k" }` sets single ones. Run `rex config reload` after.
 
+Rex reads `keys.lua` only when its config loads. An accept that changes it says
+"Keys changed: run `rex config reload`" once, on the board's message line (in place
+of "Accepted") and in the news. `cmd+;` then `b` with no board running (it was
+quit, or its coordinator was started with `--no-board`) starts one beside the
+coordinator, as `bullpen up` would, and shows it.
+
 Then tell the coordinator what you want. To drive it by hand:
 
 ```sh
@@ -206,7 +218,8 @@ bullpen answer BP-1 2 # press option 2 of that prompt (or y, n), as you would in
 bullpen reply BP-1 "Postgres"   # answer the coordinator's `ask`: it goes to the coordinator
 bullpen diff BP-1     # its changes against its base, in a pager (--stat: just the files)
 bullpen check         # tasks whose status is out of step with their agent; --fix catches up
-bullpen go BP-1       # focus its pane (`go` alone: the coordinator; --next: next needing you)
+bullpen go BP-1       # focus its pane (`go` alone: the coordinator; --next: next needing you;
+                      #   --board: the board, started first if none runs)
 bullpen go --next --all-repos   # the next task needing you in any repository
 bullpen go BP-1 --repo ~/shop   # a task of another repository
 bullpen pick          # type part of any open task, in any repository, and go to it (the cmd+; j picker)
@@ -846,8 +859,8 @@ bullpen builds it again in the background:
   version. It never changes your mise config.
 
 With `BULLPEN_BOARD` set (a board program of your own), bullpen builds nothing.
-Boards started before this change don't reload themselves: close them and run
-`bullpen up` once.
+Boards started from an older install's path (`board/target/release/bullpen-board`)
+don't reload themselves: `bullpen doctor` names them, and `bullpen up` restarts them.
 
 ## Where things live
 

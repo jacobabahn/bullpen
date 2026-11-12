@@ -313,5 +313,7 @@ bullpen · The board wasn't rebuilt: cargo failed: error[E0425]: .... Boards kee
 - The board wasn't rebuilt (bullpen's own board, after its source changed): a
   failed build or uncommitted changes in `board/`. Tell the person in one line;
   the old board keeps working. A board that was rebuilt reloads by itself: no news.
+- Keys changed (an accept changed bullpen's `lua/keys.lua`): tell the person in one
+  line to run `rex config reload`; the cmd+; keys run the old ones until then.
 - When there's nothing to add, reply with a single short line or nothing at all.
   Several news lines at once get one reply.
