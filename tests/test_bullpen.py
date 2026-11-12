@@ -1664,8 +1664,9 @@ class BullpenTest(unittest.TestCase):
     def test_a_short_guide_change_is_told_once_with_its_diff(self):
         self.bp("up")
         now = self.guide()
-        old = now.replace("Several news lines at once get one reply.", "Reply to each news line.\nAnd mean it.")
-        old = old.replace("## News\n", "## News\nOld words.\nMore old words.\n")
+        # two lines of the guide now in place of one: two changed lines in one section
+        old = now.replace("- When there's nothing to add, reply with a single short line or nothing at all.\n"
+                          "  Several news lines at once get one reply.", "- Reply to each news line.")
         self.assertNotEqual(old, now)
         self.give_old_guide("blk1", old)
         self.bp("up")
@@ -1674,7 +1675,7 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(lines[0], "bullpen · Your coordinator guide changed (section: News). "
                                    "Read the change below and follow it from now on:")
         self.assertEqual(lines[1:3], ["--- guide (yours)", "+++ guide (now)"])
-        self.assertIn("-  Reply to each news line.", lines)
+        self.assertIn("-- Reply to each news line.", lines)
         self.assertIn("+  Several news lines at once get one reply.", lines)
         self.assertEqual(self.guide_hashes()["blk1"], hashlib.sha256(now.encode()).hexdigest())
         self.bp("up")
@@ -1691,7 +1692,11 @@ class BullpenTest(unittest.TestCase):
         self.bp("up")
         now = self.guide()
         old = now.replace("## Review\n", "## Review\n" + "An old rule.\n" * 50)
-        old = old.replace("Several news lines at once get one reply.", "Reply to each news line.\nAnd mean it.")
+        old = old.replace("- When there's nothing to add, reply with a single short line or nothing at all.\n"
+                          "  Several news lines at once get one reply.", "- Reply to each news line.")
+        old = old.replace("When a worker runs `ready`, its PR opens (or, when the repo has no remote, its\n"
+                          "local branch is marked ready)", "When a worker is ready")
+        self.assertEqual(old.count("When a worker is ready"), 1)
         self.give_old_guide("blk1", old)
         self.bp("up")
         [msg] = self.guide_news()
