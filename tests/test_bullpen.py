@@ -4,6 +4,7 @@ Run: python3 -m unittest discover -s tests
 """
 
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -1635,6 +1636,117 @@ class BullpenTest(unittest.TestCase):
         self.bp("_event", self.block(tid), "blocked", "question", "Which one?\nA or B")
         line = self.typed()[-1][1]
         self.assertEqual(line, "bullpen · BP-1 needs the person (question): Which one? A or B")
+
+    # ---------- telling coordinators that their guide changed ----------
+
+    def guide(self):
+        return self.bp("guide").stdout[:-1]  # print's own newline
+
+    def give_old_guide(self, block, text, keep=True):
+        """The coordinator in pane block was given the guide text (None: from before
+        hashes); keep=False: its text wasn't kept."""
+        cfg_path = next((self.tmp / "state" / "repos").glob("*/config.json"))
+        cfg = json.loads(cfg_path.read_text())
+        c = next(c for c in cfg["coordinators"] if c["block"] == block)
+        c.pop("guide", None)
+        if text is not None:
+            c["guide"] = hashlib.sha256(text.encode()).hexdigest()
+            if keep:
+                (self.tmp / "state" / "guides" / f"{c['guide']}.md").write_text(text)
+        cfg_path.write_text(json.dumps(cfg))
+
+    def guide_hashes(self):
+        return {c["block"]: c.get("guide") for c in self.coordinators()}
+
+    def guide_news(self, block="blk1"):
+        return [l for b, l in self.typed() if b == block and "coordinator guide" in l]
+
+    def test_a_short_guide_change_is_told_once_with_its_diff(self):
+        self.bp("up")
+        now = self.guide()
+        old = now.replace("Several news lines at once get one reply.", "Reply to each news line.")
+        self.assertNotEqual(old, now)
+        self.give_old_guide("blk1", old)
+        self.bp("up")
+        [msg] = self.guide_news()
+        lines = msg.split("\n")
+        self.assertEqual(lines[0], "bullpen · Your coordinator guide changed (section: News). "
+                                   "Read the change below and follow it from now on:")
+        self.assertEqual(lines[1:3], ["--- guide (yours)", "+++ guide (now)"])
+        self.assertIn("-  Reply to each news line.", lines)
+        self.assertIn("+  Several news lines at once get one reply.", lines)
+        self.assertEqual(self.guide_hashes()["blk1"], hashlib.sha256(now.encode()).hexdigest())
+        self.bp("up")
+        self.assertEqual(len(self.guide_news()), 1)  # once
+
+    def test_an_unchanged_guide_is_no_news(self):
+        tid = self.ready_with_a_commit()
+        self.bp("up")
+        self.bp("accept", tid)
+        self.assertEqual(self.guide_news(), [])
+        self.assertNotIn(" guide guide: ", self.news_log())
+
+    def test_a_long_guide_change_names_its_sections_and_points_at_the_guide(self):
+        self.bp("up")
+        now = self.guide()
+        old = now.replace("## Review\n", "## Review\n" + "An old rule.\n" * 50)
+        old = old.replace("Several news lines at once get one reply.", "Reply to each news line.")
+        self.give_old_guide("blk1", old)
+        self.bp("up")
+        [msg] = self.guide_news()
+        self.assertNotIn("\n", msg)
+        self.assertRegex(msg, r"^bullpen · Your coordinator guide changed \(sections: Review, News\), "
+                              r"\d+ lines of diff: run `bullpen guide` to read it all, and follow it from now on\.$")
+
+    def test_a_coordinator_from_before_guide_hashes_is_told_once_without_a_diff(self):
+        self.bp("up")
+        self.give_old_guide("blk1", None)
+        self.bp("up")
+        self.bp("up")
+        self.assertEqual(self.guide_news(), [
+            "bullpen · Your coordinator guide may have changed since you were given it: run "
+            "`bullpen guide` to read it all, and follow it from now on."])
+        self.give_old_guide("blk1", "a guide whose text wasn't kept", keep=False)
+        self.bp("up")
+        self.assertEqual(len(self.guide_news()), 2)
+        self.assertIn("may have changed", self.guide_news()[1])
+
+    def test_a_guide_change_is_told_to_each_running_coordinator_alone(self):
+        tid = self.ready_with_a_commit()
+        other = self.new_pane()
+        self.bp_in(other, "up", "--here")
+        third = self.new_pane()
+        self.bp_in(third, "up", "--here")
+        now = self.guide()
+        self.assertEqual(set(self.guide_hashes().values()), {hashlib.sha256(now.encode()).hexdigest()})
+        old = now.replace("## News\n", "## News\nOld words.\n")
+        self.give_old_guide("blk1", old)
+        self.give_old_guide(other, old)
+        self.give_old_guide(third, old)
+        (self.fake / "alive" / third).unlink()  # its agent is closed: nobody to tell
+        before = self.typed()
+        self.bp("accept", tid)
+        told = [(b, l.split("\n")[0]) for b, l in self.typed()[len(before):] if "coordinator guide" in l]
+        line = "bullpen · Your coordinator guide changed (section: News). Read the change below and follow it from now on:"
+        self.assertEqual(sorted(told), sorted([("blk1", line), (other, line)]))
+        self.assertEqual(self.guide_hashes()[third], hashlib.sha256(old.encode()).hexdigest())
+        self.bp("up")  # drops the closed one; nothing more to tell
+        self.assertEqual(len([l for b, l in self.typed() if "coordinator guide" in l]), 2)
+
+    def test_a_guide_diff_comes_after_its_line_by_monitor(self):
+        self.bp("up")
+        self.bp("config", "--news", "monitor")
+        self.bp_in("blk1", "news")  # its cursor starts here
+        now = self.guide()
+        self.give_old_guide("blk1", now.replace("## News\n", "## News\nOld words.\n"))
+        self.bp("up")
+        out = self.bp_in("blk1", "news").stdout.splitlines()
+        self.assertEqual(out[0], "bullpen · Your coordinator guide changed (section: News). "
+                                 "Read the change below and follow it from now on:")
+        self.assertEqual(out[1:3], ["--- guide (yours)", "+++ guide (now)"])
+        self.assertIn("-Old words.", out)
+        self.assertEqual(self.bp_in("blk1", "news").stdout, "")
+        self.assertEqual(self.guide_news(), [])  # nothing typed
 
     def test_go_refuses_a_task_without_a_pane(self):
         self.bp("up")

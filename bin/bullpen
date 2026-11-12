@@ -11,6 +11,7 @@ or logged for it to follow with `bullpen news --follow`.
 import argparse
 import codecs
 import datetime as dt
+import difflib
 import fcntl
 import hashlib
 import json
@@ -644,7 +645,7 @@ def rex_alive(session, block):
 
 
 def rex_type(session, block, text):
-    """Type one line into a terminal and press Enter."""
+    """Type a message (a line, or several) into a terminal and press Enter."""
     s = ["-s", session] if session else []
     run([REX, "send", *s, "-b", block, text])
     run([REX, "send-key", *s, "-b", block, "enter"])
@@ -735,14 +736,17 @@ def where(t):
 NEWS_MARK = "bullpen · "
 
 
-def news(repo, task, event, text, everyone=False, skip=None, typed=None):
+def news(repo, task, event, text, everyone=False, skip=None, typed=None, to=None, more=()):
     """One line of news, `bullpen · <what happened>`, for the coordinator that owns the
     task (everyone=True: for all of them, as news that isn't about one task is): logged,
     and typed into their prompts unless they follow the log (config --news monitor).
     skip: a coordinator not to tell (the one that ran the command). typed: what to type
-    in place of the line (the person's own words, not bullpen's)."""
+    in place of the line (the person's own words, not bullpen's). to: the IDs of the
+    coordinators it is for, whoever owns what. more: lines that go after it, as they
+    are (a diff): logged after it, each starting with a tab, and typed with it as one
+    message."""
     line = NEWS_MARK + " ".join(text.split())  # one line: a newline would send it early
-    to, waits = news_to(repo, task, everyone)
+    to, waits = (to, False) if to else news_to(repo, task, everyone)
     if skip and to and skip in to:
         to = [cid for cid in to if cid != skip]
         if not to:
@@ -750,11 +754,13 @@ def news(repo, task, event, text, everyone=False, skip=None, typed=None):
     log = repo.dir / "news.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("a") as f:
-        f.write(f"{now()}{' [' + ','.join(to) + ']' if to else ''} {task['id']} {event}: {line}\n")
+        f.write(f"{now()}{' [' + ','.join(to) + ']' if to else ''} {task['id']} {event}: {line}\n"
+                + "".join(f"\t{l}\n" for l in more))  # one write: a reader never sees half
     if repo.cfg.get("news") != "monitor":
         # With no coordinator alive the line waits once, in the shared outbox: one copy
         # per coordinator would reach the first to come back once for each.
-        type_news(repo, " ".join(typed.split()) if typed else line, None if waits else to)
+        said = " ".join(typed.split()) if typed else line
+        type_news(repo, LINE_BREAK.join([said, *more]), None if waits else to)
 
 
 def news_to(repo, task, everyone=False):
@@ -767,6 +773,13 @@ def news_to(repo, task, everyone=False):
         return [own["id"]], False
     live = [c for c in cs if alive(c)]
     return [c["id"] for c in (live or cs)], not live
+
+
+# An outbox holds one message a line; a message of several lines (news with a diff
+# after it) keeps its line breaks as this, and gets them back when it is typed. Claude
+# Code takes a newline that comes in a typed burst as part of the message (a paste), and
+# only the Enter after it sends it.
+LINE_BREAK = "\x1f"
 
 
 def outbox_path(repo, cid=None):
@@ -1016,7 +1029,7 @@ def deliver(repo):
             done = False
             continue
         for line in take_lines(path):
-            rex_type(c.get("session"), c["block"], line)
+            rex_type(c.get("session"), c["block"], line.replace(LINE_BREAK, "\n"))
     return done
 
 
@@ -1161,9 +1174,10 @@ def news_for(text, cid, listed):
 
 
 def print_news(repo, offset, cid=None):
-    """Print coordinator cid's whole lines logged after offset, moving its cursor past
-    each line once it is out (or skipped: another coordinator's). Returns the new
-    offset. A line still being written waits."""
+    """Print coordinator cid's news logged after offset, moving its cursor past each
+    line once it is out (or skipped: another coordinator's). A line's own lines after
+    it (each starting with a tab: a diff) go with it. Returns the new offset. A line
+    still being written waits."""
     size = news_size(repo)
     if offset > size:  # the log was removed or cut short: what's there now is new
         offset = 0
@@ -1173,22 +1187,37 @@ def print_news(repo, offset, cid=None):
     listed = {c["id"] for c in load_config(repo.dir)["coordinators"]}
     with (repo.dir / "news.log").open("rb") as f:
         f.seek(offset)
-        for raw in f:
-            if not raw.endswith(b"\n"):
-                break
-            text = raw.decode(errors="replace").rstrip("\n")
+        for raws in news_records(f):
+            text = raws[0].decode(errors="replace").rstrip("\n")
             at = text.find(NEWS_MARK)
             # Printing and moving the cursor go together: being stopped in between
             # (a monitor expiring) would print the line again next time.
             held = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGINT, signal.SIGHUP})
             try:
-                if news_for(text, cid, listed):
-                    print(text[at:] if at >= 0 else text, flush=True)
-                offset += len(raw)
+                # a tab-led line with no line before it (a cursor left between them) is skipped
+                if not text.startswith("\t") and news_for(text, cid, listed):
+                    rest = [r.decode(errors="replace")[1:].rstrip("\n") for r in raws[1:]]
+                    print("\n".join([text[at:] if at >= 0 else text, *rest]), flush=True)
+                offset += sum(len(r) for r in raws)
                 set_news_cursor(repo, offset, cid)  # after printing: if nobody was reading, it comes again
             finally:
                 signal.pthread_sigmask(signal.SIG_SETMASK, held)
     return offset
+
+
+def news_records(f):
+    """The whole news lines left in f, each with the tab-led lines that follow it, as
+    lists of raw lines. One still being written isn't given."""
+    rec = []
+    for raw in f:
+        if not raw.endswith(b"\n"):
+            return
+        if rec and not raw.startswith(b"\t"):
+            yield rec
+            rec = []
+        rec.append(raw)
+    if rec:
+        yield rec
 
 
 def news_reader(repo):
@@ -1287,6 +1316,106 @@ def guide_file(repo):
     return path
 
 
+# ---------- telling running coordinators that their guide changed ----------
+#
+# A coordinator gets its guide once, in its system prompt or by reading `bullpen guide`
+# (`up --here`), and can't load it again. Each records the hash of the guide it was
+# given (c["guide"]), and the text itself is kept in <state>/guides/<hash>.md: one
+# folder for every repo, since they all run this bullpen's guide. `up` and `accept`
+# (a merge or a pull may have changed prompts/coordinator.md) compare each running
+# coordinator's hash, in every repo, with the guide now. A coordinator whose guide is
+# out of date gets one news line, only it, with the diff after the line when it is
+# short, and its hash moves on, so each change is told once. One from before hashes,
+# or whose old text is gone, is told to read the guide again, with no diff.
+
+GUIDES = STATE / "guides"
+GUIDE_NEWS = {"id": "guide"}  # the news log's task column for these lines
+GUIDE_DIFF_LINES = 40  # a longer diff is summed up by its sections instead
+
+
+def guide_hash(text):
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def give_guide(c, text):
+    """Record that coordinator c has this guide: its hash, and the text, for the diff
+    when it changes."""
+    h = guide_hash(text)
+    path = GUIDES / f"{h}.md"
+    if not path.exists():
+        GUIDES.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        tmp.write_text(text)
+        os.replace(tmp, path)
+    c["guide"] = h
+
+
+def old_guide(h):
+    """The guide text with hash h, if it was kept."""
+    try:
+        return (GUIDES / f"{h}.md").read_text() if h else None
+    except OSError:
+        return None
+
+
+def guide_sections(old, new):
+    """The headings of the guide's sections that changed, in order: those around changed
+    lines in the new guide, or in the old one for a section that's gone."""
+    a, b = old.splitlines(), new.splitlines()
+
+    def heading(lines, i):
+        for l in reversed(lines[:i + 1]):
+            if l.startswith("#"):
+                return l.lstrip("#").strip()
+        return "the top"
+
+    out = []
+    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        if op == "equal":
+            continue
+        hs = [heading(b, j) for j in range(j1, max(j2, j1 + 1))] if b else []
+        hs += [heading(a, i) for i in range(i1, i2) if a[i].startswith("#")]  # removed sections
+        out += [h for h in hs if h not in out]
+    return out
+
+
+def guide_news(old, new):
+    """(line, lines after it) telling a coordinator given the guide old (None: not
+    known) that it is now new."""
+    follow = "follow it from now on"
+    if old is None:
+        return (f"Your coordinator guide may have changed since you were given it: run "
+                f"`bullpen guide` to read it all, and {follow}.", [])
+    diff = list(difflib.unified_diff(old.splitlines(), new.splitlines(),
+                                     "guide (yours)", "guide (now)", lineterm=""))
+    where = guide_sections(old, new)
+    where = f" ({'section' if len(where) == 1 else 'sections'}: {', '.join(where)})" if where else ""
+    if len(diff) <= GUIDE_DIFF_LINES:
+        return f"Your coordinator guide changed{where}. Read the change below and {follow}:", diff
+    return (f"Your coordinator guide changed{where}, {len(diff)} lines of diff: run `bullpen guide` "
+            f"to read it all, and {follow}.", [])
+
+
+def tell_guide_changes(repo):
+    """Tell each running coordinator, in this repo and every other, whose guide isn't
+    the current one what changed. Never fails the command that called it."""
+    try:
+        text = guide_text()
+        h = guide_hash(text)
+        for r in [repo] + [o for o in known_repos() if o.dir != repo.dir]:
+            told = [c for c in r.cfg["coordinators"] if c.get("guide") != h and alive(c)]
+            for c in told:
+                line, more = guide_news(old_guide(c.get("guide")), text)
+                news(r, GUIDE_NEWS, "guide", line, to=[c["id"]], more=more)
+                give_guide(c, text)
+                print(f"coordinator {c['id']}{'' if r is repo else ' of ' + str(r.root)}: "
+                      f"told that its guide changed")
+            if told:
+                r.save()
+    except (Fail, OSError, ValueError) as e:
+        print(f"bullpen: couldn't tell the coordinators about their guide: {e}", file=sys.stderr)
+
+
 def coordinator_label(repo):
     return f"bullpen: {repo.root.name}"
 
@@ -1331,6 +1460,7 @@ def cmd_up(args):
             print(f"coordinator {c['id']}: this pane ({block})."
                   + (f" The other coordinators stay: {others}. Tasks you add are yours." if live else ""),
                   end=" ")
+        give_guide(c, guide_text())  # it's told to read it now
         print(f"Run `{SELF} guide` to read the coordinator's guide."
               + (" News comes by monitor: start it first, as the guide says."
                  if repo.cfg.get("news") == "monitor" else ""))
@@ -1349,9 +1479,11 @@ def cmd_up(args):
         ]
         block = rex_run(session, repo.root, coordinator_label(repo), argv, focus=True)
         c = add_coordinator(repo, block, session)
+        give_guide(c, guide_text())
         print(f"coordinator started: {block}")
         mine = [c]
     repo.save()
+    tell_guide_changes(repo)  # the others (all of them, without --here), after a pull
     if not args.no_board:
         for c in mine:
             ensure_board(repo, session, c)
@@ -3941,6 +4073,7 @@ def cmd_accept(args):
     if how != "nothing to merge":
         rebase_others(repo, t)
     start_queued(repo, t, "accepted")
+    tell_guide_changes(repo)  # the merge may have changed the coordinator's guide
     refresh_watcher(repo)  # the merge may have changed the watcher itself
     if repo.root.resolve() == HOME.resolve():  # bullpen's own checkout: maybe the board too
         said = rebuild_board_if_stale(repo)

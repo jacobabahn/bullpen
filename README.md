@@ -771,6 +771,36 @@ mode `--follow` always does that, and plain `bullpen news` still works. News
 logged in `monitor` mode but not yet read when you switch back is not typed:
 `bullpen news` prints it.
 
+When the coordinator's guide changes. A coordinator gets its guide
+(`prompts/coordinator.md`) once: in its system prompt, or by reading `bullpen guide`
+after `up --here`, and a running agent can't load it again. So each coordinator
+records the hash of the guide it was given, and the text is kept in
+`~/.local/state/bullpen/guides/<hash>.md`. When `bullpen up` or `bullpen accept` (a
+pull or a merge may have changed it) finds that a running coordinator's guide is
+out of date, in any repository, it sends that coordinator alone one news line, and
+records the new hash, so each change is told once. When the diff is short (40
+lines or less) it comes after the line, as a unified diff (typed with it as one
+message, or printed after it by `bullpen news`, logged as lines starting with a
+tab):
+
+```
+bullpen · Your coordinator guide changed (section: News). Read the change below and follow it from now on:
+--- guide (yours)
++++ guide (now)
+@@ -314,4 +314,4 @@
+...
+```
+
+A longer change names the sections it touches instead:
+
+```
+bullpen · Your coordinator guide changed (sections: Review, News), 63 lines of diff: run `bullpen guide` to read it all, and follow it from now on.
+```
+
+A coordinator from before this (no hash),
+or one whose old text is gone, is told once that its guide may have changed, to run
+`bullpen guide`, with no diff.
+
 ### Notifications
 
 When a task comes to need you (its worker or reviewer is at a prompt, the
@@ -880,6 +910,8 @@ don't reload themselves: `bullpen doctor` names them, and `bullpen up` restarts 
   as `[c1]`), with `news-<id>.cursor` (how far each coordinator's `bullpen news`
   has read) and `outbox-<id>.txt` (typed news waiting for an empty input). See
   [News](#news).
+- The coordinator guides running coordinators were given, for the diff when it changes:
+  `~/.local/state/bullpen/guides/<hash>.md`. See [News](#news).
 - Notifications: `notify.log` beside the tasks. See [Notifications](#notifications).
 - What each worker and reviewer is doing, for the board: `~/.local/state/bullpen/doing/<pane>.json`,
   written by the watcher (at most every 3 seconds a pane, no news) and removed with the pane.

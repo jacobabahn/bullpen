@@ -187,7 +187,8 @@ comes to you from then on. The limit on running tasks is shared by all of you.
 
 ## News
 
-News is one line starting `bullpen · `. It reaches you in one of two ways;
+News is one line starting `bullpen · ` (only a change to this guide can bring a
+diff after its line). It reaches you in one of two ways;
 `bullpen up` and your first message say which (`bullpen config` shows it as
 `news`), and bullpen tells you if it changes:
 
@@ -241,6 +242,7 @@ bullpen · BP-4 started (BP-3 was accepted)
 bullpen · BP-6 started (BP-9 was dropped, freeing a slot)
 bullpen · BP-10 waits on BP-9, which was dropped, so it stays queued. Ask the person what to do: ...
 bullpen · The board wasn't rebuilt: cargo failed: error[E0425]: .... Boards keep running the old one. Log: ... Fix it, then run `bullpen build-board`.
+bullpen · Your coordinator guide changed (section: News). Read the change below and follow it from now on:
 ```
 
 - News is what happened, not a request from the person. Act on it only as far as
@@ -315,5 +317,9 @@ bullpen · The board wasn't rebuilt: cargo failed: error[E0425]: .... Boards kee
   the old board keeps working. A board that was rebuilt reloads by itself: no news.
 - Keys changed (an accept changed bullpen's `lua/keys.lua`): tell the person in one
   line to run `rex config reload`; the cmd+; keys run the old ones until then.
+- Your coordinator guide changed: bullpen's guide (this text) was changed by a
+  merge or a pull since you were given it, and you can't reload it. Read the diff
+  after the line (or run `bullpen guide` when it says to) and follow the guide as
+  it is now, over what you were given. Nothing to tell the person.
 - When there's nothing to add, reply with a single short line or nothing at all.
   Several news lines at once get one reply.
