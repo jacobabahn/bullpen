@@ -127,7 +127,8 @@ back (or give more rows); a board too short to spare it drops the gap first.
 The keys at the bottom follow the selected task: `⏎` opens its worker (or its
 reviewer), `a` accepts a ready task or closes a finished one and `d` drops
 (each asks y/n first, the question saying which), `t` tells, `p` peeks, `v`
-shows its diff, `s` starts, `r` resumes, `c` goes back to the coordinator, `n`
+shows its diff, `g` opens its guided tour (see [Guided review tours](#guided-review-tours)),
+`s` starts, `r` resumes, `c` goes back to the coordinator, `n`
 selects the next task that needs you. On a task that needs you, `i` answers it
 from the board (see [Answering from the board](#answering-from-the-board)). Once an accept or close goes through, the
 next task that needs you is selected, so you can run down a queue of ready tasks
@@ -408,9 +409,32 @@ minutes with the shell still running, `check` counts it as stopped without a ver
 A larger change reads better in order. `bullpen tour BP-3` asks a cheap agent for a
 **tour** of a ready task (or one in review): the change in reading order, one
 **step** per logical change, each with a title, a note on why it changed and what
-to look at, and the hunks it covers. The design is in
-[docs/prd/guided-review.md](docs/prd/guided-review.md); the board's stepper (`g`,
-`c`) comes in its part 2.
+to look at, and the hunks it covers. You step through it on the board (`g`),
+comment on steps, then accept or send the comments back. The design is in
+[docs/prd/guided-review.md](docs/prd/guided-review.md).
+
+**On the board**, `g` on a ready task (or one in review) opens its tour in a large
+floating pane in the middle of the window, the way the jump picker opens. With no
+tour yet (or a failed one), it starts the agent: the task gets a spinner, and the
+tour opens by itself once it's written. With a stale one, the board asks: `n`
+writes a new one, `o` opens the old one anyway. On any other task it says why not.
+In the tour:
+
+- Each step shows its title, the files and lines it covers, its note and your
+  comments on it, then its hunks from git (through delta when it's installed).
+  `n` and `p` (or `→` `←`) go to the next and previous step, `j` `k` `space` `b`
+  `g` `G` scroll, `esc` (or `q`) closes it back to the board.
+- `c` comments on the step: type it and press `⏎` (`esc` drops it). To point at
+  a line, mention it in the text. Comments are drafts, kept with the task, and
+  opening the tour again resumes at the step you were on.
+- After the last step, the end lists your comments: `s` sends them back to the
+  worker (`tour --send`), `a` accepts the task (warning first, if comments are
+  unsent: `a` again accepts anyway), `esc` closes.
+
+The board marks a ready task "Toured." once you've opened its tour (until the
+worker's next `ready`), else "Not toured yet." or "Tour written, not opened yet.":
+a nudge only, accepting never needs a tour. A failed tour shows as "tour failed:
+<why>".
 
 ```sh
 bullpen tour BP-3             # with a current tour, its path; else start writing one
@@ -421,6 +445,7 @@ bullpen tour BP-3 --step 2    # step 2's hunks, from git, as a patch (--json: wi
 bullpen tour-comment BP-3 2 "Line 40 should log the error."   # a draft comment on step 2
 bullpen tour-comment BP-3     # the drafts (--json); --remove N removes one
 bullpen tour BP-3 --send      # send the drafts back to the worker
+bullpen tour BP-3 --view      # step through it on this terminal (the board's g: --pane)
 ```
 
 - **Only on request**, and only for a task that is ready or in review: a working

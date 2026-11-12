@@ -2265,6 +2265,8 @@ def cmd_ready(args):
     if t.get("gh"):
         t["gh"].pop("sent", None)  # whatever GitHub sent it back for is answered now
     t.pop("rebased", None)  # what the board says of a rebase after an accept
+    if t.get("tour"):
+        t["tour"].pop("opened", None)  # new code: not toured yet, as the board says
     t.pop("from_ready", None)
     local = not repo.has_origin()
     if not repo.cfg.get("review", True):
@@ -2971,10 +2973,13 @@ def write_tour(repo, tid):
                       "patch": patch_id(wt, base_ref), "written": now(),
                       "model": model_in(tour_command(repo)), "steps": steps})
     t = repo.task(tid)  # read again: it may have changed while the agent ran
+    opener = (t.get("tour") or {}).get("open")
     t["tour"] = {"state": "written", "at": now(), "commit": commit}
     if (t.get("note") or "").startswith("tour failed"):
         t["note"] = None
     write_json(repo.task_path(tid), t)  # not save_task: the status didn't change
+    if opener:
+        open_when_written(repo, t, opener)
     return path
 
 
@@ -3068,12 +3073,13 @@ def tour_status(t):
                    f"ready or in review, whose code isn't changing")
 
 
-def start_tour(repo, t, wait):
+def start_tour(repo, t, wait, opener=None):
     """Write a tour of the task: now (wait), or by a process of its own in the background.
-    t["tour"] says it's being written, with that process's pid, so the board can show it."""
+    t["tour"] says it's being written, with that process's pid, so the board can show it.
+    With opener ({"session", "from"}), the stepper opens there once it's written."""
     if not t.get("worktree") or not Path(t["worktree"]).is_dir():
         raise Fail(f"{t['id']} has no worktree, so there's nothing to tour")
-    t["tour"] = {"state": "writing", "at": now(), "pid": os.getpid()}
+    t["tour"] = {"state": "writing", "at": now(), "pid": os.getpid(), **({"open": opener} if opener else {})}
     if (t.get("note") or "").startswith("tour failed"):
         t["note"] = None
     write_json(repo.task_path(t["id"]), t)
@@ -3094,9 +3100,13 @@ def cmd_tour(args):
         return send_comments(repo, t)
     if args.show or args.step is not None:
         return show_tour(repo, t, args)
+    if args.view:
+        return view_tour(repo, t, args.back)
     tour_status(t)
     state, tour, why = tour_state(repo, t)
     path = tour_path(repo, t)
+    if args.pane:
+        return tour_pane(repo, t, state, args)
     if state == "writing" and not args.wait:
         print(f"{t['id']}'s tour is being written: {path} once it's done")
         return
@@ -3174,6 +3184,365 @@ def show_tour(repo, t, args):
     sys.stdout.write(diff)
 
 
+# ---------- the stepper: reading a tour on the board ----------
+#
+# The board's g runs `tour <ID> --pane`: with a current tour (or a stale one, once the
+# person chose it), it opens the stepper in a large floating pane in the middle of the
+# window, the way the jump picker opens; with none, it starts the agent and the stepper
+# opens once the tour is written. The stepper (`tour <ID> --view`) shows one step at a
+# time: its title and note, the person's comments on it, then its hunks from git (in
+# delta when installed). After the last step comes a summary of the comments, from
+# which they're sent back or the task accepted. Where the person was is kept with the
+# drafts, so opening the tour again resumes there.
+
+TOUR_BOUNDS = [0.05, 0.04, 0.9, 0.9]  # most of the window: x, y, w, h
+
+
+def tour_label(t):
+    return f"bullpen: {t['id']} tour"
+
+
+def tour_pane(repo, t, state, args):
+    """The board's g: open the stepper on a current tour (or a stale one: the board asked
+    first), or start writing a tour that opens when it's written."""
+    session = args.session or os.environ.get("REX_SESSION") or t.get("session")
+    opener = {"session": session, "from": args.from_block}
+    if state == "writing":
+        t["tour"]["open"] = opener
+        write_json(repo.task_path(t["id"]), t)
+        print(f"{t['id']}'s tour is being written: it opens when it's done")
+        return
+    if state in ("none", "failed") or args.new:
+        start_tour(repo, t, False, opener)
+        print(f"writing a tour of {t['id']}: it opens when it's done")
+        return
+    open_stepper(repo, t, session, args.from_block)
+    print(f"opened {t['id']}'s tour" + (" (stale: the code changed since it was written)" if state == "stale" else ""))
+
+
+def open_stepper(repo, t, session, from_block=None):
+    """The stepper in a floating pane over the window of from_block (else of the task's
+    board or coordinator), focused. One per task: an old one closes."""
+    view = rex_view(session)
+    for _, _, b in find_panes(view, tour_label(t)):
+        rex_close(session, b)
+    argv = [SELF, "tour", t["id"], "--view", "--back"]
+    spec = {"bounds": TOUR_BOUNDS, "layout": {"block": {
+        "flavor": TERMINAL, "label": tour_label(t),
+        "options": {"command": with_state(argv), "cwd": str(repo.root)}}}}
+    home = home_of(repo, t)
+    anchor = from_block or (home.get("board") or {}).get("block") or home.get("block")
+    where = find_pane(view, block=anchor) if anchor else None
+    if where:
+        spec["window_id"] = where[0]
+    r = rex_api(session, "session.new_layer", spec)
+    set_layer(session, r["layer_id"], "normal", focus=True)
+
+
+def open_when_written(repo, t, opener):
+    """The tour the person asked for on the board is written: open it where they asked."""
+    try:
+        open_stepper(repo, t, opener.get("session"), opener.get("from"))
+    except Exception as e:  # the tour is written all the same: g opens it
+        with tour_log(repo, t).open("a") as f:
+            f.write(f"{now()} couldn't open the tour: {e}\n")
+
+
+STEP_NEXT = ("n", "l", "\x1b[C", "\x1bOC")  # n, l, →
+STEP_BACK = ("p", "h", "\x1b[D", "\x1bOD")  # p, h, ←
+LINE_DOWN = ("j", "\x1b[B", "\x1bOB", "\x0e")  # j, ↓, ctrl+n
+LINE_UP = ("k", "\x1b[A", "\x1bOA", "\x10")  # k, ↑, ctrl+p
+PAGE_DOWN = (" ", "f", "\x1b[6~", "\x04", "\x06")  # space, f, page down, ctrl+d, ctrl+f
+PAGE_UP = ("b", "\x1b[5~", "\x15", "\x02")  # b, page up, ctrl+u, ctrl+b
+STEP_KEYS = "n next · p back · j k scroll · space page · c comment · esc close"
+END_KEYS = "s send them back · a accept · p back · esc close"
+BOLD, DIM, OFF = "\x1b[1m", "\x1b[2m", "\x1b[0m"
+
+
+def plural(n, word):
+    return f"{n} {word}{'s' if n != 1 else ''}"
+
+
+def wrap_text(text, width, indent=""):
+    """Text wrapped to width, its own lines and blank lines kept."""
+    import textwrap
+    out = []
+    for line in (text or "").split("\n"):
+        lead = re.match(r"\s*([-*] |\d+\. )?", line).group(0)
+        out += textwrap.wrap(line, max(width, 10), initial_indent=indent, subsequent_indent=indent + " " * len(lead),
+                             drop_whitespace=True) or [""]
+    return out
+
+
+def colour_diff(diff):
+    """A patch's lines coloured as git would, for a terminal without delta."""
+    out = []
+    for line in diff.rstrip("\n").split("\n"):
+        line = line.expandtabs(4)
+        if line.startswith(("diff --git", "index ", "--- ", "+++ ", "new file", "deleted file", "rename ", "similarity")):
+            out.append(BOLD + line + OFF)
+        elif line.startswith("@@"):
+            out.append("\x1b[36m" + line + OFF)
+        elif line.startswith("+"):
+            out.append("\x1b[32m" + line + OFF)
+        elif line.startswith("-"):
+            out.append("\x1b[31m" + line + OFF)
+        else:
+            out.append(line)
+    return out
+
+
+def diff_lines(diff, width, delta):
+    """A step's patch as the lines shown: through delta when installed, else coloured."""
+    if not diff.strip():
+        return [DIM + "(no code in this step)" + OFF]
+    if delta:
+        p = subprocess.run([delta, "--paging=never", f"--width={width}"], input=diff, text=True,
+                           capture_output=True)
+        if p.returncode == 0 and p.stdout.strip():
+            return p.stdout.rstrip("\n").split("\n")
+    return colour_diff(diff)
+
+
+class Stepper:
+    """What the stepper shows and does with each key, apart from the terminal and the
+    task. at is the step shown (0-based); at == len(steps) is the summary at the end.
+    diff(i, width) gives step i's hunks as lines."""
+
+    def __init__(self, tid, title, tour, comments, at, diff):
+        self.tid, self.title, self.steps, self.commit = tid, title, tour["steps"], tour["commit"]
+        self.comments, self.diff = comments, diff
+        self.at = min(max(at, 0), len(self.steps))
+        self.top, self.mode, self.text, self.msg, self.sure = 0, "read", "", "", False
+        self.cache = {}
+
+    def at_end(self):
+        return self.at == len(self.steps)
+
+    def go(self, i):
+        i = min(max(i, 0), len(self.steps))
+        if i != self.at:
+            self.at, self.top = i, 0
+
+    def key(self, k, rows=20):
+        """Apply one key. Returns what the stepper can't do itself: "close", "send",
+        "accept", or ("comment", text) to save; else None."""
+        if self.mode == "comment":
+            return self.comment_key(k)
+        sure, self.sure, self.msg = self.sure, False, ""
+        if k in ("\x1b", "q", "\x03", "\x07"):
+            return "close"
+        if self.at_end():
+            if k == "s":
+                if self.comments:
+                    return "send"
+                self.msg = "No comments to send: p goes back to the steps."
+                return None
+            if k == "a":
+                if self.comments and not sure:
+                    self.sure = True
+                    self.msg = (f"{plural(len(self.comments), 'comment')} not sent: a again accepts anyway, "
+                                f"s sends them back instead.")
+                    return None
+                return "accept"
+        elif k == "c":
+            self.mode, self.text = "comment", ""
+            return None
+        if k in STEP_NEXT:
+            self.go(self.at + 1)
+        elif k in STEP_BACK:
+            self.go(self.at - 1)
+        elif k in LINE_DOWN:
+            self.top += 1
+        elif k in LINE_UP:
+            self.top = max(self.top - 1, 0)
+        elif k in PAGE_DOWN:
+            self.top += max(rows - 2, 1)
+        elif k in PAGE_UP:
+            self.top = max(self.top - max(rows - 2, 1), 0)
+        elif k == "g":
+            self.top = 0
+        elif k == "G":
+            self.top = 10 ** 9  # clamped when drawn
+        return None
+
+    def comment_key(self, k):
+        if k in ("\r", "\n"):
+            text, self.mode, self.text = " ".join(self.text.split()), "read", ""
+            return ("comment", text) if text else None
+        if k in ("\x1b", "\x03", "\x07"):
+            self.mode, self.text, self.msg = "read", "", "Comment not saved."
+        elif k in ("\x7f", "\x08"):
+            self.text = self.text[:-1]
+        elif k == "\x15":
+            self.text = ""
+        elif k == "\x17":
+            self.text = re.sub(r"\S*\s*$", "", self.text)
+        elif k.isprintable() and not k.startswith("\x1b") and len(self.text) < 2000:
+            self.text += k
+        return None
+
+    def on_step(self, i):
+        """The drafts on step i of this tour."""
+        return [c for c in self.comments if c["step"] == i + 1 and c.get("commit") == self.commit]
+
+    def body(self, width):
+        """The lines under the header: the step's title, files, note, comments and
+        hunks; or, at the end, the comments to send."""
+        w = max(width - 2, 10)
+        if self.at_end():
+            out = [BOLD + "End of the tour" + OFF, ""]
+            if not self.comments:
+                return out + ["No comments. a accepts the task, esc closes, p goes back."]
+            out.append(f"Your {plural(len(self.comments), 'comment')}, not sent yet:")
+            for n, c in enumerate(self.comments, 1):
+                out += ["", f"{n:>2}. {BOLD}step {c['step']}, {c['title']}{OFF}"]
+                out += wrap_text(c["text"], w - 4, "    ")
+            return out + ["", "s sends them back to the worker, who fixes them and runs ready again."]
+        s = self.steps[self.at]
+        out = [BOLD + s["title"] + OFF, DIM + step_files(s) + OFF, ""]
+        if s.get("note"):
+            out += wrap_text(s["note"], w) + [""]
+        for c in self.on_step(self.at):
+            out += ["\x1b[33m" + line + OFF for line in wrap_text(c["text"], w - 2, "▍ ")] + [""]
+        if (self.at, width) not in self.cache:
+            self.cache[(self.at, width)] = self.diff(self.at, width)
+        return out + self.cache[(self.at, width)]
+
+    def prompt(self):
+        return f"Comment on step {self.at + 1}: "
+
+    def typed(self, width):
+        """The end of what's typed, as much as fits after the prompt."""
+        room = max(width - len(self.prompt()) - 3, 1)
+        return self.text[-room:]
+
+    def cursor(self, width, height):
+        """(row, column) of the cursor, from 1, while a comment is typed."""
+        return height - 1, 2 + len(self.prompt()) + len(self.typed(width))
+
+    def screen(self, width, height):
+        """The stepper's lines: a header, the body from self.top, a message line and the keys."""
+        n = len(self.steps)
+        where = "end" if self.at_end() else f"step {self.at + 1} of {n}"
+        head = f"{self.tid}  {self.title}"
+        room = max(width - len(where) - 4, 0)
+        head = (head[:room - 1] + "…") if len(head) > room else head
+        out = [BOLD + " " + head + " " * max(width - 2 - len(head) - len(where), 1) + where + OFF, ""]
+        rows = max(height - 4, 1)
+        body = self.body(width)
+        self.top = min(self.top, max(len(body) - rows, 0))
+        shown = body[self.top:self.top + rows]
+        out += [" " + line + OFF for line in shown] + [""] * (rows - len(shown))
+        more = len(body) - self.top - rows
+        if self.mode == "comment":
+            out.append(f" {BOLD}{self.prompt()}{OFF}{self.typed(width)}")
+            out.append(f" {DIM}⏎ saves · esc cancels · mention a line to point at it{OFF}")
+        else:
+            down = f"  ↓ {more} more" if more > 0 else ""
+            out.append(" " + (BOLD + self.msg + OFF if self.msg else DIM + down.strip() + OFF))
+            keys = END_KEYS if self.at_end() else STEP_KEYS
+            drafts = f" · {plural(len(self.comments), 'comment')}" if self.comments else ""
+            out.append(f" {DIM}{keys}{drafts}{OFF}")
+        return out
+
+
+def save_place(repo, t, commit, at):
+    """Where the person is in the tour, kept with the drafts: opening it again resumes there."""
+    c = read_comments(repo, t)
+    c["at"] = {"commit": commit, "step": at + 1}
+    write_json(comments_path(repo, t), c)
+
+
+def stepper_tui(st, act, moved):
+    """Run the stepper on the terminal until act() says it's done (True). act(action)
+    does what the stepper can't: save a comment, send, accept, close. moved(at) is
+    told of each step the person goes to."""
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
+    tty.setraw(fd)
+    sys.stdout.write("\x1b[?1049h\x1b[?7l")  # its own screen; long lines are cut, not wrapped
+    try:
+        while True:
+            size = shutil.get_terminal_size()
+            lines = st.screen(size.columns, size.lines)
+            cursor = ("\x1b[?25h\x1b[{};{}H".format(*st.cursor(size.columns, len(lines)))
+                      if st.mode == "comment" else "\x1b[?25l")
+            sys.stdout.write("\x1b[H\x1b[2J" + "\r\n".join(lines) + cursor)
+            sys.stdout.flush()
+            if not select.select([fd], [], [], 0.5)[0]:
+                continue  # redraw: the pane may have changed size
+            for k in read_keys(fd, decoder):
+                at = st.at
+                a = st.key(k, size.lines - 4)
+                if a and act(a):
+                    return
+                if st.at != at:
+                    moved(st.at)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        sys.stdout.write("\x1b[?7h\x1b[?25h\x1b[?1049l")
+        sys.stdout.flush()
+
+
+def view_tour(repo, t, back=False):
+    """Step through the task's tour on this terminal: the board's g opens it in a pane."""
+    tour = read_json(tour_path(repo, t))
+    if not tour:
+        raise Fail(f"{t['id']} has no tour: `bullpen tour {t['id']}` writes one")
+    if not sys.stdin.isatty():
+        raise Fail("the tour needs a terminal (the board's g opens it in a pane)")
+    run_ = t.get("tour") or {}
+    if run_.get("state") == "written":
+        run_["opened"] = tour["commit"]  # the board marks it toured
+        write_json(repo.task_path(t["id"]), t)
+    place = read_comments(repo, t).get("at") or {}
+    at = place.get("step", 1) - 1 if place.get("commit") == tour["commit"] else 0
+    wt = t.get("worktree")
+    files = tour_diff(repo, t, tour) if wt and Path(wt).is_dir() else []
+    delta = shutil.which("delta")
+    st = Stepper(t["id"], t["title"], tour, read_comments(repo, t)["comments"], at,
+                 lambda i, w: diff_lines(step_diff(files, tour["steps"][i]), w, delta))
+
+    def act(a):
+        if a == "close":
+            return True
+        if isinstance(a, tuple):
+            n = add_comment(repo, repo.task(t["id"]), st.at + 1, a[1])
+            st.comments = read_comments(repo, t)["comments"]
+            st.msg = f"Saved comment {n} on step {st.at + 1}."
+            return False
+        if a == "send":
+            import contextlib
+            import io
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    send_comments(repo, repo.task(t["id"]))
+            except Fail as e:
+                st.msg = str(e)
+                return False
+            return True
+        if a == "accept":
+            st.msg = f"Accepting {t['id']}…"
+            size = shutil.get_terminal_size()
+            sys.stdout.write("\x1b[H\x1b[2J" + "\r\n".join(st.screen(size.columns, size.lines)))
+            sys.stdout.flush()
+            p = subprocess.run([SELF, "accept", t["id"]], cwd=repo.root, stdin=subprocess.DEVNULL,
+                               text=True, capture_output=True)
+            if p.returncode == 0:
+                return True
+            last = (p.stderr or p.stdout).strip().splitlines()
+            st.msg = (last[-1] if last else "accept failed").removeprefix("bullpen: ")
+        return False
+
+    stepper_tui(st, act, lambda at: save_place(repo, t, tour["commit"], at))
+    if back:
+        b = home_of(repo, t).get("board") or {}
+        if rex_alive(b.get("session"), b.get("block")):
+            rex_focus(b.get("session"), b["block"])
+
+
 # ---------- the person's comments on a tour ----------
 
 def read_comments(repo, t):
@@ -3205,18 +3574,24 @@ def cmd_tour_comment(args):
     text = " ".join(args.text or []).strip()
     if not text:
         raise Fail("say what the comment is")
+    print(add_comment(repo, t, args.step, text))
+
+
+def add_comment(repo, t, step, text):
+    """Add a draft comment on step N of the task's tour; returns its number."""
     tour = read_json(tour_path(repo, t))
     if not tour:
         raise Fail(f"{t['id']} has no tour to comment on: `bullpen tour {t['id']}` writes one")
-    if not 1 <= args.step <= len(tour["steps"]):
+    if not 1 <= step <= len(tour["steps"]):
         raise Fail(f"{t['id']}'s tour has steps 1 to {len(tour['steps'])}")
-    s = tour["steps"][args.step - 1]
+    c = read_comments(repo, t)
+    s = tour["steps"][step - 1]
     # the step as it was: a new tour may number its steps differently
-    c["comments"].append({"id": c["next"], "step": args.step, "title": s["title"], "hunks": s["hunks"],
+    c["comments"].append({"id": c["next"], "step": step, "title": s["title"], "hunks": s["hunks"],
                           "commit": tour["commit"], "text": text, "at": now()})
     c["next"] += 1
     write_json(comments_path(repo, t), c)
-    print(c["next"] - 1)
+    return c["next"] - 1
 
 
 def comments_text(t, comments, k):
@@ -6065,6 +6440,14 @@ def parser():
     p.add_argument("--json", action="store_true", help="with --show or --step: as JSON (for the board)")
     p.add_argument("--send", action="store_true",
                    help="send your draft comments to the worker: the task goes back to working")
+    p.add_argument("--pane", action="store_true",
+                   help="step through it in a floating pane (the board's g); with no tour, write one "
+                        "and open it when it's written")
+    p.add_argument("--view", action="store_true", help="step through it on this terminal")
+    p.add_argument("--back", action="store_true", help=argparse.SUPPRESS)  # then focus the board
+    p.add_argument("--from", dest="from_block", default=os.environ.get("REX_BLOCK"),
+                   help="with --pane: the pane whose window it opens over (default: this one)")
+    p.add_argument("--session", help="with --pane: the session you're in")
     p.set_defaults(fn=cmd_tour)
 
     p = sub.add_parser("tour-comment", help="draft comments on a tour's steps: add, list (no STEP) or remove")

@@ -60,6 +60,34 @@ pub struct Review {
     pub block: Option<String>,
 }
 
+/// Its guided review tour (`bullpen tour`): being written, written or failed.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct TourRun {
+    /// "writing", "written" or "failed"
+    #[serde(default)]
+    pub state: String,
+    /// the commit it was written on
+    #[serde(default, deserialize_with = "lenient")]
+    pub commit: Option<String>,
+    /// the commit of the tour the person last opened: it's toured when that's this one
+    #[serde(default, deserialize_with = "lenient")]
+    pub opened: Option<String>,
+}
+
+/// What `bullpen tour --show --json` says of a task's tour.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct TourShow {
+    /// "writing", "failed", "current", "stale" or "none"
+    #[serde(default)]
+    pub state: String,
+}
+
+impl TourShow {
+    pub fn parse(out: &str) -> Option<TourShow> {
+        serde_json::from_str(out.trim()).ok()
+    }
+}
+
 /// Why a task waits on someone: {"by": "worker" | "reviewer", "kind": "prompt" | ...}.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Stop {
@@ -201,6 +229,9 @@ pub struct Task {
     /// why it waits on someone: its worker's or reviewer's stop
     #[serde(default, deserialize_with = "lenient")]
     pub stop: Option<Stop>,
+    /// its guided review tour, once one was asked for
+    #[serde(default, deserialize_with = "lenient")]
+    pub tour: Option<TourRun>,
     /// those not done yet, worked out from the other tasks: "BP-8", "BP-9 (dropped)"
     #[serde(skip)]
     pub waits: Vec<String>,
@@ -284,6 +315,21 @@ impl Task {
             "working" => self.block.as_deref(),
             _ => None,
         }
+    }
+
+    /// Can it have a tour: ready or in review, so its code isn't changing.
+    pub fn tourable(&self) -> bool {
+        matches!(self.status.as_str(), "ready" | "review")
+    }
+
+    /// Is its tour being written now?
+    pub fn tour_writing(&self) -> bool {
+        self.tourable() && self.tour.as_ref().is_some_and(|r| r.state == "writing")
+    }
+
+    /// Has the person opened the tour of its code as it is?
+    pub fn toured(&self) -> bool {
+        self.tour.as_ref().is_some_and(|r| r.state == "written" && r.opened.is_some() && r.opened == r.commit)
     }
 
     /// When it entered its current status.
@@ -821,15 +867,33 @@ pub fn model_phrase(t: &Task, cfg: &Config) -> String {
     }
 }
 
-/// task_detail, then what auto-accept does with it and the model it chose.
+/// Where a ready task's tour stands, as a nudge (a tour is never needed to accept),
+/// and a tour being written of one in review: "" otherwise, and when a failed one's
+/// note says why already.
+pub fn tour_phrase(t: &Task) -> &'static str {
+    if t.tour_writing() {
+        return "Writing its tour…";
+    }
+    if t.status != "ready" || t.why.as_deref().unwrap_or("").starts_with("Nothing to merge") {
+        return "";
+    }
+    match t.tour.as_ref().map(|r| r.state.as_str()) {
+        _ if t.toured() => "Toured.",
+        Some("written") => "Tour written, not opened yet.",
+        Some("failed") => "",
+        _ => "Not toured yet.",
+    }
+}
+
+/// task_detail, then what auto-accept does with it, the model it chose and its tour.
 pub fn detail_with_auto(t: &Task, cfg: &Config, at: DateTime<FixedOffset>) -> String {
     let text = task_detail(t, cfg.review_rounds, at);
     let model = model_phrase(t, cfg);
-    let parts = [text.as_str(), auto_phrase(t, cfg.auto_accept), model.as_str()];
+    let parts = [text.as_str(), auto_phrase(t, cfg.auto_accept), model.as_str(), tour_phrase(t)];
     parts.iter().filter(|p| !p.is_empty()).copied().collect::<Vec<_>>().join(" ").trim().to_string()
 }
 
-fn capitalize(text: &str) -> String {
+pub fn capitalize(text: &str) -> String {
     let mut c = text.chars();
     c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
 }
@@ -932,8 +996,8 @@ pub fn task_keys(t: Option<&Task>) -> Vec<(&'static str, &'static str)> {
         "needs" => vec![("⏎", "answer"), ("t", "tell"), ("p", "peek")],
         "triage" => vec![("⏎", "open"), ("p", "peek"), ("t", "tell")],
         "stopped" => vec![("r", "resume"), ("p", "peek"), ("d", "drop")],
-        "review" => vec![("⏎", "reviewer"), ("p", "peek")],
-        "ready" => vec![("a", "accept"), ("d", "drop"), ("⏎", "open")],
+        "review" => vec![("⏎", "reviewer"), ("g", "tour"), ("p", "peek")],
+        "ready" => vec![("a", "accept"), ("g", "tour"), ("d", "drop"), ("⏎", "open")],
         "finished" => vec![("a", "close"), ("d", "drop"), ("⏎", "open")],
         "working" => vec![("⏎", "open"), ("t", "tell"), ("p", "peek")],
         "todo" => vec![("s", "start"), ("d", "drop")],
@@ -1299,14 +1363,14 @@ pub(crate) mod tests {
         let cfg = |on| Config { auto_accept: on, ..Config::default_for_test() };
         let approved = Some(Review { round: Some(1), verdict: Some("approved".into()), kind: None, block: None });
         let t = Task { pr: Some("https://github.com/me/repo/pull/4".into()), review: approved, ..task("BP-1", "ready") };
-        assert_eq!(detail_with_auto(&t, &cfg(true), now()), "PR #4, approved by review.");
+        assert_eq!(detail_with_auto(&t, &cfg(true), now()), "PR #4, approved by review. Not toured yet.");
         let held = Task { auto_accept: Some(false), ..t.clone() };
-        assert_eq!(detail_with_auto(&held, &cfg(true), now()), "PR #4, approved by review. Kept for you: no auto-accept.");
-        assert_eq!(detail_with_auto(&held, &cfg(false), now()), "PR #4, approved by review.");
+        assert_eq!(detail_with_auto(&held, &cfg(true), now()), "PR #4, approved by review. Kept for you: no auto-accept. Not toured yet.");
+        assert_eq!(detail_with_auto(&held, &cfg(false), now()), "PR #4, approved by review. Not toured yet.");
         let own = Task { auto_accept: Some(true), ..task("BP-1", "todo") };
         assert_eq!(detail_with_auto(&own, &cfg(false), now()), "Not started. s starts it. Auto-accepts once approved.");
         let waiting = Task { auto_wait: Some(true), ..t.clone() };
-        assert_eq!(detail_with_auto(&waiting, &cfg(true), now()), "PR #4, approved by review. Auto-accepts once its checks pass.");
+        assert_eq!(detail_with_auto(&waiting, &cfg(true), now()), "PR #4, approved by review. Auto-accepts once its checks pass. Not toured yet.");
         assert_eq!(auto_phrase(&Task { status: "done".into(), ..held }, true), "");
     }
 

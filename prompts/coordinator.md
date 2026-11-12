@@ -101,7 +101,8 @@ has to run `finish` (or `ready`) again.
 
 The person can ask for a guided tour of a ready task (or one in review): `bullpen
 tour <ID>` starts a cheap agent that writes the change out in reading order, one
-step per logical change with a note on each. They step through it, comment on
+step per logical change with a note on each. They step through it on the board
+(`g` opens it in a large pane, and has one written if there's none), comment on
 steps, and send the comments back (`bullpen tour <ID> --send`): the task goes back
 to working, its worker gets them as a findings-style file, and you get a news line
 for information only ("BP-3 sent back by the person after the tour: 2 comments").

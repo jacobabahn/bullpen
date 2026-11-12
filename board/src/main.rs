@@ -14,7 +14,7 @@
 mod model;
 mod ui;
 
-use model::{Action, Config, Prompt, Question, Task};
+use model::{Action, Config, Prompt, Question, Task, TourShow};
 use notify::{RecursiveMode, Watcher};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::path::{Path, PathBuf};
@@ -42,6 +42,12 @@ Acting on the selected task
   t            tell its worker something
   p            peek at the end of its worker's screen (live)
   v            view its diff against its base (q closes it)
+  g            a guided tour of its change, on a task that's ready
+               or in review: opens it in a large pane, or (with
+               none yet) has one written, and it opens when it's
+               done. In it: n p step, j k space scroll, c comment
+               on the step; at the end s sends the comments back
+               to the worker, a accepts, esc closes
   s            start it
   r            resume a stopped worker
 
@@ -66,6 +72,8 @@ pub enum Mode {
     /// the prompt a task's agent is at, read again every second (None until first read),
     /// until an option is pressed or esc
     Answer { id: String, title: String, prompt: Option<Prompt> },
+    /// g on a task whose tour is stale: n writes a new one, o opens the old one
+    Stale { id: String },
 }
 
 /// A slow command, run in the background.
@@ -212,7 +220,7 @@ impl App {
         let (path, was) = self.exe.as_ref()?;
         let busy = !self.running.is_empty()
             || self.pending.is_some()
-            || matches!(self.mode, Mode::Tell { .. } | Mode::Answer { .. });
+            || matches!(self.mode, Mode::Tell { .. } | Mode::Answer { .. } | Mode::Stale { .. });
         match ExeId::of(path) {
             Some(now) if now != *was && !busy => Some(path.clone()),
             _ => None,
@@ -455,6 +463,50 @@ impl App {
         }
     }
 
+    /// g: the task's guided tour. A current one opens; with none, one is written and
+    /// opens when it's done; a stale one asks first.
+    fn tour(&mut self, t: &Task) {
+        if !t.tourable() {
+            self.msg = format!("{} can't have a tour yet: only a task that's ready or in review, whose code isn't changing.", t.id);
+            return;
+        }
+        if !t.tour_writing() {
+            let (bullpen, root) = (self.bullpen.clone(), self.root.clone());
+            let (ok, out) = run(&bullpen, &root, &["tour".into(), t.id.clone(), "--show".into(), "--json".into()]);
+            if !ok {
+                self.msg = last_line(&out);
+                return;
+            }
+            if TourShow::parse(&out).is_some_and(|s| s.state == "stale") {
+                self.mode = Mode::Stale { id: t.id.clone() };
+                return;
+            }
+        }
+        self.open_tour(&t.id, false);
+    }
+
+    /// `bullpen tour <id> --pane`: open the stepper, or start writing a tour (new) that opens when written.
+    fn open_tour(&mut self, id: &str, new: bool) {
+        let mut args = vec!["tour", id, "--pane"];
+        if new {
+            args.push("--new");
+        }
+        let (ok, out) = self.bp(&args);
+        self.msg = if ok { format!("{}.", model::capitalize(&out)) } else { out };
+    }
+
+    /// A key while g asks about a stale tour.
+    fn stale_key(&mut self, ch: Option<char>) {
+        let Mode::Stale { id } = &self.mode else { return };
+        let id = id.clone();
+        self.mode = Mode::Normal;
+        match ch {
+            Some('n') => self.open_tour(&id, true),
+            Some('o') => self.open_tour(&id, false),
+            _ => self.msg = "Cancelled.".into(),
+        }
+    }
+
     /// Handle a key. False when the board should quit.
     fn key(&mut self, k: KeyEvent) -> bool {
         if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
@@ -467,6 +519,10 @@ impl App {
             }
             Mode::Answer { .. } => {
                 self.answer_key(k.code);
+                return true;
+            }
+            Mode::Stale { .. } => {
+                self.stale_key(if let KeyCode::Char(c) = k.code { Some(c) } else { None });
                 return true;
             }
             Mode::Tell { id, text, reply } => {
@@ -611,6 +667,7 @@ impl App {
             (_, Some('v')) => self.msg = self.bp(&["diff", sel, "--pane"]).1,
             (_, Some('t')) => self.mode = Mode::Tell { id: sel.into(), text: String::new(), reply: false },
             (_, Some('i')) => self.answer(&cur),
+            (_, Some('g')) => self.tour(&cur),
             _ => {}
         }
     }
@@ -618,7 +675,7 @@ impl App {
     /// How long the loop may wait for something to happen before redrawing.
     fn tick(&self) -> Duration {
         let moving = |t: &Task| matches!(t.status.as_str(), "working" | "review");
-        if !self.running.is_empty() || self.tasks.iter().any(moving) {
+        if !self.running.is_empty() || self.tasks.iter().any(|t| moving(t) || t.tour_writing()) {
             Duration::from_millis(50) // spinners and the marks of working tasks turn
         } else if matches!(self.mode, Mode::Overlay { peek: Some(_), .. } | Mode::Answer { .. }) {
             Duration::from_millis(250)
@@ -1056,6 +1113,80 @@ mod tests {
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
+    /// A bullpen that logs its arguments, says the tour's state is `state` to
+    /// `tour --show --json`, and answers `tour --pane` as the real one does.
+    fn fake_bullpen(d: &Scratch, state: &str) -> PathBuf {
+        let exe = d.0.join("bullpen");
+        let log = d.0.join("log");
+        program(&exe, &format!(
+            "#!/bin/sh\necho \"$*\" >> {log}\ncase \"$*\" in\n\
+             *--show*) echo '{{\"id\": \"'$2'\", \"state\": \"{state}\", \"why\": null, \"steps\": []}}' ;;\n\
+             *--new*) echo \"writing a tour of $2: it opens when it's done\" ;;\n\
+             *) echo \"opened $2's tour\" ;;\nesac\n",
+            log = log.display()
+        ));
+        exe
+    }
+
+    fn calls(d: &Scratch) -> Vec<String> {
+        std::fs::read_to_string(d.0.join("log")).unwrap_or_default().lines().map(String::from).collect()
+    }
+
+    #[test]
+    fn g_on_a_task_that_isnt_ready_or_in_review_says_why_not() {
+        for status in ["working", "todo", "needs", "finished"] {
+            let mut a = app(vec![task("BP-1", status)]);
+            a.settle();
+            press(&mut a, 'g');
+            assert!(matches!(a.mode, Mode::Normal));
+            assert_eq!(a.msg, "BP-1 can't have a tour yet: only a task that's ready or in review, whose code isn't changing.");
+        }
+    }
+
+    #[test]
+    fn g_opens_a_current_tour_or_has_one_written() {
+        for (state, said) in [("current", "Opened BP-1's tour."), ("none", "Opened BP-1's tour."), ("failed", "Opened BP-1's tour.")] {
+            let d = Scratch::new(&format!("g-{state}"));
+            let mut a = app(vec![task("BP-1", "ready")]);
+            (a.bullpen, a.root) = (fake_bullpen(&d, state), d.0.clone());
+            a.settle();
+            press(&mut a, 'g');
+            assert!(matches!(a.mode, Mode::Normal), "{state}");
+            assert_eq!(calls(&d), ["tour BP-1 --show --json", "tour BP-1 --pane"], "{state}");
+            assert_eq!(a.msg, said, "{state}");
+        }
+        // being written: no need to look, `--pane` opens it once it's done
+        let d = Scratch::new("g-writing");
+        let writing = Some(model::TourRun { state: "writing".into(), ..Default::default() });
+        let mut a = app(vec![Task { tour: writing, ..task("BP-1", "review") }]);
+        (a.bullpen, a.root) = (fake_bullpen(&d, "writing"), d.0.clone());
+        a.settle();
+        press(&mut a, 'g');
+        assert_eq!(calls(&d), ["tour BP-1 --pane"]);
+    }
+
+    #[test]
+    fn g_on_a_stale_tour_asks_new_or_old() {
+        let d = Scratch::new("g-stale");
+        let mut a = app(vec![task("BP-1", "ready")]);
+        (a.bullpen, a.root) = (fake_bullpen(&d, "stale"), d.0.clone());
+        a.settle();
+        press(&mut a, 'g');
+        assert!(matches!(&a.mode, Mode::Stale { id } if id == "BP-1"));
+        press(&mut a, 'n');
+        assert!(matches!(a.mode, Mode::Normal));
+        assert_eq!(calls(&d).last().unwrap(), "tour BP-1 --pane --new");
+        assert_eq!(a.msg, "Writing a tour of BP-1: it opens when it's done.");
+        press(&mut a, 'g');
+        press(&mut a, 'o');
+        assert_eq!(calls(&d).last().unwrap(), "tour BP-1 --pane");
+        assert_eq!(a.msg, "Opened BP-1's tour.");
+        press(&mut a, 'g');
+        press(&mut a, 'x');
+        assert_eq!(a.msg, "Cancelled.");
+        assert_eq!(calls(&d).len(), 5); // three looks, two opens
+    }
+
     #[test]
     fn a_board_reloads_once_its_program_is_renamed_into_place_and_its_idle() {
         let d = Scratch::new("reexec");
@@ -1073,6 +1204,8 @@ mod tests {
         a.running.clear();
         a.mode = Mode::Tell { id: "BP-1".into(), text: "half a".into(), reply: false };
         assert_eq!(a.replaced(), None); // nor while you type
+        a.mode = Mode::Stale { id: "BP-1".into() };
+        assert_eq!(a.replaced(), None); // nor while it asks about a stale tour
         a.mode = Mode::Normal;
         a.pending = Some((Action::Accept, "BP-1".into()));
         assert_eq!(a.replaced(), None); // nor while it asks y/n

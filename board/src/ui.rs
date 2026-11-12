@@ -273,6 +273,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 // a task with a command running gets a spinner in place of its mark
                 let mark = match app.job(&t.id) {
                     Some(_) => span(spinner(app), bold()),
+                    // its tour being written: the same spinner, until it opens
+                    None if t.tour_writing() => span(spinner(app), mark_style(&t.status)),
                     // an agent that has gone quiet: a still mark, in the colour of one that needs you
                     None if t.is_stuck() => span(model::mark(&t.status), mark_style("needs")),
                     // one stopped at the usage limit isn't working either: a still mark
@@ -344,6 +346,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         put(buf, area, last, 1, span(label, bold()));
         put(buf, area, last, x, shown.clone());
         f.set_cursor_position(Position::new(area.x + (x + width(&shown)) as u16, area.y + last as u16));
+    } else if let Mode::Stale { id } = &app.mode {
+        let ask = format!("{id}'s tour is stale: the code changed since. n new tour  o old one  esc cancels");
+        put(buf, area, last, 1, span(fit(&ask, w.saturating_sub(2)), bold()));
     } else if let Some((action, _)) = &app.pending {
         let verb = match action {
             Action::Accept => "accept",
@@ -563,9 +568,9 @@ mod tests {
     #[test]
     fn the_last_row_is_left_for_rexs_capsules() {
         let mut a = app(vec![ready("BP-1")], 1, Layout::Grouped);
-        let s = screen(&mut a, 40, 12);
+        let s = screen(&mut a, 46, 12);
         assert_eq!(row(&s, 0), "");
-        assert!(row(&s, 1).starts_with(" a accept  d drop"), "{s:#?}");
+        assert!(row(&s, 1).starts_with(" a accept  g tour  d drop"), "{s:#?}");
         assert!(row(&s, 1).ends_with("? keys"), "{s:#?}");
 
         a.msg = "Accepted BP-1".into();
@@ -624,12 +629,53 @@ mod tests {
     }
 
     #[test]
+    fn a_ready_task_says_whether_its_toured_and_a_tour_being_written_spins() {
+        let run = |state: &str, commit: &str, opened: Option<&str>| {
+            Some(model::TourRun { state: state.into(), commit: Some(commit.into()), opened: opened.map(String::from) })
+        };
+        let tasks = vec![
+            ready("BP-1"),
+            Task { tour: run("written", "abc", Some("abc")), ..ready("BP-2") },
+            Task { tour: run("written", "def", Some("abc")), ..ready("BP-3") },
+            Task { tour: run("writing", "", None), ..ready("BP-4") },
+            Task { tour: run("failed", "", None), note: Some("tour failed: its tour doesn't parse".into()), ..ready("BP-5") },
+        ];
+        let mut a = app(tasks, 0, Layout::Grouped);
+        let s = screen(&mut a, 60, 18);
+        // a spinner turns in place of BP-4's mark
+        assert!(!s[9].starts_with(" ✔") && s[9].ends_with("BP-4  Task BP-4"), "{s:#?}");
+        let s: Vec<String> = s.into_iter().enumerate().map(|(i, r)| if i == 9 { r[r.find("BP-4").unwrap()..].into() } else { r }).collect();
+        assert_eq!(s[2..13], [
+            " Ready to accept  5",
+            " ✔ BP-1  Task BP-1",
+            "         Done. Not toured yet.",
+            " ✔ BP-2  Task BP-2",
+            "         Done. Toured.",
+            " ✔ BP-3  Task BP-3",
+            "         Done. Tour written, not opened yet.",
+            "BP-4  Task BP-4",
+            "         Done. Writing its tour…",
+            " ✔ BP-5  Task BP-5",
+            "         tour failed: its tour doesn't parse",
+        ].map(String::from), "{s:#?}");
+        assert!(row(&s, 0).starts_with(" a accept  g tour"), "{s:#?}");
+    }
+
+    #[test]
+    fn a_stale_tour_asks_on_the_last_row() {
+        let mut a = app(vec![ready("BP-1")], 1, Layout::Grouped);
+        a.mode = Mode::Stale { id: "BP-1".into() };
+        let s = screen(&mut a, 90, 10);
+        assert_eq!(row(&s, 1), " BP-1's tour is stale: the code changed since. n new tour  o old one  esc cancels");
+    }
+
+    #[test]
     fn a_gap_of_none_is_the_old_layout() {
         let mut a = app(vec![ready("BP-1")], 0, Layout::Grouped);
         a.msg = "Accepted BP-1".into();
-        let s = screen(&mut a, 40, 12);
+        let s = screen(&mut a, 46, 12);
         assert_eq!(row(&s, 1), " Accepted BP-1");
-        assert!(row(&s, 0).starts_with(" a accept  d drop"), "{s:#?}");
+        assert!(row(&s, 0).starts_with(" a accept  g tour  d drop"), "{s:#?}");
         assert!(row(&s, 0).ends_with("? keys"), "{s:#?}");
     }
 

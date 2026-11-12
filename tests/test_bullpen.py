@@ -6,6 +6,7 @@ Run: python3 -m unittest discover -s tests
 import datetime as dt
 import json
 import os
+import re
 import select
 import shutil
 import subprocess
@@ -4820,6 +4821,123 @@ class TourTest(unittest.TestCase):
         self.assertEqual(t["status"], "ready")
         self.assertIn("approved by review of the person's comments", self.news()[-1])
 
+    # ---------- the stepper, for the board's g ----------
+
+    def test_g_opens_a_current_tour_in_a_large_pane_over_the_board(self):
+        tid = self.toured()
+        out = self.bp("tour", tid, "--pane", "--from", "blk1", "--session", "session:1").stdout
+        self.assertIn(f"opened {tid}'s tour", out)
+        layer = self.api("session.new_layer")[-1]
+        block = layer["layout"]["block"]
+        self.assertEqual(block["label"], f"bullpen: {tid} tour")
+        self.assertEqual(block["options"]["command"][-4:], ["tour", tid, "--view", "--back"])
+        self.assertEqual(layer["bounds"], [0.05, 0.04, 0.9, 0.9])
+        self.assertEqual(layer["window_id"], "w1")  # over the pane it was asked from
+        self.assertEqual(self.api("session.set_layer_state")[-1]["state"], "normal")
+        self.assertTrue(self.api("session.set_layer_state")[-1]["focus"])
+        before = len(self.api("session.new_layer"))
+        closes = lambda: [a for a in self.rex_calls() if a[:2] == ["block", "close"]]
+        closed = len(closes())
+        self.bp("tour", tid, "--pane", "--from", "blk1", "--session", "session:1")  # one stepper per task
+        self.assertEqual(len(self.api("session.new_layer")), before + 1)
+        self.assertEqual(len(closes()), closed + 1)
+        self.assertEqual(self.agent_runs(), 1)  # no new tour
+
+    def test_g_with_no_tour_writes_one_and_opens_it_once_written(self):
+        tid = self.two_file_task()
+        self.answer([{"title": "All", "note": "n", "hunks": [{"file": "a.txt"}, {"file": "fix1.txt"}]}])
+        out = self.bp("tour", tid, "--pane", "--from", "blk1", "--session", "session:1").stdout
+        self.assertIn(f"writing a tour of {tid}: it opens when it's done", out)
+        for _ in range(100):
+            if self.show(tid)["tour"]["state"] != "writing":
+                break
+            time.sleep(0.1)
+        self.assertEqual(self.show(tid)["tour"]["state"], "written")
+        self.assertNotIn("open", self.show(tid)["tour"])
+        layer = self.api("session.new_layer")[-1]
+        self.assertEqual(layer["layout"]["block"]["label"], f"bullpen: {tid} tour")
+        self.assertEqual(layer["window_id"], "w1")
+        # a stale one opens as it is (the board asked first), and --new writes another
+        self.commit_file(tid, "fix1.txt", "fixed better\n")
+        self.assertIn("(stale: the code changed since it was written)",
+                      self.bp("tour", tid, "--pane", "--from", "blk1").stdout)
+        self.assertEqual(self.agent_runs(), 1)
+        self.assertIn("writing a tour", self.bp("tour", tid, "--pane", "--new", "--from", "blk1").stdout)
+        self.assertIn("is working", self.bp("tour", self.start_task("Other"), "--pane", ok=False).stderr)
+
+    def stepper_on_a_terminal(self, tid, keys):
+        """Run the stepper on a terminal of its own, type keys, and return what it drew
+        after each (the first: before any key) and how it exited."""
+        import pty
+        master, slave = pty.openpty()
+        p = subprocess.Popen([str(BULLPEN), "tour", tid, "--view"], cwd=self.repo, env=self.env,
+                             stdin=slave, stdout=slave, stderr=slave)
+        os.close(slave)
+        screens = []
+        for k in keys + [None]:
+            seen = b""
+            while not (seen.endswith((b"\x1b[?25l", b"H")) and (b"close" in seen or b"cancels" in seen)):
+                r, _, _ = select.select([master], [], [], 10)
+                self.assertTrue(r, f"the stepper drew nothing: {seen!r}")
+                try:
+                    seen += os.read(master, 65536)
+                except OSError:
+                    break
+            screens.append(re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", seen.decode(errors="replace")))
+            if k is None:
+                break
+            os.write(master, k.encode())
+            time.sleep(0.1)
+        try:
+            while select.select([master], [], [], 10)[0] and os.read(master, 65536):
+                pass
+        except OSError:
+            pass
+        os.close(master)
+        return screens, p.wait(10)
+
+    def test_the_stepper_steps_takes_comments_resumes_and_sends(self):
+        tid = self.toured()  # steps: The fix, a.txt
+        screens, code = self.stepper_on_a_terminal(tid, ["n", "c", *"Keep line 26.", "\r", "q"])
+        self.assertEqual(code, 0)
+        self.assertIn("step 1 of 2", screens[0])
+        self.assertIn("The fix", screens[0])
+        self.assertIn("step 2 of 2", screens[1])
+        self.assertIn("+line 2, changed", screens[1])  # its hunks, from git
+        self.assertIn("Comment on step 2:", screens[2])
+        self.assertIn("Saved comment 1 on step 2.", screens[-2])
+        self.assertIn("Keep line 26.", screens[-2])  # under the step's note
+        drafts = json.loads(self.bp("tour-comment", tid, "--json").stdout)
+        self.assertEqual([(c["step"], c["text"]) for c in drafts], [(2, "Keep line 26.")])
+        self.assertEqual(self.show(tid)["tour"]["opened"], self.tour_file(tid)["commit"])  # toured
+        # opened again: it resumes at step 2; past the last step, the summary
+        screens, code = self.stepper_on_a_terminal(tid, ["n", "s"])
+        self.assertIn("step 2 of 2", screens[0])
+        self.assertIn("End of the tour", screens[1])
+        self.assertIn("Your 1 comment, not sent yet:", screens[1])
+        self.assertIn("step 2, a.txt", screens[1])
+        self.assertEqual(code, 0)
+        t = self.show(tid)
+        self.assertEqual(t["status"], "working")  # s sent them back
+        self.assertIn("Keep line 26.", Path(t["tour_sent"]["file"]).read_text())
+        self.assertEqual(self.news()[-1], "bullpen · BP-1 sent back by the person after the tour: 1 comment")
+
+    def test_the_stepper_warns_before_accepting_with_comments_unsent(self):
+        tid = self.toured()
+        self.bp("tour-comment", tid, "1", "Hmm.")
+        screens, code = self.stepper_on_a_terminal(tid, ["n", "n", "a", "a"])
+        self.assertIn("1 comment not sent: a again accepts anyway", screens[3])
+        self.assertEqual(code, 0)
+        self.assertEqual(self.show(tid)["status"], "done")
+
+    def test_a_new_ready_is_not_toured_yet(self):
+        tid = self.toured()
+        self.stepper_on_a_terminal(tid, ["q"])
+        self.assertIn("opened", self.show(tid)["tour"])
+        self.commit_file(tid, "fix1.txt", "fixed better\n")
+        self.ready(tid)
+        self.assertNotIn("opened", self.show(tid)["tour"])
+
     def test_tour_model_is_a_layered_setting(self):
         self.assertEqual(json.loads(self.bp("config", "--json").stdout)["tour_model"], "sonnet")
         self.bp("config", "--global", "--tour-model", "haiku")
@@ -5596,6 +5714,91 @@ class HelpersTest(unittest.TestCase):
         self.assertIn("10/10", out[1])
         self.assertEqual(out[2:], ["  BP-5  queue", "  BP-6  queue", "\x1b[7m> BP-7  queue\x1b[0m"])
         self.assertIn("no open tasks in any repository", self.bp.Picker([]).screen(80, 5)[1])
+
+    def stepper(self, comments=()):
+        tour = {"commit": "c1", "steps": [{"title": "One", "note": "Why one.", "hunks": [{"file": "a", "lines": [1, 2]}]},
+                                          {"title": "Two", "note": "", "hunks": [{"file": "b"}]}]}
+        return self.bp.Stepper("BP-1", "Fix it", tour, list(comments), 0,
+                               lambda i, w: [f"diff line {n} of step {i + 1}" for n in range(30)])
+
+    def test_stepper_keys(self):
+        st = self.stepper()
+        self.assertIsNone(st.key("n"))
+        self.assertEqual(st.at, 1)
+        st.key("\x1b[C")  # → past the last step: the summary
+        self.assertTrue(st.at_end())
+        st.key("n")  # no further
+        self.assertTrue(st.at_end())
+        st.key("p")
+        st.key("\x1b[D")
+        self.assertEqual(st.at, 0)
+        st.key("j")
+        st.key(" ", rows=10)
+        self.assertEqual(st.top, 9)
+        st.key("k")
+        self.assertEqual(st.top, 8)
+        st.key("n")
+        self.assertEqual(st.top, 0)  # a new step starts at its top
+        self.assertIsNone(st.key("c"))
+        for k in "Line 3 is off":
+            st.key(k)
+        st.key("\x7f")
+        self.assertEqual(st.key("q"), None)  # typed, not quit
+        self.assertEqual(st.key("\r"), ("comment", "Line 3 is ofq"))
+        st.key("c")
+        st.key("x")
+        self.assertIsNone(st.key("\x1b"))  # esc drops what's typed
+        self.assertEqual((st.mode, st.msg), ("read", "Comment not saved."))
+        st.key("c")
+        self.assertIsNone(st.key("\r"))  # nothing typed: nothing saved
+        self.assertEqual(st.key("\x1b"), "close")
+        self.assertEqual(st.key("q"), "close")
+
+    def test_stepper_end_sends_or_accepts(self):
+        st = self.stepper()
+        st.go(2)
+        self.assertIsNone(st.key("s"))
+        self.assertIn("No comments to send", st.msg)
+        self.assertEqual(st.key("a"), "accept")  # nothing unsent: no warning
+        st = self.stepper([{"id": 1, "step": 1, "title": "One", "commit": "c1", "text": "Why?"}])
+        st.go(2)
+        self.assertIsNone(st.key("a"))
+        self.assertIn("1 comment not sent: a again accepts anyway", st.msg)
+        self.assertEqual(st.key("a"), "accept")
+        st.key("a")
+        st.key("j")  # another key in between: it asks again
+        self.assertIsNone(st.key("a"))
+        self.assertEqual(st.key("s"), "send")
+        self.assertIsNone(st.key("c"))  # no comments on the summary
+        self.assertEqual(st.mode, "read")
+
+    def test_stepper_screen(self):
+        st = self.stepper([{"id": 1, "step": 1, "title": "One", "commit": "c1", "text": "Why?"},
+                           {"id": 2, "step": 1, "title": "One", "commit": "c0", "text": "From an old tour."}])
+        plain = lambda lines: [re.sub(r"\x1b\[[0-9;]*m", "", line).rstrip() for line in lines]
+        out = plain(st.screen(60, 12))
+        self.assertEqual(len(out), 12)
+        self.assertTrue(out[0].startswith(" BP-1  Fix it") and out[0].endswith("step 1 of 2"), out)
+        self.assertEqual(out[2:9], [" One", " a 1-2", "", " Why one.", "", " ▍ Why?", ""])
+        self.assertEqual(out[9], " diff line 0 of step 1")
+        self.assertIn("↓ 29 more", out[10])
+        self.assertIn("c comment", out[11])
+        self.assertIn("2 comments", out[11])
+        st.go(2)
+        out = plain(st.screen(60, 30))
+        self.assertTrue(out[0].endswith("end"))
+        self.assertIn(" Your 2 comments, not sent yet:", out)
+        self.assertIn(" s send them back · a accept · p back · esc close · 2 comments", out)
+        st.go(0)
+        st.key("G")
+        out = plain(st.screen(60, 12))
+        self.assertEqual(out[9], " diff line 29 of step 1")  # the bottom, no further
+        st.key("c")
+        for k in "x" * 80:
+            st.key(k)
+        out = plain(st.screen(60, 12))
+        self.assertEqual(out[10], " Comment on step 1: " + "x" * 38)  # the end of what's typed
+        self.assertEqual(st.cursor(60, 12), (11, 59))
 
     def test_split_keys_keeps_escape_sequences_whole(self):
         self.assertEqual(self.bp.split_keys("ab\x1b[Bc\x1bOA\x1b"), ["a", "b", "\x1b[B", "c", "\x1bOA", "\x1b"])
