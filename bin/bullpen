@@ -3258,11 +3258,29 @@ def shell_word_found(word, cwd):
     return run(["sh", "-c", 'command -v "$1" >/dev/null', "sh", word], cwd=cwd, check=False).returncode == 0
 
 
-def check_hook(repo, name):
+def shebang_program(argv):
+    """The program a #! line runs: its first word, or for env, the first word after
+    env's options (-S splits its string) and NAME=value settings."""
+    if Path(argv[0]).name != "env":
+        return argv[0]
+    words, skip = argv[1:], False
+    for w in words:
+        if skip:
+            skip = False
+        elif w in ("-u", "-C", "--unset", "--chdir"):
+            skip = True  # their argument follows
+        elif w.startswith("-S") and len(w) > 2:
+            return w[2:]  # -Sbash
+        elif not w.startswith("-") and "=" not in w:
+            return w
+    return None
+
+
+def check_hook(repo, name, why_not=None):
     """The setup (or teardown) a new task would get: config.json's command, else
     .bullpen/<name>.sh as committed on the base. It must parse and find what it runs."""
     if not repo:
-        return "skip", "can't tell outside a bullpen repo"
+        return "skip", f"can't tell: {why_not or 'not in a git repository'}"
     cmd = repo.cfg.get(name)
     path = f".bullpen/{name}.sh"
     if cmd:
@@ -3290,7 +3308,9 @@ def check_hook(repo, name):
         argv = first[2:].split()
         if not argv:
             return "fail", f"{path} on {ref} has an empty #! line: name its interpreter, or remove the line"
-        prog = argv[1] if Path(argv[0]).name == "env" and len(argv) > 1 else argv[0]
+        prog = shebang_program(argv)
+        if not prog:
+            return "fail", f"{path} on {ref} has a #! line that names no program: fix it"
         if not (os.access(prog, os.X_OK) if "/" in prog else shutil.which(prog)):
             return "fail", f"{path} on {ref} runs under {prog}, which isn't here: install it, or fix its #! line"
         shell = Path(prog).name
@@ -3301,8 +3321,10 @@ def check_hook(repo, name):
     return "ok", f"{path} on {ref}" + ("" if first.startswith("#!") else ", run under sh")
 
 
-def check_coordinators(repo):
+def check_coordinators(repo, why_not=None):
     """The coordinators config.json lists still have their panes (and boards)."""
+    if not repo and why_not:
+        return "skip", f"can't tell: {why_not}"
     if not repo or not repo.cfg["coordinators"]:
         return "skip", "none yet: run `bullpen up`"
     gone, ok_ = [], []
@@ -3338,6 +3360,7 @@ def doctor_checks(cheap=False):
     """[(name, state, text)]. cheap leaves out what needs the network or what `up` sees to."""
     repo, d = doctor_repo()
     cfg = repo.cfg if repo else DEFAULT_CONFIG
+    why_not = "config.json doesn't parse" if d and not repo else None
     out = [("rex", check_rex)]
     if not cheap:
         out.append(("gh", lambda: check_gh(repo)))
@@ -3347,9 +3370,10 @@ def doctor_checks(cheap=False):
     out.append(("state", check_state))
     if d:
         out.append(("config", lambda: check_config(d)))
-    out += [("setup", lambda: check_hook(repo, "setup")), ("teardown", lambda: check_hook(repo, "teardown"))]
+    out += [("setup", lambda: check_hook(repo, "setup", why_not)),
+            ("teardown", lambda: check_hook(repo, "teardown", why_not))]
     if not cheap:
-        out.append(("coordinators", lambda: check_coordinators(repo)))
+        out.append(("coordinators", lambda: check_coordinators(repo, why_not)))
     res = []
     for name, fn in out:
         try:

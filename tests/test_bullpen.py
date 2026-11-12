@@ -3907,7 +3907,8 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(p.returncode, 1)
         self.assertEqual(lines["config"][0], "FAIL")
         self.assertIn("doesn't parse", lines["config"][1])
-        self.assertEqual(lines["coordinators"][0], "--")
+        for name in ("setup", "teardown", "coordinators"):
+            self.assertEqual(lines[name], ("--", "can't tell: config.json doesn't parse"))
 
     def test_doctor_on_an_unwritable_state_folder(self):
         if os.geteuid() == 0:
@@ -3932,6 +3933,10 @@ class BullpenTest(unittest.TestCase):
         self.healthy()
         self.commit_hook("setup", "#!/bin/sh\nnpm ci\n")
         self.assertEqual(self.doctor()[1]["setup"], ("ok", ".bullpen/setup.sh on origin/main"))
+        self.commit_hook("setup", "#!/usr/bin/env -S sh -e\nnpm ci\n")  # env's options aren't the program
+        self.assertEqual(self.doctor()[1]["setup"], ("ok", ".bullpen/setup.sh on origin/main"))
+        self.commit_hook("setup", "#!/usr/bin/env -S sh -e\nif true; then\n")  # and sh still checks it
+        self.assertIn("isn't valid sh", self.doctor()[1]["setup"][1])
         self.commit_hook("setup", "#!/usr/bin/env no-such-shell\necho hi\n")
         line = self.doctor()[1]["setup"]
         self.assertEqual(line[0], "FAIL")
@@ -4592,6 +4597,15 @@ class HelpersTest(unittest.TestCase):
         self.assertGreater(key("0.1.0"), key("0.1.0-preview.99"))
         self.assertGreater(key("v0.2.0-preview.1"), self.bp.REX_MIN)
         self.assertIsNone(key("dev"))
+
+    def test_a_shebangs_program_skips_envs_options(self):
+        prog = self.bp.shebang_program
+        self.assertEqual(prog(["/bin/bash", "-e"]), "/bin/bash")
+        self.assertEqual(prog(["/usr/bin/env", "bash"]), "bash")
+        self.assertEqual(prog(["/usr/bin/env", "-S", "bash", "-e"]), "bash")
+        self.assertEqual(prog(["/usr/bin/env", "-Sbash", "-e"]), "bash")
+        self.assertEqual(prog(["/usr/bin/env", "-i", "FOO=1", "-u", "BAR", "python3"]), "python3")
+        self.assertIsNone(prog(["/usr/bin/env", "-S"]))
 
     # ---------- help and ls ----------
 
