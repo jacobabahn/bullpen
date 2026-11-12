@@ -70,6 +70,16 @@ FAKE_REX = textwrap.dedent("""\
         if not rec.exists():
             sys.exit("rex: no such method")  # an older Rex: bullpen goes by the screen
         print(json.dumps({"records": [json.loads(rec.read_text())]}))
+    elif a[:2] == ["server", "status"]:
+        if (d / "server_down").exists():
+            sys.exit("rex: no server")
+        version = d / "server_version"  # what the tests say the server is; else Rex says nothing
+        if version.exists():
+            print(json.dumps({"rex_version": version.read_text()}))
+    elif a[0] == "actions":
+        acts = d / "actions.json"  # the actions the tests say the Rex config defines
+        if acts.exists():
+            print(acts.read_text())
     elif a[:2] == ["api", "call"]:
         rest = a[2:]
         sid = R.get("session", "session:1")
@@ -136,6 +146,8 @@ FAKE_GH = textwrap.dedent("""\
     body = sys.stdin.read()  # like a gh that waits for input: it must get none
     with open(d / "gh.log", "a") as f:
         f.write(json.dumps({"argv": sys.argv[1:], "body": body}) + "\\n")
+    if sys.argv[1:3] == ["auth", "status"] and (d / "gh_signed_out").exists():
+        sys.exit("You are not logged into any GitHub hosts.")
     if sys.argv[1:3] == ["pr", "create"]:
         print("https://github.com/me/repo/pull/7")
     elif sys.argv[1:3] == ["pr", "view"]:
@@ -3793,6 +3805,165 @@ class BullpenTest(unittest.TestCase):
         self.bp("_event", self.block(tid), "blocked", "permission", "Allow rm?")
         self.assertIn("BP-1 needs you (permission)", read())
 
+    # ---------- doctor ----------
+
+    def healthy(self):
+        """A setup doctor finds nothing wrong with: a new enough Rex, keys, a built
+        board, the agent program on PATH, and `up` run."""
+        (self.fake / "server_version").write_text("0.1.0-preview.13")
+        (self.fake / "actions.json").write_text(json.dumps({"actions": [
+            {"name": n, "source": "/x/lua/keys.lua:62"}
+            for n in ("bullpen_next", "bullpen_board", "bullpen_coordinator")]}))
+        board = self.fake / "board"
+        board.write_text("#!/bin/sh\n")
+        board.chmod(0o755)
+        claude = self.fake / "claude"
+        claude.write_text("#!/bin/sh\n")
+        claude.chmod(0o755)
+        self.env["BULLPEN_BOARD"] = str(board)
+        self.env["PATH"] = f"{self.fake}:{self.env['PATH']}"
+        self.bp("up")
+
+    def doctor(self, cwd=None):
+        p = self.bp("doctor", ok=False, cwd=cwd)
+        lines = {}
+        for line in p.stdout.splitlines()[:-1]:
+            mark, rest = line.split(None, 1)
+            name, text = rest.split(": ", 1)
+            lines[name] = (mark, text)
+        return p, lines
+
+    def test_doctor_says_all_good(self):
+        self.healthy()
+        p, lines = self.doctor()
+        self.assertEqual(p.returncode, 0, p.stdout)
+        self.assertEqual(p.stdout.splitlines()[-1], "All good.")
+        for name in ("rex", "gh", "agents", "board", "keys", "watcher", "state", "config", "coordinators"):
+            self.assertEqual(lines[name][0], "ok", (name, lines[name]))
+        self.assertEqual(lines["setup"][0], "--")
+        self.assertIn("0.1.0-preview.13", lines["rex"][1])
+        self.assertIn("c1 (blk1)", lines["coordinators"][1])
+        self.assertNotIn("problem", self.bp("up").stdout)
+
+    def test_doctor_names_each_problem_and_its_fix(self):
+        self.healthy()
+        (self.fake / "server_version").write_text("0.1.0-preview.12")
+        (self.fake / "actions.json").write_text(json.dumps({"actions": []}))
+        (self.fake / "gh_signed_out").write_text("")
+        self.env["BULLPEN_BOARD"] = str(self.tmp / "missing")
+        cfg_path = next((self.tmp / "state").rglob("config.json"))
+        cfg = json.loads(cfg_path.read_text())
+        cfg["worker"] = ["no-such-agent"]
+        cfg_path.write_text(json.dumps(cfg))
+        (self.fake / "alive" / "blk3").unlink()  # the watcher
+        (self.fake / "alive" / "blk2").unlink()  # c1's board
+        p, lines = self.doctor()
+        self.assertEqual(p.returncode, 1)
+        self.assertEqual(p.stdout.splitlines()[-1], "7 problems.")
+        fixes = {"rex": "preview.13 or later", "keys": "run `bullpen keys`", "gh": "gh auth login",
+                 "board": "BULLPEN_BOARD", "agents": "no-such-agent isn't on PATH (config.json's worker)",
+                 "watcher": "run `bullpen up`", "coordinators": "c1's board (blk2) is gone"}
+        for name, fix in fixes.items():
+            self.assertEqual(lines[name][0], "FAIL", (name, lines[name]))
+            self.assertIn(fix, lines[name][1])
+
+    def test_doctor_on_a_stale_watcher_or_gone_coordinator(self):
+        self.healthy()
+        w = self.tmp / "state" / "watcher.json"
+        data = json.loads(w.read_text())
+        data["stamp"]["watch"] = "old"
+        w.write_text(json.dumps(data))
+        (self.fake / "alive" / "blk1").unlink()  # the coordinator
+        _, lines = self.doctor()
+        self.assertIn("from an older watch.lua or bullpen", lines["watcher"][1])
+        self.assertIn("c1's pane (blk1) is gone", lines["coordinators"][1])
+
+    def test_doctor_when_rex_has_no_server(self):
+        self.healthy()
+        (self.fake / "server_down").write_text("")
+        _, lines = self.doctor()
+        self.assertEqual(lines["rex"][0], "FAIL")
+        self.assertIn("rex server start", lines["rex"][1])
+
+    def test_doctor_cant_tell_on_a_rex_that_doesnt_say(self):
+        self.healthy()
+        (self.fake / "server_version").unlink()
+        (self.fake / "actions.json").unlink()
+        p, lines = self.doctor()
+        self.assertEqual((lines["rex"][0], lines["keys"][0]), ("--", "--"))
+        self.assertEqual(p.returncode, 0)
+
+    def test_doctor_in_local_mode_needs_no_gh(self):
+        sh("git", "-C", str(self.repo), "remote", "remove", "origin")
+        self.healthy()
+        (self.fake / "gh_signed_out").write_text("")
+        _, lines = self.doctor()
+        self.assertEqual(lines["gh"], ("--", "local mode (no origin remote): gh isn't needed"))
+
+    def test_doctor_on_a_config_that_doesnt_parse(self):
+        self.healthy()
+        next((self.tmp / "state").rglob("config.json")).write_text("{oops")
+        p, lines = self.doctor()
+        self.assertEqual(p.returncode, 1)
+        self.assertEqual(lines["config"][0], "FAIL")
+        self.assertIn("doesn't parse", lines["config"][1])
+        self.assertEqual(lines["coordinators"][0], "--")
+
+    def test_doctor_on_an_unwritable_state_folder(self):
+        if os.geteuid() == 0:
+            self.skipTest("root writes anywhere")
+        self.healthy()
+        state = self.tmp / "state"
+        state.chmod(0o555)
+        self.addCleanup(state.chmod, 0o755)
+        _, lines = self.doctor()
+        self.assertEqual(lines["state"][0], "FAIL")
+        self.assertIn(f"can't write to {state}", lines["state"][1])
+
+    def test_doctor_outside_a_repository(self):
+        self.healthy()
+        elsewhere = self.tmp / "elsewhere"
+        elsewhere.mkdir()
+        p, lines = self.doctor(cwd=elsewhere)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertEqual(lines["setup"][0], "--")
+
+    def test_doctor_checks_the_setup_hook(self):
+        self.healthy()
+        self.commit_hook("setup", "#!/bin/sh\nnpm ci\n")
+        self.assertEqual(self.doctor()[1]["setup"], ("ok", ".bullpen/setup.sh on origin/main"))
+        self.commit_hook("setup", "#!/usr/bin/env no-such-shell\necho hi\n")
+        line = self.doctor()[1]["setup"]
+        self.assertEqual(line[0], "FAIL")
+        self.assertIn("runs under no-such-shell", line[1])
+        self.commit_hook("setup", "if true; then\n")  # no #!: sh runs it, and it doesn't parse
+        line = self.doctor()[1]["setup"]
+        self.assertEqual(line[0], "FAIL")
+        self.assertIn("isn't valid sh", line[1])
+        (self.repo / ".bullpen" / "teardown.sh").write_text("echo bye\n")  # never committed
+        line = self.doctor()[1]["teardown"]
+        self.assertEqual(line[0], "FAIL")
+        self.assertIn("isn't committed on origin/main", line[1])
+
+    def test_doctor_checks_the_setup_command(self):
+        self.healthy()
+        self.bp("config", "--setup", "cd . && echo hi")
+        self.assertEqual(self.doctor()[1]["setup"], ("ok", "config.json's setup: cd . && echo hi"))
+        self.bp("config", "--setup", "no-such-tool install")
+        line = self.doctor()[1]["setup"]
+        self.assertEqual(line[0], "FAIL")
+        self.assertIn("runs no-such-tool, which isn't on PATH", line[1])
+
+    def test_up_hints_at_doctor_without_its_slow_checks(self):
+        self.healthy()
+        (self.fake / "gh_signed_out").write_text("")  # gh needs the network: up doesn't ask
+        self.assertNotIn("problem", self.bp("up").stdout)
+        self.env["BULLPEN_BOARD"] = str(self.tmp / "missing")
+        (self.fake / "actions.json").write_text(json.dumps({"actions": []}))
+        out = self.bp("up").stdout.splitlines()
+        self.assertEqual(out[-2], "2 problems: run `bullpen doctor`")
+        self.assertTrue(out[-1].startswith("news: "))
+
     # ---------- worktree setup and teardown ----------
 
     def commit_hook(self, name, text):
@@ -4414,6 +4585,14 @@ class HelpersTest(unittest.TestCase):
     def setUpClass(cls):
         cls.bp = cls.cli()
 
+    def test_rex_versions_compare_previews_before_releases(self):
+        key = self.bp.rex_version_key
+        self.assertLess(key("0.1.0-preview.12"), self.bp.REX_MIN)
+        self.assertEqual(key("0.1.0-preview.13"), self.bp.REX_MIN)
+        self.assertGreater(key("0.1.0"), key("0.1.0-preview.99"))
+        self.assertGreater(key("v0.2.0-preview.1"), self.bp.REX_MIN)
+        self.assertIsNone(key("dev"))
+
     # ---------- help and ls ----------
 
     def test_every_command_and_option_has_help_but_the_internal_ones(self):
@@ -4762,6 +4941,7 @@ return table.concat(seen, "|")
             f"blk1={line('blocked', 'Allow?', 103)} rev1={line('working', 'Reviewing', 104)}",
             f"rev1={line('working', 'Reviewing', 104)}",
         ])
+
 
 
 if __name__ == "__main__":

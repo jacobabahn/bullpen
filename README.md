@@ -20,6 +20,7 @@ pane, or the coordinator follows it with Claude Code's Monitor tool (see [News](
 ./install.sh          # link bullpen into ~/.local/bin and build the board
 bullpen keys          # prints a line: add it to your Rex config (init.lua),
 rex config reload     #   then reload, for the cmd+; keys
+bullpen doctor        # checks all of that, and says how to fix what's missing
 bullpen up            # in a Rex pane in your repository: the coordinator and its board
 ```
 
@@ -37,6 +38,34 @@ a ready one, or closes a finished one. The words used here are in [GLOSSARY.md](
 Needs Rex (a server from preview.13 on, for minimized floating panes), git, `gh`
 (signed in), Claude Code and, to build the task board, Rust's `cargo`. Run
 `./install.sh` again after pulling changes to the board.
+
+### Doctor
+
+`bullpen doctor` checks the setup and prints one line per check: `ok`, `FAIL` with
+the exact fix, or `--` when a check doesn't apply or can't be told. It exits
+non-zero when anything fails. It checks:
+
+- `rex` is on PATH and its server is preview.13 or later (`rex server status`)
+- `gh` is installed and signed in (`gh auth status`), unless the repo is in
+  [local mode](#local-mode)
+- the programs in the coordinator, worker and reviewer commands (Claude Code's
+  `claude`, unless you changed them) are on PATH
+- the board is built and not older than `board/`'s sources: else run `./install.sh`
+- the keys are in your Rex config: Rex lists the `bullpen_next`, `bullpen_board`
+  and `bullpen_coordinator` actions (`rex actions`)
+- the watcher is running, from the current `watch.lua` and `bin/bullpen` (the hashes
+  in `watcher.json`)
+- the state folder is writable, and this repo's `config.json` parses
+- the setup and teardown hooks, if there are any: `.bullpen/setup.sh` as committed
+  on the base (its `#!` interpreter exists, and an `sh` or `bash` script parses), or
+  the `config --setup` command (it parses, and its program is found). A
+  `.bullpen/setup.sh` that is there but not committed on the base is a failure: it
+  wouldn't run.
+- the coordinators in `config.json` still have their panes and boards
+
+`bullpen up` runs the quick checks (not `gh`, which needs the network, nor the
+watcher and coordinators, which `up` sees to itself) and, if any fail, prints one
+line: "2 problems: run `bullpen doctor`".
 
 ## Use
 
