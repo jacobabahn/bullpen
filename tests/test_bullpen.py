@@ -1695,6 +1695,96 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.api("session.set_layer_state")[-1], {"layer_id": layer, "state": "normal", "focus": True})
         self.assertIn("goes with --next", self.bp("go", "--all-repos", ok=False).stderr)
 
+    # ---- jump to a task: pick ----
+
+    def test_pick_filter_lists_open_tasks_of_every_repo_best_first(self):
+        self.bp("add", "Fix the login redirect", "--brief", "x")
+        self.bp("add", "Cover logout", "--brief", "x")
+        self.bp("add", "Gone soon", "--brief", "x")
+        self.bp("drop", "BP-3")  # closed: not listed
+        shop = self.other_repo("shop")
+        self.bp("add", "Sell it", "--brief", "x", cwd=shop)
+        pick = lambda q, cwd=None: self.bp("pick", "--filter", q, "--from", "nowhere", cwd=cwd).stdout.splitlines()
+        self.assertEqual(pick(""), [  # this repository's first, with each one's name
+            "proj  BP-1  queued (todo)  Fix the login redirect",
+            "proj  BP-2  queued (todo)  Cover logout",
+            "shop  BP-1  queued (todo)  Sell it"])
+        self.assertEqual([l.split()[:2] for l in pick("", cwd=shop)][0], ["shop", "BP-1"])  # from shop: shop's first
+        self.assertEqual(pick("lgn"), [pick("")[0]])  # letters in order, not together
+        self.assertEqual(pick("shop bp1"), [pick("")[2]])  # every word must match
+        self.assertEqual(pick("p-2"), [pick("")[1]])
+        self.assertEqual(pick("zzz"), [])
+        shutil.rmtree(shop)  # a repository whose checkout is gone is left out, and with one repo, no names
+        self.assertEqual(pick("")[0], "BP-1  queued (todo)  Fix the login redirect")
+
+    def test_go_repo_goes_to_a_task_of_another_repo(self):
+        here = self.start_task("Here")
+        shop = self.other_repo("shop")
+        self.bp("up", cwd=shop)
+        self.bp("add", "Sell it", "--brief", "x", cwd=shop)
+        self.bp("start", "BP-1", cwd=shop)
+        theirs = json.loads(self.bp("show", "BP-1", "--json", cwd=shop).stdout)["block"]
+        go = lambda *a: json.loads(self.bp("go", "BP-1", "--json", "--from", self.block(here), *a).stdout)
+        self.assertEqual(go()["block"], self.block(here))  # the same ID, this pane's repository
+        self.assertEqual(go("--repo", str(shop))["block"], theirs)
+        p = self.bp("go", "BP-1", "--repo", str(self.tmp), ok=False)
+        self.assertIn(f"bullpen has no tasks for {self.tmp}", p.stderr)
+
+    def test_pick_pane_opens_the_picker_over_the_pane_you_are_in(self):
+        self.start_task()
+        self.bp("pick", "--pane", "--from", "blk1", "--session", "session:1", cwd=self.tmp)
+        layer = self.api("session.new_layer")[-1]
+        block = layer["layout"]["block"]
+        self.assertEqual(block["label"], "bullpen: jump")
+        self.assertEqual(block["options"]["command"][-5:], ["pick", "--from", "blk1", "--session", "session:1"])
+        self.assertEqual(layer["window_id"], "w1")  # the coordinator's window
+        lid = json.loads((self.fake / "reg.json").read_text())["blocks"]["blk5"]["layer"]
+        self.assertEqual(self.api("session.set_layer_state")[-1], {"layer_id": lid, "state": "normal", "focus": True})
+        self.bp("pick", "--pane", "--from", "blk1", "--session", "session:1")  # again: one picker at a time
+        self.assertFalse((self.fake / "alive" / "blk5").exists())
+        self.assertTrue((self.fake / "alive" / "blk6").exists())
+
+    def pick_on_a_terminal(self, keys, cwd=None):
+        """Run `bullpen pick` on a terminal of its own, type keys, and return how it exited."""
+        import pty
+        master, slave = pty.openpty()
+        p = subprocess.Popen([str(BULLPEN), "pick", "--from", "nowhere"], cwd=cwd or self.repo, env=self.env,
+                             stdin=slave, stdout=slave, stderr=slave)
+        os.close(slave)
+        seen = b""
+        for k in keys:
+            while not seen.endswith(b"H") or b"jump to>" not in seen:  # drawn: ready for a key
+                r, _, _ = select.select([master], [], [], 10)
+                self.assertTrue(r, f"the picker drew nothing: {seen!r}")
+                seen += os.read(master, 65536)
+            seen = b""
+            os.write(master, k.encode())
+            time.sleep(0.1)  # an arrow's bytes, not esc then letters
+        try:
+            while select.select([master], [], [], 10)[0] and os.read(master, 65536):
+                pass
+        except OSError:
+            pass  # the terminal closed with the picker
+        os.close(master)
+        return p.wait(10)
+
+    def test_pick_goes_to_the_task_you_choose(self):
+        self.start_task("Here")
+        shop = self.other_repo("shop")
+        self.bp("up", cwd=shop)
+        self.bp("add", "Sell it", "--brief", "x", cwd=shop)
+        self.bp("start", "BP-1", cwd=shop)
+        theirs = json.loads(self.bp("show", "BP-1", "--json", cwd=shop).stdout)["block"]
+        lid = lambda b: json.loads((self.fake / "reg.json").read_text())["blocks"][b]["layer"]
+        self.assertEqual(self.pick_on_a_terminal(["s", "e", "l", "\r"]), 0)
+        self.assertEqual(self.api("session.set_layer_state")[-1], {"layer_id": lid(theirs), "state": "normal", "focus": True})
+        before = len(self.api("session.set_layer_state"))
+        self.assertEqual(self.pick_on_a_terminal(["\x1b[B", "\x1b[A", "\r"]), 0)  # down and up again: the first
+        self.assertEqual(self.api("session.set_layer_state")[-1]["layer_id"], lid(self.block("BP-1")))
+        before = len(self.api("session.set_layer_state"))
+        self.assertEqual(self.pick_on_a_terminal(["x", "\x1b"]), 0)  # esc: nothing happens
+        self.assertEqual(len(self.api("session.set_layer_state")), before)
+
     def test_board_repos_is_a_setting_global_too(self):
         cfg = lambda: json.loads(self.bp("config", "--json").stdout)
         self.assertEqual((cfg()["board_repos"], cfg()["sources"]["board_repos"]), (True, "default"))
@@ -4046,7 +4136,7 @@ class BullpenTest(unittest.TestCase):
         (self.fake / "server_version").write_text("0.1.0-preview.13")
         (self.fake / "actions.json").write_text(json.dumps({"actions": [
             {"name": n, "source": "/x/lua/keys.lua:62"}
-            for n in ("bullpen_next", "bullpen_board", "bullpen_coordinator")]}))
+            for n in ("bullpen_next", "bullpen_board", "bullpen_coordinator", "bullpen_jump")]}))
         board = self.fake / "board"
         board.write_text("#!/bin/sh\n")
         board.chmod(0o755)
@@ -5183,6 +5273,66 @@ class HelpersTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.bp = cls.cli()
+
+    # ---- pick ----
+
+    def test_fuzzy_matches_each_word_in_order_ignoring_case(self):
+        f = self.bp.fuzzy_score
+        self.assertIsNotNone(f("lgn", "Fix the LOGIN redirect"))
+        self.assertIsNone(f("ngl", "Fix the login redirect"))  # out of order
+        self.assertIsNotNone(f("redirect fix", "Fix the login redirect"))  # words in any order
+        self.assertIsNone(f("fix logout", "Fix the login redirect"))  # every word must match
+        self.assertEqual(f("", "anything"), 0)
+
+    def test_fuzzy_ranks_letters_together_and_word_starts_first(self):
+        pf = self.bp.pick_filter
+        self.assertEqual(pf("log", ["l o g", "a login"]), [1, 0])  # together
+        self.assertEqual(pf("re", ["more", "redirect"]), [1, 0])  # the start of a word
+        self.assertEqual(pf("42", ["BP-142", "BP-42"]), [1, 0])
+        self.assertEqual(pf("bp", ["BP-1", "BP-2"]), [0, 1])  # ties keep their order
+        self.assertEqual(pf("x", ["a", "b"]), [])
+
+    def test_picker_keys(self):
+        p = self.bp.Picker(["BP-1  working  Fix login", "BP-2  queued  Cover logout", "BP-3  ready  Docs"])
+        self.assertEqual(p.shown, [0, 1, 2])
+        for k in "lo":
+            p.key(k)
+        self.assertEqual((p.query, p.shown, p.sel), ("lo", [0, 1], 0))
+        p.key("\x1b[B")
+        p.key("\x1b[B")  # can't go past the last
+        self.assertEqual(p.sel, 1)
+        self.assertEqual(p.key("\r"), "choose")
+        self.assertEqual(p.chosen(), 1)
+        p.key("\x7f")
+        self.assertEqual((p.query, p.sel), ("l", 0))  # a new search starts at the top
+        p.key("\x10")  # ctrl+p: can't go above the first
+        self.assertEqual(p.sel, 0)
+        for k in " zz":
+            p.key(k)
+        self.assertEqual(p.shown, [])
+        self.assertIsNone(p.key("\r"))  # nothing to choose
+        p.key("\x17")  # ctrl+w: the last word
+        self.assertEqual(p.query, "l ")
+        p.key("\x15")  # ctrl+u: all of it
+        self.assertEqual((p.query, p.shown), ("", [0, 1, 2]))
+        self.assertEqual(p.key("\x04"), "cancel")  # ctrl+d with nothing typed
+        self.assertEqual(p.key("\x1b"), "cancel")
+        self.assertEqual(p.key("\x03"), "cancel")
+        p.key("\x1b[C")  # another escape sequence does nothing
+        self.assertEqual(p.query, "")
+
+    def test_picker_screen_keeps_the_selected_task_in_view(self):
+        p = self.bp.Picker([f"BP-{n}  queued  Task number {n}" for n in range(1, 11)])
+        for _ in range(6):
+            p.key("\x0e")  # ctrl+n
+        out = p.screen(13, 5)  # the query, a hint and three tasks
+        self.assertEqual(out[0], "jump to> ")
+        self.assertIn("10/10", out[1])
+        self.assertEqual(out[2:], ["  BP-5  queue", "  BP-6  queue", "\x1b[7m> BP-7  queue\x1b[0m"])
+        self.assertIn("no open tasks in any repository", self.bp.Picker([]).screen(80, 5)[1])
+
+    def test_split_keys_keeps_escape_sequences_whole(self):
+        self.assertEqual(self.bp.split_keys("ab\x1b[Bc\x1bOA\x1b"), ["a", "b", "\x1b[B", "c", "\x1bOA", "\x1b"])
 
     def test_rex_versions_compare_previews_before_releases(self):
         key = self.bp.rex_version_key

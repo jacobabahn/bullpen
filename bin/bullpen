@@ -9,19 +9,23 @@ or logged for it to follow with `bullpen news --follow`.
 """
 
 import argparse
+import codecs
 import datetime as dt
 import fcntl
 import hashlib
 import json
 import os
 import re
+import select
 import shlex
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
+import termios
 import time
+import tty
 from pathlib import Path
 
 HOME = Path(__file__).resolve().parent.parent
@@ -3428,7 +3432,7 @@ def pane_coordinator(repo, block):
 def cmd_go(args):
     if args.all_repos and not args.next:
         raise Fail("--all-repos goes with --next")
-    home = find_repo(args.from_block)
+    home = go_home(args)
     try:
         repo, session, block, name = go_target(home, args)
     except Fail as e:
@@ -3450,6 +3454,16 @@ def cmd_go(args):
         print(json.dumps({"session": session, "block": block, "name": name}))
     else:
         show_pane(repo, session, block)
+
+
+def go_home(args):
+    """The repository `go` is about: --repo, else the one the pane or folder belongs to."""
+    if not args.repo:
+        return find_repo(args.from_block)
+    repo = Repo(Path(args.repo).resolve())
+    if not (repo.dir / "config.json").exists():
+        raise Fail(f"bullpen has no tasks for {args.repo}")
+    return repo
 
 
 def cmd_hide(args):
@@ -3493,6 +3507,213 @@ def show_pane(repo, session, block):
         if set_layer(session, target[1]["layer_id"], "normal", focus=True):
             return
     rex_focus(session, block)
+
+
+# ---------- pick: jump to any open task by typing part of it ----------
+
+PICK_LABEL = "bullpen: jump"
+PICK_BOUNDS = [0.15, 0.12, 0.7, 0.6]  # the middle of the window: x, y, w, h
+
+
+def pick_items(home=None):
+    """(repo, task) of every open task bullpen knows: home's first, then the other
+    repositories', each in `ls` order."""
+    repos = known_repos()
+    if home:
+        repos = [home] + [r for r in repos if r.dir != home.dir]
+    return [(r, t) for r in repos for t in r.tasks() if t["status"] not in CLOSED]
+
+
+def pick_lines(items):
+    """One line per task: its ID, status and title, with its repository's name first
+    when the tasks come from more than one."""
+    many = len({r.dir for r, _ in items}) > 1
+    rw = max((len(r.root.name) for r, _ in items), default=0)
+    iw = max((len(t["id"]) for _, t in items), default=0)
+    sw = max((len(status_words(t["status"])) for _, t in items), default=0)
+    return [(f"{r.root.name:<{rw}}  " if many else "")
+            + f"{t['id']:<{iw}}  {status_words(t['status']):<{sw}}  {t['title']}" for r, t in items]
+
+
+def fuzzy_score(query, text):
+    """How well text matches query, or None when it doesn't. Each word of the query must
+    be in text, its letters in order but not necessarily together (case ignored).
+    Letters together, and at the start of a word, score higher."""
+    low, total = text.lower(), 0
+    for word in query.lower().split():
+        scores = [s for start, c in enumerate(low) if c == word[0]
+                  for s in [word_score(word, low, start)] if s is not None]
+        if not scores:
+            return None
+        total += max(scores)
+    return total
+
+
+def word_score(word, low, start):
+    """The score of word's letters found in low from start on, each as early as it can be."""
+    score, prev, i = 0, None, start
+    for c in word:
+        i = low.find(c, i)
+        if i < 0:
+            return None
+        if prev is not None:
+            score += 3 if i == prev + 1 else -min(i - prev - 1, 5)
+        if i == 0 or not low[i - 1].isalnum():
+            score += 2
+        score += 1
+        prev, i = i, i + 1
+    return score
+
+
+def pick_filter(query, lines):
+    """The indexes of the lines matching query, best first; ties keep their order."""
+    scored = [(s, i) for i, line in enumerate(lines) for s in [fuzzy_score(query, line)] if s is not None]
+    return [i for _, i in sorted(scored, key=lambda si: (-si[0], si[1]))]
+
+
+PICK_UP = ("\x1b[A", "\x1bOA", "\x10", "\x0b")  # ↑, ctrl+p, ctrl+k
+PICK_DOWN = ("\x1b[B", "\x1bOB", "\x0e")  # ↓, ctrl+n
+PICK_HINT = "⏎ go · esc close · ↑↓ move"
+
+
+class Picker:
+    """What the picker shows and does with each key, apart from the terminal."""
+
+    def __init__(self, lines):
+        self.lines, self.query, self.sel = lines, "", 0
+        self.shown = pick_filter("", lines)
+        self.msg = "" if lines else "no open tasks in any repository"
+
+    def key(self, k):
+        """Apply one key: "choose" or "cancel" when it ends the picker, else None."""
+        if k in ("\r", "\n"):
+            return "choose" if self.shown else None
+        if k in ("\x1b", "\x03", "\x07") or (k == "\x04" and not self.query):
+            return "cancel"
+        if k in PICK_UP:
+            self.sel = max(self.sel - 1, 0)
+        elif k in PICK_DOWN:
+            self.sel = min(self.sel + 1, max(len(self.shown) - 1, 0))
+        elif k in ("\x7f", "\x08"):
+            self.search(self.query[:-1])
+        elif k == "\x15":  # ctrl+u
+            self.search("")
+        elif k == "\x17":  # ctrl+w
+            self.search(re.sub(r"\S*\s*$", "", self.query))
+        elif k.isprintable() and not k.startswith("\x1b"):
+            self.search(self.query + k)
+        return None
+
+    def search(self, query):
+        self.query, self.sel, self.msg = query, 0, ""
+        self.shown = pick_filter(query, self.lines)
+
+    def chosen(self):
+        return self.shown[self.sel] if self.shown else None
+
+    def screen(self, width, height):
+        """The picker's lines: the query, a hint, then the matching tasks around the selected one."""
+        rows = max(height - 2, 1)
+        first = max(0, self.sel - rows + 1)
+        out = [f"jump to> {self.query}",
+               f"\x1b[2m{self.msg or f'{len(self.shown)}/{len(self.lines)}  {PICK_HINT}'}\x1b[0m"]
+        for n, i in enumerate(self.shown[first:first + rows], first):
+            line = self.lines[i][:max(width - 2, 0)]
+            out.append(f"\x1b[7m> {line}\x1b[0m" if n == self.sel else f"  {line}")
+        return out
+
+
+def split_keys(text):
+    """The keys in what the terminal sent: an escape sequence (an arrow) is one key."""
+    out, i = [], 0
+    while i < len(text):
+        m = re.match(r"\x1b(\[[0-?]*[ -/]*[@-~]|O.)", text[i:])
+        n = m.end() if m else 1
+        out.append(text[i:i + n])
+        i += n
+    return out
+
+
+def read_keys(fd, decoder):
+    data = os.read(fd, 1024)
+    if not data:
+        return ["\x03"]  # the terminal went away
+    if data == b"\x1b" and select.select([fd], [], [], 0.03)[0]:
+        data += os.read(fd, 1024)  # the rest of an arrow, not esc
+    return split_keys(decoder.decode(data))
+
+
+def pick_tui(p, choose):
+    """Run the picker on the terminal until a task is chosen (True) or it's closed (False).
+    choose(index) goes to that task and returns None, or why it couldn't."""
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
+    tty.setraw(fd)
+    try:
+        while True:
+            size = shutil.get_terminal_size()
+            lines = p.screen(size.columns, size.lines)
+            sys.stdout.write("\x1b[H\x1b[2J" + "\r\n".join(lines) + f"\x1b[1;{len(lines[0]) + 1}H")
+            sys.stdout.flush()
+            for k in read_keys(fd, decoder):
+                act = p.key(k)
+                if act == "cancel":
+                    return False
+                if act == "choose":
+                    p.msg = choose(p.chosen()) or ""
+                    if not p.msg:
+                        return True
+                    break
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        sys.stdout.write("\x1b[H\x1b[2J")
+        sys.stdout.flush()
+
+
+def cmd_pick(args):
+    if args.pane:
+        return pick_pane(args)
+    try:
+        home = find_repo(args.from_block)
+    except Fail:
+        home = None
+    items = pick_items(home)
+    lines = pick_lines(items)
+    if args.filter is not None:
+        for i in pick_filter(args.filter, lines):
+            print(lines[i])
+        return
+    if not sys.stdin.isatty():
+        raise Fail("pick needs a terminal (--filter prints the matching tasks instead)")
+
+    def choose(i):
+        r, t = items[i]
+        p = subprocess.run([SELF, "go", t["id"], "--repo", str(r.root),
+                            *(["--session", args.session] if args.session else [])],
+                           stdin=subprocess.DEVNULL, text=True, capture_output=True)
+        return None if p.returncode == 0 else (p.stderr.strip().removeprefix("bullpen: ") or "couldn't go there")
+
+    pick_tui(Picker(lines), choose)
+
+
+def pick_pane(args):
+    """Open the picker in a floating pane in the middle of the window of the pane you're
+    in; it closes itself when you choose or press esc. One picker at a time."""
+    session = args.session or os.environ.get("REX_SESSION")
+    view = rex_view(session)
+    for _, _, b in find_panes(view, PICK_LABEL):
+        rex_close(session, b)
+    argv = [SELF, "pick", *(["--from", args.from_block] if args.from_block else []),
+            *(["--session", session] if session else [])]
+    spec = {"bounds": PICK_BOUNDS, "layout": {"block": {
+        "flavor": TERMINAL, "label": PICK_LABEL,
+        "options": {"command": with_state(argv), "cwd": str(Path.home())}}}}
+    where = find_pane(view, block=args.from_block) if args.from_block else None
+    if where:
+        spec["window_id"] = where[0]
+    r = rex_api(session, "session.new_layer", spec)
+    set_layer(session, r["layer_id"], "normal", focus=True)
 
 
 def seconds_since(stamp, at=None):
@@ -3725,8 +3946,9 @@ def cmd_keys(args):
     print(f"-- Add to your Rex config (rex config shows where), then run `rex config reload`:\n"
           f'dofile("{keys}").setup{{ {opts} }}\n'
           f"-- Defaults: cmd+;>n next task needing you, cmd+;>b board, cmd+;>c coordinator,\n"
+          f"-- cmd+;>j jump to any open task (type part of it, in any repository),\n"
           f"-- and ctrl+escape puts the worker pane you're in back into its capsule.\n"
-          f'-- Change them with prefix = "...", or keys = {{ next = ..., board = ..., coordinator = ..., hide = ... }}.')
+          f'-- Change them with prefix = "...", or keys = {{ next = ..., board = ..., coordinator = ..., jump = ..., hide = ... }}.')
 
 
 # ---------- doctor: is everything bullpen needs in place? ----------
@@ -3736,7 +3958,7 @@ def cmd_keys(args):
 # the cheap ones (no network, nothing `up` itself just fixed) and only counts problems.
 
 REX_MIN = (0, 1, 0, 13)  # preview.13: minimized floating panes
-KEY_ACTIONS = ("bullpen_next", "bullpen_board", "bullpen_coordinator")
+KEY_ACTIONS = ("bullpen_next", "bullpen_board", "bullpen_coordinator", "bullpen_jump")
 
 
 def rex_version_key(text):
@@ -3821,7 +4043,7 @@ def check_board():
 
 
 def check_keys():
-    """Rex lists the actions its config defines: bullpen's keys define three."""
+    """Rex lists the actions its config defines: bullpen's keys define four."""
     if not shutil.which(REX):
         return "skip", "can't tell without rex"
     p = run([REX, "actions", "--json"], check=False)
@@ -5073,8 +5295,17 @@ def parser():
     p.add_argument("--from", dest="from_block", default=os.environ.get("REX_BLOCK"),
                    help="the pane you're in (default: this one)")
     p.add_argument("--session", help="the session you're in (key bindings pass it)")
+    p.add_argument("--repo", help="the repository the task is in (default: the pane's, else this folder's)")
     p.add_argument("--json", action="store_true", help="print the target instead of focusing it")
     p.set_defaults(fn=cmd_go)
+
+    p = sub.add_parser("pick", help="type part of any open task, in any repository, and go to it")
+    p.add_argument("--pane", action="store_true", help="open the picker in a floating pane (the jump key)")
+    p.add_argument("--filter", metavar="QUERY", help="print the open tasks matching QUERY, best first")
+    p.add_argument("--from", dest="from_block", default=os.environ.get("REX_BLOCK"),
+                   help="the pane you're in (default: this one)")
+    p.add_argument("--session", help="the session you're in (key bindings pass it)")
+    p.set_defaults(fn=cmd_pick)
 
     p = sub.add_parser("hide", help="put the worker pane you're in back into its capsule")
     p.add_argument("--from", dest="from_block", default=os.environ.get("REX_BLOCK"),

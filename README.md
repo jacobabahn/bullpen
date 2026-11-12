@@ -55,8 +55,8 @@ non-zero when anything fails. It checks:
   and `src/`, by hash), or being rebuilt. Else it says why: its last build failed
   (with the log), `board/` has uncommitted changes, or it just hasn't been rebuilt
   yet; `bullpen build-board` fixes each
-- the keys are in your Rex config: Rex lists the `bullpen_next`, `bullpen_board`
-  and `bullpen_coordinator` actions (`rex actions`)
+- the keys are in your Rex config: Rex lists the `bullpen_next`, `bullpen_board`,
+  `bullpen_coordinator` and `bullpen_jump` actions (`rex actions`)
 - the watcher is running, from the current `watch.lua` and `bin/bullpen` (the hashes
   in `watcher.json`)
 - the state folder is writable, and this repo's `config.json` parses
@@ -145,18 +145,27 @@ Tasks that waited on the accepted one start by themselves (see
 ### Keys
 
 `bullpen keys` prints a line to add to your Rex config (`init.lua`). It defines
-three actions, also in the command palette under Bullpen, and binds:
+four actions, also in the command palette under Bullpen, and binds:
 
 - `cmd+;` then `n`: the next task that needs you. Again: the one after it.
 - `cmd+;` then `b`: the board.
 - `cmd+;` then `c`: the coordinator.
+- `cmd+;` then `j`: jump to any open task. A picker opens in the middle of the
+  window, listing every open task (ID, status and title, and the repository's
+  name when there is more than one) of every repository bullpen knows, this
+  one's first. Type part of it: each word you type must be in the line, its
+  letters in order but not necessarily together (`lgn` finds "login"), and the
+  closest matches come first. `↑` `↓` (or `ctrl+p` `ctrl+n`) move, `⏎` goes to
+  that task as `bullpen go` does, and `esc` closes the picker. A task without a
+  pane (queued, say) says so and the picker stays open. It works from any pane
+  (`bullpen pick --pane`; `bullpen pick` runs it in the terminal you're in).
 
 And in a worker's or reviewer's floating pane, `ctrl+escape` puts it back into its
 capsule and returns you to the board (`bullpen hide`); elsewhere the key goes
 through.
 
 `setup{ prefix = "ctrl+b" }` moves them behind another key, and
-`keys = { next = "cmd+shift+j" }` sets single ones. Run `rex config reload` after.
+`keys = { next = "cmd+shift+j", jump = "cmd+k" }` sets single ones. Run `rex config reload` after.
 
 Then tell the coordinator what you want. To drive it by hand:
 
@@ -177,6 +186,9 @@ bullpen diff BP-1     # its changes against its base, in a pager (--stat: just t
 bullpen check         # tasks whose status is out of step with their agent; --fix catches up
 bullpen go BP-1       # focus its pane (`go` alone: the coordinator; --next: next needing you)
 bullpen go --next --all-repos   # the next task needing you in any repository
+bullpen go BP-1 --repo ~/shop   # a task of another repository
+bullpen pick          # type part of any open task, in any repository, and go to it (the cmd+; j picker)
+bullpen pick --filter "lgn"   # just print the open tasks matching, best first
 bullpen tell BP-1 "Also cover the logout path"
 bullpen resume BP-1   # restart a stopped worker, continuing its conversation
 bullpen ask BP-1 "..."   # (coordinator) BP-1 needs you: the question shows on the board
@@ -278,6 +290,9 @@ checkout is gone is left out of what follows.
 - `bullpen go --next --all-repos` goes to the next task that needs you in any
   repository, the one waiting longest first, as `go --next` does in one. In the
   repository it runs for, it skips what that board hides, as `go --next` does.
+- `cmd+;` then `j` (`bullpen pick`) picks any open task of any repository by
+  typing part of it (see [Keys](#keys)); `bullpen go BP-1 --repo PATH` goes to a
+  task of another repository.
 - The board's top line, after the repository's name, names the other
   repositories with something for you: `shop: 1 needs you, 2 ready` (needs you:
   needs or stopped; ready: ready to accept, or finished), shortened to
