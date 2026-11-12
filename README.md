@@ -90,8 +90,17 @@ A repository can have more than one coordinator at a time, each an agent in its
 own pane. `bullpen up --here` in another agent's pane adds it as a coordinator and
 leaves the others as they are; `bullpen up` from elsewhere starts one only when
 none is running. Each coordinator has an ID (`c1`, `c2`, ...) and its own board
-beside it. Every board shows every task; with several coordinators, the board's
-top line names its coordinator and other coordinators' tasks have dimmed titles.
+beside it. With several coordinators, each board shows only its own
+coordinator's tasks, plus those with no coordinator or whose coordinator is gone
+(those are everyone's). Its top line names its coordinator and says what it
+hides ("+4 in c2 · o shows"). `o` shows the other coordinators' tasks too, in
+their usual groups, with dimmed titles that start with their coordinator's ID
+("c2 · Fix the login"); their closed ones follow `f`. Each board remembers its
+choice (its entry's `board_others` in config.json; `bullpen config
+--board-others on --coordinator c1` sets it from a shell). `go --next` from a
+coordinator's pane, its board or one of its workers skips the tasks its board
+hides, as do the board's `n` and selection. With one coordinator, every board
+shows every task.
 
 A task belongs to the coordinator that added it: the one whose pane ran `bullpen
 add`, or the first coordinator when `add` ran anywhere else (`bullpen show`
@@ -532,7 +541,9 @@ working agent can show no progress before you hear of it (20 by default, `0` for
 never). `bullpen config --triage-minutes 15` sets how long a task can wait on its
 coordinator before it goes to you (10 by default; see [Triage](#triage)). `bullpen config
 --board-bottom-gap 0` lets the board use its bottom row (1 empty row by default, for
-Rex's capsules). `bullpen config --prefix XY --base develop` changes the task prefix (default `BP`)
+Rex's capsules). `bullpen config --board-others on --coordinator c1` makes c1's
+board show the other coordinators' tasks too (see [Several
+coordinators](#several-coordinators); the board's `o`). `bullpen config --prefix XY --base develop` changes the task prefix (default `BP`)
 and the base branch (default: origin's default branch). The worker and coordinator
 commands are in that folder's `config.json` (`worker`, `coordinator_cmd`). `"rebase_others": false`
 there stops `accept` rebasing the other open tasks (see [After accept](#after-accept)).

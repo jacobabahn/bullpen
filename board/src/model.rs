@@ -199,6 +199,9 @@ pub struct Config {
     pub auto_accept: bool,
     /// the IDs of the repo's coordinators
     pub coordinators: Vec<String>,
+    /// the coordinators whose boards show the other coordinators' tasks too
+    /// (their entry's `board_others`, set by the board's `o`)
+    pub board_others: Vec<String>,
     /// the worker model for all tasks (`bullpen config --worker-model`)
     pub worker_model: Option<String>,
     /// rows the board leaves empty at its bottom, for Rex's minimized-pane capsules
@@ -214,6 +217,17 @@ impl Config {
             (Some(me), Some(o)) => self.coordinators.len() > 1 && o != me && self.coordinators.iter().any(|c| c == o),
             _ => false,
         }
+    }
+
+    /// Does the board beside coordinator me show the other coordinators' tasks?
+    pub fn shows_others(&self, me: Option<&str>) -> bool {
+        me.is_some_and(|me| self.board_others.iter().any(|c| c == me))
+    }
+
+    /// Is the task left off this board? Another coordinator's, while the board shows
+    /// only its own.
+    pub fn hides(&self, t: &Task, me: Option<&str>) -> bool {
+        !self.shows_others(me) && self.theirs(t, me)
     }
 }
 
@@ -253,6 +267,15 @@ impl Config {
             coordinators: v["coordinators"]
                 .as_array()
                 .map(|cs| cs.iter().filter_map(|c| c["id"].as_str().map(String::from)).collect())
+                .unwrap_or_default(),
+            board_others: v["coordinators"]
+                .as_array()
+                .map(|cs| {
+                    cs.iter()
+                        .filter(|c| c["board_others"].as_bool() == Some(true))
+                        .filter_map(|c| c["id"].as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default(),
             worker_model: v["worker_model"].as_str().map(String::from),
             bottom_gap: v["board_bottom_gap"].as_u64().unwrap_or(1) as usize,
@@ -339,6 +362,46 @@ pub fn board_groups(tasks: &[Task], closed: bool) -> Vec<(&'static str, Vec<&Tas
             (!ts.is_empty()).then_some((*heading, ts))
         })
         .collect()
+}
+
+/// The groups this board shows: board_groups without the tasks it hides.
+pub fn shown_groups<'a>(tasks: &'a [Task], cfg: &Config, me: Option<&str>, closed: bool) -> Vec<(&'static str, Vec<&'a Task>)> {
+    board_groups(tasks, closed)
+        .into_iter()
+        .filter_map(|(heading, ts)| {
+            let ts: Vec<&Task> = ts.into_iter().filter(|t| !cfg.hides(t, me)).collect();
+            (!ts.is_empty()).then_some((heading, ts))
+        })
+        .collect()
+}
+
+/// How many tasks the board hides, by coordinator in the config's order: those it
+/// would show with the others' tasks on (closed ones only with `closed`).
+pub fn hidden(tasks: &[Task], cfg: &Config, me: Option<&str>, closed: bool) -> Vec<(String, usize)> {
+    let hid: Vec<&Task> = board_groups(tasks, closed).into_iter().flat_map(|(_, ts)| ts).filter(|t| cfg.hides(t, me)).collect();
+    cfg.coordinators
+        .iter()
+        .map(|c| (c.clone(), hid.iter().filter(|t| t.coordinator.as_deref() == Some(c)).count()))
+        .filter(|(_, n)| *n > 0)
+        .collect()
+}
+
+/// The header's note of what's hidden: "+4 in c2 · o shows", "" when nothing is.
+pub fn hidden_hint(hidden: &[(String, usize)]) -> String {
+    if hidden.is_empty() {
+        return String::new();
+    }
+    let n: usize = hidden.iter().map(|(_, n)| n).sum();
+    let whose: Vec<&str> = hidden.iter().map(|(c, _)| c.as_str()).collect();
+    format!("+{n} in {} · o shows", whose.join(", "))
+}
+
+/// A task's title as the board shows it: another coordinator's starts with its ID.
+pub fn shown_title(t: &Task, cfg: &Config, me: Option<&str>) -> String {
+    match t.coordinator.as_deref() {
+        Some(c) if cfg.theirs(t, me) => format!("{c} · {}", t.title),
+        _ => t.title.clone(),
+    }
 }
 
 pub fn pr_short(url: Option<&str>) -> String {
@@ -714,6 +777,7 @@ pub(crate) mod tests {
                 merge: "rebase".into(),
                 auto_accept: false,
                 coordinators: Vec::new(),
+                board_others: Vec::new(),
                 worker_model: None,
                 bottom_gap: 1,
             }
@@ -736,6 +800,100 @@ pub(crate) mod tests {
         assert!(!cfg.theirs(&owned(Some("c3")), Some("c1"))); // its owner is gone: everyone's
         assert!(!cfg.theirs(&owned(None), Some("c1")));
         assert!(!cfg.theirs(&owned(Some("c2")), None)); // a board that isn't anyone's
+    }
+
+    /// Two coordinators: c1's and c2's tasks, one with no owner, one whose owner is gone.
+    fn two_boards() -> (Config, Vec<Task>) {
+        let mut cfg = Config::default_for_test();
+        cfg.coordinators = vec!["c1".into(), "c2".into()];
+        let owned = |id: &str, status: &str, o: Option<&str>| Task { coordinator: o.map(String::from), ..task(id, status) };
+        let tasks = vec![
+            owned("BP-1", "working", Some("c1")),
+            owned("BP-2", "needs", Some("c2")),
+            owned("BP-3", "ready", Some("c2")),
+            owned("BP-4", "done", Some("c2")),
+            owned("BP-5", "todo", None),
+            owned("BP-6", "review", Some("c9")),
+        ];
+        (cfg, tasks)
+    }
+
+    fn shown_ids<'a>(tasks: &'a [Task], cfg: &Config, me: Option<&str>, closed: bool) -> Vec<&'a str> {
+        let mut ids: Vec<&str> = shown_groups(tasks, cfg, me, closed).into_iter().flat_map(|(_, ts)| ts).map(|t| t.id.as_str()).collect();
+        ids.sort_by_key(|id| id[3..].parse::<u32>().unwrap());
+        ids
+    }
+
+    #[test]
+    fn a_board_shows_only_its_own_coordinators_tasks() {
+        let (cfg, tasks) = two_boards();
+        // c2's are left off c1's board; its own, the ownerless and the gone owner's stay
+        assert_eq!(shown_ids(&tasks, &cfg, Some("c1"), true), vec!["BP-1", "BP-5", "BP-6"]);
+        assert_eq!(shown_ids(&tasks, &cfg, Some("c2"), false), vec!["BP-2", "BP-3", "BP-5", "BP-6"]);
+        // a board that isn't anyone's shows everything
+        assert_eq!(shown_ids(&tasks, &cfg, None, false), vec!["BP-1", "BP-2", "BP-3", "BP-5", "BP-6"]);
+    }
+
+    #[test]
+    fn ownerless_and_gone_owners_tasks_stay_on_every_board() {
+        let (cfg, tasks) = two_boards();
+        for me in ["c1", "c2"] {
+            let ids = shown_ids(&tasks, &cfg, Some(me), false);
+            assert!(ids.contains(&"BP-5") && ids.contains(&"BP-6"), "{me}: {ids:?}");
+        }
+        assert_eq!(shown_title(&tasks[4], &cfg, Some("c1")), "");
+        assert_eq!(shown_title(&tasks[5], &cfg, Some("c1")), "");
+    }
+
+    #[test]
+    fn showing_the_others_brings_their_tasks_back_labelled() {
+        let (mut cfg, mut tasks) = two_boards();
+        cfg.board_others = vec!["c1".into()];
+        assert!(cfg.shows_others(Some("c1")) && !cfg.shows_others(Some("c2")));
+        // c1's board: everything, closed ones only with f
+        assert_eq!(shown_ids(&tasks, &cfg, Some("c1"), false), vec!["BP-1", "BP-2", "BP-3", "BP-5", "BP-6"]);
+        assert_eq!(shown_ids(&tasks, &cfg, Some("c1"), true), vec!["BP-1", "BP-2", "BP-3", "BP-4", "BP-5", "BP-6"]);
+        // in their usual groups
+        let groups = shown_groups(&tasks, &cfg, Some("c1"), false);
+        let group = |id: &str| groups.iter().find(|(_, ts)| ts.iter().any(|t| t.id == id)).unwrap().0;
+        assert_eq!((group("BP-2"), group("BP-3")), ("Needs you", "Ready to accept"));
+        // labelled with their coordinator; its own aren't
+        tasks[1].title = "Fix it".into();
+        assert_eq!(shown_title(&tasks[1], &cfg, Some("c1")), "c2 · Fix it");
+        tasks[0].title = "Mine".into();
+        assert_eq!(shown_title(&tasks[0], &cfg, Some("c1")), "Mine");
+        // c2's board still shows only its own
+        assert_eq!(shown_ids(&tasks, &cfg, Some("c2"), false), vec!["BP-2", "BP-3", "BP-5", "BP-6"]);
+        assert!(hidden(&tasks, &cfg, Some("c1"), true).is_empty());
+    }
+
+    #[test]
+    fn the_header_counts_what_is_hidden() {
+        let (mut cfg, tasks) = two_boards();
+        // BP-2 and BP-3 open; BP-4 is closed, so it counts only with f
+        assert_eq!(hidden(&tasks, &cfg, Some("c1"), false), vec![("c2".to_string(), 2)]);
+        assert_eq!(hidden(&tasks, &cfg, Some("c1"), true), vec![("c2".to_string(), 3)]);
+        assert_eq!(hidden_hint(&hidden(&tasks, &cfg, Some("c1"), false)), "+2 in c2 · o shows");
+        // c2 hides c1's one task
+        assert_eq!(hidden_hint(&hidden(&tasks, &cfg, Some("c2"), false)), "+1 in c1 · o shows");
+        // several others
+        cfg.coordinators.push("c3".into());
+        let mut more = tasks.clone();
+        more.push(Task { coordinator: Some("c3".into()), ..task("BP-7", "working") });
+        assert_eq!(hidden_hint(&hidden(&more, &cfg, Some("c1"), false)), "+3 in c2, c3 · o shows");
+        // nothing hidden: nothing said
+        let mine: Vec<Task> = tasks.iter().filter(|t| t.coordinator.as_deref() != Some("c2")).cloned().collect();
+        assert_eq!(hidden_hint(&hidden(&mine, &cfg, Some("c1"), false)), "");
+    }
+
+    #[test]
+    fn one_coordinator_shows_everything_as_before() {
+        let (mut cfg, tasks) = two_boards();
+        cfg.coordinators = vec!["c1".into()];
+        // c2 isn't listed: its tasks are everyone's
+        assert_eq!(shown_ids(&tasks, &cfg, Some("c1"), true), vec!["BP-1", "BP-2", "BP-3", "BP-4", "BP-5", "BP-6"]);
+        assert!(hidden(&tasks, &cfg, Some("c1"), true).is_empty());
+        assert_eq!(shown_title(&tasks[1], &cfg, Some("c1")), "");
     }
 
     #[test]
@@ -771,6 +929,7 @@ pub(crate) mod tests {
             merge: "rebase".into(),
             auto_accept: on,
             coordinators: Vec::new(),
+            board_others: Vec::new(),
             worker_model: None,
             bottom_gap: 1,
         };

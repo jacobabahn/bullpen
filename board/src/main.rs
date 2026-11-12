@@ -41,6 +41,8 @@ Acting on the selected task
 The board
   l            switch layout (grouped, compact)
   f            show closed tasks too (accepted, closed, dropped)
+  o            show other coordinators' tasks too, dimmed and
+               labelled with their coordinator (with several)
   ?            this list
   q            quit the board";
 
@@ -107,7 +109,8 @@ pub struct App {
     pub dir: PathBuf,
     pub root: PathBuf,
     pub bullpen: PathBuf,
-    /// the coordinator this board sits beside (`--coordinator`): other ones' tasks are dimmed
+    /// the coordinator this board sits beside (`--coordinator`): other ones' tasks are
+    /// hidden, or dimmed with `o`
     pub me: Option<String>,
     pub repo_name: String,
     pub cfg: Config,
@@ -170,9 +173,32 @@ impl App {
         self.tasks = model::load_tasks(&self.dir);
     }
 
+    /// The groups the board shows: without the tasks it hides.
+    pub fn groups(&self) -> Vec<(&'static str, Vec<&Task>)> {
+        model::shown_groups(&self.tasks, &self.cfg, self.me.as_deref(), self.finished)
+    }
+
     /// The tasks in the order the board shows them.
     pub fn order(&self) -> Vec<&Task> {
-        model::board_groups(&self.tasks, self.finished).into_iter().flat_map(|(_, ts)| ts).collect()
+        self.groups().into_iter().flat_map(|(_, ts)| ts).collect()
+    }
+
+    /// Show or hide the other coordinators' tasks, and remember it for this board.
+    fn toggle_others(&mut self) {
+        let Some(me) = self.me.clone().filter(|_| self.cfg.coordinators.len() > 1) else {
+            self.msg = "Only one coordinator: every task is shown.".into();
+            return;
+        };
+        let on = !self.cfg.shows_others(Some(&me));
+        self.cfg.board_others.retain(|c| *c != me);
+        if on {
+            self.cfg.board_others.push(me.clone());
+        }
+        self.top = 0;
+        let (ok, out) = self.bp(&["config", "--board-others", if on { "on" } else { "off" }, "--coordinator", &me]);
+        if !ok {
+            self.msg = out;
+        }
     }
 
     pub fn current(&self) -> Option<&Task> {
@@ -342,6 +368,7 @@ impl App {
                 }
             }
             (_, Some('f')) => self.finished = !self.finished,
+            (_, Some('o')) => self.toggle_others(),
             (_, Some('c')) if self.current().is_some_and(|t| t.status == "finished") => {
                 let id = self.current().map(|t| t.id.clone()).unwrap_or_default();
                 if !self.still(&id) {
@@ -613,6 +640,47 @@ mod tests {
 
     fn press(a: &mut App, c: char) {
         a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+    }
+
+    fn owned(id: &str, status: &str, c: &str) -> Task {
+        Task { coordinator: Some(c.into()), ..task(id, status) }
+    }
+
+    #[test]
+    fn selection_and_n_skip_the_other_coordinators_tasks() {
+        let mut a = app(vec![owned("BP-1", "needs", "c1"), owned("BP-2", "needs", "c2"), owned("BP-3", "needs", "c1")]);
+        a.cfg.coordinators = vec!["c1".into(), "c2".into()];
+        a.me = Some("c1".into());
+        a.sel = Some("BP-2".into());
+        a.settle();
+        assert_eq!(a.sel.as_deref(), Some("BP-1")); // BP-2 isn't shown: off it
+        press(&mut a, 'j');
+        assert_eq!(a.sel.as_deref(), Some("BP-3"));
+        press(&mut a, 'n');
+        assert_eq!(a.sel.as_deref(), Some("BP-1"));
+        press(&mut a, 'n');
+        assert_eq!(a.sel.as_deref(), Some("BP-3"));
+        // o shows them: BP-2 comes between (the setting can't be saved here; it still toggles)
+        press(&mut a, 'o');
+        assert!(a.cfg.shows_others(Some("c1")));
+        assert_eq!(a.order().iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["BP-1", "BP-2", "BP-3"]);
+        press(&mut a, 'k');
+        assert_eq!(a.sel.as_deref(), Some("BP-2"));
+        // and o again hides them
+        press(&mut a, 'o');
+        assert!(!a.cfg.shows_others(Some("c1")));
+        a.settle();
+        assert_eq!(a.sel.as_deref(), Some("BP-1"));
+    }
+
+    #[test]
+    fn o_with_one_coordinator_says_so() {
+        let mut a = app(vec![owned("BP-1", "needs", "c1")]);
+        a.cfg.coordinators = vec!["c1".into()];
+        a.me = Some("c1".into());
+        press(&mut a, 'o');
+        assert!(a.cfg.board_others.is_empty());
+        assert_eq!(a.msg, "Only one coordinator: every task is shown.");
     }
 
     #[test]

@@ -608,7 +608,9 @@ def cmd_flush(args):
 #
 # A repo can have several coordinators, each an agent in its own pane with its own
 # board beside it. cfg["coordinators"] lists them, oldest (the primary) first:
-# {"id": "c1", "block", "session", "board": {"block", "session"}}. The ID stays when
+# {"id": "c1", "block", "session", "board": {"block", "session"}, "board_others"}.
+# Its board shows only its own tasks (and those with no owner, or a gone one) unless
+# board_others (the board's `o`) shows the others' too. The ID stays when
 # a Rex restart gives the pane a new block. A task belongs to the coordinator that
 # added it (t["coordinator"], its ID): news about it goes to that one alone while its
 # pane is alive, else to all of them. `bullpen adopt` moves a task to another.
@@ -626,6 +628,15 @@ def coordinator_at(repo, block, boards=True):
         if c.get("block") == block or (boards and (c.get("board") or {}).get("block") == block):
             return c
     return None
+
+
+def on_board(repo, c, t):
+    """Does coordinator c's board show the task? Not another live coordinator's, while
+    c's board_others is off. With one coordinator (or c None), every task."""
+    if not c or c.get("board_others") or len(repo.cfg["coordinators"]) < 2:
+        return True
+    own = owner(repo, t)
+    return not own or own["id"] == c["id"]
 
 
 def alive(c):
@@ -2500,6 +2511,13 @@ def cmd_config(args):
         if args.board_bottom_gap < 0:
             raise Fail("--board-bottom-gap takes rows, or 0 for none")
         repo.cfg["board_bottom_gap"] = args.board_bottom_gap
+    if args.board_others:
+        c = coordinator(repo, args.coordinator) if args.coordinator else \
+            coordinator_at(repo, os.environ.get("REX_BLOCK"))
+        if not c:
+            raise Fail(f"no coordinator {args.coordinator}" if args.coordinator else
+                       "--board-others is per board: run it in a coordinator's pane or board, or add --coordinator ID")
+        c["board_others"] = args.board_others == "on"
     if args.auto_accept:
         repo.cfg["auto_accept"] = args.auto_accept == "on"
     if args.triage_minutes is not None:
@@ -2523,7 +2541,10 @@ def cmd_guide(args):
 def go_target(repo, args):
     """(session, block, name) of the pane `go` should focus."""
     if args.next:
-        needs = sorted((t for t in repo.tasks() if t["status"] == "needs" and t.get("block")),
+        # only over the tasks the board of the pane's coordinator shows
+        c = pane_coordinator(repo, args.from_block)
+        needs = sorted((t for t in repo.tasks() if t["status"] == "needs" and t.get("block")
+                        and on_board(repo, c, t)),
                        key=lambda t: t.get("since") or t.get("updated") or "")
         if not needs:
             raise Fail("nothing needs you")
@@ -2555,8 +2576,13 @@ def go_target(repo, args):
 
 
 def coordinator_for(repo, block):
+    """The coordinator a pane goes with (pane_coordinator), else the primary one."""
+    return pane_coordinator(repo, block) or primary(repo)
+
+
+def pane_coordinator(repo, block):
     """The coordinator a pane goes with: itself, the one beside its board, or the one
-    owning its task; else the primary one."""
+    owning its task; None for any other pane."""
     c = coordinator_at(repo, block)
     if not c and block:
         entry = read_json(STATE / "blocks" / f"{safe(block)}.json") or {}
@@ -2566,7 +2592,7 @@ def coordinator_for(repo, block):
                 c = owner(repo, repo.task(role.split()[0]))
             except Fail:
                 pass
-    return c or primary(repo)
+    return c
 
 
 def cmd_go(args):
@@ -3883,6 +3909,11 @@ def main(argv=None):
     p.add_argument("--board-layout", choices=["grouped", "compact"], help="how the board lists tasks")
     p.add_argument("--board-bottom-gap", type=int, metavar="ROWS",
                    help="empty rows at the board's bottom, under Rex's minimized-pane capsules (default 1; 0: none)")
+    p.add_argument("--board-others", choices=["on", "off"],
+                   help="with several coordinators: this coordinator's board shows the other ones' tasks too "
+                        "(default off; the board's o key)")
+    p.add_argument("--coordinator", metavar="ID",
+                   help="the coordinator --board-others is for (default: the one whose pane or board runs it)")
     p.add_argument("--auto-accept", choices=["on", "off"],
                    help="accept (merge) a task by itself once review approves it (default off)")
     p.add_argument("--triage-minutes", type=int, metavar="MINUTES",

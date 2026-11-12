@@ -148,8 +148,8 @@ was approved makes it ready again, with a news line.
 There can be other coordinators for this repository at the same time, each an
 agent in its own pane with its own board (`bullpen config` lists them under
 `"coordinators"`). The tasks you add are yours: news about them comes to you
-alone. Other coordinators' tasks are theirs: `ls` and the board show them (their
-titles dimmed on your board), and you don't hear about them. Leave them alone:
+alone. Other coordinators' tasks are theirs: `ls` shows them, your board hides
+them unless the person presses `o` there, and you don't hear about them. Leave them alone:
 don't `tell`, `start`, `resume`, `accept` or `drop` another coordinator's task
 unless the person asks you to. News about several tasks at once comes to every
 coordinator, and so does news for a task whose coordinator's pane is gone. If

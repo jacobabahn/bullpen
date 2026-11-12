@@ -81,7 +81,7 @@ fn screen_line(raw: &str) -> Line<'static> {
 
 /// The header's right side: how many tasks are in each state, in the marks'
 /// colours, dropping the least urgent until it fits.
-fn counts(tasks: &[Task], room: usize) -> Line<'static> {
+fn counts(tasks: &[&Task], room: usize) -> Line<'static> {
     let n = |sts: &[&str]| tasks.iter().filter(|t| sts.contains(&t.status.as_str())).count();
     let mut parts: Vec<(String, Style)> = [
         (n(&["needs"]), "needs"),
@@ -162,7 +162,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // bottom (the detail panel, message line, keys, scroll mark) sits on top of it
     let h = h - bottom_gap(app, h, 4 + footer);
     app.height = h as u16;
-    let groups = model::board_groups(&app.tasks, app.finished);
+    // by field, not app.groups(): app.top changes while these are in use
+    let groups = model::shown_groups(&app.tasks, &app.cfg, app.me.as_deref(), app.finished);
     let cur_id = app.current().map(|t| t.id.clone());
     let is_cur = |t: &Task| Some(&t.id) == cur_id.as_ref();
     // IDs share a column as wide as the longest, so titles and details line up
@@ -174,13 +175,17 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let name = fit(&app.repo_name, w.saturating_sub(2).min(24));
     // a small marker when approved tasks accept themselves
     let auto = if app.cfg.auto_accept { " · auto-accept" } else { "" };
-    // with several coordinators: whose board this is (other ones' tasks are dimmed)
+    // with several coordinators: whose board this is, and how many of the other
+    // ones' tasks it hides (`o` shows them, dimmed)
+    let hint = model::hidden_hint(&model::hidden(&app.tasks, &app.cfg, app.me.as_deref(), app.finished));
+    let hint = if hint.is_empty() { hint } else { format!(" · {hint}") };
     let auto = match app.me.as_deref() {
-        Some(me) if app.cfg.coordinators.len() > 1 => format!(" · {me}{auto}"),
+        Some(me) if app.cfg.coordinators.len() > 1 => format!(" · {me}{auto}{hint}"),
         _ => auto.to_string(),
     };
     let auto = auto.as_str();
-    let count = counts(&app.tasks, w.saturating_sub(width(&name) + width(auto) + 5));
+    let shown: Vec<&Task> = groups.iter().flat_map(|(_, ts)| ts.iter().copied()).collect();
+    let count = counts(&shown, w.saturating_sub(width(&name) + width(auto) + 5));
     put(buf, area, 0, w.saturating_sub(2 + count.width()).max(1), count);
     put(buf, area, 0, 1 + width(&name), span(auto, dim()));
     put(buf, area, 0, 1, span(name, bold()));
@@ -360,7 +365,7 @@ fn title_line(app: &App, t: &Task, selected: bool, w: usize, idw: usize, now: ch
     }
 
     let age = model::ago(t.stamp(), now);
-    let title = fit(&t.title, width_all.saturating_sub(width(&left) + width(&age) + 2));
+    let title = fit(&model::shown_title(t, &app.cfg, app.me.as_deref()), width_all.saturating_sub(width(&left) + width(&age) + 2));
     let middle = pad(&format!("  {title}"), width_all.saturating_sub(idw + width(&age)));
     let stale = t.status == "needs" && model::seconds_in_status(t, now) >= STALE;
     // dim text is hard to read on the tint, so the selected row drops it
@@ -423,6 +428,23 @@ mod tests {
 
     fn row(s: &[String], from_bottom: usize) -> &str {
         &s[s.len() - 1 - from_bottom]
+    }
+
+    #[test]
+    fn the_header_says_what_is_hidden_and_o_labels_them() {
+        let c = |id: &str, who: &str| Task { coordinator: Some(who.into()), ..ready(id) };
+        let mut a = app(vec![c("BP-1", "c1"), c("BP-2", "c2"), c("BP-3", "c2")], 1, Layout::Grouped);
+        a.cfg.coordinators = vec!["c1".into(), "c2".into()];
+        a.me = Some("c1".into());
+        let s = screen(&mut a, 60, 14);
+        assert!(s[0].contains("repo · c1 · +2 in c2 · o shows"), "{s:#?}");
+        assert!(s[0].ends_with("✔ 1"), "{s:#?}"); // counts what's shown
+        assert!(!s.iter().any(|r| r.contains("BP-2")), "{s:#?}");
+        a.cfg.board_others = vec!["c1".into()];
+        let s = screen(&mut a, 60, 14);
+        assert!(!s[0].contains("o shows") && s[0].ends_with("✔ 3"), "{s:#?}");
+        assert!(s.iter().any(|r| r.contains("BP-2  c2 · Task BP-2")), "{s:#?}");
+        assert!(s.iter().any(|r| r.contains("BP-1  Task BP-1")), "{s:#?}");
     }
 
     #[test]

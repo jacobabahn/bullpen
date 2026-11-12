@@ -2542,6 +2542,41 @@ class BullpenTest(unittest.TestCase):
         self.assertIn("coordinator already running: c1 (blk1), c2", out)
         self.assertEqual([a[0] for a in self.rex_calls()].count("run"), 1)
 
+    def test_board_others_is_a_setting_per_board(self):
+        other = self.two_coordinators()
+        self.assertNotIn("board_others", self.coordinators()[0])  # off by default
+        self.bp("config", "--board-others", "on", "--coordinator", "c1")  # as the board runs it
+        self.assertEqual([c.get("board_others") for c in self.coordinators()], [True, None])
+        self.bp_in(other, "config", "--board-others", "on")  # in c2's pane: c2's
+        self.bp("config", "--board-others", "off", "--coordinator", "c1")
+        self.assertEqual([c.get("board_others") for c in self.coordinators()], [False, True])
+        board = self.coordinators()[1]["board"]["block"]
+        self.bp_in(board, "config", "--board-others", "off")  # on c2's board: c2's
+        self.assertEqual(self.coordinators()[1]["board_others"], False)
+        p = self.bp("config", "--board-others", "on", ok=False)  # whose?
+        self.assertIn("per board", p.stderr)
+        p = self.bp("config", "--board-others", "on", "--coordinator", "c7", ok=False)
+        self.assertIn("no coordinator c7", p.stderr)
+
+    def test_go_next_skips_tasks_the_board_hides(self):
+        other = self.two_coordinators()
+        mine = self.bp("add", "Mine", "--brief", "x").stdout.strip()  # c1's
+        theirs = self.bp_in(other, "add", "Theirs", "--brief", "x").stdout.strip()
+        for tid in (theirs, mine):
+            self.bp("start", tid)
+            self.bp("_event", self.block(tid), "blocked", "question", "Which?")
+        nxt = lambda frm: json.loads(self.bp("go", "--next", "--json", "--from", frm).stdout)["block"]
+        c1_board = self.coordinators()[0]["board"]["block"]
+        self.assertEqual(nxt(c1_board), self.block(mine))
+        self.assertEqual(nxt(self.block(mine)), self.block(mine))  # c2's isn't on c1's board
+        self.assertEqual(nxt(other), self.block(theirs))  # nor c1's on c2's
+        self.assertEqual(nxt("elsewhere"), self.block(theirs))  # not a coordinator's pane: every task
+        self.bp("config", "--board-others", "on", "--coordinator", "c1")
+        self.assertEqual(nxt(self.block(mine)), self.block(theirs))
+        # c2's board is unchanged
+        self.assertEqual(nxt(other), self.block(theirs))
+        self.assertEqual(nxt(self.block(theirs)), self.block(theirs))
+
     def test_a_task_belongs_to_the_coordinator_that_added_it(self):
         other = self.two_coordinators()
         mine = self.bp_in(other, "add", "Theirs", "--brief", "x").stdout.strip()
