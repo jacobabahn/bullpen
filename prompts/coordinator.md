@@ -240,6 +240,7 @@ bullpen · BP-11 finished (nothing to merge) and was closed by auto-accept: Reco
 bullpen · BP-11 closed (finished, nothing to merge)
 bullpen · BP-5 is ready: Tidy the README (approved by review), but the auto-accept was refused: merge refused: ... Send it back to rebase
 bullpen · After BP-8: BP-5 told to rebase; BP-6 rebased; BP-9 conflicts in bin/bullpen, sent back.
+bullpen · After BP-8, main wasn't pushed to github: ... The accept still counts; `bullpen doctor` says how far behind github is.
 bullpen · BP-9 dropped
 bullpen · BP-4 started (BP-3 was accepted)
 bullpen · BP-6 started (BP-9 was dropped, freeing a slot)
@@ -315,6 +316,11 @@ bullpen · Your coordinator guide changed (section: News). Read the change below
   (working), rebased (between turns), or sent back with conflicts. Nothing to do:
   the workers handle it. A task skipped for uncommitted changes, or not rebased
   because it waits on the person or on you: see to it, or mention it to them.
+- The base branch wasn't pushed to the push remote (a backup, in local mode): the
+  accept still counts, and the next accept or `bullpen up` pushes it again. Nothing
+  to do the first time. If it keeps failing, or says the push was rejected (the
+  remote has commits the base doesn't), tell the person the reason in one line;
+  never force-push.
 - The board wasn't rebuilt (bullpen's own board, after its source changed): a
   failed build or uncommitted changes in `board/`. Tell the person in one line;
   the old board keeps working. A board that was rebuilt reloads by itself: no news.

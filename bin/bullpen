@@ -72,10 +72,11 @@ DEFAULT_CONFIG = {
     "max_running": 3,        # tasks working at once (review doesn't count); the queue starts more as they hand off
     "rebase_others": True,   # accept rebases the other open tasks onto the new base
     "board_repos": True,     # the board's top line counts what needs you or is ready in other repos
+    "push_remote": None,     # local mode: a remote accept pushes the base branch to, as a backup
 }
 
 # Settings that belong to one repository: the global config.json can't hold them.
-REPO_ONLY = ("prefix", "next", "base", "coordinators", "next_coordinator", "news")
+REPO_ONLY = ("prefix", "next", "base", "coordinators", "next_coordinator", "news", "push_remote")
 # What bullpen notes for itself in a repo's config.json.
 INTERNAL = ("root", "triage_migrated", "stops_migrated", "layered")
 
@@ -1597,6 +1598,9 @@ def cmd_up(args):
             ensure_board(repo, session, c)
     gather(repo, session)
     ensure_watcher(session)
+    said = catch_up_push(repo)
+    if said:
+        print(said)
     said = rebuild_board_if_stale(repo)
     if said:
         print(said)
@@ -4178,6 +4182,10 @@ def cmd_accept(args):
         news(repo, t, "accepted", f"{t['id']} approved by review and auto-accepted ({how})")
     else:
         tell_coordinator(repo, t, "accepted", f"{t['id']} accepted ({how})")
+    if t.get("merged") and not t.get("pr"):  # local mode: back up the base branch
+        said = push_base(repo, t["base"], t)
+        if said:
+            print(said)
     if how != "nothing to merge":
         rebase_others(repo, t)
     start_queued(repo, t, "accepted")
@@ -4344,6 +4352,138 @@ def rebase_other(repo, t, accepted):
             return f"{t['id']} rebased, but its patch changed: a reviewer checks it again"
     repo.save_task(t)  # same status: it stays where it was
     return f"{t['id']} rebased"
+
+
+# ---------- the push remote: a backup of the base branch, in local mode ----------
+#
+# config --push-remote names a remote (not origin: with origin, bullpen is in PR mode
+# and the setting does nothing). After accept merges into the local base branch, the
+# base branch alone is pushed there, in the background, never forced. Pushes take a
+# lock and push the branch as it is then, so two accepts in a row can't race: the
+# later push carries both. A failed push leaves the accept standing, with one news line.
+
+
+PUSH_NEWS = {"id": "push"}  # the news log's task column when no task is behind a push
+
+
+def push_remote(repo):
+    """The remote accept pushes the base branch to, or None (unset, or PR mode)."""
+    name = repo.cfg.get("push_remote")
+    return name if name and not repo.has_origin() else None
+
+
+def push_env(repo):
+    """git that never waits for a password or a key's passphrase: it fails instead."""
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
+    if not env.get("GIT_SSH_COMMAND") and git(repo.root, "config", "core.sshCommand", check=False).returncode != 0:
+        env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
+    return env
+
+
+def quiet_git(repo, *args, timeout=60):
+    """git on the network, away from any terminal (no prompt can reach the person)."""
+    try:
+        return subprocess.run(["git", "-C", str(repo.root), *args], env=push_env(repo), text=True,
+                              stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout,
+                              start_new_session=True)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(args, 1, "", f"no answer from the remote in {timeout}s")
+
+
+def push_base(repo, base, t=None):
+    """After a local merge: push base to the push remote in the background. Says what it
+    started, or None when there's no push remote."""
+    remote = push_remote(repo)
+    if not remote:
+        return None
+    argv = [SELF, "_push", base] + (["--task", t["id"]] if t else [])
+    p = subprocess.Popen(argv, cwd=repo.root, start_new_session=True,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if os.environ.get("BULLPEN_PUSH_WAIT"):  # the tests: wait for it, to look at what it did
+        p.wait()
+    return f"pushing {base} to {remote} in the background"
+
+
+def push_reason(out, remote, base):
+    """Why git push (or ls-remote) failed, in a few words."""
+    text = " ".join(out.split())
+    if "[rejected]" in out or "non-fast-forward" in out or "fetch first" in out:
+        return (f"rejected, {remote} has commits {base} doesn't (bullpen never force-pushes: "
+                f"`git pull {remote} {base}` by hand, then `git push {remote} {base}`)")
+    lines = [l.strip() for l in out.splitlines() if l.strip() and not l.strip().startswith("hint:")]
+    fatal = [l for l in lines if l.startswith(("fatal:", "error:", "remote:", "ERROR"))]
+    return clip((fatal or lines or [text or "git push failed"])[0], 200)
+
+
+def cmd_push_bg(args):
+    """(bullpen) push the base branch to the push remote, one push at a time."""
+    repo = Repo(repo_root())
+    remote = push_remote(repo)
+    if not remote:
+        return
+    repo.dir.mkdir(parents=True, exist_ok=True)
+    with open(repo.dir / "push.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)  # an earlier push finishes first
+        # The branch as it is now: a later accept's commits go too, never an older tip.
+        p = quiet_git(repo, "push", "-q", remote, f"refs/heads/{args.base}:refs/heads/{args.base}")
+    if p.returncode == 0:
+        return
+    try:
+        t = repo.task(args.task) if args.task else PUSH_NEWS
+    except Fail:
+        t = PUSH_NEWS
+    after = "" if t is PUSH_NEWS else f"After {t['id']}, "
+    news(repo, t, "push", f"{after}{args.base} wasn't pushed to {remote}: "
+                          f"{push_reason(p.stderr or p.stdout, remote, args.base)}. "
+                          + ("" if t is PUSH_NEWS else "The accept still counts; ")
+                          + f"`bullpen doctor` says how far behind {remote} is.",
+         everyone=t is PUSH_NEWS)
+    return 1
+
+
+def catch_up_push(repo):
+    """`up`: push the base branch when it has commits the push remote didn't get (after
+    an offline spell, say), as far as this checkout last saw it. Says what it started."""
+    remote = push_remote(repo)
+    if not remote or git(repo.root, "remote", "get-url", remote, check=False).returncode != 0:
+        return None
+    base = repo.base()
+    if git(repo.root, "rev-parse", "-q", "--verify", f"refs/heads/{base}", check=False).returncode != 0:
+        return None
+    seen = f"refs/remotes/{remote}/{base}"
+    if git(repo.root, "rev-parse", "-q", "--verify", seen, check=False).returncode == 0:
+        if int(git(repo.root, "rev-list", "--count", f"{seen}..refs/heads/{base}").stdout.strip()) == 0:
+            return None
+    return push_base(repo, base)
+
+
+def check_push(repo, why_not=None):
+    """The push remote: there, reachable without a prompt, and how far behind the base."""
+    if not repo:
+        return "skip", f"can't tell: {why_not or 'not in a git repository'}"
+    name = repo.cfg.get("push_remote")
+    if not name:
+        return "skip", "none (`bullpen config --push-remote <remote>` backs up the base branch after each accept)"
+    if repo.has_origin():
+        return "skip", f"{name} is set, but this repo has an origin remote (PR mode), so nothing is pushed to it"
+    if git(repo.root, "remote", "get-url", name, check=False).returncode != 0:
+        return "fail", (f"there's no remote {name}: `git remote add {name} <url>`, "
+                        f"or `bullpen config --push-remote \"\"`")
+    base = repo.base()
+    p = quiet_git(repo, "ls-remote", "--heads", name, f"refs/heads/{base}", timeout=20)
+    if p.returncode != 0:
+        return "fail", f"can't reach {name} without a prompt: {push_reason(p.stderr or p.stdout, name, base)}"
+    theirs = (p.stdout.split() or [None])[0]
+    if not theirs:
+        return "fail", f"{name} has no {base} yet: `git push {name} {base}`"
+    if git(repo.root, "cat-file", "-e", f"{theirs}^{{commit}}", check=False).returncode != 0 or \
+            git(repo.root, "merge-base", "--is-ancestor", theirs, f"refs/heads/{base}", check=False).returncode != 0:
+        return "fail", (f"{name}'s {base} has commits this one doesn't, so pushes are rejected: "
+                        f"`git pull {name} {base}`, then `git push {name} {base}`")
+    n = int(git(repo.root, "rev-list", "--count", f"{theirs}..refs/heads/{base}").stdout.strip())
+    if n:
+        return "fail", f"{name} is {commits(n)} behind {base}: `git push {name} {base}`"
+    return "ok", f"{name} has {base} as it is here"
 
 
 def onto(ref):
@@ -4901,7 +5041,7 @@ def cmd_review_mode(args):
 
 
 # The flags `config` takes for each setting, for messages.
-PER_REPO_FLAGS = ("prefix", "base", "news", "board_others", "coordinator")
+PER_REPO_FLAGS = ("prefix", "base", "news", "board_others", "coordinator", "push_remote")
 
 
 def config_changes(args):
@@ -4913,6 +5053,8 @@ def config_changes(args):
         ch["prefix"] = args.prefix
     if args.base:
         ch["base"] = args.base
+    if getattr(args, "push_remote", None) is not None:
+        ch["push_remote"] = args.push_remote.strip() or None  # "": off
     for key in ("workers", "merge", "news", "board_layout", "notify"):
         if getattr(args, key):
             ch[key] = getattr(args, key)
@@ -4948,13 +5090,13 @@ def check_unset(keys, repo=None):
     """The keys --unset names, checked: settings bullpen has (or this repo's config.json
     has), and not one only a repository has, unless it is the repo's base."""
     for k in keys:
-        if k in REPO_ONLY and not (repo and k == "base"):
+        if k in REPO_ONLY and not (repo and k in ("base", "push_remote")):
             raise Fail(f"{k} is this repository's own: " + (
                 "it can't be in the global config.json" if not repo else f"change it with --{k.replace('_', '-')}"))
         if k in INTERNAL or (k not in DEFAULT_CONFIG and not (repo and k in repo.own)
                              and k not in read_global_file()):
             raise Fail(f"no setting {k}: it is one of " + ", ".join(
-                k for k in DEFAULT_CONFIG if k not in REPO_ONLY or k == "base"))
+                k for k in DEFAULT_CONFIG if k not in REPO_ONLY or k in ("base", "push_remote")))
     return keys
 
 
@@ -4993,7 +5135,8 @@ def cmd_config(args):
 def config_global(args):
     """`config --global`: change the global config.json, which every repository's
     settings fall back on."""
-    per_repo = [f"--{f.replace('_', '-')}" for f in PER_REPO_FLAGS if getattr(args, f)]
+    per_repo = [f"--{f.replace('_', '-')}" for f in PER_REPO_FLAGS if getattr(args, f) is not None
+                and getattr(args, f) is not False]
     if per_repo:
         raise Fail(f"{', '.join(per_repo)} {'is' if len(per_repo) == 1 else 'are'} per repository, "
                    "so not for the global config: run it without --global, in that repository")
@@ -6067,6 +6210,7 @@ def doctor_checks(cheap=False):
             ("teardown", lambda: check_hook(repo, "teardown", why_not))]
     if not cheap:
         out.append(("coordinators", lambda: check_coordinators(repo, why_not)))
+        out.append(("push", lambda: check_push(repo, why_not)))
     res = []
     for name, fn in out:
         try:
@@ -7410,6 +7554,9 @@ def parser():
                    help="print the settings as JSON, with each one's source under \"sources\"")
     p.add_argument("--prefix", help="the letters new task IDs start with, like BP (2 to 5 capitals)")
     p.add_argument("--base", help="the branch tasks start from and open PRs against (default: the repo's default branch)")
+    p.add_argument("--push-remote", metavar="REMOTE",
+                   help="local mode: push the base branch to this remote (a backup, not origin) after "
+                        "each accept, and when `up` finds it behind (\"\" turns it off)")
     p.add_argument("--workers", choices=["float", "tabs"],
                    help="new workers as capsules in the coordinator's tab (float) or as tabs")
     p.add_argument("--review", choices=["on", "off"], help="a reviewer agent checks each task")
@@ -7514,6 +7661,11 @@ def parser():
     p = sub.add_parser("_tour")
     p.add_argument("id")
     p.set_defaults(fn=cmd_tour_bg)
+
+    p = sub.add_parser("_push")
+    p.add_argument("base")
+    p.add_argument("--task", help=argparse.SUPPRESS)
+    p.set_defaults(fn=cmd_push_bg)
 
     p = sub.add_parser("_auto_accept")
     p.add_argument("id", help="the task, like BP-3")

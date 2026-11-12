@@ -68,14 +68,17 @@ non-zero when anything fails. It checks:
   the `config --setup` command (it parses, and its program is found). A
   `.bullpen/setup.sh` that is there but not committed on the base is a failure: it
   wouldn't run.
+- the push remote, if one is set (see [Local mode](#local-mode)): the remote is
+  there, answers without a prompt, and has the base branch as it is here. Else, for
+  one behind: "github is 2 commits behind main: `git push github main`"
 - the coordinators in `config.json` still have their panes and boards, and each
   running board runs the program `bullpen board` runs now (Rex says which program a
   pane runs). One from an older install's path never reloads by itself: "c1's board
   is from an older build: `bullpen up` restarts it". `up` opens a new board in its
   place and closes the old one
 
-`bullpen up` runs the quick checks (not `gh`, which needs the network, nor the
-watcher and coordinators, which `up` sees to itself) and, if any fail, prints one
+`bullpen up` runs the quick checks (not `gh` or the push remote, which need the
+network, nor the watcher and coordinators, which `up` sees to itself) and, if any fail, prints one
 line: "2 problems: run `bullpen doctor`".
 
 ## Use
@@ -901,6 +904,21 @@ changes to other files survive. If anything stands in the way (a conflict, or an
 uncommitted change to a file the task touches), `accept` says why and leaves the
 task ready, with its worktree and branch as they were.
 
+To keep a copy elsewhere without PRs, add a remote under another name than `origin`
+(so bullpen stays in local mode) and name it: `bullpen config --push-remote github`.
+After each `accept` (and auto-accept) that merges something, bullpen pushes the base
+branch, and only it, to that remote: `git push github main`, in the background, so
+the accept doesn't wait on the network. Pushes take turns and push the branch as it
+is then, so two accepts in a row both land. It never force-pushes, and git is never
+let to ask for a password. A push that fails (offline, rejected because the remote
+has commits the base doesn't, no access) doesn't undo the accept: one news line gives
+the reason, and `bullpen doctor` says how far behind the remote is. `close` pushes
+nothing (there's no merge), nor does a merge you do by hand. But `bullpen up` pushes
+the base branch when it has commits the remote didn't get (as far as this checkout
+last saw the remote), so things catch up after an offline spell. `bullpen config
+--push-remote ""` or `--unset push_remote` turns it off. With an `origin` remote
+(PR mode), the setting does nothing: merges happen on GitHub.
+
 ### Board rebuilds
 
 Every board runs the program `bullpen build-board` (and `install.sh`) builds from
@@ -970,8 +988,8 @@ bullpen config --global --unset merge    # and the global one back to the defaul
 
 `--unset` takes the setting's name as `config.json` has it (`worker_model`,
 `review_rounds`). `--global` works outside a repository too. The prefix, the base
-branch, the news mode and the coordinators belong to one repository, so `--global`
-refuses `--prefix`, `--base`, `--news` and `--board-others`. The commands
+branch, the news mode, the push remote and the coordinators belong to one repository,
+so `--global` refuses `--prefix`, `--base`, `--news`, `--push-remote` and `--board-others`. The commands
 (`worker`, `reviewer`, `coordinator_cmd`, `tour`) and `rebase_others` have no flags: set them
 in either `config.json` by hand.
 
@@ -995,7 +1013,9 @@ board show the other coordinators' tasks too (see [Several
 coordinators](#several-coordinators); the board's `o`). `bullpen config --board-repos off`
 takes the other repositories off the board's top line (on by default; see [Several
 repositories](#several-repositories)). `bullpen config --prefix XY --base develop` changes the task prefix (default `BP`)
-and the base branch (default: origin's default branch). The worker and coordinator
+and the base branch (default: origin's default branch). `bullpen config --push-remote
+github` pushes the base branch to the `github` remote after each accept, in local mode
+only (see [Local mode](#local-mode)). The worker and coordinator
 commands are in that folder's `config.json` (`worker`, `coordinator_cmd`). `"rebase_others": false`
 there stops `accept` rebasing the other open tasks (see [After accept](#after-accept)).
 
