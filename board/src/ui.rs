@@ -357,14 +357,22 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         f.set_cursor_position(Position::new(area.x + x as u16, area.y + last as u16));
     } else if let Mode::Stale { .. } = &app.mode {
         put(buf, area, last, 1, span(fit("n new tour   o the old one   esc cancels", w.saturating_sub(2)), bold()));
-    } else if let Some((action, _)) = &app.pending {
+    } else if let Some((action, tid)) = &app.pending {
+        let t = app.tasks.iter().find(|t| &t.id == tid);
+        let risky = t.is_some_and(|t| model::confirm_risky(*action, t, &app.cfg));
+        // the PR a drop closes, said here too: a narrow row has no room for it
+        let pr = model::pr_short(t.and_then(|t| t.pr.as_deref()));
         let verb = match action {
-            Action::Accept => "accept",
-            Action::Close => "close",
-            Action::Drop => "drop",
-            Action::DropForce => "discard and drop",
+            Action::Accept if risky => "accept anyway".to_string(),
+            Action::Accept => "accept".into(),
+            Action::Close => "close".into(),
+            Action::Drop if !pr.is_empty() => format!("drop and close {pr}"),
+            Action::Drop => "drop".into(),
+            Action::DropForce => "discard and drop".into(),
         };
-        put(buf, area, last, 1, span(fit(&format!("y {verb}   any other key cancels"), w.saturating_sub(2)), bold()));
+        let texts = [format!("y {verb}   any other key cancels"), format!("y {verb}   n cancels")];
+        let tone = if risky { bold().fg(Color::Red) } else { bold() };
+        put(buf, area, last, 1, span(model::first_fit(&texts, w.saturating_sub(2)), tone));
     } else {
         put(buf, area, last, 1, key_row(model::task_keys(cur), w));
     }
@@ -538,10 +546,10 @@ fn title_line(app: &App, t: &Task, selected: bool, w: usize, idw: usize, now: ch
     if let Some((action, tid)) = &app.pending {
         if *tid == t.id {
             // the row becomes the question, in place: nothing below moves
-            let tone = if matches!(action, Action::Accept | Action::Close) { Color::Green } else { Color::Red };
-            let q = model::confirm_text(*action, t, &app.cfg.merge);
+            let tone = if model::confirm_risky(*action, t, &app.cfg) { Color::Red } else { Color::Green };
+            let texts = model::confirm_texts(*action, t, &app.cfg);
             let yn = "y / n";
-            let line = format!("{left}{}", fit(&q, width_all.saturating_sub(width(&left) + width(yn) + 2)));
+            let line = format!("{left}{}", model::first_fit(&texts, width_all.saturating_sub(width(&left) + width(yn) + 2)));
             let line = pad(&line, width_all.saturating_sub(width(yn))) + yn;
             return Line::from(span(line, rev().add_modifier(Modifier::BOLD).fg(tone)));
         }
@@ -613,6 +621,55 @@ mod tests {
 
     fn row(s: &[String], from_bottom: usize) -> &str {
         &s[s.len() - 1 - from_bottom]
+    }
+
+    /// The colour of the text's first cell.
+    fn tone_of(app: &mut App, w: u16, h: u16, text: &str) -> Option<Color> {
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| draw(f, app)).unwrap();
+        let buf = term.backend().buffer();
+        let s: Vec<String> = (0..h).map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect()).collect();
+        let y = s.iter().position(|r| r.contains(text))?;
+        let x = s[y][..s[y].find(text)?].chars().count();
+        Some(buf[(x as u16, y as u16)].fg)
+    }
+
+    #[test]
+    fn a_risky_confirm_names_the_risk_in_red() {
+        use crate::model::{Gh, Review};
+        let review = |v: &str| Some(Review { round: Some(1), verdict: Some(v.into()), kind: None, block: None });
+        let gh = |c: &str| Some(Gh { checks: Some(c.into()), ..Default::default() });
+        let pr = |n: u32| Some(format!("https://x/pull/{n}"));
+        let safe = Task { pr: pr(41), review: review("approved"), gh: gh("passing"), ..ready("BP-7") };
+        let risky = Task { pr: pr(42), review: review("changes"), gh: gh("failing"), ..ready("BP-8") };
+        let working = Task { pr: pr(43), status: "working".into(), ..ready("BP-9") };
+        let mut a = app(vec![safe, risky, working], 1, Layout::Grouped);
+
+        a.pending = Some((Action::Accept, "BP-8".into()));
+        let s = screen(&mut a, 42, 24);
+        assert!(s.iter().any(|r| r.contains("BP-8  Checks failing. Accept?   y / n")), "{s:#?}");
+        assert_eq!(row(&s, 1), " y accept anyway   any other key cancels");
+        assert_eq!(tone_of(&mut a, 42, 24, "Checks failing"), Some(Color::Red));
+        assert_eq!(tone_of(&mut a, 42, 24, "y accept anyway"), Some(Color::Red));
+        let s = screen(&mut a, 70, 24);
+        assert!(s.iter().any(|r| r.contains("BP-8  Checks failing. Accept and rebase-merge anyway?")), "{s:#?}");
+
+        // a safe accept stays green, its key row plain
+        a.pending = Some((Action::Accept, "BP-7".into()));
+        let s = screen(&mut a, 42, 24);
+        assert!(s.iter().any(|r| r.contains("BP-7  Accept and rebase-merge?")), "{s:#?}");
+        assert_eq!(row(&s, 1), " y accept   any other key cancels");
+        assert_eq!(tone_of(&mut a, 42, 24, "Accept and rebase"), Some(Color::Green));
+        assert_eq!(tone_of(&mut a, 42, 24, "y accept"), Some(Color::Reset));
+
+        // a drop says whose agent it stops, and the key row is red too
+        a.pending = Some((Action::Drop, "BP-9".into()));
+        let s = screen(&mut a, 42, 24);
+        assert!(s.iter().any(|r| r.contains("BP-9  Worker running. Drop it?  y / n")), "{s:#?}");
+        assert_eq!(row(&s, 1), " y drop and close PR #43   n cancels");
+        assert_eq!(tone_of(&mut a, 42, 24, "y drop"), Some(Color::Red));
+        let s = screen(&mut a, 70, 24);
+        assert!(s.iter().any(|r| r.contains("BP-9  Worker running. Drop it and close PR #43?")), "{s:#?}");
     }
 
     #[test]

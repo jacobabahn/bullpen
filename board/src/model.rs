@@ -364,6 +364,8 @@ pub struct Config {
     /// the top line counts what needs you or is ready in other repositories
     /// (`bullpen config --board-repos`)
     pub other_repos: bool,
+    /// a reviewer checks each task before it's ready (`bullpen config --review`)
+    pub review: bool,
 }
 
 impl Config {
@@ -471,6 +473,7 @@ impl Config {
             worker_model: v["worker_model"].as_str().map(String::from),
             bottom_gap: v["board_bottom_gap"].as_u64().unwrap_or(1) as usize,
             other_repos: v["board_repos"].as_bool().unwrap_or(true),
+            review: v["review"].as_bool().unwrap_or(true),
         }
     }
 }
@@ -1122,25 +1125,103 @@ pub enum Action {
     DropForce,
 }
 
-/// The question a task's own row turns into while the board waits for y or n.
-pub fn confirm_text(action: Action, t: &Task, merge: &str) -> String {
+/// What could go wrong with an accept or a drop, worst first, each in full and in
+/// short: failing or running checks, changes asked for, no review; a worker or
+/// reviewer still running.
+pub fn confirm_risks(action: Action, t: &Task, cfg: &Config) -> Vec<(&'static str, &'static str)> {
+    let mut risks = Vec::new();
+    match action {
+        Action::Accept => {
+            match t.gh.as_ref().and_then(|g| g.checks.as_deref()) {
+                Some("failing") => risks.push(("Checks failing", "Checks failing")),
+                Some("running") => risks.push(("Checks still running", "Checks running")),
+                _ => {}
+            }
+            let nothing = t.why.as_deref().unwrap_or("").starts_with("Nothing to merge");
+            match t.review.as_ref().and_then(|r| r.verdict.as_deref()) {
+                Some("approved") => {}
+                Some("changes") => risks.push(("Review asks for changes", "Changes asked")),
+                _ if cfg.review && !nothing => risks.push(("Not reviewed", "Not reviewed")),
+                _ => {}
+            }
+        }
+        Action::Drop => match t.status.as_str() {
+            "working" | "needs" => risks.push(("Its worker is still running", "Worker running")),
+            "review" => risks.push(("Its reviewer is still running", "Reviewer running")),
+            _ => {}
+        },
+        Action::Close | Action::DropForce => {}
+    }
+    risks
+}
+
+/// Does the confirm turn red: a drop, or an accept with a risk.
+pub fn confirm_risky(action: Action, t: &Task, cfg: &Config) -> bool {
+    match action {
+        Action::Accept | Action::Close => !confirm_risks(action, t, cfg).is_empty(),
+        Action::Drop | Action::DropForce => true,
+    }
+}
+
+/// The question a task's own row turns into while the board waits for y or n, in
+/// shorter and shorter words: the row shows the first that fits. A risk comes first,
+/// so a cut never loses it, and the shortest is the risk alone: the key row still
+/// says what y does.
+pub fn confirm_texts(action: Action, t: &Task, cfg: &Config) -> Vec<String> {
     let pr = pr_short(t.pr.as_deref());
-    let verb = match merge {
+    let verb = match cfg.merge.as_str() {
         "rebase" => "rebase-merge",
         "squash" => "squash-merge",
         other => other,
     };
     let nothing = t.why.as_deref().unwrap_or("").starts_with("Nothing to merge");
-    match action {
+    let risks = confirm_risks(action, t, cfg);
+    let ask = match action {
         Action::Accept if pr.is_empty() && t.is_local() && !nothing => {
-            format!("Accept and {verb} into {}?", t.base.as_deref().unwrap_or("its base"))
+            format!("Accept and {verb} into {}", t.base.as_deref().unwrap_or("its base"))
         }
-        Action::Accept if pr.is_empty() => "Accept and clean up?".into(),
-        Action::Accept => format!("Accept and {verb}?"),
-        Action::Close => "Close it and remove its worktree?".into(),
-        Action::Drop if pr.is_empty() => "Drop it?".into(),
-        Action::Drop => format!("Drop it and close {pr}?"),
-        Action::DropForce => "Discard uncommitted changes?".into(),
+        Action::Accept if pr.is_empty() => "Accept and clean up".into(),
+        Action::Accept => format!("Accept and {verb}"),
+        Action::Close => "Close it and remove its worktree".into(),
+        Action::Drop if pr.is_empty() => "Drop it".into(),
+        Action::Drop => format!("Drop it and close {pr}"),
+        Action::DropForce => "Discard uncommitted changes".into(),
+    };
+    let Some(&(worst, short)) = risks.first() else { return vec![format!("{ask}?")] };
+    let all = risks.iter().enumerate().map(|(i, r)| if i == 0 { r.0.to_string() } else { r.0.to_lowercase() });
+    let all = all.collect::<Vec<_>>().join(", ");
+    let mut texts = match action {
+        Action::Accept => vec![
+            format!("{all}. {ask} anyway?"),
+            format!("{worst}. {ask} anyway?"),
+            format!("{worst}. Accept anyway?"),
+            format!("{short}. Accept anyway?"),
+            format!("{short}. Accept?"),
+            format!("{short}."),
+        ],
+        _ => vec![
+            format!("{worst}. {ask}?"),
+            format!("{short}. {ask}?"),
+            format!("{short}. Drop it?"),
+            format!("{short}. Drop?"),
+            format!("{short}."),
+        ],
+    };
+    texts.dedup();
+    texts
+}
+
+/// The longest question, as the row says it with all the room it needs.
+#[cfg(test)]
+pub fn confirm_text(action: Action, t: &Task, cfg: &Config) -> String {
+    confirm_texts(action, t, cfg).remove(0)
+}
+
+/// The first of the texts that fits the width, else the last one cut.
+pub fn first_fit(texts: &[String], w: usize) -> String {
+    match texts.iter().find(|t| width(t) <= w) {
+        Some(t) => t.clone(),
+        None => fit(texts.last().map(String::as_str).unwrap_or(""), w),
     }
 }
 
@@ -1246,6 +1327,7 @@ pub(crate) mod tests {
                 worker_model: None,
                 bottom_gap: 1,
                 other_repos: true,
+                review: true,
             }
         }
     }
@@ -1633,8 +1715,8 @@ pub(crate) mod tests {
         assert_eq!(task_detail(&rebased, 2, now()), "Local branch bullpen/bp-2-x, approved by review. Rebased onto main.");
         let done = Task { status: "done".into(), merged: Some("abc".into()), ..t.clone() };
         assert_eq!(task_detail(&done, 2, now()), "Accepted. Merged into main.");
-        assert_eq!(confirm_text(Action::Accept, &t, "squash"), "Accept and squash-merge into main?");
-        assert_eq!(confirm_text(Action::Drop, &t, "rebase"), "Drop it?");
+        assert_eq!(confirm_text(Action::Accept, &t, &merge("squash")), "Accept and squash-merge into main?");
+        assert_eq!(confirm_text(Action::Drop, &t, &merge("rebase")), "Drop it?");
     }
 
     #[test]
@@ -1680,7 +1762,7 @@ pub(crate) mod tests {
         assert_eq!(task_detail(&task("BP-3", "finished"), 2, now()), "Finished, nothing to merge. a closes it.");
         assert_eq!(task_keys(Some(&t))[0], ("a", "close"));
         assert!(task_keys(Some(&t)).contains(&("v", "diff")));
-        assert_eq!(confirm_text(Action::Close, &t, "rebase"), "Close it and remove its worktree?");
+        assert_eq!(confirm_text(Action::Close, &t, &merge("rebase")), "Close it and remove its worktree?");
         assert_eq!(task_stat(&t), "");
         // once closed it is done, under Closed, and counts as done for what waits on it
         let closed = Task { status: "done".into(), closed: Some(true), worktree: None, ..t };
@@ -1757,12 +1839,89 @@ pub(crate) mod tests {
         assert_eq!(wrap("abcdefghij", 4, 3), vec!["abcd", "efgh", "ij"]);
     }
 
+    fn merge(how: &str) -> Config {
+        Config { merge: how.into(), ..Config::default_for_test() }
+    }
+
+    fn approved() -> Option<Review> {
+        Some(Review { round: Some(1), verdict: Some("approved".into()), kind: None, block: None })
+    }
+
+    fn checks(c: &str) -> Option<Gh> {
+        Some(Gh { checks: Some(c.into()), ..Default::default() })
+    }
+
     #[test]
     fn confirm_names_the_merge() {
-        let t = Task { pr: Some("https://x/pull/7".into()), ..task("BP-1", "ready") };
-        assert_eq!(confirm_text(Action::Accept, &t, "squash"), "Accept and squash-merge?");
-        assert_eq!(confirm_text(Action::Drop, &t, "rebase"), "Drop it and close PR #7?");
-        assert_eq!(confirm_text(Action::Accept, &task("BP-1", "ready"), "rebase"), "Accept and clean up?");
+        let t = Task { pr: Some("https://x/pull/7".into()), review: approved(), ..task("BP-1", "ready") };
+        assert_eq!(confirm_text(Action::Accept, &t, &merge("squash")), "Accept and squash-merge?");
+        assert!(!confirm_risky(Action::Accept, &t, &merge("squash")));
+        assert_eq!(confirm_text(Action::Drop, &t, &merge("rebase")), "Drop it and close PR #7?");
+        assert!(confirm_risky(Action::Drop, &t, &merge("rebase")), "a drop is always red");
+        let nothing = Task { why: Some("Nothing to merge (no commits)".into()), ..task("BP-1", "ready") };
+        assert_eq!(confirm_text(Action::Accept, &nothing, &merge("rebase")), "Accept and clean up?");
+        assert!(!confirm_risky(Action::Accept, &nothing, &merge("rebase")), "nothing to review");
+        let fin = task("BP-1", "finished");
+        assert!(!confirm_risky(Action::Close, &fin, &merge("rebase")));
+    }
+
+    #[test]
+    fn an_accept_names_its_risks_worst_first() {
+        let cfg = merge("rebase");
+        let pr = Some("https://x/pull/42".into());
+        let t = Task { pr: pr.clone(), gh: checks("failing"), review: changes(2), ..task("BP-8", "ready") };
+        assert_eq!(confirm_risks(Action::Accept, &t, &cfg), vec![("Checks failing", "Checks failing"), ("Review asks for changes", "Changes asked")]);
+        assert!(confirm_risky(Action::Accept, &t, &cfg));
+        assert_eq!(
+            confirm_texts(Action::Accept, &t, &cfg),
+            vec![
+                "Checks failing, review asks for changes. Accept and rebase-merge anyway?",
+                "Checks failing. Accept and rebase-merge anyway?",
+                "Checks failing. Accept anyway?",
+                "Checks failing. Accept?",
+                "Checks failing.",
+            ]
+        );
+        let t = Task { pr: pr.clone(), gh: checks("passing"), review: changes(2), ..task("BP-8", "ready") };
+        assert_eq!(confirm_text(Action::Accept, &t, &cfg), "Review asks for changes. Accept and rebase-merge anyway?");
+        assert_eq!(confirm_texts(Action::Accept, &t, &cfg).last().unwrap(), "Changes asked.");
+        let t = Task { pr: pr.clone(), gh: checks("running"), review: approved(), ..task("BP-8", "ready") };
+        assert_eq!(confirm_text(Action::Accept, &t, &cfg), "Checks still running. Accept and rebase-merge anyway?");
+        assert_eq!(confirm_texts(Action::Accept, &t, &cfg).last().unwrap(), "Checks running.");
+        // no verdict: not reviewed, unless the repo has review off
+        let t = Task { pr, ..task("BP-8", "ready") };
+        assert_eq!(confirm_text(Action::Accept, &t, &cfg), "Not reviewed. Accept and rebase-merge anyway?");
+        let off = Config { review: false, ..cfg.clone() };
+        assert_eq!(confirm_text(Action::Accept, &t, &off), "Accept and rebase-merge?");
+        assert!(!confirm_risky(Action::Accept, &t, &off));
+        assert!(Config::from_value(&serde_json::json!({})).review);
+        assert!(!Config::from_value(&serde_json::json!({"review": false})).review);
+    }
+
+    #[test]
+    fn a_drop_names_the_agent_it_stops() {
+        let cfg = merge("rebase");
+        let pr = Some("https://x/pull/42".into());
+        let t = Task { pr: pr.clone(), ..task("BP-3", "working") };
+        assert_eq!(
+            confirm_texts(Action::Drop, &t, &cfg),
+            vec![
+                "Its worker is still running. Drop it and close PR #42?",
+                "Worker running. Drop it and close PR #42?",
+                "Worker running. Drop it?",
+                "Worker running. Drop?",
+                "Worker running.",
+            ]
+        );
+        assert_eq!(confirm_text(Action::Drop, &task("BP-3", "needs"), &cfg), "Its worker is still running. Drop it?");
+        assert_eq!(confirm_text(Action::Drop, &task("BP-3", "review"), &cfg), "Its reviewer is still running. Drop it?");
+        for st in ["stopped", "ready", "todo", "triage"] {
+            assert_eq!(confirm_text(Action::Drop, &task("BP-3", st), &cfg), "Drop it?", "{st}");
+        }
+        assert_eq!(first_fit(&confirm_texts(Action::Drop, &t, &cfg), 23), "Worker running. Drop?");
+        assert_eq!(first_fit(&confirm_texts(Action::Drop, &t, &cfg), 24), "Worker running. Drop it?");
+        assert_eq!(first_fit(&confirm_texts(Action::Drop, &t, &cfg), 15), "Worker running.");
+        assert_eq!(first_fit(&confirm_texts(Action::Drop, &t, &cfg), 10), "Worker ru…");
     }
 
     fn changes(round: u32) -> Option<Review> {

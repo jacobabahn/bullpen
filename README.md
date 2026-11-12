@@ -151,7 +151,9 @@ back (or give more rows); a board too short to spare it drops the gap first.
 
 The keys at the bottom follow the selected task: `⏎` opens its worker (or its
 reviewer), `a` accepts a ready task or closes a finished one and `d` drops
-(each asks y/n first, the question saying which), `t` tells, `p` peeks, `v`
+(each asks y/n first, the question saying which; in red, and first, what could
+go wrong: checks failing or still running, changes asked for, not reviewed, a
+worker or reviewer still running; a drop is always red), `t` tells, `p` peeks, `v`
 shows its diff, `g` opens its guided tour (see [Guided review tours](#guided-review-tours)),
 `s` starts, `r` resumes, `c` goes back to the coordinator, `n`
 selects the next task that needs you. On a task that needs you, `i` answers it
