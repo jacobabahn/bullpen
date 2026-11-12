@@ -320,9 +320,13 @@ on BP-9 while BP-9 waits on BP-8).
 
 When a task is accepted, bullpen starts each queued task whose dependencies are
 now all accepted, in ID order, as long as fewer than `max_running` tasks are
-working or in review (3 by default; `bullpen config --max-running 5` changes
-it). When an accept or a drop frees a slot, the next queued task starts
-too. Only tasks with dependencies are queued like this: a plain todo task waits
+working (3 by default; `bullpen config --max-running 5` changes it). A task in
+review doesn't take a slot: reviewers are short and cheap. So when a worker
+hands its task off (to review, ready, or finished), or an accept or a drop frees
+a slot, the next queued task starts too. A task sent back from review works
+again and takes a slot again, even if that puts the count over `max_running`:
+it is finishing work already started, and the queue starts nothing more until
+the count is under the limit. Only tasks with dependencies are queued like this: a plain todo task waits
 for the coordinator (or you) to start it. Each start is one news line, `BP-9
 started (BP-8 was accepted)`. While the usage limit is reached nothing starts;
 the news says which tasks could.

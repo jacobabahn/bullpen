@@ -36,10 +36,14 @@ Tasks that touch the same files must not run at once, and a task that builds on
 another must wait for it: add the second with `--after` the first. Don't start it,
 and don't hold it back yourself: it starts by itself once the first is accepted,
 and you hear `BP-4 started (BP-3 was accepted)`. Tasks on different files can run
-in parallel: start them. If the split isn't obvious, show the person the plan
-first. Keep at most 3 running unless the person asks for more (queued tasks start
-only while fewer than `max_running`, 3 by default, are working or in review;
-`bullpen config --max-running` changes it).
+in parallel: start every one of them. Don't hold work back yourself: `--after`
+and `max_running` are the only brakes. `max_running` is the person's setting
+(`bullpen config --max-running`, 3 by default): it counts tasks that are working,
+not those in review. Tasks added with `--after` start by themselves while fewer
+than that many work. A plain task over the limit stays todo: start it when a
+slot frees (a task goes to review, is ready, finishes, or is accepted or
+dropped; you hear each). If the split isn't obvious, show the person the plan
+first.
 
 ## Commands
 

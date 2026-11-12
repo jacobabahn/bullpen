@@ -2466,6 +2466,62 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.show("BP-2")["status"], "todo")
         self.assertIn("BP-2 can start (BP-1 was accepted), but the usage limit is reached", self.news_lines()[-1])
 
+    def done_dependency(self, title="Landed"):
+        """A task marked done, for queued tasks to wait on: its ID."""
+        tid = self.bp("add", title, "--brief", "x").stdout.strip()
+        path = next((self.tmp / "state" / "repos").iterdir()) / "tasks" / f"{tid}.json"
+        path.write_text(json.dumps({**json.loads(path.read_text()), "status": "done"}))
+        return tid
+
+    def test_review_frees_a_slot_and_a_task_sent_back_takes_one_again(self):
+        self.bp("config", "--max-running", "1")
+        self.start_task("First")  # BP-1 works: the one slot is taken
+        dep = self.done_dependency()  # BP-2
+        self.bp("add", "Next", "--brief", "x", "--after", dep)  # BP-3: queued, nothing frees a slot yet
+        self.assertEqual(self.show("BP-3")["status"], "todo")
+        # BP-1 goes to review: review doesn't take a slot, so BP-3 starts
+        self.commit_and_ready("BP-1")
+        self.assertEqual((self.show("BP-1")["status"], self.show("BP-3")["status"]), ("review", "working"))
+        self.assertIn("bullpen · BP-3 started (BP-1 went to review, freeing a slot)", self.news_lines())
+        self.bp("add", "Later", "--brief", "x", "--after", dep)  # BP-4
+        # sent back with findings, BP-1 works again, over the limit: allowed, it's finishing its work
+        self.verdict("BP-1", "changes", "Misses the empty case.")
+        self.assertEqual(self.show("BP-1")["status"], "working")
+        # BP-3 goes to review, but BP-1 still takes the one slot: BP-4 waits
+        self.commit_and_ready("BP-3")
+        self.assertEqual((self.show("BP-3")["status"], self.show("BP-4")["status"]), ("review", "todo"))
+        self.assertFalse(any("BP-4 started" in l for l in self.news_lines()))
+        # BP-1 back in review: nothing works, so BP-4 starts
+        self.commit_and_ready("BP-1", 2)
+        self.assertEqual(self.show("BP-4")["status"], "working")
+        self.assertIn("bullpen · BP-4 started (BP-1 went to review, freeing a slot)", self.news_lines())
+
+    def test_the_queue_keeps_to_max_running_among_working_tasks(self):
+        self.bp("config", "--max-running", "2")
+        self.start_task("First")
+        self.bp("add", "Second", "--brief", "x")
+        self.bp("start", "BP-2")
+        dep = self.done_dependency()  # BP-3
+        for title in ("A", "B", "C"):  # BP-4, BP-5, BP-6
+            self.bp("add", title, "--brief", "x", "--after", dep)
+        self.commit_and_ready("BP-1")  # BP-2 still works: one slot, for BP-4
+        status = {t: self.show(t)["status"] for t in ("BP-4", "BP-5", "BP-6")}
+        self.assertEqual(status, {"BP-4": "working", "BP-5": "todo", "BP-6": "todo"})
+
+    def test_ready_without_review_and_finish_free_a_slot(self):
+        self.bp("config", "--review", "off")
+        self.bp("config", "--max-running", "1")
+        self.start_task("First")
+        dep = self.done_dependency()  # BP-2
+        self.bp("add", "Next", "--brief", "x", "--after", dep)  # BP-3
+        self.commit_and_ready_no_review("BP-1")
+        self.assertEqual(self.show("BP-3")["status"], "working")
+        self.assertIn("bullpen · BP-3 started (BP-1 is ready, freeing a slot)", self.news_lines())
+        self.bp("add", "Then", "--brief", "x", "--after", dep)  # BP-4
+        self.bp("finish", "BP-3", "--summary", "Answered.", cwd=self.show("BP-3")["worktree"])
+        self.assertEqual(self.show("BP-4")["status"], "working")
+        self.assertIn("bullpen · BP-4 started (BP-3 finished, freeing a slot)", self.news_lines())
+
     # ---------- rules ----------
 
     def commit_rules(self, text):
