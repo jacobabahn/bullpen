@@ -84,34 +84,14 @@ fn screen_line(raw: &str) -> Line<'static> {
     }
 }
 
-/// The header's right side: how many tasks are in each state, in the marks'
-/// colours, dropping the least urgent until it fits.
-fn counts(tasks: &[&Task], room: usize) -> Line<'static> {
-    let n = |sts: &[&str]| tasks.iter().filter(|t| sts.contains(&t.status.as_str())).count();
-    let mut parts: Vec<(String, Style)> = [
-        (n(&["needs"]), "needs"),
-        (n(&["stopped"]), "stopped"),
-        (n(&["ready"]), "ready"),
-        (n(&["finished"]), "finished"),
-        (n(&["triage"]), "triage"),
-        (n(&["review"]), "review"),
-        (n(&["working"]), "working"),
-        (n(&["todo"]), "todo"),
-    ]
-    .into_iter()
-    .filter(|(n, _)| *n > 0)
-    .map(|(n, st)| (format!("{} {n}", model::mark(st)), mark_style(st)))
-    .collect();
-    let total = |p: &[(String, Style)]| p.iter().map(|(s, _)| width(s)).sum::<usize>() + 2 * p.len().saturating_sub(1);
-    while !parts.is_empty() && total(&parts) > room {
-        parts.pop();
-    }
+/// The header's right side: what you act on here, in the marks' colours.
+fn counts(parts: Vec<(String, &'static str)>, sep: &'static str) -> Line<'static> {
     let mut spans = Vec::new();
-    for (i, (text, style)) in parts.into_iter().enumerate() {
+    for (i, (text, st)) in parts.into_iter().enumerate() {
         if i > 0 {
-            spans.push(span("  ", Style::new()));
+            spans.push(span(sep, dim()));
         }
-        spans.push(span(text, style));
+        spans.push(span(text, mark_style(st)));
     }
     Line::from(spans)
 }
@@ -184,31 +164,40 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // under the title, to the right edge
     let detail_w = w.saturating_sub(5 + idw + 2);
 
-    // header: the repository, and how many tasks are in each state
+    // header: the repository, and what you act on
     let name = fit(&app.repo_name, w.saturating_sub(2).min(24));
     // a small marker when approved tasks accept themselves
     let auto = if app.cfg.auto_accept { " · auto-accept" } else { "" };
     // with several coordinators: whose board this is, and how many of the other
     // ones' tasks it hides (`o` shows them, dimmed)
-    let hint = model::hidden_hint(&model::hidden(&app.tasks, &app.cfg, app.me.as_deref(), app.finished));
-    let hint = if hint.is_empty() { hint } else { format!(" · {hint}") };
-    let auto = match app.me.as_deref() {
-        Some(me) if app.cfg.coordinators.len() > 1 => format!(" · {me}{auto}{hint}"),
-        _ => auto.to_string(),
+    let hidden = model::hidden(&app.tasks, &app.cfg, app.me.as_deref(), app.finished);
+    let left = |key: bool| {
+        let hint = model::hidden_hint(&hidden, key);
+        let hint = if hint.is_empty() { hint } else { format!(" · {hint}") };
+        match app.me.as_deref() {
+            Some(me) if app.cfg.coordinators.len() > 1 => format!(" · {me}{auto}{hint}"),
+            _ => auto.to_string(),
+        }
     };
-    let auto = auto.as_str();
+    // then the other repositories with something for you, and what needs you or
+    // is ready here, at the right edge; the other repositories get the room first,
+    // and on a crowded line the hint drops its "o shows"
     let shown: Vec<&Task> = groups.iter().flat_map(|(_, ts)| ts.iter().copied()).collect();
-    let count = counts(&shown, w.saturating_sub(width(&name) + width(auto) + 5));
-    let count_x = w.saturating_sub(2 + count.width()).max(1);
-    // then the other repositories with something for you, in what room is left
-    let others_x = 1 + width(&name) + width(auto) + 3;
-    let room = count_x.saturating_sub(others_x + 2);
-    if !app.others.counts.is_empty() && room >= 8 {
+    let (needs, ready) = model::acts(&shown);
+    let top = |auto: &str| model::top_right(needs, ready, &app.others.counts, w.saturating_sub(width(&name) + width(auto) + 3));
+    let (mut auto, mut right) = (left(true), top(&left(true)));
+    if !right.whole && !hidden.is_empty() {
+        auto = left(false);
+        right = top(&auto);
+    }
+    let others_x = 1 + width(&name) + width(&auto) + 3;
+    if !right.others.is_empty() {
         let style = if app.others.counts.iter().any(|c| c.needs > 0) { Style::new().fg(AMBER) } else { dim() };
         put(buf, area, 0, others_x - 3, span(" · ", dim()));
-        put(buf, area, 0, others_x, span(model::others_text(&app.others.counts, room), style));
+        put(buf, area, 0, others_x, span(right.others, style));
     }
-    put(buf, area, 0, count_x, count);
+    let count = counts(right.counts, right.sep);
+    put(buf, area, 0, w.saturating_sub(2 + count.width()), count);
     put(buf, area, 0, 1 + width(&name), span(auto, dim()));
     put(buf, area, 0, 1, span(name, bold()));
 
@@ -589,11 +578,11 @@ mod tests {
         a.me = Some("c1".into());
         let s = screen(&mut a, 60, 14);
         assert!(s[0].contains("repo · c1 · +2 in c2 · o shows"), "{s:#?}");
-        assert!(s[0].ends_with("✔ 1"), "{s:#?}"); // counts what's shown
+        assert!(s[0].ends_with("1 ready"), "{s:#?}"); // counts what's shown
         assert!(!s.iter().any(|r| r.contains("BP-2")), "{s:#?}");
         a.cfg.board_others = vec!["c1".into()];
         let s = screen(&mut a, 60, 14);
-        assert!(!s[0].contains("o shows") && s[0].ends_with("✔ 3"), "{s:#?}");
+        assert!(!s[0].contains("o shows") && s[0].ends_with("3 ready"), "{s:#?}");
         assert!(s.iter().any(|r| r.contains("BP-2  c2 · Task BP-2")), "{s:#?}");
         assert!(s.iter().any(|r| r.contains("BP-1  Task BP-1")), "{s:#?}");
     }
@@ -603,12 +592,40 @@ mod tests {
         let mut a = app(vec![ready("BP-1")], 1, Layout::Grouped);
         a.others.counts = vec![model::RepoCount { name: "shop".into(), needs: 1, ready: 2 }];
         let s = screen(&mut a, 60, 10);
-        assert!(s[0].starts_with(" repo · shop: 1 needs you, 2 ready"), "{s:#?}");
-        assert!(s[0].ends_with("✔ 1"), "{s:#?}"); // this repo's counts keep their place
+        assert_eq!(s[0], " repo · shop: 1 needs you, 2 ready                 1 ready", "{s:#?}");
+        // at the board's usual 42 columns this repo's count shrinks to its mark first
+        let s = screen(&mut a, 42, 10);
+        assert_eq!(s[0], " repo · shop: 1 needs you, 2 ready    ✔1", "{s:#?}");
         let s = screen(&mut a, 30, 10);
-        assert!(s[0].starts_with(" repo · shop ●1 ✔2"), "{s:#?}");
-        let s = screen(&mut a, 20, 10); // no room: left out
-        assert!(!s[0].contains("shop"), "{s:#?}");
+        assert_eq!(s[0], " repo · shop ●1 ✔2   1 ready", "{s:#?}");
+        let s = screen(&mut a, 24, 10); // cut, never under 8 columns
+        assert_eq!(s[0], " repo · shop ●1 ✔2  ✔1", "{s:#?}");
+        let s = screen(&mut a, 23, 10);
+        assert_eq!(s[0], " repo · shop ●1…   ✔1", "{s:#?}");
+        let s = screen(&mut a, 20, 10); // the other repo's marks stay whole before this one's count
+        assert_eq!(s[0], " repo · shop ●1 ✔2", "{s:#?}");
+        let s = screen(&mut a, 17, 10); // no room for them: this repo's count comes back
+        assert_eq!(s[0], " repo   1 ready", "{s:#?}");
+    }
+
+    #[test]
+    fn a_crowded_top_line_drops_o_shows_before_the_counts() {
+        // c1's board at 42 columns, with c3's tasks hidden and another repo ready
+        let c = |id: &str, who: &str, status: &str| Task { coordinator: Some(who.into()), status: status.into(), ..ready(id) };
+        let tasks = vec![c("BP-1", "c1", "needs"), c("BP-2", "c1", "ready"), c("BP-3", "c3", "working"), c("BP-4", "c3", "ready")];
+        let mut a = app(tasks, 1, Layout::Grouped);
+        a.repo_name = "bullpen".into();
+        a.cfg.coordinators = vec!["c1".into(), "c3".into()];
+        a.me = Some("c1".into());
+        let s = screen(&mut a, 60, 10); // room for it all
+        assert_eq!(s[0], " bullpen · c1 · +2 in c3 · o shows   1 needs you · 1 ready", "{s:#?}");
+        let s = screen(&mut a, 42, 10);
+        assert_eq!(s[0], " bullpen · c1 · +2 in c3           ●1 ✔1", "{s:#?}");
+        a.others.counts = vec![model::RepoCount { name: "jj-evolved".into(), needs: 0, ready: 1 }];
+        let s = screen(&mut a, 42, 10);
+        assert_eq!(s[0], " bullpen · c1 · +2 in c3 · jj-evolved ✔1", "{s:#?}");
+        let s = screen(&mut a, 50, 10);
+        assert_eq!(s[0], " bullpen · c1 · +2 in c3 · jj-evolved ✔1   ●1 ✔1", "{s:#?}");
     }
 
     fn busy(id: &str, status: &str, text: &str) -> Task {

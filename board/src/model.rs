@@ -583,30 +583,121 @@ fn count_tasks(tasks: &Path) -> (usize, usize) {
     (needs, ready)
 }
 
-/// The other repositories on the top line in at most w columns: "shop: 1 needs you,
-/// 2 ready · web: 1 ready", else as marks ("shop ●1 ✔2 · web ✔1"), cut to fit.
-pub fn others_text(counts: &[RepoCount], w: usize) -> String {
-    let words = |c: &RepoCount| {
-        let parts: Vec<String> = [(c.needs, "needs you"), (c.ready, "ready")]
+/// "1 needs you", "2 need you", "3 ready": a count of what you act on, in words.
+fn act_words(n: usize, status: &str) -> String {
+    match status {
+        "needs" if n == 1 => "1 needs you".into(),
+        "needs" => format!("{n} need you"),
+        _ => format!("{n} ready"),
+    }
+}
+
+/// What you act on among these tasks: how many need you (needs or stopped) and
+/// how many wait on your accept or close (ready or finished).
+pub fn acts(tasks: &[&Task]) -> (usize, usize) {
+    let n = |sts: &[&str]| tasks.iter().filter(|t| sts.contains(&t.status.as_str())).count();
+    (n(&["needs", "stopped"]), n(&["ready", "finished"]))
+}
+
+/// This repository's part of the top line: what needs you and what's ready, each
+/// with the status whose colour it takes, in words ("2 need you", "3 ready") or
+/// marks ("●2", "✔3"). Words go between " · ", marks between spaces.
+pub fn act_parts(needs: usize, ready: usize, words: bool) -> Vec<(String, &'static str)> {
+    [(needs, "needs"), (ready, "ready")]
+        .into_iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, st)| (if words { act_words(n, st) } else { format!("{}{n}", mark(st)) }, st))
+        .collect()
+}
+
+pub fn act_sep(words: bool) -> &'static str {
+    if words { " · " } else { " " }
+}
+
+fn act_width(needs: usize, ready: usize, words: bool) -> usize {
+    let parts = act_parts(needs, ready, words);
+    parts.iter().map(|(s, _)| width(s)).sum::<usize>() + width(act_sep(words)) * parts.len().saturating_sub(1)
+}
+
+/// The other repositories on the top line: "shop: 1 needs you, 2 ready · web: 1 ready".
+fn others_words(counts: &[RepoCount]) -> String {
+    let one = |c: &RepoCount| {
+        let parts: Vec<String> = [(c.needs, "needs"), (c.ready, "ready")]
             .into_iter()
             .filter(|(n, _)| *n > 0)
-            .map(|(n, what)| format!("{n} {what}"))
+            .map(|(n, st)| act_words(n, st))
             .collect();
         format!("{}: {}", c.name, parts.join(", "))
     };
-    let marks = |c: &RepoCount| {
-        let parts: Vec<String> = [(c.needs, mark("needs")), (c.ready, mark("ready"))]
-            .into_iter()
-            .filter(|(n, _)| *n > 0)
-            .map(|(n, m)| format!("{m}{n}"))
-            .collect();
+    counts.iter().map(one).collect::<Vec<_>>().join(" · ")
+}
+
+/// The same in marks: "shop ●1 ✔2 · web ✔1".
+fn others_marks(counts: &[RepoCount]) -> String {
+    let one = |c: &RepoCount| {
+        let parts: Vec<String> = act_parts(c.needs, c.ready, false).into_iter().map(|(s, _)| s).collect();
         format!("{} {}", c.name, parts.join(" "))
     };
-    let long = counts.iter().map(words).collect::<Vec<_>>().join(" · ");
-    if width(&long) <= w {
-        return long;
+    counts.iter().map(one).collect::<Vec<_>>().join(" · ")
+}
+
+/// The right of the top line: the other repositories' text (put after " · "),
+/// and this repository's counts at the right edge, two columns after it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Top {
+    pub others: String,
+    /// each part with the status whose colour it takes, between `sep`
+    pub counts: Vec<(String, &'static str)>,
+    pub sep: &'static str,
+    /// nothing was cut or left out
+    pub whole: bool,
+}
+
+/// How the top line's `room` columns after the repository's name (and its
+/// coordinator and hidden tasks, which come first) are shared. The other
+/// repositories get the room first: their words, else their marks, else their
+/// marks cut to no less than 8 columns. This repository's counts take words when
+/// they fit beside them, else marks, else only what needs you ("●2"). Without room
+/// for both, the other repositories' marks stay whole and this one's counts go:
+/// they are on the group headings below.
+pub fn top_right(needs: usize, ready: usize, others: &[RepoCount], room: usize) -> Top {
+    let forms = [(needs, ready, true), (needs, ready, false), (needs, 0, false)];
+    let gap = |w: usize| if w == 0 { 0 } else { w + 2 };
+    let mine = |taken: usize, all: bool| {
+        let forms = if all { &forms[..2] } else { &forms[..] };
+        forms.iter().find(|&&(n, r, words)| taken + gap(act_width(n, r, words)) <= room).map(|&(n, r, words)| Top {
+            others: String::new(),
+            counts: act_parts(n, r, words),
+            sep: act_sep(words),
+            whole: r == ready,
+        })
+    };
+    let with = |others: String, top: Option<Top>, cut: bool| {
+        top.map(|t| Top { whole: t.whole && !cut, others, ..t })
+    };
+    let mut tries: Vec<Option<Top>> = Vec::new();
+    if !others.is_empty() {
+        for o in [others_words(others), others_marks(others)] {
+            tries.push(with(o.clone(), mine(3 + width(&o), true), false));
+        }
+        let left = room.saturating_sub(3 + gap(act_width(needs, ready, false)));
+        if left >= 8 {
+            let cut = fit(&others_marks(others), left);
+            // "shop ●1…", not "shop ●1 …"
+            let cut = match cut.strip_suffix('…') {
+                Some(head) if head.ends_with(' ') => format!("{}…", head.trim_end()),
+                _ => cut,
+            };
+            tries.push(with(cut.clone(), mine(3 + width(&cut), true), true));
+        }
+        let o = others_marks(others);
+        if 3 + width(&o) <= room {
+            tries.push(Some(Top { others: o, counts: Vec::new(), sep: "", whole: needs + ready == 0 }));
+        }
     }
-    fit(&counts.iter().map(marks).collect::<Vec<_>>().join(" · "), w)
+    tries.push(with(String::new(), mine(0, false), !others.is_empty()));
+    let none = Top { others: String::new(), counts: Vec::new(), sep: "", whole: false };
+    tries.into_iter().flatten().next().unwrap_or(none)
 }
 
 /// A pane's name as a file name, as bullpen and the watcher write it.
@@ -688,7 +779,7 @@ pub fn mark(status: &str) -> &'static str {
         "triage" => "◎",
         "ready" => "✔",
         "finished" => "◆",
-        "done" => "✓",
+        "done" => "·", // dim, unlike ready's bold ✔
         "review" => "◐",
         "working" => "○",
         "todo" => "◌", // a dotted circle: not started yet
@@ -733,13 +824,15 @@ pub fn hidden(tasks: &[Task], cfg: &Config, me: Option<&str>, closed: bool) -> V
 }
 
 /// The header's note of what's hidden: "+4 in c2 · o shows", "" when nothing is.
-pub fn hidden_hint(hidden: &[(String, usize)]) -> String {
+/// Without `key` (on a crowded top line) it's "+4 in c2".
+pub fn hidden_hint(hidden: &[(String, usize)], key: bool) -> String {
     if hidden.is_empty() {
         return String::new();
     }
     let n: usize = hidden.iter().map(|(_, n)| n).sum();
     let whose: Vec<&str> = hidden.iter().map(|(c, _)| c.as_str()).collect();
-    format!("+{n} in {} · o shows", whose.join(", "))
+    let key = if key { " · o shows" } else { "" };
+    format!("+{n} in {}{key}", whose.join(", "))
 }
 
 /// A task's title as the board shows it: another coordinator's starts with its ID.
@@ -1228,9 +1321,78 @@ pub(crate) mod tests {
             RepoCount { name: "shop".into(), needs: 1, ready: 2 },
             RepoCount { name: "web".into(), needs: 0, ready: 1 },
         ];
-        assert_eq!(others_text(&counts, 80), "shop: 1 needs you, 2 ready · web: 1 ready");
-        assert_eq!(others_text(&counts, 30), "shop ●1 ✔2 · web ✔1");
-        assert_eq!(width(&others_text(&counts, 10)), 10);
+        assert_eq!(others_words(&counts), "shop: 1 needs you, 2 ready · web: 1 ready");
+        assert_eq!(others_marks(&counts), "shop ●1 ✔2 · web ✔1");
+        let o = |room| tr(0, 0, &counts, room);
+        assert_eq!(o(80).0, "shop: 1 needs you, 2 ready · web: 1 ready");
+        assert_eq!(o(30).0, "shop ●1 ✔2 · web ✔1");
+        assert_eq!(width(&o(13).0), 10);
+        assert_eq!(o(10).0, ""); // under 8 columns: left out
+    }
+
+    /// The top line's right as text: the other repos, and this one's counts.
+    fn tr(needs: usize, ready: usize, others: &[RepoCount], room: usize) -> (String, String) {
+        let t = top_right(needs, ready, others, room);
+        let counts: Vec<String> = t.counts.into_iter().map(|(s, _)| s).collect();
+        (t.others, counts.join(t.sep))
+    }
+
+    fn mine(counts: &str) -> (String, String) {
+        (String::new(), counts.into())
+    }
+
+    #[test]
+    fn the_top_line_counts_what_you_act_on_in_words_when_they_fit() {
+        let parts = |n, r, words| act_parts(n, r, words).into_iter().map(|(s, _)| s).collect::<Vec<_>>();
+        assert_eq!(parts(2, 3, true), ["2 need you", "3 ready"]);
+        assert_eq!(parts(1, 0, true), ["1 needs you"]);
+        assert_eq!(parts(2, 3, false), ["●2", "✔3"]);
+        assert!(parts(0, 0, true).is_empty());
+        // "2 need you · 3 ready" is 20 wide, "●2 ✔3" 5, each with 2 columns before it
+        assert_eq!(tr(2, 3, &[], 22), mine("2 need you · 3 ready"));
+        assert_eq!(tr(2, 3, &[], 21), mine("●2 ✔3"));
+        assert_eq!(tr(2, 3, &[], 7), mine("●2 ✔3"));
+        assert_eq!(tr(2, 3, &[], 6), mine("●2")); // then only what needs you
+        assert!(top_right(2, 3, &[], 7).whole && !top_right(2, 3, &[], 6).whole);
+        assert_eq!(tr(2, 3, &[], 3), mine(""));
+        assert_eq!(tr(0, 3, &[], 4), mine("✔3"));
+        assert_eq!(tr(0, 3, &[], 3), mine(""));
+        assert!(top_right(0, 0, &[], 0).whole);
+        let ts = [task("BP-1", "needs"), task("BP-2", "stopped"), task("BP-3", "ready"), task("BP-4", "finished"),
+                  task("BP-5", "working"), task("BP-6", "todo"), task("BP-7", "triage"), task("BP-8", "review")];
+        assert_eq!(acts(&ts.iter().collect::<Vec<_>>()), (2, 2));
+    }
+
+    #[test]
+    fn the_other_repos_get_the_room_before_this_ones_counts() {
+        let shop = |needs, ready| vec![RepoCount { name: "shop".into(), needs, ready }];
+        let pair = |o: &str, c: &str| (o.to_string(), c.to_string());
+        // "shop: 1 needs you" is 17 wide and " · " before it: 20
+        assert_eq!(tr(2, 3, &shop(1, 0), 42), pair("shop: 1 needs you", "2 need you · 3 ready"));
+        assert_eq!(tr(2, 3, &shop(1, 0), 41), pair("shop: 1 needs you", "●2 ✔3"));
+        assert_eq!(tr(2, 3, &shop(1, 0), 27), pair("shop: 1 needs you", "●2 ✔3"));
+        // then the other repos shrink to marks
+        assert_eq!(tr(2, 3, &shop(1, 0), 26), pair("shop ●1", "●2 ✔3"));
+        // their marks and this one's words, when their words are what's long
+        let two = vec![RepoCount { name: "shop".into(), needs: 2, ready: 4 }, RepoCount { name: "web".into(), needs: 0, ready: 1 }];
+        assert_eq!(tr(2, 3, &two, 44), pair("shop ●2 ✔4 · web ✔1", "2 need you · 3 ready"));
+        // then cut, never under 8 columns, and this one's marks stay
+        let long = vec![RepoCount { name: "jj-evolved-sandbox".into(), needs: 1, ready: 2 }];
+        assert_eq!(tr(2, 3, &long, 20), pair("jj-evolve…", "●2 ✔3"));
+        assert!(!top_right(2, 3, &long, 20).whole);
+        // without room for both, the other repos' marks stay whole and this one's counts go
+        let jj = vec![RepoCount { name: "jj-evolved".into(), needs: 0, ready: 1 }];
+        assert_eq!(tr(1, 1, &jj, 16), pair("jj-evolved ✔1", ""));
+        assert!(!top_right(1, 1, &jj, 16).whole);
+        // and with no room for even those, this one's counts come back
+        assert_eq!(tr(1, 1, &jj, 15), pair("", "●1 ✔1"));
+        assert!(top_right(1, 1, &jj, 23).whole);
+    }
+
+    #[test]
+    fn ready_and_closed_have_marks_you_tell_apart() {
+        assert_eq!(mark("ready"), "✔");
+        assert_eq!(mark("done"), "·");
     }
 
     fn task(id: &str, status: &str) -> Task {
@@ -1322,17 +1484,18 @@ pub(crate) mod tests {
         // BP-2 and BP-3 open; BP-4 is closed, so it counts only with f
         assert_eq!(hidden(&tasks, &cfg, Some("c1"), false), vec![("c2".to_string(), 2)]);
         assert_eq!(hidden(&tasks, &cfg, Some("c1"), true), vec![("c2".to_string(), 3)]);
-        assert_eq!(hidden_hint(&hidden(&tasks, &cfg, Some("c1"), false)), "+2 in c2 · o shows");
+        assert_eq!(hidden_hint(&hidden(&tasks, &cfg, Some("c1"), false), true), "+2 in c2 · o shows");
+        assert_eq!(hidden_hint(&hidden(&tasks, &cfg, Some("c1"), false), false), "+2 in c2");
         // c2 hides c1's one task
-        assert_eq!(hidden_hint(&hidden(&tasks, &cfg, Some("c2"), false)), "+1 in c1 · o shows");
+        assert_eq!(hidden_hint(&hidden(&tasks, &cfg, Some("c2"), false), true), "+1 in c1 · o shows");
         // several others
         cfg.coordinators.push("c3".into());
         let mut more = tasks.clone();
         more.push(Task { coordinator: Some("c3".into()), ..task("BP-7", "working") });
-        assert_eq!(hidden_hint(&hidden(&more, &cfg, Some("c1"), false)), "+3 in c2, c3 · o shows");
+        assert_eq!(hidden_hint(&hidden(&more, &cfg, Some("c1"), false), true), "+3 in c2, c3 · o shows");
         // nothing hidden: nothing said
         let mine: Vec<Task> = tasks.iter().filter(|t| t.coordinator.as_deref() != Some("c2")).cloned().collect();
-        assert_eq!(hidden_hint(&hidden(&mine, &cfg, Some("c1"), false)), "");
+        assert_eq!(hidden_hint(&hidden(&mine, &cfg, Some("c1"), false), true), "");
     }
 
     #[test]

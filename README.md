@@ -114,8 +114,15 @@ change ("3 files, +120 −14"), worked out once when its worker runs `ready`. A
 task that needs you gets an amber bar; its age turns red after 5 minutes. A
 working task's mark spins, and one in review turns; one whose agent has shown no
 progress for a while (below) stops turning and gets the amber bar too. The top
-line counts the tasks in each state, and names other repositories with tasks that
-need you or are ready (see [Several repositories](#several-repositories)). `l` switches to a compact layout, one line
+line counts only what you act on, at its right: `2 need you · 3 ready` (need
+you: needs or stopped; ready: ready to accept, or finished), in amber and green,
+shortened to `●2 ✔3` when the words don't fit. Before it come the other
+repositories with tasks that need you or are ready (see [Several
+repositories](#several-repositories)), which get the room first. On a crowded
+line the hidden tasks' note drops its "o shows" first, then this repository's
+counts shrink to marks, then to what needs you alone; the other repositories go
+only when even their marks don't fit. A closed task's mark is a dim `·`, so it
+isn't taken for a ready task's `✔`. `l` switches to a compact layout, one line
 per task with the selected task's detail at the bottom (what its agent is doing
 first).
 
@@ -309,9 +316,10 @@ checkout is gone is left out of what follows.
   typing part of it (see [Keys](#keys)); `bullpen go BP-1 --repo PATH` goes to a
   task of another repository.
 - The board's top line, after the repository's name, names the other
-  repositories with something for you: `shop: 1 needs you, 2 ready` (needs you:
+  repositories with something for you: `shop: 1 needs you, 2 ready` (need you:
   needs or stopped; ready: ready to accept, or finished), shortened to
-  `shop ●1 ✔2` when the words don't fit, and left out when even that has no room.
+  `shop ●1 ✔2` when the words don't fit, cut (to no less than 8 columns) beside
+  this repository's counts, and left out when even that has no room.
   It is amber while one of them needs you. The board looks at the other
   repositories every 10 seconds, and reads a repository's tasks again only when
   its tasks folder changed. `bullpen config --board-repos off` turns it off
