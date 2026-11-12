@@ -885,11 +885,11 @@ pub fn tour_phrase(t: &Task) -> &'static str {
     }
 }
 
-/// task_detail, then what auto-accept does with it, the model it chose and its tour.
+/// task_detail, then what auto-accept does with it and the model it chose.
 pub fn detail_with_auto(t: &Task, cfg: &Config, at: DateTime<FixedOffset>) -> String {
     let text = task_detail(t, cfg.review_rounds, at);
     let model = model_phrase(t, cfg);
-    let parts = [text.as_str(), auto_phrase(t, cfg.auto_accept), model.as_str(), tour_phrase(t)];
+    let parts = [text.as_str(), auto_phrase(t, cfg.auto_accept), model.as_str()];
     parts.iter().filter(|p| !p.is_empty()).copied().collect::<Vec<_>>().join(" ").trim().to_string()
 }
 
@@ -986,6 +986,13 @@ pub fn task_stat(t: &Task) -> &str {
         "review" | "ready" => t.diffstat.as_deref().unwrap_or(""),
         _ => "",
     }
+}
+
+/// The line under a task in review or ready: the size of its change, then where its
+/// tour stands: "3 files, +120 −14 · Not toured yet".
+pub fn stat_line(t: &Task) -> String {
+    let tour = tour_phrase(t).trim_end_matches('.');
+    [task_stat(t), tour].iter().filter(|p| !p.is_empty()).copied().collect::<Vec<_>>().join(" · ")
 }
 
 /// The keys that make sense for this task, for the footer: (key, what it does).
@@ -1363,14 +1370,14 @@ pub(crate) mod tests {
         let cfg = |on| Config { auto_accept: on, ..Config::default_for_test() };
         let approved = Some(Review { round: Some(1), verdict: Some("approved".into()), kind: None, block: None });
         let t = Task { pr: Some("https://github.com/me/repo/pull/4".into()), review: approved, ..task("BP-1", "ready") };
-        assert_eq!(detail_with_auto(&t, &cfg(true), now()), "PR #4, approved by review. Not toured yet.");
+        assert_eq!(detail_with_auto(&t, &cfg(true), now()), "PR #4, approved by review.");
         let held = Task { auto_accept: Some(false), ..t.clone() };
-        assert_eq!(detail_with_auto(&held, &cfg(true), now()), "PR #4, approved by review. Kept for you: no auto-accept. Not toured yet.");
-        assert_eq!(detail_with_auto(&held, &cfg(false), now()), "PR #4, approved by review. Not toured yet.");
+        assert_eq!(detail_with_auto(&held, &cfg(true), now()), "PR #4, approved by review. Kept for you: no auto-accept.");
+        assert_eq!(detail_with_auto(&held, &cfg(false), now()), "PR #4, approved by review.");
         let own = Task { auto_accept: Some(true), ..task("BP-1", "todo") };
         assert_eq!(detail_with_auto(&own, &cfg(false), now()), "Not started. s starts it. Auto-accepts once approved.");
         let waiting = Task { auto_wait: Some(true), ..t.clone() };
-        assert_eq!(detail_with_auto(&waiting, &cfg(true), now()), "PR #4, approved by review. Auto-accepts once its checks pass. Not toured yet.");
+        assert_eq!(detail_with_auto(&waiting, &cfg(true), now()), "PR #4, approved by review. Auto-accepts once its checks pass.");
         assert_eq!(auto_phrase(&Task { status: "done".into(), ..held }, true), "");
     }
 

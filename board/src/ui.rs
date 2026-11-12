@@ -225,8 +225,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                         rows.push(Row::Detail(t, d));
                     }
                 }
-                if !model::task_stat(t).is_empty() {
-                    rows.push(Row::Detail(t, model::task_stat(t).into()));
+                let stat = model::stat_line(t);
+                if !stat.is_empty() {
+                    rows.push(Row::Detail(t, stat));
                 }
             }
         }
@@ -305,7 +306,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         let yb = h.saturating_sub(footer);
         put(buf, area, yb, 1, span("─".repeat(w.saturating_sub(3)), dim()));
         put(buf, area, yb + 1, 1, span(fit(&format!("{}  {}", cur.id, cur.title), w.saturating_sub(2)), bold()));
-        let stat = model::task_stat(cur);
+        let stat = model::stat_line(cur);
         // what its agent is doing now first, then the rest of what there is to say
         let doing = model::doing_now(cur, now);
         let room = 3 - usize::from(!stat.is_empty()) - usize::from(!doing.is_empty());
@@ -314,7 +315,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             lines.insert(0, doing);
         }
         if !stat.is_empty() {
-            lines.push(stat.into());
+            lines.push(stat);
         }
         for (j, line) in lines.into_iter().enumerate() {
             put(buf, area, yb + 2 + j, 1, span(fit(&line, w.saturating_sub(2)), dim()));
@@ -634,29 +635,34 @@ mod tests {
             Some(model::TourRun { state: state.into(), commit: Some(commit.into()), opened: opened.map(String::from) })
         };
         let tasks = vec![
-            ready("BP-1"),
+            Task { diffstat: Some("3 files, +12 −1".into()), ..ready("BP-1") },
             Task { tour: run("written", "abc", Some("abc")), ..ready("BP-2") },
             Task { tour: run("written", "def", Some("abc")), ..ready("BP-3") },
             Task { tour: run("writing", "", None), ..ready("BP-4") },
             Task { tour: run("failed", "", None), note: Some("tour failed: its tour doesn't parse".into()), ..ready("BP-5") },
         ];
         let mut a = app(tasks, 0, Layout::Grouped);
-        let s = screen(&mut a, 60, 18);
+        let s = screen(&mut a, 60, 24);
         // a spinner turns in place of BP-4's mark
-        assert!(!s[9].starts_with(" ✔") && s[9].ends_with("BP-4  Task BP-4"), "{s:#?}");
-        let s: Vec<String> = s.into_iter().enumerate().map(|(i, r)| if i == 9 { r[r.find("BP-4").unwrap()..].into() } else { r }).collect();
-        assert_eq!(s[2..13], [
+        assert!(!s[12].starts_with(" ✔") && s[12].ends_with("BP-4  Task BP-4"), "{s:#?}");
+        let s: Vec<String> = s.into_iter().enumerate().map(|(i, r)| if i == 12 { r[r.find("BP-4").unwrap()..].into() } else { r }).collect();
+        assert_eq!(s[2..18], [
             " Ready to accept  5",
             " ✔ BP-1  Task BP-1",
-            "         Done. Not toured yet.",
+            "         Done.",
+            "         3 files, +12 −1 · Not toured yet",
             " ✔ BP-2  Task BP-2",
-            "         Done. Toured.",
+            "         Done.",
+            "         Toured",
             " ✔ BP-3  Task BP-3",
-            "         Done. Tour written, not opened yet.",
+            "         Done.",
+            "         Tour written, not opened yet",
             "BP-4  Task BP-4",
-            "         Done. Writing its tour…",
+            "         Done.",
+            "         Writing its tour…",
             " ✔ BP-5  Task BP-5",
             "         tour failed: its tour doesn't parse",
+            "",
         ].map(String::from), "{s:#?}");
         assert!(row(&s, 0).starts_with(" a accept  g tour"), "{s:#?}");
     }

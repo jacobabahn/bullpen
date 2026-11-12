@@ -431,10 +431,10 @@ In the tour:
   worker (`tour --send`), `a` accepts the task (warning first, if comments are
   unsent: `a` again accepts anyway), `esc` closes.
 
-The board marks a ready task "Toured." once you've opened its tour (until the
-worker's next `ready`), else "Not toured yet." or "Tour written, not opened yet.":
-a nudge only, accepting never needs a tour. A failed tour shows as "tour failed:
-<why>".
+The line with the size of a ready task's change says "Toured" once you've opened
+its tour (until the worker's next `ready`), else "Not toured yet" or "Tour written,
+not opened yet": a nudge only, accepting never needs a tour. A failed tour shows as
+"tour failed: <why>" on the task.
 
 ```sh
 bullpen tour BP-3             # with a current tour, its path; else start writing one
