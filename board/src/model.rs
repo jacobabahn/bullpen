@@ -373,7 +373,9 @@ pub struct Config {
 
 impl Config {
     /// Is the task another coordinator's? Only when there are several: a task with
-    /// no owner, or one whose owner is gone, is everyone's.
+    /// no owner, or one whose owner is gone, is everyone's. bullpen drops a coordinator
+    /// once its pane closes, so a listed one is running: this agrees with bullpen's
+    /// `sees_to` without asking Rex about panes.
     pub fn theirs(&self, t: &Task, me: Option<&str>) -> bool {
         match (me, t.coordinator.as_deref()) {
             (Some(me), Some(o)) => self.coordinators.len() > 1 && o != me && self.coordinators.iter().any(|c| c == o),

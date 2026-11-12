@@ -519,7 +519,7 @@ def stop(repo, t, by, kind, why, lines=(), event="stopped"):
         status, say = "needs", (lambda line: line)
     elif by == "worker" and kind in ("exited", "pane_gone"):
         status, say = "stopped", (lambda line: line)
-    elif coordinator_up(repo, t):
+    elif sees_to(repo, t):
         m = triage_minutes(repo)
         status, say = "triage", (lambda line: f"For the coordinator: {line} (still here in {m} min, "
                                               f"it goes to the person)")
@@ -872,15 +872,12 @@ def news(repo, task, event, text, everyone=False, skip=None, typed=None, to=None
 
 
 def news_to(repo, task, everyone=False):
-    """(IDs, waits): the coordinators a line of news is for, the task's owner while its
-    pane is alive, else every live coordinator; with none alive, all of them (waits is
-    True: it has to wait for one to come back). ([], True) when the repo has none."""
+    """(IDs, waits): the coordinators a line of news is for, those who see to the task
+    (every live one, with everyone); with none alive, all of them (waits is True: it
+    has to wait for one to come back). ([], True) when the repo has none."""
     cs = repo.cfg["coordinators"]
-    own = None if everyone else owner(repo, task)
-    if own and alive(own):
-        return [own["id"]], False
-    live = [c for c in cs if alive(c)]
-    return [c["id"] for c in (live or cs)], not live
+    to = [c for c in cs if alive(c)] if everyone else sees_to(repo, task)
+    return [c["id"] for c in (to or cs)], not to
 
 
 # An outbox holds one message a line; a message of several lines (news with a diff
@@ -1234,8 +1231,10 @@ def cmd_flush(args):
 # Its board shows only its own tasks (and those with no owner, or a gone one) unless
 # board_others (the board's `o`) shows the others' too. The ID stays when
 # a Rex restart gives the pane a new block. A task belongs to the coordinator that
-# added it (t["coordinator"], its ID): news about it goes to that one alone while its
-# pane is alive, else to all of them. `bullpen adopt` moves a task to another.
+# added it (t["coordinator"], its ID). Who sees to it (sees_to) is that one alone while
+# its pane is running, else every running coordinator: they get its news, its stops
+# and its panes, and their boards show it. A coordinator whose pane closes is dropped
+# (coordinator_gone). `bullpen adopt` moves a task to another.
 
 
 def coordinator(repo, cid):
@@ -1253,12 +1252,12 @@ def coordinator_at(repo, block, boards=True):
 
 
 def on_board(repo, c, t):
-    """Does coordinator c's board show the task? Not another live coordinator's, while
-    c's board_others is off. With one coordinator (or c None), every task."""
+    """Does coordinator c's board show the task? Only one c sees to, or one nobody sees
+    to, while c's board_others is off. With one coordinator (or c None), every task."""
     if not c or c.get("board_others") or len(repo.cfg["coordinators"]) < 2:
         return True
-    own = owner(repo, t)
-    return not own or own["id"] == c["id"]
+    sees = sees_to(repo, t)
+    return not sees or any(o["id"] == c["id"] for o in sees)
 
 
 def alive(c):
@@ -1275,16 +1274,20 @@ def primary(repo):
     return cs[0] if cs else None
 
 
-def home_of(repo, t):
-    """Where a task's panes live: with its owner, else the primary coordinator."""
-    return owner(repo, t) or primary(repo) or {}
-
-
-def coordinator_up(repo, t):
-    """Is there a coordinator to see to the task: its owner's pane is alive, or, for a
-    task with no owner (or a gone one), some coordinator's is?"""
+def sees_to(repo, t):
+    """The coordinators who see to a task: its owner while the owner's pane is running,
+    else every running coordinator, else none (the task needs the person)."""
     own = owner(repo, t)
-    return alive(own) if own else any(alive(c) for c in repo.cfg["coordinators"])
+    if alive(own):
+        return [own]
+    return [c for c in repo.cfg["coordinators"] if alive(c)]
+
+
+def home_of(repo, t):
+    """Where a task's panes live: with the coordinator who sees to it, else (none
+    running) with its owner, else the primary coordinator."""
+    sees = sees_to(repo, t)
+    return sees[0] if sees else owner(repo, t) or primary(repo) or {}
 
 
 def add_coordinator(repo, block, session):
@@ -1300,15 +1303,53 @@ def prune(repo):
     """Forget coordinators whose panes are gone, and close their boards. Their tasks'
     news goes to the others."""
     for c in list(repo.cfg["coordinators"]):
-        if alive(c):
-            continue
-        b = c.get("board") or {}
-        if b.get("block"):
-            rex_close(b.get("session"), b["block"])
-            unindex_block(b["block"])
-        unindex_block(c.get("block"))
-        repo.cfg["coordinators"].remove(c)
-        print(f"coordinator {c['id']}: its pane is gone, so it is dropped")
+        if not alive(c):
+            drop_coordinator(repo, c)
+
+
+def drop_coordinator(repo, c):
+    """Forget coordinator c, whose pane is gone, and close its board."""
+    b = c.get("board") or {}
+    if b.get("block"):
+        rex_close(b.get("session"), b["block"])
+        unindex_block(b["block"])
+    unindex_block(c.get("block"))
+    repo.cfg["coordinators"].remove(c)
+    print(f"coordinator {c['id']}: its pane is gone, so it is dropped")
+
+
+GONE_WAIT = 5  # seconds before a look at whether a coordinator's pane really closed
+
+
+def coordinator_gone(repo, c):
+    """The watcher said coordinator c's pane is gone: a few seconds later, look in the
+    background, and drop c if its pane really closed."""
+    wait = os.environ.get("BULLPEN_GONE_WAIT")  # the tests: no wait, and wait for the look
+    p = subprocess.Popen([SELF, "_coordinator_gone", c["id"], "--wait", wait or str(GONE_WAIT)],
+                         cwd=repo.root, start_new_session=True, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if wait:
+        p.wait()
+
+
+def cmd_coordinator_gone(args):
+    """(background) Drop a coordinator whose pane closed: only while Rex still answers
+    for its session but not for its pane, and has no pane of bullpen's coordinator
+    label that no coordinator has. So a Rex shutdown or restart drops nobody: `up`
+    finds the panes again."""
+    time.sleep(args.wait)
+    repo = Repo(repo_root())
+    c = coordinator(repo, args.id)
+    if not c or alive(c):
+        return
+    view = rex_view(c.get("session"))
+    if view is None:
+        return  # Rex is down, or restarted with a new session: nobody can tell
+    taken = {o.get("block") for o in repo.cfg["coordinators"]}
+    if any(h[2] not in taken for h in find_panes(view, coordinator_label(repo))):
+        return  # a restart brought it back under a new ID
+    drop_coordinator(repo, c)
+    repo.save()
 
 
 # ---------- news by monitor: `bullpen news [--follow]` ----------
@@ -2621,7 +2662,7 @@ def cmd_reply(args):
     text = " ".join(" ".join(args.answer).split())
     if not text:
         raise Fail("give the answer")
-    if not coordinator_up(repo, t):
+    if not sees_to(repo, t):
         raise Fail(f"no coordinator is running to take the answer: `bullpen tell {t['id']}` "
                    f"tells its worker instead")
     question = t.get("why") or ""
@@ -5055,7 +5096,7 @@ def cmd_show(args):
     if len(repo.cfg["coordinators"]) > 1 or (t.get("coordinator") and not owner(repo, t)):
         c = owner(repo, t)
         print(f"    coord: " + (f"{c['id']} ({c['block']})" if c else
-                                 f"{t.get('coordinator') or 'none'}, gone: its news goes to every coordinator"))
+                                 f"{t.get('coordinator') or 'none'}, gone: every running coordinator sees to it"))
     if t.get("auto_accept") is not None:
         print(f"     auto: {'accepts by itself once approved' if t['auto_accept'] else 'kept for you (--no-auto-accept)'}")
     if waits_phrase(repo, t):
@@ -6492,7 +6533,7 @@ def overdue(repo, t, at=None):
     person now, else None."""
     if t["status"] != "triage":
         return None
-    if not coordinator_up(repo, t):
+    if not sees_to(repo, t):
         return " (no coordinator is running)", "no coordinator is running"
     m = triage_minutes(repo)
     if seconds_since(t.get("since") or t.get("updated") or now(), at) >= m * 60:
@@ -6768,7 +6809,12 @@ def cmd_gone(args):
     if not repo:
         return
     unindex_block(args.block)
-    if role in ("coordinator", "board"):
+    if role == "coordinator":
+        c = coordinator_at(repo, args.block, boards=False)
+        if c:
+            coordinator_gone(repo, c)
+        return
+    if role == "board":
         return
     if role.endswith(" review"):
         t = repo.task(role.split()[0])
@@ -7859,6 +7905,11 @@ def parser():
     p.add_argument("base")
     p.add_argument("--task", help=argparse.SUPPRESS)
     p.set_defaults(fn=cmd_push_bg)
+
+    p = sub.add_parser("_coordinator_gone")
+    p.add_argument("id")
+    p.add_argument("--wait", type=float, default=GONE_WAIT)
+    p.set_defaults(fn=cmd_coordinator_gone)
 
     p = sub.add_parser("_auto_accept")
     p.add_argument("id", help="the task, like BP-3")

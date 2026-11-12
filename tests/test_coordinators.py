@@ -197,7 +197,7 @@ class CoordinatorsTest(BullpenTest):
         self.bp("up")  # drops c2, and closes its board
         self.assertEqual([c["id"] for c in self.coordinators()], ["c1", "c3"])
         self.assertIn(["block", "close", board2, "-s", "session:1"], self.rex_calls())
-        self.assertIn("coord: c2, gone: its news goes to every coordinator", self.bp("show", a).stdout)
+        self.assertIn("coord: c2, gone: every running coordinator sees to it", self.bp("show", a).stdout)
         self.bp_in(third, "adopt", a)
         self.assertEqual(self.show(a)["coordinator"], "c3")
         self.ask(a, "c3?")
@@ -250,3 +250,54 @@ class CoordinatorsTest(BullpenTest):
         self.assertEqual(self.focused()[-1], other)
         self.bp("go")  # from elsewhere: the primary one
         self.assertEqual(self.focused()[-1], "blk1")
+
+    # ---------- who sees to a task ----------
+
+    def test_a_gone_owners_task_is_on_the_running_coordinators_boards(self):
+        other = self.two_coordinators()
+        a = self.bp_in(other, "add", "Theirs", "--brief", "x").stdout.strip()
+        self.bp("start", a)
+        c1_board = self.coordinators()[0]["board"]["block"]
+        self.ask(a, "anyone?")
+        self.assertIn("nothing needs you", self.bp("go", "--next", "--from", c1_board, ok=False).stderr)
+        (self.fake / "alive" / other).unlink()  # c2's agent is closed: c1 sees to its task
+        out = json.loads(self.bp("go", "--next", "--json", "--from", c1_board).stdout)
+        self.assertEqual(out["block"], self.block(a))
+
+    def gone_now(self, block):
+        """The watcher reports a pane gone; bullpen's later look happens right away."""
+        self.env["BULLPEN_GONE_WAIT"] = "0"
+        self.bp("_gone", block)
+
+    def test_a_coordinator_whose_pane_closes_is_dropped(self):
+        other = self.two_coordinators()
+        board2 = self.coordinators()[1]["board"]["block"]
+        a = self.bp_in(other, "add", "Theirs", "--brief", "x").stdout.strip()
+        (self.fake / "alive" / other).unlink()
+        self.gone_now(other)
+        self.assertEqual([c["id"] for c in self.coordinators()], ["c1"])
+        self.assertIn(["block", "close", board2, "-s", "session:1"], self.rex_calls())
+        self.assertIn("coord: c2, gone", self.bp("show", a).stdout)
+
+    def test_a_coordinator_still_running_is_kept(self):
+        other = self.two_coordinators()
+        self.gone_now(other)  # the pane came back, or the event was for something else
+        self.assertEqual([c["id"] for c in self.coordinators()], ["c1", "c2"])
+
+    def test_a_rex_restart_drops_no_coordinator(self):
+        other = self.two_coordinators()
+        reg = self.fake / "reg.json"
+        R = json.loads(reg.read_text())
+        # Rex restarted and its pane came back under a new ID: `up` finds it again
+        (self.fake / "alive" / "blk1").unlink()
+        R["blocks"]["blk99"] = dict(R["blocks"]["blk1"])
+        (self.fake / "alive" / "blk99").write_text("")
+        reg.write_text(json.dumps(R))
+        self.gone_now("blk1")
+        self.assertEqual([c["id"] for c in self.coordinators()], ["c1", "c2"])
+        # Rex is down, or came back with a new session: nobody can tell, so nobody is dropped
+        R["session"] = "session:2"
+        reg.write_text(json.dumps(R))
+        (self.fake / "alive" / other).unlink()
+        self.gone_now(other)
+        self.assertEqual([c["id"] for c in self.coordinators()], ["c1", "c2"])

@@ -317,9 +317,17 @@ class TriageTest(BullpenTest):
         other = self.two_coordinators()
         tid = self.bp_in(other, "add", "Theirs", "--brief", "x").stdout.strip()
         self.bp("start", tid)
-        (self.fake / "alive" / other).unlink()  # its owner is gone; c1 still runs
         self.bp("_event", self.block(tid), "error", "", "boom")
-        self.assertEqual(self.show(tid)["status"], "needs")
+        self.assertEqual(self.typed()[-1][0], other)  # its owner sees to it, alone
+        (self.fake / "alive" / other).unlink()  # its owner is gone; c1 still runs, and sees to it
+        self.bp("ok", tid)
+        self.bp("_event", self.block(tid), "error", "", "boom again")
+        self.assertEqual(self.show(tid)["status"], "triage")
+        who, line = self.typed()[-1]
+        self.assertEqual(who, "blk1")
+        self.assertIn("For the coordinator", line)
+        self.bp("check", "--fix", "--quiet")  # not overdue: c1 runs
+        self.assertEqual(self.show(tid)["status"], "triage")
 
     def test_review_starts_a_new_reviewer_within_the_rounds(self):
         tid = self.start_task()

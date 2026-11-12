@@ -7,6 +7,8 @@ Words bullpen's code and docs use. The code for a task's lifecycle is in the
 
 **Coordinator**: the agent you talk to. It turns what you ask into tasks, starts their workers and sees to their stops. A repository can have several, `c1`, `c2`, ...
 
+**Sees to**: the coordinators who see to a task: its own (the one that added it, or adopted it) while that one's pane is running, else every running coordinator, else nobody, and the task needs the person. They get its news and its triage stops, its panes go in their tab, and their boards show it. A coordinator whose pane closes is dropped, so a listed coordinator is a running one. `sees_to` in `bin/bullpen` is the rule.
+
 **Worker**: the agent doing one task, in its own pane, worktree and branch. A **reviewer** is the agent that checks it after `ready`.
 
 **Pane**: where an agent or the board runs: a Rex pane, labelled `bullpen: <ID>` for a worker and `bullpen: <ID> review` for its reviewer.
@@ -25,7 +27,7 @@ _Avoid_: window, block (Rex's API word for it).
 **Stop**: why a task waits on someone, recorded as `{"by": "worker" | "reviewer", "kind": ...}`: at a prompt, failed, ended its turn without `ready`, exited, its pane gone after a Rex restart, a message that didn't reach the worker, not continued after the usage limit, or its worktree's setup failed (so no worker started). Only a task in `triage`, `needs` or `stopped` has one. The task's `why` says the same thing in words, for people and the board; code never goes by its wording.
 _Avoid_: reason (for the recorded stop), needs (for any stop).
 
-**Triage**: a stop the task's coordinator can see to; "coordinator on it" on the board. It becomes **needs** if no coordinator is running, or once `triage_minutes` pass (escalation).
+**Triage**: a stop the coordinators who **see to** the task can settle; "coordinator on it" on the board. It becomes **needs** if none is running, or once `triage_minutes` pass (escalation).
 
 **Needs**: a task that needs the person ("needs you" on the board, as is a stopped one): an agent at a prompt, an `ask`, or an escalated triage.
 

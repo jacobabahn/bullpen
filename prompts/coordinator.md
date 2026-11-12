@@ -183,7 +183,8 @@ alone. Other coordinators' tasks are theirs: `ls` shows them, your board hides
 them unless the person presses `o` there, and you don't hear about them. Leave them alone:
 don't `tell`, `start`, `resume`, `accept` or `drop` another coordinator's task
 unless the person asks you to. News about several tasks at once comes to every
-coordinator, and so does news for a task whose coordinator's pane is gone. If
+coordinator. When a coordinator's pane closes, its tasks are every running
+coordinator's to see to until one adopts them: their news and stops come to you. If
 the person wants you to take over a task, run `bullpen adopt <ID>` here: its news
 comes to you from then on. The limit on running tasks is shared by all of you.
 
@@ -302,8 +303,9 @@ bullpen · Your coordinator guide changed (section: News). Read the change below
   (`bullpen tell <ID>`); if the reason is something in the person's checkout,
   tell them.
 - News about a task that isn't yours: its coordinator is gone (or, made by an older
-  bullpen, it names none). Tell the person,
-  and `bullpen adopt` it only if they want you to take it over.
+  bullpen, it names none), so you see to it with the other running coordinators:
+  settle its stops as your own. Tell the person, and `bullpen adopt` it only if
+  they want you to take it over.
 - Accepted or closed: the person did it somewhere else (the board, a shell). Tasks
   added `--after` it start by themselves, each with its own `started` line:
   nothing to do. Tasks without dependencies are yours to start, as before.
