@@ -1291,7 +1291,7 @@ def home_of(repo, t):
 
 
 def add_coordinator(repo, block, session):
-    n = repo.cfg.get("next_coordinator") or 1
+    n = repo.cfg["next_coordinator"]
     c = {"id": f"c{n}", "block": block, "session": session, "board": None}
     repo.cfg["next_coordinator"] = n + 1
     repo.cfg["coordinators"].append(c)
@@ -3410,7 +3410,7 @@ def tour_inputs(repo, t, base_ref, files):
 
 def tour_command(repo):
     """The tour agent's argv: headless, on tour_model, with read-only tools."""
-    cmd = with_model(repo.cfg.get("tour") or ["claude"], repo.cfg.get("tour_model"))
+    cmd = with_model(repo.cfg["tour"], repo.cfg["tour_model"])
     if not is_claude(cmd):
         return resolve(cmd)
     return resolve(cmd) + ["-p", "--output-format", "json", "--no-session-persistence",
@@ -6524,8 +6524,7 @@ def up_hint():
 # running, it needs the person ("needs"), as prompts and `ask` do at once.
 
 def triage_minutes(repo):
-    m = repo.cfg.get("triage_minutes")
-    return DEFAULT_CONFIG["triage_minutes"] if m is None else m
+    return repo.cfg["triage_minutes"]
 
 
 def overdue(repo, t, at=None):
@@ -7064,7 +7063,9 @@ def check_repo(repo, ids, fix, out):
             continue
         if a["state"] == "working" and compacting(session, block, a["msg"]):
             continue  # compacting by itself: no turn, so no drift
-        limit = repo.cfg.get("stuck_after") or DEFAULT_CONFIG["stuck_after"]
+        # How long an idle agent's shell may run before it is drift. stuck_after 0 turns
+        # off only the "no progress" news: this check still runs, on the default.
+        limit = repo.cfg["stuck_after"] or DEFAULT_CONFIG["stuck_after"]
         found = (worker_drift if who == "worker" else reviewer_drift)(t, a, limit)
         if found:
             drift += 1
