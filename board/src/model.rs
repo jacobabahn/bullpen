@@ -58,6 +58,57 @@ pub struct Review {
     pub block: Option<String>,
 }
 
+/// Why a task waits on someone: {"by": "worker" | "reviewer", "kind": "prompt" | ...}.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Stop {
+    #[serde(default)]
+    pub by: String,
+    #[serde(default)]
+    pub kind: String,
+}
+
+/// What `i` answers on a task that needs you.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Question {
+    /// its worker or reviewer is at a prompt: press one of its options
+    Prompt,
+    /// its coordinator asked: the answer goes to the coordinator
+    Ask,
+}
+
+/// The prompt a task's agent is at, as `bullpen prompt` reads it off its screen.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct Prompt {
+    /// "worker" or "reviewer"
+    #[serde(default)]
+    pub who: String,
+    /// None: its screen shows no prompt now
+    #[serde(default)]
+    pub question: Option<String>,
+    /// (key, label): "1", "Yes"
+    #[serde(default)]
+    pub options: Vec<(String, String)>,
+    /// which prompt it is: `bullpen answer --prompt` refuses another
+    #[serde(default)]
+    pub id: Option<String>,
+    /// the end of its screen, in colour
+    #[serde(default)]
+    pub screen: Vec<String>,
+}
+
+impl Prompt {
+    /// What `bullpen prompt` printed, or None when it said something else (an error).
+    pub fn parse(out: &str) -> Option<Prompt> {
+        serde_json::from_str(out.trim()).ok()
+    }
+
+    /// The label of the option this key picks: digits as they are, y and n either case.
+    pub fn option(&self, c: char) -> Option<(&str, &str)> {
+        let key = c.to_ascii_lowercase().to_string();
+        self.options.iter().find(|(k, _)| *k == key).map(|(k, l)| (k.as_str(), l.as_str()))
+    }
+}
+
 /// What an agent last said it's doing: the watcher writes it to
 /// <state>/doing/<block>.json from the pane's "working: ..." status.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -141,6 +192,12 @@ pub struct Task {
     /// done by `close`: it finished with nothing to merge
     #[serde(default, deserialize_with = "lenient")]
     pub closed: Option<bool>,
+    /// its coordinator asked the person about it (`bullpen ask`): the question is its why
+    #[serde(default, deserialize_with = "lenient")]
+    pub ask: Option<bool>,
+    /// why it waits on someone: its worker's or reviewer's stop
+    #[serde(default, deserialize_with = "lenient")]
+    pub stop: Option<Stop>,
     /// those not done yet, worked out from the other tasks: "BP-8", "BP-9 (dropped)"
     #[serde(skip)]
     pub waits: Vec<String>,
@@ -171,6 +228,20 @@ impl Task {
 
     pub fn closed(&self) -> bool {
         matches!(self.status.as_str(), "done" | "dropped")
+    }
+
+    /// The question the person can answer from the board, if any: its coordinator's
+    /// (an ask) before its agent's prompt.
+    pub fn question(&self) -> Option<Question> {
+        if self.status != "needs" {
+            None
+        } else if self.ask == Some(true) {
+            Some(Question::Ask)
+        } else if self.stop.as_ref().is_some_and(|s| s.kind == "prompt") {
+            Some(Question::Prompt)
+        } else {
+            None
+        }
     }
 
     pub fn is_local(&self) -> bool {
@@ -701,6 +772,7 @@ pub fn task_stat(t: &Task) -> &str {
 pub fn task_keys(t: Option<&Task>) -> Vec<(&'static str, &'static str)> {
     let Some(t) = t else { return Vec::new() };
     let mut keys: Vec<(&str, &str)> = match t.status.as_str() {
+        "needs" if t.question().is_some() => vec![("i", "answer"), ("⏎", "open"), ("t", "tell"), ("p", "peek")],
         "needs" => vec![("⏎", "answer"), ("t", "tell"), ("p", "peek")],
         "triage" => vec![("⏎", "open"), ("p", "peek"), ("t", "tell")],
         "stopped" => vec![("r", "resume"), ("p", "peek"), ("d", "drop")],
@@ -1162,9 +1234,38 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_task_that_needs_you_says_what_i_answers() {
+        let stop = |kind: &str| Some(Stop { by: "worker".into(), kind: kind.into() });
+        let t = |status: &str, ask: Option<bool>, kind: &str| Task { ask, stop: stop(kind), ..task("BP-1", status) };
+        assert_eq!(t("needs", None, "prompt").question(), Some(Question::Prompt));
+        assert_eq!(t("needs", Some(true), "prompt").question(), Some(Question::Ask)); // the coordinator's first
+        assert_eq!(t("needs", Some(true), "ended").question(), Some(Question::Ask));
+        assert_eq!(t("needs", None, "ended").question(), None); // an escalated triage: open its pane
+        assert_eq!(t("working", None, "prompt").question(), None);
+        let read: Task = serde_json::from_str(r#"{"id":"BP-1","status":"needs","ask":true,"stop":{"by":"reviewer","kind":"prompt"}}"#).unwrap();
+        assert_eq!((read.question(), read.stop.unwrap().by.as_str()), (Some(Question::Ask), "reviewer"));
+    }
+
+    #[test]
+    fn a_prompt_is_read_from_what_bullpen_prompt_prints() {
+        let out = r#"{"who": "worker", "question": "Do you want to proceed?", "options": [["1", "Yes"], ["2", "No"]], "id": "ab12", "screen": ["a", "b"]}"#;
+        let p = Prompt::parse(out).unwrap();
+        assert_eq!((p.who.as_str(), p.question.as_deref(), p.id.as_deref()), ("worker", Some("Do you want to proceed?"), Some("ab12")));
+        assert_eq!(p.option('2'), Some(("2", "No")));
+        assert_eq!(p.option('3'), None);
+        let yn = Prompt { options: vec![("y".into(), "Yes".into()), ("n".into(), "No".into())], ..Default::default() };
+        assert_eq!(yn.option('Y'), Some(("y", "Yes")));
+        let none = Prompt::parse(r#"{"who": "worker", "question": null, "options": [], "id": null, "screen": []}"#).unwrap();
+        assert_eq!((none.question, none.options.len()), (None, 0));
+        assert_eq!(Prompt::parse("bullpen: BP-1 isn't waiting at a prompt"), None);
+    }
+
+    #[test]
     fn keys_fit_the_task() {
         assert_eq!(task_keys(Some(&task("BP-1", "ready")))[0], ("a", "accept"));
         assert_eq!(task_keys(Some(&task("BP-1", "needs")))[0], ("⏎", "answer"));
+        let asked = Task { ask: Some(true), ..task("BP-1", "needs") };
+        assert_eq!(task_keys(Some(&asked))[..2], [("i", "answer"), ("⏎", "open")]);
         assert!(task_keys(None).is_empty());
         let wt = |st: &str| Task { worktree: Some("/w".into()), ..task("BP-1", st) };
         assert_eq!(task_keys(Some(&wt("working"))).last(), Some(&("v", "diff")));

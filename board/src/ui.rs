@@ -137,7 +137,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let full = f.area();
     let buf = f.buffer_mut();
 
-    if matches!(app.mode, Mode::Overlay { .. }) {
+    if matches!(app.mode, Mode::Overlay { .. } | Mode::Answer { .. }) {
         // the title, a blank line, at least one line and the foot
         let h = full.height as usize;
         app.height = (h - bottom_gap(app, h, 4)) as u16;
@@ -150,6 +150,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         }
         let foot = if peek.is_some() { "live · any key returns" } else { "any key returns" };
         put(buf, area, h.saturating_sub(1), 1, span(foot, dim()));
+        return;
+    }
+    if let Mode::Answer { title, prompt, .. } = &app.mode {
+        draw_answer(buf, full, app.height as usize, title, prompt.as_ref());
         return;
     }
 
@@ -316,8 +320,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         span("", dim())
     };
     put(buf, area, h.saturating_sub(2), 1, line);
-    if let Mode::Tell { id, text } = &app.mode {
-        let label = format!("Tell {id}:");
+    if let Mode::Tell { id, text, reply } = &app.mode {
+        let label = if *reply { format!("Answer {id}:") } else { format!("Tell {id}:") };
         let x = width(&label) + 2;
         // show the end of what's typed when it's longer than the line
         let room = w.saturating_sub(x + 2);
@@ -353,6 +357,37 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             put(buf, area, last, 1, keys);
         }
     }
+}
+
+/// The prompt a task's agent is at: the end of its screen, then its options, one a
+/// line, each with the key that presses it.
+fn draw_answer(buf: &mut Buffer, area: Rect, h: usize, title: &str, prompt: Option<&model::Prompt>) {
+    let w = area.width as usize;
+    put(buf, area, 0, 1, span(fit(title, w.saturating_sub(2)), bold()));
+    let (screen, options): (&[String], Vec<Line<'static>>) = match prompt {
+        None => (&[], vec![Line::from(span("Reading its screen…", dim()))]),
+        Some(p) if p.question.is_none() || p.options.is_empty() => {
+            (&p.screen, vec![Line::from(span("No prompt to answer on its screen now.", bold()))])
+        }
+        Some(p) => {
+            let lines = p.options.iter().map(|(key, label)| {
+                Line::from(vec![span(format!("{key} "), bold()), span(fit(label, w.saturating_sub(4 + width(key))), Style::new())])
+            });
+            (&p.screen, lines.collect())
+        }
+    };
+    // the title, a gap, the screen, a gap, the options and the foot
+    let room = h.saturating_sub(4 + options.len());
+    let shown = &screen[screen.len().saturating_sub(room)..];
+    for (j, line) in shown.iter().enumerate() {
+        put(buf, area, 2 + j, 1, screen_line(line));
+    }
+    let y = h.saturating_sub(1 + options.len());
+    for (j, line) in options.into_iter().enumerate() {
+        put(buf, area, y + j, 1, line);
+    }
+    let foot = "live · ⏎ opens its pane · esc returns";
+    put(buf, area, h.saturating_sub(1), 1, span(fit(foot, w.saturating_sub(2)), dim()));
 }
 
 /// A task's line: its ID, title and age, or the y/n question it's waiting on.
@@ -520,7 +555,7 @@ mod tests {
         assert_eq!(row(&s, 0), "");
 
         a.pending = None;
-        a.mode = Mode::Tell { id: "BP-1".into(), text: "hi".into() };
+        a.mode = Mode::Tell { id: "BP-1".into(), text: "hi".into(), reply: false };
         let s = screen(&mut a, 40, 12);
         assert_eq!(row(&s, 1), " Tell BP-1: hi");
         assert_eq!(row(&s, 0), "");
@@ -529,6 +564,39 @@ mod tests {
         let s = screen(&mut a, 40, 12);
         assert_eq!(row(&s, 1), " any key returns");
         assert_eq!(row(&s, 0), "");
+    }
+
+    #[test]
+    fn a_prompt_shows_its_screen_then_its_options() {
+        let mut a = app(vec![ready("BP-1")], 1, Layout::Grouped);
+        let p = model::Prompt {
+            who: "worker".into(),
+            question: Some("Do you want to proceed?".into()),
+            options: vec![("1".into(), "Yes".into()), ("2".into(), "Yes, and always allow access to /tmp/x".into()), ("3".into(), "No".into())],
+            id: Some("ab12".into()),
+            screen: (1..=9).map(|n| format!("line {n}")).chain(["Do you want to proceed?".to_string()]).collect(),
+        };
+        a.mode = Mode::Answer { id: "BP-1".into(), title: "BP-1  Fix it".into(), prompt: Some(p.clone()) };
+        let s = screen(&mut a, 40, 12);
+        assert_eq!(s, [
+            " BP-1  Fix it",
+            "",
+            " line 7",
+            " line 8",
+            " line 9",
+            " Do you want to proceed?",
+            "",
+            " 1 Yes",
+            " 2 Yes, and always allow access to /t…",
+            " 3 No",
+            " live · ⏎ opens its pane · esc returns",
+            "",
+        ].map(String::from), "{s:#?}");
+        a.mode = Mode::Answer { id: "BP-1".into(), title: "BP-1  Fix it".into(), prompt: Some(model::Prompt { question: None, options: vec![], ..p }) };
+        let s = screen(&mut a, 40, 12);
+        assert_eq!(s[9..11], [" No prompt to answer on its screen now.", " live · ⏎ opens its pane · esc returns"].map(String::from), "{s:#?}");
+        a.mode = Mode::Tell { id: "BP-1".into(), text: "Postgres".into(), reply: true };
+        assert_eq!(row(&screen(&mut a, 40, 12), 1), " Answer BP-1: Postgres");
     }
 
     #[test]

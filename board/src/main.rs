@@ -11,7 +11,7 @@
 mod model;
 mod ui;
 
-use model::{Action, Config, Task};
+use model::{Action, Config, Prompt, Question, Task};
 use notify::{RecursiveMode, Watcher};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::path::{Path, PathBuf};
@@ -32,6 +32,10 @@ Acting on the selected task
                remove its worktree, branch and pane. Then the next
                task that needs you is selected
   d            drop: close its PR, pane and worktree
+  i            answer what it needs you for, here: its agent's
+               prompt (shown live: press an option's number, or
+               y or n), or its coordinator's question (type the
+               answer: it goes to the coordinator, not the worker)
   t            tell its worker something
   p            peek at the end of its worker's screen (live)
   v            view its diff against its base (q closes it)
@@ -54,8 +58,11 @@ pub enum Mode {
     Normal,
     /// a full-screen text (keys, a peek) until any key; a peek at a task keeps updating
     Overlay { title: String, lines: Vec<String>, peek: Option<String> },
-    /// typing a line to tell a task's worker
-    Tell { id: String, text: String },
+    /// typing a line to tell a task's worker, or with reply, to answer its coordinator's question
+    Tell { id: String, text: String, reply: bool },
+    /// the prompt a task's agent is at, read again every second (None until first read),
+    /// until an option is pressed or esc
+    Answer { id: String, title: String, prompt: Option<Prompt> },
 }
 
 /// A slow command, run in the background.
@@ -142,6 +149,7 @@ enum Msg {
     Changed,
     Done { id: String, job: Job, ok: bool, out: String },
     Peeked { id: String, text: String },
+    Prompted { id: String, prompt: Option<Prompt>, out: String },
 }
 
 /// Run `bullpen <args>`: did it work, and what it said (stdout, else stderr).
@@ -278,16 +286,30 @@ impl App {
         }
     }
 
-    /// Read a task's screen again in the background, for a peek that's open.
+    /// Read a task's screen again in the background, for a peek or an answer that's open.
     fn peek(&mut self) {
-        let Mode::Overlay { peek: Some(id), .. } = &self.mode else { return };
+        let (id, answer) = match &self.mode {
+            Mode::Overlay { peek: Some(id), .. } => (id.clone(), false),
+            Mode::Answer { id, .. } => (id.clone(), true),
+            _ => return,
+        };
         if self.peeking || Instant::now() < self.peek_due {
             return;
         }
         self.peeking = true;
+        let (bullpen, root, tx) = (self.bullpen.clone(), self.root.clone(), self.tx.clone());
+        if answer {
+            let lines = self.height.saturating_sub(6).max(1).to_string();
+            let args = vec!["prompt".into(), id.clone(), "--lines".into(), lines];
+            std::thread::spawn(move || {
+                let (ok, out) = run(&bullpen, &root, &args);
+                let prompt = if ok { Prompt::parse(&out) } else { None };
+                let _ = tx.send(Msg::Prompted { id, prompt, out: last_line(&out) });
+            });
+            return;
+        }
         let lines = self.height.saturating_sub(4).max(1).to_string();
         let args = vec!["peek".into(), id.clone(), "--lines".into(), lines, "--vt".into()];
-        let (bullpen, root, tx, id) = (self.bullpen.clone(), self.root.clone(), self.tx.clone(), id.clone());
         std::thread::spawn(move || {
             let (_, text) = run(&bullpen, &root, &args);
             let _ = tx.send(Msg::Peeked { id, text });
@@ -304,6 +326,63 @@ impl App {
         }
     }
 
+    /// A prompt read for the answer that's open. One that can't be read (its agent
+    /// went on, its pane is gone) closes it, saying why.
+    fn prompted(&mut self, id: String, prompt: Option<Prompt>, out: String) {
+        self.peeking = false;
+        self.peek_due = Instant::now() + PEEK_EVERY;
+        let Mode::Answer { id: open, prompt: shown, .. } = &mut self.mode else { return };
+        if *open != id {
+            return;
+        }
+        match prompt {
+            Some(p) => *shown = Some(p),
+            None => {
+                self.mode = Mode::Normal;
+                self.msg = out;
+            }
+        }
+    }
+
+    /// Open what `i` answers on the task: its agent's prompt, or a line for the
+    /// coordinator's question.
+    fn answer(&mut self, t: &Task) {
+        match t.question() {
+            Some(Question::Prompt) => {
+                self.mode = Mode::Answer { id: t.id.clone(), title: format!("{}  {}", t.id, t.title), prompt: None };
+                self.peek_due = Instant::now();
+                self.peek();
+            }
+            Some(Question::Ask) => self.mode = Mode::Tell { id: t.id.clone(), text: String::new(), reply: true },
+            None if t.needs_you() => self.msg = format!("{} isn't asking anything here: ⏎ opens its pane.", t.id),
+            None => self.msg = format!("{} doesn't need you.", t.id),
+        }
+    }
+
+    /// A key while a prompt is shown: an option's key presses it (if the prompt is
+    /// still on its screen), ⏎ opens the pane, esc or q goes back.
+    fn answer_key(&mut self, code: KeyCode) {
+        let Mode::Answer { id, prompt, .. } = &self.mode else { return };
+        let (id, prompt) = (id.clone(), prompt.clone());
+        let reviewer = prompt.as_ref().is_some_and(|p| p.who == "reviewer");
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => self.mode = Mode::Normal,
+            KeyCode::Enter => {
+                self.mode = Mode::Normal;
+                let (ok, out) = if reviewer { self.bp(&["go", &id, "--review"]) } else { self.bp(&["go", &id]) };
+                self.msg = if ok { format!("Opened {id}.") } else { out };
+            }
+            KeyCode::Char(c) => {
+                let Some(p) = prompt else { return };
+                let (Some((key, label)), Some(pid)) = (p.option(c), p.id.as_deref()) else { return };
+                self.mode = Mode::Normal;
+                let (ok, out) = self.bp(&["answer", &id, key, "--prompt", pid]);
+                self.msg = if ok { format!("Answered {id}: {label}.") } else { out };
+            }
+            _ => {}
+        }
+    }
+
     /// Handle a key. False when the board should quit.
     fn key(&mut self, k: KeyEvent) -> bool {
         if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
@@ -314,14 +393,22 @@ impl App {
                 self.mode = Mode::Normal;
                 return true;
             }
-            Mode::Tell { id, text } => {
+            Mode::Answer { .. } => {
+                self.answer_key(k.code);
+                return true;
+            }
+            Mode::Tell { id, text, reply } => {
                 match k.code {
                     KeyCode::Enter => {
-                        let (id, text) = (id.clone(), text.trim().to_string());
+                        let (id, text, reply) = (id.clone(), text.trim().to_string(), *reply);
                         self.mode = Mode::Normal;
                         if !text.is_empty() {
-                            let (ok, out) = self.bp(&["tell", &id, &text]);
-                            self.msg = if ok { format!("Sent to {id}.") } else { out };
+                            let (ok, out) = self.bp(&[if reply { "reply" } else { "tell" }, &id, &text]);
+                            self.msg = match (ok, reply) {
+                                (true, true) => format!("Sent {id}'s answer to its coordinator."),
+                                (true, false) => format!("Sent to {id}."),
+                                (false, _) => out,
+                            };
                         }
                     }
                     KeyCode::Esc => self.mode = Mode::Normal,
@@ -450,7 +537,8 @@ impl App {
                 self.peek();
             }
             (_, Some('v')) => self.msg = self.bp(&["diff", sel, "--pane"]).1,
-            (_, Some('t')) => self.mode = Mode::Tell { id: sel.into(), text: String::new() },
+            (_, Some('t')) => self.mode = Mode::Tell { id: sel.into(), text: String::new(), reply: false },
+            (_, Some('i')) => self.answer(&cur),
             _ => {}
         }
     }
@@ -460,7 +548,7 @@ impl App {
         let moving = |t: &Task| matches!(t.status.as_str(), "working" | "review");
         if !self.running.is_empty() || self.tasks.iter().any(moving) {
             Duration::from_millis(50) // spinners and the marks of working tasks turn
-        } else if matches!(self.mode, Mode::Overlay { peek: Some(_), .. }) {
+        } else if matches!(self.mode, Mode::Overlay { peek: Some(_), .. } | Mode::Answer { .. }) {
             Duration::from_millis(250)
         } else {
             Duration::from_secs(1) // ages move on by the minute
@@ -473,6 +561,7 @@ impl App {
             Msg::Key(k) => return self.key(k),
             Msg::Done { id, job, ok, out } => self.done(id, job, ok, out),
             Msg::Peeked { id, text } => self.peeked(id, text),
+            Msg::Prompted { id, prompt, out } => self.prompted(id, prompt, out),
             Msg::Redraw | Msg::Changed => {}
         }
         true
@@ -740,6 +829,85 @@ mod tests {
             assert!(a.pending.is_none() && a.running.is_empty(), "{status}");
             assert!(a.msg.contains("can't run"), "{status}: {}", a.msg); // it tried `bullpen go`
         }
+    }
+
+    fn needs(id: &str, ask: bool, kind: &str) -> Task {
+        let stop = Some(model::Stop { by: "worker".into(), kind: kind.into() });
+        Task { ask: ask.then_some(true), stop, ..task(id, "needs") }
+    }
+
+    fn prompt(options: &[(&str, &str)]) -> Prompt {
+        Prompt {
+            who: "worker".into(),
+            question: Some("Do you want to proceed?".into()),
+            options: options.iter().map(|(k, l)| (k.to_string(), l.to_string())).collect(),
+            id: Some("ab12".into()),
+            screen: vec!["touch hello.txt".into()],
+        }
+    }
+
+    #[test]
+    fn i_on_a_prompt_shows_it_and_a_number_answers_it() {
+        let mut a = app(vec![needs("BP-1", false, "prompt")]);
+        a.settle();
+        press(&mut a, 'i');
+        assert!(matches!(&a.mode, Mode::Answer { id, prompt: None, .. } if id == "BP-1"));
+        a.peeking = false; // the read it started can't reach this test
+        a.prompted("BP-1".into(), Some(prompt(&[("1", "Yes"), ("2", "No")])), String::new());
+        // a key that's no option does nothing
+        press(&mut a, '7');
+        assert!(matches!(a.mode, Mode::Answer { .. }));
+        // an option runs `bullpen answer BP-1 2 --prompt ab12` (there's no bullpen here)
+        press(&mut a, '2');
+        assert!(matches!(a.mode, Mode::Normal));
+        assert!(a.msg.contains("can't run"), "{}", a.msg);
+        // esc goes back without answering
+        a.answer(&needs("BP-1", false, "prompt"));
+        a.answer_key(KeyCode::Esc);
+        assert!(matches!(a.mode, Mode::Normal));
+    }
+
+    #[test]
+    fn a_prompt_that_cant_be_read_closes_the_answer() {
+        let mut a = app(vec![needs("BP-1", false, "prompt")]);
+        a.settle();
+        press(&mut a, 'i');
+        a.prompted("BP-2".into(), None, "other".into()); // another task's: ignored
+        assert!(matches!(a.mode, Mode::Answer { .. }));
+        a.prompted("BP-1".into(), None, "BP-1 isn't waiting at a prompt".into());
+        assert!(matches!(a.mode, Mode::Normal));
+        assert_eq!(a.msg, "BP-1 isn't waiting at a prompt");
+        // a screen with no prompt now stays open, with nothing to press
+        press(&mut a, 'i');
+        a.prompted("BP-1".into(), Some(Prompt { question: None, ..prompt(&[]) }), String::new());
+        press(&mut a, '1');
+        assert!(matches!(a.mode, Mode::Answer { .. }));
+    }
+
+    #[test]
+    fn i_on_an_ask_types_an_answer_for_the_coordinator() {
+        let mut a = app(vec![needs("BP-1", true, "ended")]);
+        a.settle();
+        press(&mut a, 'i');
+        assert!(matches!(&a.mode, Mode::Tell { id, reply: true, .. } if id == "BP-1"));
+        for c in "Postgres".chars() {
+            press(&mut a, c);
+        }
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(a.mode, Mode::Normal));
+        assert!(a.msg.contains("can't run"), "{}", a.msg); // it tried `bullpen reply`
+    }
+
+    #[test]
+    fn i_with_nothing_to_answer_says_so() {
+        let mut a = app(vec![needs("BP-1", false, "ended"), task("BP-2", "working")]);
+        a.settle();
+        press(&mut a, 'i');
+        assert!(matches!(a.mode, Mode::Normal));
+        assert_eq!(a.msg, "BP-1 isn't asking anything here: ⏎ opens its pane.");
+        press(&mut a, 'j');
+        press(&mut a, 'i');
+        assert_eq!(a.msg, "BP-2 doesn't need you.");
     }
 
     #[test]

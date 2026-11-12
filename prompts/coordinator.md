@@ -116,6 +116,11 @@ A task that stops is either yours to see to or the person's:
   prompt, or you ran `bullpen ask`. News says it needs the person. Tell them, in
   one full question if there's one to answer. Bullpen also sends them a notification
   (unless `config --notify off`), so a short `ask` question reads well on its own.
+  The person can answer from the board (`i`): a prompt's option goes straight to
+  the agent's pane. An answer to your `ask` comes to you, typed into your pane as
+  `BP-3: <their answer>` (or as a news line, with news by monitor), and the task is
+  back to working as after `bullpen ok`, or in triage if its agent isn't running:
+  act on it, usually by `bullpen tell`ing the worker what they decided.
 
 What to do with each triage reason, after `bullpen peek <ID>`:
 

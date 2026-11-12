@@ -1734,6 +1734,9 @@ class BullpenTest(unittest.TestCase):
         out = self.bp("peek", tid, "--vt").stdout
         self.assertEqual(out, "\x1b[0m\x1b[31mred\x1b[0m\n\x1b[0mplain\n")
         self.assertIn("--format=vt", [a for a in self.rex_calls() if a[0] == "capture"][-1])
+        # Rex writes a run of spaces as a cursor move: the board would run the words together
+        (self.fake / "screen").write_text("\x1b[3C\x1b[0m4.\x1b[1CChat\x1b[C\x1b[1mabout\r\n")
+        self.assertEqual(self.bp("peek", tid, "--vt").stdout, "   \x1b[0m4. Chat \x1b[1mabout\n")
 
     def test_go_finds_the_repo_from_any_directory(self):
         tid = self.start_task()
@@ -2899,6 +2902,134 @@ class BullpenTest(unittest.TestCase):
         t = self.show(tid)
         self.assertEqual((t["status"], t.get("ask")), ("working", None))
         self.assertNotEqual(self.bp("ask", tid, ok=False).returncode, 0)  # no question
+
+    # Claude Code's permission prompt, as `rex capture` shows it (a real one, cut short)
+    PERMISSION = textwrap.dedent("""\
+        ● Creating empty hello.txt
+          ⎿  $ touch hello.txt
+
+        ────────────────────────────────────────
+         Bash command
+
+         touch hello.txt
+         Create empty hello.txt in current directory
+        ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+         Do you want to proceed?
+         ❯ 1. Yes
+           2. Yes, and always allow access to /tmp/x
+              from this project
+           3. No
+
+         Esc to cancel · Tab to amend
+
+        """)
+
+    def at_prompt(self, blk, screen=None, who="worker"):
+        (self.fake / f"screen_{blk}").write_text(screen or self.PERMISSION)
+        self.bp("_event", blk, "blocked", "permission", "Bash command")
+
+    def test_prompt_reads_the_question_off_the_agents_screen(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.assertIn("isn't waiting at a prompt", self.bp("prompt", tid, ok=False).stderr)
+        self.at_prompt(blk)
+        p = json.loads(self.bp("prompt", tid).stdout)
+        self.assertEqual((p["who"], p["question"]), ("worker", "Do you want to proceed?"))
+        self.assertEqual(p["options"], [["1", "Yes"], ["2", "Yes, and always allow access to /tmp/x"],
+                                        ["3", "No"]])
+        self.assertIn(" touch hello.txt", p["screen"])
+        self.assertIn("--format=vt", [a for a in self.rex_calls() if a[0] == "capture"][-1])
+        # answered in its pane meanwhile: the screen shows no prompt now
+        (self.fake / f"screen_{blk}").write_text("● Done.\n\n❯ \n")
+        p = json.loads(self.bp("prompt", tid).stdout)
+        self.assertEqual((p["question"], p["options"], p["id"]), (None, [], None))
+
+    def test_answer_presses_the_option_while_the_prompt_is_still_there(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.at_prompt(blk)
+        pid = json.loads(self.bp("prompt", tid).stdout)["id"]
+        p = self.bp("answer", tid, "3", "--prompt", pid)
+        self.assertEqual(p.stdout.strip(), "answered BP-1's worker: 3 (No)")
+        self.assertEqual(self.typed()[-1], (blk, "3"))
+        self.assertEqual(self.rex_calls()[-1][0], "send")  # the number alone answers it: no enter
+        # the watcher sees it work again, as when the person answers in the pane
+        self.bp("_event", blk, "working", "", "")
+        self.assertEqual(self.show(tid)["status"], "working")
+
+    def test_answer_refuses_a_prompt_that_is_gone_or_changed(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.at_prompt(blk)
+        pid = json.loads(self.bp("prompt", tid).stdout)["id"]
+        sent = len(self.typed())
+        p = self.bp("answer", tid, "4", "--prompt", pid, ok=False)
+        self.assertIn("4 isn't one of the prompt's options (1, 2, 3)", p.stderr)
+        # another command asks the same question: not the prompt the person read
+        (self.fake / f"screen_{blk}").write_text(self.PERMISSION.replace("touch hello.txt", "rm -rf build"))
+        p = self.bp("answer", tid, "1", "--prompt", pid, ok=False)
+        self.assertIn("isn't at that prompt any more: nothing was sent", p.stderr)
+        (self.fake / f"screen_{blk}").write_text("● Done.\n\n❯ \n")
+        self.assertNotEqual(self.bp("answer", tid, "1", ok=False).returncode, 0)
+        self.assertEqual(len(self.typed()), sent)
+
+    def test_answer_goes_to_the_reviewer_when_it_is_at_the_prompt(self):
+        tid = self.start_task()
+        reviewer = self.commit_and_ready(tid)
+        (self.fake / f"screen_{reviewer}").write_text("Overwrite notes.md? (y/n)\n")
+        self.bp("_event", reviewer, "blocked", "permission", "Write")
+        p = json.loads(self.bp("prompt", tid).stdout)
+        self.assertEqual((p["who"], p["question"], p["options"]),
+                         ("reviewer", "Overwrite notes.md? (y/n)", [["y", "Yes"], ["n", "No"]]))
+        self.bp("answer", tid, "Y", "--prompt", p["id"])
+        self.assertEqual(self.typed()[-1], (reviewer, "y"))
+        (self.fake / "alive" / reviewer).unlink()
+        self.assertIn("reviewer isn't running", self.bp("prompt", tid, ok=False).stderr)
+
+    def asked(self, question="Use SQLite or Postgres?"):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.bp("_event", blk, "idle", "", "")
+        self.bp_in("blk1", "ask", tid, question)
+        return tid, blk
+
+    def test_reply_goes_to_the_coordinator_tagged_with_the_task(self):
+        tid, blk = self.asked()
+        sent = len(self.typed())
+        self.bp("reply", tid, "Postgres,", "it's", "on", "the", "server")
+        self.assertEqual(self.typed()[sent:], [("blk1", "BP-1: Postgres, it's on the server")])  # not the worker
+        t = self.show(tid)
+        self.assertEqual((t["status"], t.get("ask"), t.get("ok")), ("working", None, True))
+        log = next((self.tmp / "state").rglob("news.log")).read_text().splitlines()[-1]
+        self.assertIn('bullpen · BP-1: the person answers "Use SQLite or Postgres?": Postgres, it\'s on the server', log)
+        p = self.bp("reply", tid, "again", ok=False)
+        self.assertIn("no question from its coordinator to answer", p.stderr)
+
+    def test_reply_is_news_when_the_coordinator_follows_it(self):
+        tid, blk = self.asked()
+        self.bp("config", "--news", "monitor")
+        sent = len(self.typed())
+        self.bp("reply", tid, "Postgres")
+        self.assertEqual(len(self.typed()), sent)  # nothing typed: its monitor reads it
+        out = self.bp_in("blk1", "news").stdout
+        self.assertIn('bullpen · BP-1: the person answers "Use SQLite or Postgres?": Postgres', out)
+
+    def test_reply_to_a_task_whose_agent_is_gone_leaves_it_to_the_coordinator(self):
+        tid, blk = self.asked()
+        (self.fake / "alive" / blk).unlink()
+        self.bp("reply", tid, "Postgres")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"], t["stop"]["kind"]),
+                         ("triage", "The person answered: Postgres", "ended"))
+        # no coordinator to take it: refused, and the question stays
+        tid2 = self.bp("add", "Other", "--brief", "x").stdout.strip()
+        self.bp("start", tid2)
+        self.bp("_event", self.block(tid2), "idle", "", "")
+        self.bp_in("blk1", "ask", tid2, "Which?")
+        (self.fake / "alive" / "blk1").unlink()
+        p = self.bp("reply", tid2, "That one", ok=False)
+        self.assertIn("no coordinator is running to take the answer", p.stderr)
+        self.assertEqual(self.show(tid2)["status"], "needs")
 
     def test_ok_clears_triage_without_typing(self):
         tid = self.start_task()
@@ -4606,6 +4737,68 @@ class HelpersTest(unittest.TestCase):
         self.assertEqual(prog(["/usr/bin/env", "-Sbash", "-e"]), "bash")
         self.assertEqual(prog(["/usr/bin/env", "-i", "FOO=1", "-u", "BAR", "python3"]), "python3")
         self.assertIsNone(prog(["/usr/bin/env", "-S"]))
+
+    # ---------- reading prompts ----------
+
+    # Claude Code's AskUserQuestion menu, as `rex capture` shows it (a real one)
+    CHOICE = textwrap.dedent("""\
+        ────────────────────────────────────────
+         ☐ Drink
+
+        Do you prefer tea or coffee?
+
+        ❯ 1. Tea
+             You prefer tea.
+          2. Coffee
+             You prefer coffee.
+          3. Type something.
+        ────────────────────────────────────────
+          4. Chat about this
+
+        Enter to select · ↑/↓ to navigate · Esc to cancel
+        """)
+
+    # the boxed layout of older Claude Code versions
+    BOXED = textwrap.dedent("""\
+        ╭──────────────────────────────────────╮
+        │ Bash command                         │
+        │                                      │
+        │   npm test                           │
+        │                                      │
+        │ Do you want to proceed?              │
+        │ ❯ 1. Yes                             │
+        │   2. No, and tell Claude what to do  │
+        │      differently (esc)               │
+        ╰──────────────────────────────────────╯
+        """)
+
+    def test_a_choice_menu_is_read_without_type_something(self):
+        p = self.bp.read_prompt(self.CHOICE)
+        self.assertEqual(p["question"], "Do you prefer tea or coffee?")
+        self.assertEqual(p["options"], [["1", "Tea"], ["2", "Coffee"], ["4", "Chat about this"]])
+
+    def test_the_boxed_layout_is_read_too(self):
+        p = self.bp.read_prompt(self.BOXED)
+        self.assertEqual((p["question"], p["options"]),
+                         ("Do you want to proceed?", [["1", "Yes"], ["2", "No, and tell Claude what to do"]]))
+
+    def test_a_yes_no_question_is_answered_by_y_or_n(self):
+        p = self.bp.read_prompt("Some output\nOverwrite it? [y/N]\n\n")
+        self.assertEqual((p["question"], p["options"]), ("Overwrite it? [y/N]", [["y", "Yes"], ["n", "No"]]))
+
+    def test_what_the_agent_wrote_is_no_prompt(self):
+        listed = "● Two ways:\n  1. Patch it\n  2. Rewrite it\n\n────\n❯ \n────\n  ⏸ manual mode on\n"
+        self.assertIsNone(self.bp.read_prompt(listed))  # its input box is under it
+        self.assertIsNone(self.bp.read_prompt("● Two ways:\n  1. Patch it\n  2. Rewrite it\n"))  # no ❯ on one
+        self.assertIsNone(self.bp.read_prompt("Do you want to proceed?\n❯ 1. Yes\n  2. No\n" + "more\n" * 4))
+        self.assertIsNone(self.bp.read_prompt("❯ 2. Yes\n  3. No\n"))  # not counted from 1
+        self.assertIsNone(self.bp.read_prompt(""))
+
+    def test_a_prompt_id_tells_one_command_from_another(self):
+        a = self.bp.read_prompt(self.BOXED)
+        self.assertEqual(a["id"], self.bp.read_prompt("old output\n" * 20 + self.BOXED)["id"])
+        b = self.bp.read_prompt(self.BOXED.replace("npm test", "rm -rf /"))
+        self.assertNotEqual(a["id"], b["id"])
 
     # ---------- help and ls ----------
 

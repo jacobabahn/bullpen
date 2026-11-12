@@ -26,8 +26,8 @@ bullpen up            # in a Rex pane in your repository: the coordinator and it
 
 Then tell the coordinator what you want ("fix the login redirect and cover it
 with a test"). It adds tasks and starts a worker for each. Watch the board: `n`
-selects the next task that needs you, `⏎` opens its pane, and `a` accepts (merges)
-a ready one, or closes a finished one. The words used here are in [GLOSSARY.md](GLOSSARY.md).
+selects the next task that needs you, `i` answers what it asks (or `⏎` opens its
+pane), and `a` accepts (merges) a ready one, or closes a finished one. The words used here are in [GLOSSARY.md](GLOSSARY.md).
 
 ## Install
 
@@ -121,7 +121,8 @@ The keys at the bottom follow the selected task: `⏎` opens its worker (or its
 reviewer), `a` accepts a ready task or closes a finished one and `d` drops
 (each asks y/n first, the question saying which), `t` tells, `p` peeks, `v`
 shows its diff, `s` starts, `r` resumes, `c` goes back to the coordinator, `n`
-selects the next task that needs you. Once an accept or close goes through, the
+selects the next task that needs you. On a task that needs you, `i` answers it
+from the board (see [Answering from the board](#answering-from-the-board)). Once an accept or close goes through, the
 next task that needs you is selected, so you can run down a queue of ready tasks
 with `a`, `y`. `?` lists them all.
 `bullpen up --no-board` leaves the board out. Accept, drop, start and resume
@@ -161,6 +162,9 @@ bullpen review-mode BP-2 full  # its first review: full, light or auto (by the s
 bullpen start BP-1    # worktree + branch + a Rex pane running the worker
 bullpen ls            # open tasks, in the board's words (--json: the raw status)
 bullpen peek BP-1     # the end of the worker's screen
+bullpen prompt BP-1   # the prompt its worker (or reviewer) is at, and its screen, as JSON
+bullpen answer BP-1 2 # press option 2 of that prompt (or y, n), as you would in its pane
+bullpen reply BP-1 "Postgres"   # answer the coordinator's `ask`: it goes to the coordinator
 bullpen diff BP-1     # its changes against its base, in a pager (--stat: just the files)
 bullpen check         # tasks whose status is out of step with their agent; --fix catches up
 bullpen go BP-1       # focus its pane (`go` alone: the coordinator; --next: next needing you)
@@ -175,6 +179,28 @@ bullpen accept BP-1   # merge its PR (or local branch; rebase), close its pane, 
 bullpen close BP-1    # the same as accept, for a finished task only
 bullpen drop BP-1     # close its PR, pane and worktree without merging
 ```
+
+### Answering from the board
+
+A task that needs you for a question gets `i answer` on its key line:
+
+- **At a prompt** (its worker or reviewer asks permission, or to choose): `i` shows
+  the end of its screen, as `p` does, with the prompt's options under it, each with
+  its key. Press one (`1`, `2`, ..., or `y`, `n` for a "(y/n)" question), and bullpen
+  presses it in the agent's pane. It reads the screen again first, and sends nothing
+  if the prompt there isn't the one you saw (answered in the pane meanwhile, or
+  another command asking). A menu's "Type something." isn't offered: `⏎` opens the
+  pane for that. `esc` goes back. The task works again once its agent does, as when
+  you answer in the pane.
+- **The coordinator asked** (`bullpen ask`): `i` opens a line, "Answer BP-3:". What
+  you type goes to the task's coordinator, not its worker: typed into its pane as
+  `BP-3: <your answer>`, or, with `config --news monitor`, as a news line it reads.
+  The task leaves needs as `bullpen ok` would (working, or in review), and the
+  coordinator acts on the answer. With its agent's pane gone, the task goes to its
+  coordinator instead ("coordinator on it"). With no coordinator running, it's
+  refused: `t` tells the worker yourself.
+
+`bullpen prompt`, `answer` and `reply` do the same from a shell.
 
 `bullpen diff BP-1` shows `git diff <base>...HEAD` from the task's worktree, then
 any changes not committed yet, in `delta` if it's installed, else `less -R`. The

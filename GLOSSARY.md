@@ -29,7 +29,7 @@ _Avoid_: reason (for the recorded stop), needs (for any stop).
 
 **Needs**: a task that needs the person ("needs you" on the board, as is a stopped one): an agent at a prompt, an `ask`, or an escalated triage.
 
-**Ask**: the coordinator puts a question to the person about a task (`bullpen ask`). The question becomes the task's `why`; its stop stays as it was.
+**Ask**: the coordinator puts a question to the person about a task (`bullpen ask`). The question becomes the task's `why`; its stop stays as it was. The person's **reply** (`bullpen reply`, the board's `i`) goes to the coordinator, and the task leaves needs as with ok.
 
 **Ok**: the coordinator has seen to a triage stop (`bullpen ok`). The task goes back to working, or to review for a reviewer's stop, and its idle agent isn't a stop again until its next turn.
 
