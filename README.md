@@ -1103,7 +1103,7 @@ config's.
 python3 tests/run.py                  # the whole suite, across CPUs: about 75 s on 16
 python3 tests/run.py tour local_mode  # only tests whose module, class or name has one of these
 python3 tests/run.py --slowest 20     # and list the 20 slowest
-python3 -m unittest discover -s tests # the same tests one at a time: about 12 minutes
+python3 -m unittest discover -s tests # the same tests one at a time: about 9 minutes
 cd board && cargo test                # the board's: well under a second once built
 ```
 
