@@ -4666,6 +4666,8 @@ FAKE_TOUR = textwrap.dedent("""\
         f.write(" ".join(sys.argv[1:]) + "\\n")
     out = d / "tour_out"  # what the tests make the agent answer
     sys.stdout.write(out.read_text() if out.exists() else "")
+    if (d / "tour_out_next").exists():  # what it answers when asked again
+        (d / "tour_out_next").rename(out)
     sys.exit(int((d / "tour_exit").read_text()) if (d / "tour_exit").exists() else 0)
 """)
 
@@ -4834,6 +4836,68 @@ class TourTest(unittest.TestCase):
         shown = json.loads(self.bp("tour", tid, "--show", "--json").stdout)
         self.assertEqual(shown["state"], "failed")
         self.assertIn("stopped before the tour was written", shown["why"])
+
+    def tour_log(self, tid):
+        return next((self.tmp / "state").rglob(f"{tid}.tour.log")).read_text()
+
+    def test_a_reply_with_a_corrected_tour_uses_the_last_tour_in_it(self):
+        tid = self.two_file_task()
+        first = json.dumps({"steps": [{"title": "PLACEHOLDER", "note": "", "hunks": []}]})
+        second = json.dumps({"steps": [{"title": "The fix", "note": "Why.",
+                                        "hunks": [{"file": "a.txt", "lines": [2, 2]}]}]})
+        (self.fake / "tour_out").write_text(
+            f"{first}\n\nWait, correcting that: here is the full tour.\n\n{second}\n")
+        self.bp("tour", tid, "--wait")
+        self.assertEqual([s["title"] for s in self.tour_file(tid)["steps"]], ["The fix", "Other changes"])
+        self.assertEqual(self.agent_runs(), 1)  # no need to ask again
+        self.assertIn("its answer had text around the tour (2 JSON objects)", self.tour_log(tid))
+
+    def test_a_tour_in_a_code_fence_is_read(self):
+        tid = self.two_file_task()
+        tour = {"steps": [{"title": "All of it", "note": "", "hunks": []}]}
+        (self.fake / "tour_out").write_text(f"```json\n{json.dumps(tour, indent=2)}\n```\n")
+        self.bp("tour", tid, "--wait")
+        self.assertEqual([s["title"] for s in self.tour_file(tid)["steps"]], ["All of it", "Other changes"])
+        self.assertEqual(self.agent_runs(), 1)
+
+    def test_an_answer_that_isnt_a_tour_is_asked_for_once_more(self):
+        tid = self.two_file_task()
+        (self.fake / "tour_out").write_text('{"steps": [{"title": "x", "hunks": [{"file": "a.txt"')  # cut off
+        (self.fake / "tour_out_next").write_text(json.dumps({"steps": [{"title": "x", "note": "", "hunks": []}]}))
+        self.bp("tour", tid, "--wait")
+        self.assertEqual(self.agent_runs(), 2)
+        self.assertEqual(self.show(tid)["tour"]["state"], "written")
+        log = self.tour_log(tid)
+        self.assertIn("attempt 1: its tour doesn't parse", log)
+        self.assertIn("attempt 2: ", log)
+        self.assertEqual(log.count("--- stdout"), 2)  # both answers are in the log
+        # twice not a tour: the tour fails, after the second attempt
+        (self.fake / "tour.log").unlink()
+        (self.fake / "tour_out").write_text("no tour here")
+        self.assertIn("doesn't parse", self.bp("tour", tid, "--new", "--wait", ok=False).stderr)
+        self.assertEqual(self.agent_runs(), 2)
+        # an agent that fails isn't asked again
+        (self.fake / "tour.log").unlink()
+        (self.fake / "tour_exit").write_text("3")
+        self.bp("tour", tid, "--wait", ok=False)
+        self.assertEqual(self.agent_runs(), 1)
+
+    def test_claude_answers_with_structured_output(self):
+        tid = self.two_file_task()
+        claude = self.fake / "bin-claude" / "claude"
+        claude.parent.mkdir()
+        claude.write_text(FAKE_TOUR)
+        claude.chmod(0o755)
+        (self.tmp / "xdg" / "bullpen" / "config.json").write_text(json.dumps({"tour": [str(claude)]}))
+        (self.fake / "tour_out").write_text(json.dumps({
+            "type": "result", "is_error": False, "result": "{not quite json",
+            "structured_output": {"steps": [{"title": "Structured", "note": "", "hunks": []}]}}))
+        self.bp("tour", tid, "--wait")
+        self.assertEqual([s["title"] for s in self.tour_file(tid)["steps"]], ["Structured", "Other changes"])
+        args = (self.fake / "tour.log").read_text().split()
+        schema = json.loads(args[args.index("--json-schema") + 1])
+        self.assertEqual(schema["required"], ["steps"])
+        self.assertIn("-p", args)
 
     def toured(self):
         tid = self.two_file_task()

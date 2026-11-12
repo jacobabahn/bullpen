@@ -2744,6 +2744,16 @@ TOUR_TOOLS = ["Read", "Grep", "Glob", "Bash(git diff:*)", "Bash(git log:*)", "Ba
               "Bash(git status:*)", "Bash(git blame:*)", "Bash(git ls-files:*)"]
 TOUR_TIMEOUT = 20 * 60  # seconds before a tour agent counts as failed
 MAX_TOUR_DIFF_LINES = 3000  # longer, and the agent reads the diff with git itself
+TOUR_ATTEMPTS = 2  # an answer that isn't a tour is asked for once more
+# the answer's shape, for claude's structured output (--json-schema); tour_steps checks the rest
+TOUR_SCHEMA = {"type": "object", "required": ["steps"], "properties": {"steps": {
+    "type": "array", "minItems": 1, "items": {
+        "type": "object", "required": ["title", "note", "hunks"], "properties": {
+            "title": {"type": "string"}, "note": {"type": "string"}, "hunks": {
+                "type": "array", "items": {
+                    "type": "object", "required": ["file"], "properties": {
+                        "file": {"type": "string"},
+                        "lines": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2}}}}}}}}}
 OTHER_CHANGES = "Other changes"
 
 
@@ -2848,18 +2858,56 @@ def ref_lines(v):
     return [min(a, b), max(a, b)]
 
 
-def tour_json(text):
-    """The tour object in an agent's output: the whole of it, else the outermost {...}
-    in it (an agent may wrap it in a code fence or a sentence)."""
-    text = text.strip()
+def json_objects(text):
+    """Every JSON object in text, in order, outermost ones only: an agent may wrap its
+    answer in a code fence or a sentence, or follow it with a corrected one."""
+    dec, out, i = json.JSONDecoder(), [], text.find("{")
+    while i >= 0:
+        try:
+            obj, end = dec.raw_decode(text, i)
+        except ValueError:
+            i = text.find("{", i + 1)
+            continue
+        out.append(obj)
+        i = text.find("{", end)
+    return out
+
+
+def parse_tour(answer, files):
+    """The checked steps of an agent's answer (claude's structured output, or text):
+    the text as JSON, else the last JSON object in it that is a tour. Raises ValueError
+    for an answer with no tour. Returns (steps, references dropped, a note on any text
+    around the tour, else None)."""
+    if isinstance(answer, dict):
+        return (*tour_format(answer, files), None)
+    text = answer.strip()
     try:
-        return json.loads(text)
+        data = json.loads(text)
     except ValueError:
         pass
-    a, b = text.find("{"), text.rfind("}")
-    if a < 0 or b < a:
-        raise ValueError("no JSON object in its output")
-    return json.loads(text[a:b + 1])
+    else:
+        return (*tour_format(data, files), None)
+    objs = json_objects(text)
+    if not objs:
+        raise ValueError("its tour doesn't parse (no JSON object in its output)")
+    first = None
+    for obj in reversed(objs):
+        try:
+            steps, dropped = tour_format(obj, files)
+        except ValueError as e:
+            first = first or e
+            continue
+        return steps, dropped, (f"its answer had text around the tour ({len(objs)} JSON objects): "
+                                "the last one that is a tour was used")
+    raise first
+
+
+def tour_format(data, files):
+    """tour_steps, with its error saying the tour isn't in the format."""
+    try:
+        return tour_steps(data, files)
+    except ValueError as e:
+        raise ValueError(f"its tour isn't in the format: {e}")
 
 
 def tour_steps(data, files):
@@ -2931,7 +2979,21 @@ def tour_command(repo):
         return resolve(cmd)
     return resolve(cmd) + ["-p", "--output-format", "json", "--no-session-persistence",
                            "--permission-mode", "dontAsk", "--tools", "Read,Grep,Glob,Bash",
-                           "--allowedTools", *TOUR_TOOLS]
+                           "--allowedTools", *TOUR_TOOLS,
+                           "--json-schema", json.dumps(TOUR_SCHEMA, separators=(",", ":"))]
+
+
+def tour_answer(out):
+    """A tour agent's answer: claude's structured output (a dict) when it has one, else
+    its text. Raises ValueError for an agent error."""
+    try:
+        r = json.loads(out)
+    except ValueError:
+        r = None
+    if isinstance(r, dict) and r.get("type") == "result" and isinstance(r.get("structured_output"), dict):
+        agent_result(out)  # an error is still an error
+        return r["structured_output"]
+    return agent_result(out)
 
 
 def agent_result(out):
@@ -2964,30 +3026,20 @@ def write_tour(repo, tid):
             raise ValueError(f"it has no changes against {base_ref}")
         prompt = (PROMPTS / "tour.md").read_text().format(**tour_inputs(repo, t, base_ref, files))
         argv = tour_command(repo)
-        with log.open("w") as f:
-            f.write(f"{now()} {shlex.join(argv)}\n(the prompt on stdin: {len(prompt)} characters)\n\n")
-        try:
-            p = subprocess.run(argv, cwd=wt, input=prompt, text=True, capture_output=True,
-                               timeout=TOUR_TIMEOUT)
-        except FileNotFoundError:
-            raise ValueError(f"{argv[0]} isn't installed")
-        except subprocess.TimeoutExpired:
-            raise ValueError(f"the agent took over {TOUR_TIMEOUT // 60} minutes")
+        for attempt in range(1, TOUR_ATTEMPTS + 1):
+            answer = tour_answer(run_tour_agent(argv, prompt, wt, log, attempt))
+            try:
+                steps, dropped, extra = parse_tour(answer, files)
+                break
+            except ValueError as e:
+                if attempt == TOUR_ATTEMPTS:
+                    raise
+                with log.open("a") as f:
+                    f.write(f"{now()} attempt {attempt}: {e}; asking again\n\n")
         with log.open("a") as f:
-            f.write(f"exit {p.returncode}\n--- stdout\n{p.stdout}\n--- stderr\n{p.stderr}\n")
-        if p.returncode != 0:
-            last = (p.stderr or p.stdout).strip().splitlines()
-            raise ValueError(f"the agent exited with {p.returncode}: {clip(last[-1] if last else 'no output', 120)}")
-        try:
-            data = tour_json(agent_result(p.stdout))
-        except ValueError as e:
-            raise ValueError(f"its tour doesn't parse ({clip(str(e), 120)})")
-        try:
-            steps, dropped = tour_steps(data, files)
-        except ValueError as e:
-            raise ValueError(f"its tour isn't in the format: {e}")
-        if dropped:
-            with log.open("a") as f:
+            if extra:
+                f.write(extra + "\n")
+            if dropped:
                 f.write("hunks that match nothing in the diff, left out: " + "; ".join(dropped) + "\n")
     except ValueError as e:
         tour_failed(repo, tid, str(e))
@@ -3005,6 +3057,26 @@ def write_tour(repo, tid):
     if opener:
         open_when_written(repo, t, opener)
     return path
+
+
+def run_tour_agent(argv, prompt, wt, log, attempt):
+    """Run the tour agent once, its output in the log (a new log on the first attempt).
+    Returns its stdout, or raises ValueError if it didn't finish."""
+    with log.open("w" if attempt == 1 else "a") as f:
+        f.write(f"{now()} attempt {attempt}: {shlex.join(argv)}\n(the prompt on stdin: {len(prompt)} characters)\n\n")
+    try:
+        p = subprocess.run(argv, cwd=wt, input=prompt, text=True, capture_output=True,
+                           timeout=TOUR_TIMEOUT)
+    except FileNotFoundError:
+        raise ValueError(f"{argv[0]} isn't installed")
+    except subprocess.TimeoutExpired:
+        raise ValueError(f"the agent took over {TOUR_TIMEOUT // 60} minutes")
+    with log.open("a") as f:
+        f.write(f"exit {p.returncode}\n--- stdout\n{p.stdout}\n--- stderr\n{p.stderr}\n")
+    if p.returncode != 0:
+        last = (p.stderr or p.stdout).strip().splitlines()
+        raise ValueError(f"the agent exited with {p.returncode}: {clip(last[-1] if last else 'no output', 120)}")
+    return p.stdout
 
 
 def tour_failed(repo, tid, why):

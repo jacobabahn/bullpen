@@ -461,6 +461,12 @@ bullpen tour BP-3 --view      # step through it on this terminal (the board's g:
   the brief, the worker's summary and the review findings, may only read files and
   run `git diff`, `log` and `show`, and answers with the tour as JSON: bullpen writes
   the file. It doesn't count toward `max_running`.
+- **Its answer.** With `claude`, the answer's shape is given as a JSON schema
+  (`--json-schema`), and bullpen takes Claude Code's structured output. From another
+  agent (or text), it reads the text as JSON, else the last JSON object in it that is
+  a tour (an answer in a code fence, or one corrected after a first try), and notes
+  the extra text in the log. An answer that still isn't a tour is asked for once
+  more, both attempts in the log, before the tour fails.
 - **The tour file** is `briefs/<ID>.tour.json`: the commit and patch-id it was
   written on, and its steps, each `{"title", "note", "hunks": [{"file", "lines":
   [start, end]}]}` (lines in the new file; a binary file has none). Hunks that
@@ -471,7 +477,7 @@ bullpen tour BP-3 --view      # step through it on this terminal (the board's g:
   commit, or the same patch-id after a clean rebase, as review approvals carry over.
   Otherwise it is stale: `tour` prints the old one's path and says so, and `--new`
   writes another.
-- **A failed tour** (the agent failed, or its answer isn't a tour) is a line on the
+- **A failed tour** (the agent failed, or its answer isn't a tour twice) is a line on the
   task on the board, "tour failed: <why>", with the agent's output in
   `briefs/<ID>.tour.log`. No news, no triage: `tour` again retries.
 - **Comments** are drafts per task and step (`briefs/<ID>.tour-comments.json`), each

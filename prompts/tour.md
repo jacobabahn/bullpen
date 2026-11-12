@@ -56,6 +56,9 @@ context. Change nothing.
 
 ## Your answer
 
-Answer with the tour as JSON and nothing else, no code fence:
+Read and think first, as long as you need. Then answer with the tour as JSON,
+once, and nothing else: no code fence, no text before or after it, and no second
+version. If you find a mistake while you write it, fix it before you answer;
+your final message is the finished tour. It looks like this:
 
 {{"steps": [{{"title": "...", "note": "...", "hunks": [{{"file": "...", "lines": [1, 20]}}]}}]}}
