@@ -128,7 +128,7 @@ first).
 
 `bullpen ls`, `bullpen show` and the picker (`cmd+;` `j`) say a task the way the
 board does: its mark (● needs you, ■ stopped, ◎ coordinator on it, ✔ ready, ◆
-finished, ◐ in review, ○ working, ◌ queued, ✓ accepted or closed, – dropped), its
+finished, ◐ in review, ○ working, ◌ queued, · accepted or closed, – dropped), its
 ID, title and age, then the board's line for it, needs-you first as on the board.
 Piped, `ls` prints each task whole on one line; on a terminal it is in colour and
 each line is cut to the width. When that would leave too little room for the line

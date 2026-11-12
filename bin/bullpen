@@ -4091,7 +4091,7 @@ def cmd_drop(args):
 # its mark, ID, title, age and the board's sentence for it, in the board's order.
 # Change one, change the other.
 
-MARKS = {"needs": "●", "stopped": "■", "triage": "◎", "ready": "✔", "finished": "◆", "done": "✓",
+MARKS = {"needs": "●", "stopped": "■", "triage": "◎", "ready": "✔", "finished": "◆", "done": "·",
          "review": "◐", "working": "○", "todo": "◌", "dropped": "–"}
 # the board's groups, in order: what you do next first
 BOARD_ORDER = {"needs": 0, "stopped": 0, "triage": 1, "ready": 2, "finished": 3, "review": 4,

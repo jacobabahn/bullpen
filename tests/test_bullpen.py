@@ -5873,6 +5873,16 @@ class HelpersTest(unittest.TestCase):
         self.assertTrue(colour.startswith("\x1b[1;33m●\x1b[0m "))  # the mark amber, as on the board
         self.assertIn("\x1b[1;31m12m", colour)  # needs you for over 5 minutes: the age turns red
 
+    def test_the_marks_are_the_boards(self):
+        # one mark per status everywhere: the board's mark() in board/src/model.rs
+        src = (ROOT / "board" / "src" / "model.rs").read_text()
+        body = src[src.index("pub fn mark(status: &str)"):]
+        body = body[:body.index("\n}\n")]
+        board = dict(re.findall(r'"(\w+)" => "(.)"', body))
+        self.assertEqual(self.bp.MARKS, board)
+        # ready and closed are told apart
+        self.assertEqual((self.bp.MARKS["ready"], self.bp.MARKS["done"]), ("✔", "·"))
+
     def test_a_narrow_terminal_gets_the_boards_rows(self):
         a = {"id": "BP-3", "status": "needs", "title": "Fix the login redirect after sign-in",
              "why": "Asks: python3 or python? The Makefile uses both and the CI image only has python3.",
