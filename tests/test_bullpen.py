@@ -518,7 +518,7 @@ class BullpenTest(unittest.TestCase):
         self.make_watcher_stale(watch="an older watch.lua")
         out = self.bp("up").stdout
         new = self.watcher()
-        self.assertIn(f"watcher restarted (watch.lua or bullpen changed): {new['block']}", out)
+        self.assertEqual(out, "Coordinator already running. Watcher restarted (watch.lua or bullpen changed).\n")
         self.assertNotEqual(new["block"], old["block"])
         self.assertEqual(new["stamp"], old["stamp"])  # what runs now
         self.assertFalse((self.fake / "alive" / old["block"]).exists())  # the old one is closed
@@ -1489,8 +1489,46 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(list((self.tmp / "state").rglob("outbox*.txt")), [])
         self.assertIn("News comes by monitor: start it first", self.bp("up", "--here").stdout)
 
+    def test_up_says_one_plain_line_and_verbose_names_the_panes(self):
+        self.assertEqual(self.bp("up").stdout,
+                         "Coordinator, board and watcher started. Tell the coordinator what you want.\n")
+        self.assertEqual(self.bp("up").stdout, "Coordinator already running.\n")
+        (self.fake / "alive" / "blk2").unlink()  # the board, quit
+        self.assertEqual(self.bp("up").stdout, "Coordinator already running. Board started.\n")
+        self.assertEqual(self.bp("up", "--verbose").stdout.splitlines(),
+                         ["coordinator already running: c1 (blk1)",
+                          "news: typed into the coordinator's pane (`bullpen config --news monitor`: "
+                          "by Claude Code's Monitor tool instead)."])
+
+    def test_errors_say_a_status_in_the_boards_words(self):
+        self.bp("up")
+        for n in range(1, 5):
+            self.bp("add", f"Task {n}", "--brief", "b")
+        self.bp("start", "BP-1")
+
+        def set_status(tid, status):
+            f = next((self.tmp / "state").rglob(f"tasks/{tid}.json"))
+            f.write_text(json.dumps({**json.loads(f.read_text()), "status": status}))
+        set_status("BP-2", "stopped")
+        set_status("BP-3", "ready")
+        self.bp("after", "BP-4", "BP-3")
+        said = {args: self.bp(*args.split(), ok=False).stderr.strip() for args in (
+            "accept BP-1", "go BP-4", "diff BP-4", "ok BP-1", "ok BP-2", "close BP-3", "start BP-4", "tour BP-2")}
+        self.assertEqual(said, {
+            "accept BP-1": "bullpen: BP-1 is working, not ready to accept or finished",
+            "go BP-4": "bullpen: BP-4 has no pane: it's queued (todo)",
+            "diff BP-4": "bullpen: BP-4 is queued (todo), with no worktree, so there's nothing to diff",
+            "ok BP-1": "bullpen: BP-1 is working, not waiting on its coordinator",
+            "ok BP-2": "bullpen: BP-2 needs you (stopped), not waiting on its coordinator",
+            "close BP-3": "bullpen: BP-3 is ready to accept, not finished: `accept BP-3` merges it",
+            "start BP-4": "bullpen: BP-4 waits on BP-3 (ready to accept): it starts by itself once they're "
+                          "accepted; `start BP-4 --force` starts it now",
+            "tour BP-2": "bullpen: BP-2 needs you (stopped): a tour is only for a task that is ready or in "
+                         "review, whose code isn't changing"})
+
     def test_up_says_how_news_arrives(self):
-        out = self.bp("up").stdout.splitlines()
+        out = self.bp("up", "--verbose").stdout.splitlines()
+        self.assertEqual(out[:3], ["coordinator started: blk1", "board started: blk2", "watcher started: blk3"])
         self.assertTrue(out[-1].startswith("news: typed into the coordinator's pane"))
         self.bp("config", "--news", "monitor")
         for args in (["up"], ["up", "--here"]):
@@ -3049,7 +3087,8 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(len(self.coordinators()), 2)
         self.assertEqual(len([a for a in self.rex_calls() if a[0] == "split"]), 2)
         out = self.bp("up").stdout  # from elsewhere: as before, nothing new
-        self.assertIn("coordinator already running: c1 (blk1), c2", out)
+        self.assertEqual(out, "Coordinators c1 and c2 already running.\n")
+        self.assertIn("coordinators already running: c1 (blk1), c2", self.bp("up", "--verbose").stdout)
         self.assertEqual([a[0] for a in self.rex_calls()].count("run"), 1)
 
     def test_board_others_is_a_setting_per_board(self):
@@ -3192,7 +3231,7 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(cs, [{"id": "c1", "block": "blk1", "session": "session:1",
                                "board": {"block": "blk2", "session": "session:1"}}])
         self.assertNotIn("coordinator", json.loads(self.bp("config", "--json").stdout))
-        self.assertIn("coordinator already running: c1 (blk1)", self.bp("up").stdout)
+        self.assertIn("coordinator already running: c1 (blk1)\n", self.bp("up", "--verbose").stdout)
         self.assertEqual([a[0] for a in self.rex_calls()].count("split"), 1)  # its board stays
         self.bp("config", "--news", "monitor")
         tid = self.bp("add", "T", "--brief", "x").stdout.strip()
@@ -4591,7 +4630,8 @@ class BullpenTest(unittest.TestCase):
         (self.fake / "alive" / "blk2").unlink()  # c1's board
         p, lines = self.doctor()
         self.assertEqual(p.returncode, 1)
-        self.assertEqual(p.stdout.splitlines()[-1], "7 problems.")
+        self.assertEqual(p.stdout.splitlines()[-1],
+                         "7 problems: rex, gh, agents, board, keys, watcher, coordinators.")
         fixes = {"rex": "preview.13 or later", "keys": "run `bullpen keys --install`", "gh": "gh auth login",
                  "board": "BULLPEN_BOARD", "agents": "no-such-agent isn't on PATH (config.json's worker)",
                  "watcher": "run `bullpen up`", "coordinators": "c1's board (blk2) is gone"}
@@ -4622,7 +4662,7 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(lines["coordinators"],
                          ("FAIL", "c1's board is from an older build: `bullpen up` restarts it"))
         out = self.bp("up").stdout
-        self.assertIn("board restarted (it ran an older build): blk4", out)
+        self.assertIn("Board restarted (it ran an older build).", out)
         self.assertFalse((self.fake / "alive" / "blk2").exists())
         self.assertEqual(json.loads(self.bp("config", "--json").stdout)["coordinators"][0]["board"]["block"],
                          "blk4")
@@ -4765,9 +4805,9 @@ class BullpenTest(unittest.TestCase):
         cfg = self.cfg()
         self.assertEqual((cfg["max_running"], cfg["merge"]), (2, "merge"))
         out = self.bp("config").stdout
-        self.assertRegex(out, r"(?m)^merge +merge +repo$")
-        self.assertRegex(out, r"(?m)^max_running +2 +global$")
-        self.assertRegex(out, r"(?m)^triage_minutes +10 +default$")
+        self.assertRegex(out, r"(?m)^  merge +merge +repo$")
+        self.assertRegex(out, r"(?m)^  max_running +2 +global$")
+        self.assertRegex(out, r"(?m)^  triage_minutes +10 +default$")
         self.assertIn("models: worker opus;", out)
         # the repo's config.json holds only its own settings
         own = json.loads(next((self.tmp / "state" / "repos").iterdir()).joinpath("config.json").read_text())
@@ -4814,13 +4854,32 @@ class BullpenTest(unittest.TestCase):
             self.assertIn("1 or more", p.stderr)
         self.assertEqual(self.cfg("--max-running", "4")["max_running"], 4)
 
+    def test_doctor_and_config_write_home_as_a_tilde(self):
+        self.healthy()
+        self.env["HOME"] = str(self.tmp)
+        out = self.bp("doctor").stdout
+        self.assertNotIn(str(self.tmp), out)
+        self.assertIn("ok    state: ~/state is writable", out)
+        out = self.bp("config").stdout
+        self.assertNotIn(str(self.tmp), out)
+        self.assertEqual(out.splitlines()[0], "repo:   ~/proj")
+        self.assertIn("global: ~/xdg/bullpen/config.json (none yet)", out)
+        self.assertIn("no task BP-9 in ~/proj: `bullpen ls --all` lists them", self.bp("show", "BP-9", ok=False).stderr)
+
+    def test_config_lists_the_settings_in_groups(self):
+        out = self.bp("config").stdout
+        titles = [l for l in out.splitlines() if l and not l.startswith(" ") and ":" not in l]
+        self.assertEqual(titles, ["Tasks", "Agents", "Review", "Board", "News"])  # no Other: each has a group
+        self.assertIn("Board\n  board_layout      grouped  default\n", out)
+        self.assertRegex(out, r"(?m)^  worker +claude --permission-mode auto +default$")
+
     def test_global_config_outside_a_repository(self):
         elsewhere = self.tmp / "elsewhere"
         elsewhere.mkdir()
         p = self.bp("config", "--global", "--notify", "all", cwd=elsewhere)
         self.assertIn("none: not in a git repository", p.stdout)
-        self.assertRegex(p.stdout, r"(?m)^notify +all +global$")
-        self.assertNotRegex(p.stdout, r"(?m)^prefix")
+        self.assertRegex(p.stdout, r"(?m)^  notify +all +global$")
+        self.assertNotRegex(p.stdout, r"(?m)^ *prefix")
         self.assertEqual(self.global_cfg(), {"notify": "all"})
 
     def test_global_stuck_after_reaches_the_panes_the_watcher_reads(self):
@@ -4927,8 +4986,7 @@ class BullpenTest(unittest.TestCase):
         self.env["BULLPEN_BOARD"] = str(self.tmp / "missing")
         (self.fake / "actions.json").write_text(json.dumps({"actions": []}))
         out = self.bp("up").stdout.splitlines()
-        self.assertEqual(out[-2], "2 problems: run `bullpen doctor`")
-        self.assertTrue(out[-1].startswith("news: "))
+        self.assertEqual(out[-1], "2 problems: run `bullpen doctor`")
 
     # ---------- worktree setup and teardown ----------
 
@@ -5436,12 +5494,12 @@ class TourTest(unittest.TestCase):
         self.assertIn("writing a tour", self.bp("tour", tid, "--pane", "--new", "--from", "blk1").stdout)
         self.assertIn("is working", self.bp("tour", self.start_task("Other"), "--pane", ok=False).stderr)
 
-    def stepper_on_a_terminal(self, tid, keys):
+    def stepper_on_a_terminal(self, tid, keys, how=("--view",)):
         """Run the stepper on a terminal of its own, type keys, and return what it drew
         after each (the first: before any key) and how it exited."""
         import pty
         master, slave = pty.openpty()
-        p = subprocess.Popen([str(BULLPEN), "tour", tid, "--view"], cwd=self.repo, env=self.env,
+        p = subprocess.Popen([str(BULLPEN), "tour", tid, *how], cwd=self.repo, env=self.env,
                              stdin=slave, stdout=slave, stderr=slave)
         os.close(slave)
         screens = []
@@ -5466,6 +5524,15 @@ class TourTest(unittest.TestCase):
             pass
         os.close(master)
         return screens, p.wait(10)
+
+    def test_tour_on_a_terminal_opens_the_stepper_and_elsewhere_prints_the_path(self):
+        tid = self.toured()
+        path = self.bp("tour", tid).stdout.strip()  # not a terminal (an agent): its path
+        self.assertTrue(path.endswith(f"{tid}.tour.json"))
+        screens, code = self.stepper_on_a_terminal(tid, ["q"], how=())
+        self.assertEqual(code, 0)
+        self.assertIn("step 1 of 2", screens[0])
+        self.assertEqual(self.bp("tour", tid, "--path").stdout.strip(), path)
 
     def test_the_stepper_steps_takes_comments_resumes_and_sends(self):
         tid = self.toured()  # steps: The fix, a.txt

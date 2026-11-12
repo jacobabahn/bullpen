@@ -1555,6 +1555,7 @@ def cmd_up(args):
     relink(repo, session)
     prune(repo)
     live = list(repo.cfg["coordinators"])  # pruned: only live ones are left
+    said = []  # (what happened, to what, block IDs): one line, or a line each with --verbose
     if args.here:
         block = os.environ.get("REX_BLOCK")
         if not block:
@@ -1575,7 +1576,8 @@ def cmd_up(args):
                  if repo.cfg.get("news") == "monitor" else ""))
         mine = [c]
     elif live:
-        print("coordinator already running: " + ", ".join(f"{c['id']} ({c['block']})" for c in live))
+        said.append(("already running", "coordinators " + " and ".join(c["id"] for c in live)
+                     if len(live) > 1 else "coordinator", ", ".join(f"{c['id']} ({c['block']})" for c in live)))
         mine = live
     else:
         argv = resolve(repo.cfg["coordinator_cmd"]) + [
@@ -1589,28 +1591,49 @@ def cmd_up(args):
         block = rex_run(session, repo.root, coordinator_label(repo), argv, focus=True)
         c = add_coordinator(repo, block, session)
         give_guide(c, guide_text())
-        print(f"coordinator started: {block}")
+        said.append(("started", "coordinator", block))
         mine = [c]
     repo.save()
     tell_guide_changes(repo)  # the others (all of them, without --here), after a pull
     if not args.no_board:
         for c in mine:
-            ensure_board(repo, session, c)
+            ensure_board(repo, session, c, said=said)
     gather(repo, session)
-    ensure_watcher(session)
-    said = catch_up_push(repo)
-    if said:
-        print(said)
-    said = rebuild_board_if_stale(repo)
-    if said:
-        print(said)
+    ensure_watcher(session, said=said)
+    if args.verbose:
+        for what, name, ids in said:
+            print(f"{name.split()[0]} {what}: {ids}")
+    elif said:
+        print(up_line(said, fresh=not args.here and not live))
+    pushed = catch_up_push(repo)
+    if pushed:
+        print(pushed)
+    rebuilt = rebuild_board_if_stale(repo)
+    if rebuilt:
+        print(rebuilt)
     hint = up_hint()
     if hint:
         print(hint)
-    print(news_mode_line(repo))
+    if args.verbose or repo.cfg.get("news") == "monitor":
+        print(news_mode_line(repo))
 
 
-def ensure_board(repo, session, c, out=sys.stdout):
+def up_line(said, fresh):
+    """`up`'s one line for people: "Coordinator, board and watcher started. Tell the
+    coordinator what you want." on a first run, else what started or was running
+    already. said: (what happened, to what, its block IDs); --verbose prints the IDs."""
+    by = {}
+    for what, name, _ in said:
+        by.setdefault(what, []).append(name)
+    parts = [(names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]) + " " + what
+             for what, names in by.items()]
+    line = " ".join(p[0].upper() + p[1:] + "." for p in parts)
+    if fresh and "coordinator" in by.get("started", []):
+        line += " Tell the coordinator what you want."
+    return line
+
+
+def ensure_board(repo, session, c, out=sys.stdout, said=None):
     """Coordinator c's task board, in a narrow pane to its right. A board running an
     older build than `bullpen board` runs now (old_board) is replaced: it never reloads."""
     b = c.get("board")
@@ -1630,9 +1653,11 @@ def ensure_board(repo, session, c, out=sys.stdout):
     repo.save()
     if old:  # only once the new one is up
         rex_close(old.get("session"), old["block"])
-        print(f"board restarted (it ran an older build): {block}", file=out)
+    what = "restarted (it ran an older build)" if old else "started"
+    if said is None:
+        print(f"board {what}: {block}", file=out)
     else:
-        print(f"board started: {block}", file=out)
+        said.append((what, "board", block))
 
 
 def board_program(b):
@@ -1674,7 +1699,7 @@ def watcher_stamp():
     return {name: file_hash(path) for name, path in (("watch", WATCH_LUA), ("bullpen", SELF))}
 
 
-def ensure_watcher(session):
+def ensure_watcher(session, said=None):
     """Start the watcher unless a current one runs; one started from an older
     watch.lua or bullpen script is closed and replaced."""
     w = read_json(STATE / "watcher.json", {})
@@ -1694,8 +1719,11 @@ def ensure_watcher(session):
     if running:  # only once the new one is up
         rex_close(w.get("session"), w["block"])
     write_json(STATE / "watcher.json", {"block": block, "session": session, "stamp": stamp})
-    print(f"watcher restarted (watch.lua or bullpen changed): {block}" if running
-          else f"watcher started: {block}")
+    what = "restarted (watch.lua or bullpen changed)" if running else "started"
+    if said is None:
+        print(f"watcher {what}: {block}")
+    else:
+        said.append((what, "watcher", block))
 
 
 def refresh_watcher(repo):
@@ -2020,7 +2048,7 @@ def cmd_start(args):
     repo = Repo(repo_root())
     t = repo.task(args.id)
     if t["status"] not in ("todo", "stopped") and not (t.get("needs_setup") and t["status"] in WAITING):
-        raise Fail(f"{is_status(t)}: `start` is for a queued or stopped task; use `resume` or `tell`")
+        raise Fail(f"{is_status(t)}; use `resume` or `tell`")
     deps = [] if args.force or t["status"] != "todo" else open_deps(repo, t)
     if deps:
         raise Fail(f"{t['id']} waits on " + ", ".join(f"{d} ({status_words(st) if st else 'no such task'})" for d, st in deps)
@@ -3497,8 +3525,15 @@ def cmd_tour(args):
     path = tour_path(repo, t)
     if args.pane:
         return tour_pane(repo, t, state, args)
+    # On a terminal, a written tour opens in the stepper; else (an agent, --path) its path.
+    here = not args.path and sys.stdin.isatty() and sys.stdout.isatty()
+    shown = "opens it" if here else "prints its path"
+
+    def written():
+        return view_tour(repo, repo.task(t["id"])) if here else print(path)
+
     if state == "writing" and not args.wait:
-        print(f"{t['id']}'s tour is being written: {path} once it's done")
+        print(f"{t['id']}'s tour is being written: `bullpen tour {t['id']}` {shown} once it's done")
         return
     if state == "writing":
         while tour_state(repo, t)[0] == "writing":
@@ -3507,22 +3542,18 @@ def cmd_tour(args):
         state, tour, why = tour_state(repo, t)
         if state == "failed":
             raise Fail(f"{t['id']}'s tour failed: {why} (log: {tour_log(repo, t)})")
-        print(path)
-        return
+        return written()
     if state == "current" and not args.new:
-        print(path)
-        return
+        return written()
     if state == "stale" and not args.new:
         print(f"{t['id']}'s tour is stale: {why}. `bullpen tour {t['id']} --new` writes a new "
               f"one; this is the old one:", file=sys.stderr)
-        print(path)
-        return
+        return written()
     out = start_tour(repo, t, args.wait)
     if out:
-        print(out)
-    else:
-        print(f"writing a tour of {t['id']} in the background ({repo.cfg.get('tour_model') or 'default model'}); "
-              f"`bullpen tour {t['id']}` prints its path once it's done")
+        return written()
+    print(f"writing a tour of {t['id']} in the background ({repo.cfg.get('tour_model') or 'default model'}); "
+          f"`bullpen tour {t['id']}` {shown} once it's done")
 
 
 def cmd_tour_bg(args):
@@ -4193,7 +4224,7 @@ def cmd_accept(args):
     if t["status"] == "finished" and not merged_outside:
         return close_task(repo, t)  # the person's yes on work with nothing to merge
     if t["status"] != "ready" and not merged_outside:
-        raise Fail(f"{is_status(t)}: only a task that's ready to accept or finished can be accepted")
+        raise Fail(f"{is_status(t)}, not ready to accept or finished")
     keys = keys_hash()
     if t.get("pr"):
         p = None if merged_outside else run(
@@ -4846,6 +4877,12 @@ def is_status(t):
     return f"{t['id']} {words}" if words.startswith("needs") else f"{t['id']} is {words}"
 
 
+def homes(text):
+    """Text with each path under $HOME written with ~, for people to read."""
+    h = str(Path.home())
+    return text if h == "/" else re.sub(re.escape(h) + r"(?![\w.-])", "~", text)
+
+
 def home(path):
     """A path with $HOME as ~, for people to read."""
     path, h = str(path), str(Path.home())
@@ -5225,6 +5262,27 @@ def config_value(v):
     return v if isinstance(v, str) else json.dumps(v)
 
 
+# `config` lists the settings in these groups, in this order; one not named here goes
+# under "Other".
+CONFIG_GROUPS = [
+    ("Tasks", ["prefix", "base", "max_running", "merge", "rebase_others", "auto_accept",
+               "setup", "teardown", "gh"]),
+    ("Agents", ["worker", "coordinator_cmd", "reviewer", "tour", "workers", "worker_model",
+                "reviewer_model", "reviewer_followup_model", "tour_model"]),
+    ("Review", ["review", "review_rounds", "light_review_lines"]),
+    ("Board", ["board_layout", "board_bottom_gap", "board_repos"]),
+    ("News", ["news", "notify", "stuck_after", "triage_minutes"]),
+]
+
+
+def config_groups(keys):
+    """[(title, keys)]: keys in CONFIG_GROUPS's groups and order, the rest under Other."""
+    named = {k for _, ks in CONFIG_GROUPS for k in ks}
+    out = [(title, [k for k in ks if k in keys]) for title, ks in CONFIG_GROUPS]
+    out.append(("Other", [k for k in keys if k not in named]))
+    return [(title, ks) for title, ks in out if ks]
+
+
 def show_config(repo, as_json=False):
     """Each setting, with where its value comes from: this repo's config.json ("repo"),
     the global one ("global") or bullpen's own default ("default"). Without a repo,
@@ -5242,16 +5300,22 @@ def show_config(repo, as_json=False):
         print(json.dumps({**({"repo": str(repo.root), "state": str(repo.dir)} if repo else {}), **cfg,
                           "models": models, "global": str(path), "sources": sources}, indent=2))
         return
-    head = [("repo", str(repo.root)), ("state", str(repo.dir / "config.json"))] if repo else \
+    head = [("repo", home(repo.root)), ("state", home(repo.dir / "config.json"))] if repo else \
         [("repo", "none: not in a git repository")]
-    head.append(("global", str(path) + ("" if path.exists() else " (none yet)")))
+    head.append(("global", home(path) + ("" if path.exists() else " (none yet)")))
     for k, v in head:
         print(f"{k + ':':<8}{v}")
-    print()
     keys = [k for k in sources if k not in ("next", "next_coordinator", "coordinators")]
-    width = max(map(len, keys))
-    for k in keys:
-        print(f"{k:<{width}}  {config_value(cfg[k]):<30} {sources[k]}")
+    cols = term_width()
+    for title, group in config_groups(keys):
+        print(f"\n{title}")
+        width = max(map(len, group))
+        vals = {k: homes(str(config_value(cfg[k]))) for k in group}
+        # on a terminal, a value too long to fit beside the others isn't lined up with them
+        room = cols - width - 6 - max(len(sources[k]) for k in group) if cols else None
+        vwidth = max((len(v) for v in vals.values() if room is None or len(v) <= room), default=0)
+        for k in group:
+            print(f"  {k:<{width}}  {vals[k]:<{vwidth}}  {sources[k]}")
     print()
     print(f"models: worker {models['worker']}; reviewer {models['reviewer']}")
     if repo:
@@ -5320,7 +5384,7 @@ def pane_target(repo, args):
         t = repo.task(args.id)
         if not t.get("block"):
             hint = f"`bullpen resume {t['id']}` starts it again" if t["status"] == "stopped" else \
-                is_status(t).replace(f"{t['id']} ", "it ", 1)
+                is_status(t).replace(f"{t['id']} is ", "it's ", 1).replace(f"{t['id']} ", "it ", 1)
             raise Fail(f"{t['id']} has no pane: {hint}")
         return t["session"], t["block"], t["id"]
     c = coordinator_for(repo, args.from_block)
@@ -6322,9 +6386,10 @@ def cmd_doctor(args):
     res = doctor_checks()
     marks = {"ok": "ok", "fail": "FAIL", "skip": "--"}
     for name, state, text in res:
-        print(f"{marks[state]:<4}  {name}: {text}")
-    n = sum(state == "fail" for _, state, _ in res)
-    print(f"{problems_phrase(n)}." if n else "All good.")
+        print(f"{marks[state]:<4}  {name}: {homes(text)}")
+    failed = [name for name, state, _ in res if state == "fail"]
+    n = len(failed)
+    print(f"{problems_phrase(n)}: {', '.join(failed)}." if n else "All good.")
     return 1 if n else 0
 
 
@@ -7410,6 +7475,8 @@ def parser():
     p.add_argument("--here", action="store_true", help="make the agent in this pane the coordinator")
     p.add_argument("--session", help="Rex session (default: this pane's)")
     p.add_argument("--no-board", action="store_true", help="don't open the task board")
+    p.add_argument("--verbose", action="store_true",
+                   help="name each pane's block ID, and how news reaches the coordinator")
     p.set_defaults(fn=cmd_up)
 
     p = sub.add_parser("go", help="focus a task's pane (or the coordinator's, or the board's)")
@@ -7590,7 +7657,8 @@ def parser():
     p.add_argument("--force", action="store_true", help="drop it even with uncommitted changes in its worktree")
     p.set_defaults(fn=cmd_drop)
 
-    p = sub.add_parser("tour", help="a guided tour of a ready task's change: its path, or start writing one")
+    p = sub.add_parser("tour", help="a guided tour of a ready task's change: step through it "
+                       "(its path, off a terminal), or start writing one")
     p.add_argument("id", help="the task, like BP-3")
     p.add_argument("--wait", action="store_true", help="write it now and print its path, not in the background")
     p.add_argument("--new", action="store_true", help="write a new tour even though there is one")
@@ -7603,6 +7671,8 @@ def parser():
                    help="step through it in a floating pane (the board's g); with no tour, write one "
                         "and open it when it's written")
     p.add_argument("--view", action="store_true", help="step through it on this terminal")
+    p.add_argument("--path", action="store_true",
+                   help="print a written tour's path, even on a terminal (where it opens by default)")
     p.add_argument("--back", action="store_true", help=argparse.SUPPRESS)  # then focus the board
     p.add_argument("--from", dest="from_block", default=os.environ.get("REX_BLOCK"),
                    help="with --pane: the pane whose window it opens over (default: this one)")

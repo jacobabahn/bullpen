@@ -79,7 +79,8 @@ non-zero when anything fails. It checks:
 
 `bullpen up` runs the quick checks (not `gh` or the push remote, which need the
 network, nor the watcher and coordinators, which `up` sees to itself) and, if any fail, prints one
-line: "2 problems: run `bullpen doctor`".
+line: "2 problems: run `bullpen doctor`". Doctor itself ends with the failed checks'
+names ("2 problems: keys, watcher."), and writes paths in your home folder with `~`.
 
 ## Use
 
@@ -89,6 +90,11 @@ In a Rex pane, inside the repository:
 bullpen up            # opens the coordinator's tab, the task board and the watcher
 bullpen up --here     # or: make the agent already in this pane a coordinator
 ```
+
+`up` says what it did in one line: "Coordinator, board and watcher started. Tell
+the coordinator what you want." the first time, "Coordinator already running."
+after. `bullpen up --verbose` names each pane's block ID and how news reaches the
+coordinator.
 
 Everything stays in one tab per repository. The coordinator is on the left and
 the board on the right. Each worker is a minimized floating pane, a capsule at
@@ -307,6 +313,10 @@ bullpen close BP-1    # the same as accept, for a finished task only
 bullpen drop BP-1     # close its PR, pane and worktree without merging
 bullpen build-board   # build the board now (see Board rebuilds)
 ```
+
+A command that can't act on a task says its status in the board's words, with the
+status itself after them when they differ: "BP-4 has no pane: it's queued (todo)",
+"BP-2 needs you (stopped), not waiting on its coordinator".
 
 ### Answering from the board
 
@@ -552,8 +562,9 @@ not opened yet": a nudge only, accepting never needs a tour. A failed tour shows
 "tour failed: <why>" on the task.
 
 ```sh
-bullpen tour BP-3             # with a current tour, its path; else start writing one
-bullpen tour BP-3 --wait      # write it now, and print its path
+bullpen tour BP-3             # with a tour, step through it (off a terminal: its path); else start writing one
+bullpen tour BP-3 --wait      # write it now, then step through it (or print its path)
+bullpen tour BP-3 --path      # its path, even on a terminal
 bullpen tour BP-3 --new       # a new tour, even though there is one
 bullpen tour BP-3 --show      # its state (writing, failed, current, stale or none) and steps; --json
 bullpen tour BP-3 --step 2    # step 2's hunks, from git, as a patch (--json: with its title and note)
@@ -586,7 +597,7 @@ bullpen tour BP-3 --view      # step through it on this terminal (the board's g:
   the agent's text.
 - **Current or stale.** A tour stays current while the patch is the same: the same
   commit, or the same patch-id after a clean rebase, as review approvals carry over.
-  Otherwise it is stale: `tour` prints the old one's path and says so, and `--new`
+  Otherwise it is stale: `tour` says so and shows the old one, and `--new`
   writes another.
 - **A failed tour** (the agent failed, or its answer isn't a tour twice) is a line on the
   task on the board, "tour failed: <why>", with the agent's output in
@@ -800,7 +811,8 @@ limit is kept in `limit.json` in the state folder, for every repository.
 ### News
 
 Every news line is logged in `news.log` beside the tasks. `bullpen config --news`
-sets how it reaches the coordinator, and `bullpen up` says which is in use:
+sets how it reaches the coordinator, and `bullpen up --verbose` says which is in use
+(`up` says it by itself for `monitor`):
 
 - `type` (the default): bullpen types each line into the coordinator's pane. It
   works with any coordinator agent, and goes on working when the coordinator's
@@ -1015,7 +1027,8 @@ don't reload themselves: `bullpen doctor` names them, and `bullpen up` restarts 
 
 ## Settings
 
-`bullpen config` lists each setting with its value and where that comes from:
+`bullpen config` lists the settings in groups (tasks, agents, review, board, news),
+each with its value and where that comes from:
 `repo` (this repository's `config.json`), `global` (the one for every repository,
 `~/.config/bullpen/config.json`, or `$XDG_CONFIG_HOME/bullpen/config.json`) or
 `default` (bullpen's own). A repository's own value wins over the global one, and
