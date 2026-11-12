@@ -17,11 +17,10 @@ pane, or the coordinator follows it with Claude Code's Monitor tool (see [News](
 ## Quick start
 
 ```sh
-./install.sh          # link bullpen into ~/.local/bin and build the board
-bullpen keys          # prints a line: add it to your Rex config (init.lua),
-rex config reload     #   then reload, for the cmd+; keys
-bullpen doctor        # checks all of that, and says how to fix what's missing
-bullpen up            # in a Rex pane in your repository: the coordinator and its board
+./install.sh            # link bullpen into ~/.local/bin and build the board
+bullpen keys --install  # the cmd+; keys: adds a line to your Rex config (init.lua), reloads it
+bullpen doctor          # checks all of that, and says how to fix what's missing
+bullpen up              # in a Rex pane in your repository: the coordinator and its board
 ```
 
 Then tell the coordinator what you want ("fix the login redirect and cover it
@@ -58,7 +57,7 @@ non-zero when anything fails. It checks:
 - the keys are in your Rex config: Rex lists the `bullpen_next`, `bullpen_board`,
   `bullpen_coordinator` and `bullpen_jump` actions (`rex actions`). With some of them
   listed and one missing, the line is there but Rex loaded an older `keys.lua`: the
-  fix is `rex config reload`
+  fix is `rex config reload`. With none listed, it's `bullpen keys --install`
 - the watcher is running, from the current `watch.lua` and `bin/bullpen` (the hashes
   in `watcher.json`)
 - the state folder is writable, and this repo's `config.json` parses
@@ -174,7 +173,11 @@ Tasks that waited on the accepted one start by themselves (see
 
 ### Keys
 
-`bullpen keys` prints a line to add to your Rex config (`init.lua`). It defines
+`bullpen keys --install` adds a line to the end of your Rex config (`init.lua`,
+or `REX_CONFIG`) and runs `rex config reload`. It only appends, so what's above
+the line stays first, and it adds nothing when the line is there (it still
+reloads). If the config already loads another bullpen's `keys.lua`, it says so
+and changes nothing: edit that line. `bullpen keys` only prints the line. It defines
 four actions, also in the command palette under Bullpen, and binds:
 
 - `cmd+;` then `n`: the next task that needs you. Again: the one after it.
@@ -192,7 +195,7 @@ four actions, also in the command palette under Bullpen, and binds:
 
 And in a worker's or reviewer's floating pane, `ctrl+escape` puts it back into its
 capsule and returns you to the board (`bullpen hide`); elsewhere the key goes
-through.
+through. Those panes say so in their label ("bullpen: BP-3 · ctrl+esc hides").
 
 `setup{ prefix = "ctrl+b" }` moves them behind another key, and
 `keys = { next = "cmd+shift+j", jump = "cmd+k" }` sets single ones. Run `rex config reload` after.

@@ -81,6 +81,8 @@ FAKE_REX = textwrap.dedent("""\
         version = d / "server_version"  # what the tests say the server is; else Rex says nothing
         if version.exists():
             print(json.dumps({"rex_version": version.read_text()}))
+    elif a[:2] == ["config", "reload"] and (d / "reload_fails").exists():
+        sys.exit("rex: no server")
     elif a[0] == "actions":
         acts = d / "actions.json"  # the actions the tests say the Rex config defines
         if acts.exists():
@@ -311,7 +313,7 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(t["block"], "blk4")
         layer = self.api("session.new_layer")[-1]
         self.assertEqual(layer["layout"]["block"]["options"]["cwd"], t["worktree"])
-        self.assertEqual(layer["layout"]["block"]["label"], "bullpen: BP-1")
+        self.assertEqual(layer["layout"]["block"]["label"], "bullpen: BP-1 · ctrl+esc hides")
         brief = (self.tmp / "state").rglob("BP-1.full.md").__next__().read_text()
         self.assertIn("Make it work.", brief)
         self.assertIn("ready BP-1 --summary-file", brief)
@@ -572,7 +574,7 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(t["status"], "review")
         self.assertEqual(t["pr"], "https://github.com/me/repo/pull/7")  # pushed and opened first
         layer = self.api("session.new_layer")[-1]
-        self.assertEqual(layer["layout"]["block"]["label"], "bullpen: BP-1 review")
+        self.assertEqual(layer["layout"]["block"]["label"], "bullpen: BP-1 review · ctrl+esc hides")
         self.assertEqual(self.layer_states()["lyr2"], "minimized")
         prompt = next((self.tmp / "state").rglob("BP-1.review-1.md")).read_text()
         self.assertIn("verdict BP-1 approve", prompt)
@@ -1237,7 +1239,8 @@ class BullpenTest(unittest.TestCase):
     def test_a_restarted_coordinator_takes_the_workers_with_it(self):
         tid = self.start_task()
         self.commit_and_ready(tid)  # a reviewer capsule too
-        both = sorted(["bullpen: proj", "bullpen: proj board", "bullpen: BP-1", "bullpen: BP-1 review"])
+        both = sorted(["bullpen: proj", "bullpen: proj board", "bullpen: BP-1 · ctrl+esc hides",
+                       "bullpen: BP-1 review · ctrl+esc hides"])
         self.assertEqual(self.windows(), {"w1": both})
         for b in ("blk1", "blk2"):  # the coordinator and board are closed
             (self.fake / "alive" / b).unlink()
@@ -1581,6 +1584,24 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(len(self.api("session.new_block")), 2)  # the watcher, again
         self.bp("_event", "blk8", "blocked", "permission", "ok?")  # events reach the task
         self.assertEqual(self.show(a)["status"], "needs")
+
+    def test_a_pane_from_before_the_hide_hint_is_found_again(self):
+        tid = self.start_task()
+        reg = self.fake / "reg.json"
+        R = json.loads(reg.read_text())
+        R["blocks"][self.block(tid)]["label"] = "bullpen: BP-1"  # started by an older bullpen
+        reg.write_text(json.dumps(R))
+        self.restart_rex()
+        self.bp("go", tid)
+        self.assertEqual(self.block(tid), "blk7")
+
+    def test_worker_panes_in_tabs_have_no_hide_hint(self):
+        self.bp("up")
+        self.bp("config", "--workers", "tabs")
+        self.bp("add", "Fix", "--brief", "x")
+        self.bp("start", "BP-1")
+        run = [a for a in self.rex_calls() if a[0] == "run"][-1]
+        self.assertEqual(run[run.index("--label") + 1], "bullpen: BP-1")  # ctrl+esc only hides floating ones
 
     def test_up_after_a_restart_that_renamed_the_session(self):
         tid = self.start_task()
@@ -4286,7 +4307,7 @@ class BullpenTest(unittest.TestCase):
         p, lines = self.doctor()
         self.assertEqual(p.returncode, 1)
         self.assertEqual(p.stdout.splitlines()[-1], "7 problems.")
-        fixes = {"rex": "preview.13 or later", "keys": "run `bullpen keys`", "gh": "gh auth login",
+        fixes = {"rex": "preview.13 or later", "keys": "run `bullpen keys --install`", "gh": "gh auth login",
                  "board": "BULLPEN_BOARD", "agents": "no-such-agent isn't on PATH (config.json's worker)",
                  "watcher": "run `bullpen up`", "coordinators": "c1's board (blk2) is gone"}
         for name, fix in fixes.items():
@@ -4340,6 +4361,52 @@ class BullpenTest(unittest.TestCase):
         _, lines = self.doctor()
         self.assertEqual(lines["keys"],
                          ("FAIL", "bullpen_jump missing: Rex loaded an older keys.lua. Run `rex config reload`"))
+
+    def keys_install(self, ok=True):
+        self.env.pop("REX_CONFIG", None)
+        return self.bp("keys", "--install", ok=ok)
+
+    def test_keys_install_appends_after_whats_there_and_reloads(self):
+        init = self.tmp / "xdg" / "rex" / "init.lua"
+        init.parent.mkdir(parents=True)
+        first = 'do local r = rex.exec({ "rexurrect", "auto-restore" }) end\nrex.bind("cmd+k", "x")'
+        init.write_text(first)  # no newline at the end
+        p = self.keys_install()
+        self.assertIn(f"added to the end of {init}", p.stdout)
+        text = init.read_text()
+        self.assertTrue(text.startswith(first + "\n\n"), text)  # what was there stays first, as it was
+        self.assertEqual(text.splitlines()[-1],
+                         f'dofile("{ROOT / "lua" / "keys.lua"}").setup{{ bin = "{BULLPEN}", '
+                         f'state = "{self.tmp / "state"}" }}')
+        self.assertIn(["config", "reload"], self.rex_calls())
+        p = self.keys_install()  # again: nothing added, still reloaded
+        self.assertIn("already in", p.stdout)
+        self.assertEqual(init.read_text(), text)
+        self.assertEqual(self.rex_calls().count(["config", "reload"]), 2)
+
+    def test_keys_install_makes_the_config_and_honours_rex_config(self):
+        init = self.tmp / "elsewhere" / "init.lua"
+        self.env["REX_CONFIG"] = str(init)
+        self.bp("keys", "--install")
+        self.assertTrue(init.read_text().startswith("-- bullpen's keys"))
+        self.assertFalse((self.tmp / "xdg" / "rex" / "init.lua").exists())
+
+    def test_keys_install_leaves_another_keys_line_alone(self):
+        init = self.tmp / "xdg" / "rex" / "init.lua"
+        init.parent.mkdir(parents=True)
+        init.write_text('dofile("/old/bullpen/lua/keys.lua").setup{ bin = "/old/bullpen/bin/bullpen" }\n')
+        p = self.keys_install(ok=False)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("already loads another keys.lua (/old/bullpen/lua/keys.lua)", p.stderr)
+        self.assertNotIn(["config", "reload"], self.rex_calls())
+        self.assertEqual(len(init.read_text().splitlines()), 1)
+
+    def test_keys_install_says_when_the_reload_fails(self):
+        (self.fake / "reload_fails").write_text("")
+        p = self.keys_install(ok=False)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("added to the end of", p.stdout)
+        self.assertIn("`rex config reload` failed: rex: no server", p.stderr)
 
     def test_go_board_starts_a_board_when_none_runs(self):
         self.bp("up")
@@ -5293,7 +5360,7 @@ class LocalModeTest(unittest.TestCase):
         t = self.show(tid)
         self.assertEqual(t["status"], "review")
         layer = self.api("session.new_layer")[-1]
-        self.assertEqual(layer["layout"]["block"]["label"], "bullpen: BP-1 review")
+        self.assertEqual(layer["layout"]["block"]["label"], "bullpen: BP-1 review · ctrl+esc hides")
         prompt = next((self.tmp / "state").rglob("BP-1.review-1.md")).read_text()
         self.assertIn(f"diff main...HEAD", prompt)
         self.bp("verdict", tid, "approve", "--summary", "Fine.")

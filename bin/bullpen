@@ -680,12 +680,22 @@ def rex_view(session):
     return v if v and "windows" in v else None
 
 
+# A worker's or reviewer's floating pane says how to put it away (lua/keys.lua's
+# default key). Its label is then "bullpen: BP-3 · ctrl+esc hides"; it's found by
+# "bullpen: BP-3" all the same, as are panes started before the hint.
+HIDE_HINT = " · ctrl+esc hides"
+
+
+def is_label(b, label):
+    return bool(label) and b.get("label") in (label, label + HIDE_HINT)
+
+
 def find_pane(view, block=None, label=None):
     """(window_id, layer, block_id) of a placed block, by ID, else by label."""
     for w in (view or {}).get("windows", []):
         for layer in w.get("layers", []):
             for b in layer.get("blocks", []):
-                if (block and b.get("block_id") == block) or (not block and label and b.get("label") == label):
+                if (block and b.get("block_id") == block) or (not block and is_label(b, label)):
                     return w["window_id"], layer, b["block_id"]
     return None
 
@@ -694,7 +704,7 @@ def find_panes(view, label):
     """(window_id, layer, block_id) of every placed block with this label."""
     return [(w["window_id"], layer, b["block_id"])
             for w in (view or {}).get("windows", []) for layer in w.get("layers", [])
-            for b in layer.get("blocks", []) if b.get("label") == label]
+            for b in layer.get("blocks", []) if is_label(b, label)]
 
 
 def set_layer(session, layer_id, state, focus=False):
@@ -1829,7 +1839,7 @@ def launch(repo, t, session, first, resume):
     if repo.cfg.get("workers") == "tabs":
         block = rex_run(session, t["worktree"], label, argv)
     else:
-        block = float_pane(repo, session, label, t["worktree"], argv, t)
+        block = float_pane(repo, session, label + HIDE_HINT, t["worktree"], argv, t)
     index_block(block, repo, t["id"])
     set_status(t, "working")
     t.update(block=block, session=session, last=None)
@@ -2683,7 +2693,7 @@ def start_review(repo, t, base_ref):
     if repo.cfg.get("workers") == "tabs":
         block = rex_run(session, t["worktree"], review_label(t), argv)
     else:
-        block = float_pane(repo, session, review_label(t), t["worktree"], argv, t)
+        block = float_pane(repo, session, review_label(t) + HIDE_HINT, t["worktree"], argv, t)
     index_block(block, repo, f"{t['id']} review")
     set_status(t, "review")
     t.update(review={
@@ -5414,17 +5424,61 @@ def cmd_build_board_bg(args):
         return 1
 
 
-def cmd_keys(args):
-    keys = KEYS_LUA
+def keys_line():
     opts = f'bin = "{SELF}"'
     if os.environ.get("BULLPEN_STATE"):
         opts += f', state = "{STATE}"'
-    print(f"-- Add to your Rex config (rex config shows where), then run `rex config reload`:\n"
-          f'dofile("{keys}").setup{{ {opts} }}\n'
+    return f'dofile("{KEYS_LUA}").setup{{ {opts} }}'
+
+
+def rex_config_path():
+    """The init.lua Rex reads: REX_CONFIG, else rex/init.lua in the config directory."""
+    if os.environ.get("REX_CONFIG"):
+        return Path(os.environ["REX_CONFIG"]).expanduser()
+    base = os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
+    return Path(base) / "rex" / "init.lua"
+
+
+KEYS_IN_CONFIG = re.compile(r"""dofile\s*\(\s*["']([^"']*keys\.lua)["']\s*\)\s*\.\s*setup""")
+
+
+def cmd_keys(args):
+    if args.install:
+        return install_keys()
+    print(f"-- Add to your Rex config (rex config shows where), then run `rex config reload`\n"
+          f"-- (`bullpen keys --install` does both):\n"
+          f"{keys_line()}\n"
           f"-- Defaults: cmd+;>n next task needing you, cmd+;>b board, cmd+;>c coordinator,\n"
           f"-- cmd+;>j jump to any open task (type part of it, in any repository),\n"
           f"-- and ctrl+escape puts the worker pane you're in back into its capsule.\n"
           f'-- Change them with prefix = "...", or keys = {{ next = ..., board = ..., coordinator = ..., jump = ..., hide = ... }}.')
+
+
+def install_keys():
+    """Add bullpen's line to the end of the Rex config if it isn't there, then reload.
+    It only ever appends: what's above it (a hook that must run first, say) stays put."""
+    path = rex_config_path()
+    try:
+        text = path.read_text()
+    except FileNotFoundError:
+        text = ""
+    found = [m.group(1) for m in KEYS_IN_CONFIG.finditer(text)]
+    if any(Path(f).expanduser().resolve() == KEYS_LUA.resolve() for f in found):
+        print(f"already in {path}")
+    elif found:
+        raise Fail(f"{path} already loads another keys.lua ({found[0]}): change that line to\n{keys_line()}")
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        gap = "" if not text else "\n" if text.endswith("\n") else "\n\n"  # a blank line after what's there
+        with open(path, "a") as f:
+            f.write(f"{gap}-- bullpen's keys (`bullpen keys` says what they are)\n{keys_line()}\n")
+        print(f"added to the end of {path}")
+    if not shutil.which(REX):
+        raise Fail("rex isn't on PATH: run `rex config reload` once it is")
+    p = run([REX, "config", "reload"], check=False)
+    if p.returncode != 0:
+        raise Fail(f"`rex config reload` failed: {(p.stderr or p.stdout).strip() or 'it said nothing'}")
+    print("Rex config reloaded: the cmd+; keys work now")
 
 
 # ---------- doctor: is everything bullpen needs in place? ----------
@@ -5536,8 +5590,7 @@ def check_keys():
         return "fail", (f"{', '.join(missing)} missing: Rex loaded an older keys.lua. "
                         f"Run `rex config reload`")
     if missing:
-        return "fail", (f"not in your Rex config ({', '.join(missing)} missing): run `bullpen keys`, "
-                        f"add the line it prints to init.lua, then `rex config reload`")
+        return "fail", "not in your Rex config: run `bullpen keys --install`"
     src = (have[KEY_ACTIONS[0]].get("source") or "").rsplit(":", 1)[0]
     return "ok", f"set up, from {src}" if src else "set up"
 
@@ -6808,6 +6861,8 @@ def parser():
     p.set_defaults(fn=cmd_build_board)
 
     p = sub.add_parser("keys", help="print the Rex config line for bullpen's key bindings")
+    p.add_argument("--install", action="store_true",
+                   help="add the line to the end of your Rex config if it's missing, then `rex config reload`")
     p.set_defaults(fn=cmd_keys)
 
     p = sub.add_parser("doctor", help="check bullpen's setup: one line per check, with the fix for what's wrong")
