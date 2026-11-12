@@ -41,3 +41,8 @@ _Avoid_: reason (for the recorded stop), needs (for any stop).
 _Avoid_: walkthrough, guide (the coordinator's guide is `bullpen guide`).
 
 **Step**: one logical change in a tour: a title, a note on why it changed and what to look at, and the hunks it covers (file and line ranges), shown from git. A last step, "Other changes", holds any hunk no other step covers. A comment is on one step.
+
+## Settings
+
+**Setting**: one of bullpen's options, like `merge` or `max_running`, changed with `bullpen config`. Each has a row in `SETTINGS` at the top of `bin/bullpen`: its default, its kind and its help. A repository's own value (its `config.json`) wins over the **global** one (`~/.config/bullpen/config.json`), which wins over the default. A **repo-only** setting (the prefix, the base branch, the news mode, the push remote, the coordinators) belongs to one repository: the global file can't hold it.
+_Avoid_: option, preference.

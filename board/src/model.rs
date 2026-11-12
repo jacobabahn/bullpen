@@ -435,7 +435,8 @@ pub fn global_config_path() -> Option<PathBuf> {
 }
 
 /// Settings only a repository can have: the global config.json's are ignored.
-const REPO_ONLY: [&str; 6] = ["prefix", "next", "base", "coordinators", "next_coordinator", "news"];
+/// A copy of bin/bullpen's REPO_ONLY: a test there holds it to its table of settings.
+const REPO_ONLY: [&str; 7] = ["prefix", "next", "base", "push_remote", "news", "coordinators", "next_coordinator"];
 
 /// The repo's settings over the global ones, as bullpen layers them.
 pub fn layered(
@@ -454,9 +455,14 @@ impl Config {
         Config::from_value(&layered(global, read_object(&dir.join("config.json"))))
     }
 
+    /// The defaults here are copies of bin/bullpen's: a test there holds them to its table.
     pub fn from_value(v: &serde_json::Value) -> Config {
         Config {
-            layout: if v["board_layout"].as_str() == Some("compact") { Layout::Compact } else { Layout::Grouped },
+            layout: if v["board_layout"].as_str().unwrap_or("grouped") == "compact" {
+                Layout::Compact
+            } else {
+                Layout::Grouped
+            },
             review_rounds: v["review_rounds"].as_u64().unwrap_or(2) as u32,
             merge: v["merge"].as_str().unwrap_or("rebase").to_string(),
             auto_accept: v["auto_accept"].as_bool().unwrap_or(false),

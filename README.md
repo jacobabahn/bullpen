@@ -490,8 +490,8 @@ on that base up to date, and they don't drift behind and conflict later:
   pane is gone). Uncommitted changes: skipped.
 
 One news line sums it up: `After BP-4: BP-5 told to rebase; BP-8 rebased; BP-9
-conflicts in bin/bullpen, sent back.` Set `"rebase_others": false` in the repo's
-`config.json` to turn this off.
+conflicts in bin/bullpen, sent back.` `bullpen config --rebase-others off` turns this
+off.
 
 ### Review
 
@@ -1060,8 +1060,10 @@ bullpen config --global --unset merge    # and the global one back to the defaul
 `review_rounds`). `--global` works outside a repository too. The prefix, the base
 branch, the news mode, the push remote and the coordinators belong to one repository,
 so `--global` refuses `--prefix`, `--base`, `--news`, `--push-remote` and `--board-others`. The commands
-(`worker`, `reviewer`, `coordinator_cmd`, `tour`) and `rebase_others` have no flags: set them
-in either `config.json` by hand.
+(`worker`, `reviewer`, `coordinator_cmd`, `tour`) have no flags: set them in either
+`config.json` by hand. `bullpen config --help` gives each flag's default; the defaults
+are in one table at the top of `bin/bullpen` (`SETTINGS`), with each setting's kind and
+whether only a repository can hold it.
 
 A repository's `config.json` holds only what it sets itself. One from before the
 global file held every setting: the first time bullpen reads it, it drops the
@@ -1086,8 +1088,10 @@ repositories](#several-repositories)). `bullpen config --prefix XY --base develo
 and the base branch (default: origin's default branch). `bullpen config --push-remote
 github` pushes the base branch to the `github` remote after each accept, in local mode
 only (see [Local mode](#local-mode)). The worker and coordinator
-commands are in that folder's `config.json` (`worker`, `coordinator_cmd`). `"rebase_others": false`
-there stops `accept` rebasing the other open tasks (see [After accept](#after-accept)).
+commands are in that folder's `config.json` (`worker`, `coordinator_cmd`). `bullpen config
+--rebase-others off` stops `accept` rebasing the other open tasks (see [After
+accept](#after-accept)), and `--gh PATH` runs that gh instead of the one on PATH
+(`BULLPEN_GH` wins over both).
 
 `bullpen config --model opus` sets the model for workers and reviewers (follow-up
 and light reviews too); `--worker-model`, `--reviewer-model` and

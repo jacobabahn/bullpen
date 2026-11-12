@@ -2,9 +2,11 @@
 
 import json
 import os
+import re
+import unittest
 from pathlib import Path
 
-from support import setUpModule, tearDownModule, sh, BullpenTest  # a temp folder for each module
+from support import setUpModule, tearDownModule, sh, BullpenTest, ROOT, BULLPEN  # a temp folder for each module
 
 
 class ConfigTest(BullpenTest):
@@ -444,3 +446,59 @@ class ConfigTest(BullpenTest):
         (self.fake / "actions.json").write_text(json.dumps({"actions": []}))
         out = self.bp("up").stdout.splitlines()
         self.assertEqual(out[-1], "2 problems: run `bullpen doctor`")
+
+    # ---------- one table of settings ----------
+
+    def test_rebase_others_and_gh_have_flags(self):
+        cfg = self.cfg("--rebase-others", "off", "--gh", "/opt/gh/bin/gh")
+        self.assertEqual((cfg["rebase_others"], cfg["gh"]), (False, "/opt/gh/bin/gh"))
+        self.assertEqual(cfg["sources"]["gh"], "repo")
+        cfg = self.cfg("--gh", "")  # "": back to the gh on PATH
+        self.assertIsNone(cfg["gh"])
+        self.bp("config", "--global", "--rebase-others", "off")
+        self.assertEqual(self.global_cfg(), {"rebase_others": False})
+
+    def test_config_help_states_the_defaults(self):
+        out = self.bp("config", "--help").stdout
+        out = " ".join(out.split())
+        for says in ("(default 3)", "(default 40)", "(default sonnet)", "(default rebase)",
+                     "(default on)", "(default off)", "(default 20)", "(default needs)", "(default 1)"):
+            self.assertIn(says, out)
+        self.assertNotIn("--coordinators", out)  # the command lists and the coordinators are file-only
+        self.assertNotIn("--worker ", out)
+
+
+class SettingsCopiesTest(unittest.TestCase):
+    """The board and the watcher keep their own short copies of some settings: they
+    must agree with bin/bullpen's table."""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        from importlib.machinery import SourceFileLoader
+        loader = SourceFileLoader("bullpen_cli", str(BULLPEN))
+        spec = importlib.util.spec_from_loader("bullpen_cli", loader)
+        cls.bp = importlib.util.module_from_spec(spec)
+        loader.exec_module(cls.bp)
+
+    def test_the_boards_repo_only_settings_agree(self):
+        src = (ROOT / "board" / "src" / "model.rs").read_text()
+        m = re.search(r"const REPO_ONLY: \[&str; \d+\] = \[([^\]]*)\]", src)
+        self.assertEqual(sorted(re.findall(r'"(\w+)"', m.group(1))), sorted(self.bp.REPO_ONLY))
+
+    def test_the_boards_defaults_agree(self):
+        src = (ROOT / "board" / "src" / "model.rs").read_text()
+        body = src[src.index("pub fn from_value"):]
+        body = body[:body.index("\n    }\n")]
+        found = re.findall(r'v\["(\w+)"\]\.as_(\w+)\(\)\.unwrap_or\(([^)]*)\)', body)
+        self.assertGreaterEqual(len(found), 7)
+        for key, kind, default in found:
+            want = self.bp.DEFAULT_CONFIG[key]
+            got = {"bool": lambda s: s == "true", "str": lambda s: json.loads(s),
+                   "u64": int}[kind](default)
+            self.assertEqual(got, want, key)
+
+    def test_the_watchers_stuck_after_agrees(self):
+        src = (ROOT / "lua" / "watch.lua").read_text()
+        m = re.search(r'"stuck_after":%s\*\(%d\+\)\'\)\) or (\d+)', src)
+        self.assertEqual(int(m.group(1)), self.bp.DEFAULT_CONFIG["stuck_after"])

@@ -40,7 +40,8 @@ local function tracked(block)
 end
 
 -- Minutes a working pane may be quiet (the repo's `stuck_after`, copied into the
--- entry); 0 is off, and so is a pane that's no longer bullpen's.
+-- entry); 0 is off, and so is a pane that's no longer bullpen's. The default is a
+-- copy of bin/bullpen's: a test there holds it to its table of settings.
 local function stuck_after(block)
   local e = entry(block)
   if not e then return 0 end

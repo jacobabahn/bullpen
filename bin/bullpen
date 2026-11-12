@@ -39,44 +39,118 @@ STATE = Path(os.environ.get("BULLPEN_STATE") or Path.home() / ".local/state/bull
 REX = os.environ.get("BULLPEN_REX", "rex")
 SELF = str(Path(__file__).resolve())
 
-DEFAULT_CONFIG = {
-    "prefix": "BP",
-    "next": 1,
-    "base": None,
-    "worker": ["claude", "--permission-mode", "auto"],
-    "coordinator_cmd": ["claude", "--permission-mode", "auto"],
-    "coordinators": [],   # [{"id": "c1", "block": ..., "session": ..., "board": {block, session}}]
-    "next_coordinator": 1,
-    "workers": "float",   # "float": minimized floating panes in their coordinator's tab; "tabs"
-    "gh": None,           # the gh program, if not the one on PATH (BULLPEN_GH wins)
-    "review": True,       # a reviewer agent checks each task before it's ready
-    "review_rounds": 2,   # reviews before a task is ready anyway, findings listed
-    "reviewer": ["claude", "--permission-mode", "auto"],
-    "board_layout": "grouped",  # or "compact"
-    "board_bottom_gap": 1,      # rows the board leaves empty at its bottom, for Rex's minimized-pane capsules
-    "merge": "rebase",    # how accept merges a PR: rebase, squash or merge
-    "stuck_after": 20,    # minutes a working agent can show no progress before news; 0: off
-    "news": "type",       # "type": typed into the coordinator's pane; "monitor": it follows `news --follow`
-    "worker_model": None,    # claude's --model for workers ("default": none; None: the command's own)
-    "reviewer_model": None,  # the same for reviewers (a full first review)
-    "reviewer_followup_model": "sonnet",  # for later rounds and light reviews (None: reviewer_model)
-    "tour": ["claude"],      # the agent that writes guided review tours, run headless (claude -p)
-    "tour_model": "sonnet",  # its --model ("default": none)
-    "light_review_lines": 40,  # a change this small (lines, in at most 2 files) gets a light review
-    "auto_accept": False,    # accept a task by itself once review approves it
-    "triage_minutes": 10,    # minutes a task can wait on its coordinator before it needs the person
-    "notify": "needs",       # notifications for the person: "needs" (needs you), "all" (and ready, finished,
-                             # auto-accepted) or "off"
-    "setup": None,           # a command run in each new worktree before its worker starts (over .bullpen/setup.sh)
-    "teardown": None,        # one run in a worktree before it is removed (over .bullpen/teardown.sh)
-    "max_running": 3,        # tasks working at once (review doesn't count); the queue starts more as they hand off
-    "rebase_others": True,   # accept rebases the other open tasks onto the new base
-    "board_repos": True,     # the board's top line counts what needs you or is ready in other repos
-    "push_remote": None,     # local mode: a remote accept pushes the base branch to, as a backup
-}
 
+class Setting:
+    """One setting: its default, its group in `config`'s list, whether only a repository
+    can hold it, and its kind, which gives `config` its flag and the flag's check:
+    "file" (no flag: set in config.json by hand), "choice", "on/off", "number" (with a
+    least value, and what to say when it is less), "text" (a "" clears it, when clears),
+    or "model" (claude's --model). A text setting with a pattern must match it."""
+
+    def __init__(self, name, default, group, kind, help="", repo_only=False, choices=None,
+                 least=None, says=None, metavar=None, clears=False, none=None, pattern=None):
+        self.name, self.default, self.group, self.kind, self.help = name, default, group, kind, help
+        self.repo_only, self.choices, self.least, self.says = repo_only, choices, least, says
+        self.metavar, self.clears, self.none, self.pattern = metavar, clears, none, pattern
+
+    @property
+    def flag(self):
+        return "--" + self.name.replace("_", "-")
+
+    def default_phrase(self):
+        """The default, as config's help states it."""
+        d = self.default
+        if d is None:
+            return self.none
+        if isinstance(d, bool):
+            return "on" if d else "off"
+        return str(d)
+
+    def full_help(self):
+        phrase = self.default_phrase()
+        return f"{self.help} (default {phrase})" if phrase else self.help
+
+
+AGENT = ["claude", "--permission-mode", "auto"]
+NOTIFY = ("all", "needs", "off")
+
+# Every setting bullpen has, in the order `config` lists them.
+SETTINGS = [
+    Setting("prefix", "BP", "Tasks", "text", "the letters new task IDs start with (2 to 5 capitals)",
+            repo_only=True, pattern=r"[A-Z]{2,5}", says="2 to 5 capital letters"),
+    Setting("next", 1, None, "file", repo_only=True),  # the next task's number
+    Setting("base", None, "Tasks", "text", "the branch tasks start from and open PRs against",
+            repo_only=True, none="the repo's default branch"),
+    Setting("max_running", 3, "Tasks", "number",
+            "tasks working at once (review doesn't count); the queue starts more as they hand off",
+            least=1, says="a number of tasks, 1 or more", metavar="N"),
+    Setting("merge", "rebase", "Tasks", "choice", "how accept merges a PR",
+            choices=("rebase", "squash", "merge")),
+    Setting("rebase_others", True, "Tasks", "on/off", "accept rebases the other open tasks onto the new base"),
+    Setting("push_remote", None, "Tasks", "text",
+            "local mode: push the base branch to this remote (a backup, not origin) after "
+            "each accept, and when `up` finds it behind (\"\" turns it off)",
+            repo_only=True, metavar="REMOTE", clears=True, none="none"),
+    Setting("auto_accept", False, "Tasks", "on/off", "accept (merge) a task by itself once review approves it"),
+    Setting("setup", None, "Tasks", "text",
+            "a command run in each new worktree before its worker starts, over .bullpen/setup.sh (\"\" clears it)",
+            metavar="CMD", clears=True, none="none"),
+    Setting("teardown", None, "Tasks", "text",
+            "a command run in a worktree before accept, close or drop removes it, over "
+            ".bullpen/teardown.sh (\"\" clears it)", metavar="CMD", clears=True, none="none"),
+    Setting("gh", None, "Tasks", "text",
+            "the gh program, if not the one on PATH; BULLPEN_GH wins (\"\" clears it)",
+            metavar="PATH", clears=True, none="gh on PATH"),
+    Setting("worker", list(AGENT), "Agents", "file"),           # the command each worker runs
+    Setting("coordinator_cmd", list(AGENT), "Agents", "file"),  # the one a coordinator runs
+    Setting("reviewer", list(AGENT), "Agents", "file"),         # the one a reviewer runs
+    Setting("tour", ["claude"], "Agents", "file"),        # the one that writes tours, headless (claude -p)
+    Setting("workers", "float", "Agents", "choice",
+            "new workers as capsules in the coordinator's tab (float) or as tabs", choices=("float", "tabs")),
+    Setting("worker_model", None, "Agents", "model",
+            "claude's --model for workers (\"default\": none, so Claude Code picks)",
+            none="the worker command's own"),
+    Setting("reviewer_model", None, "Agents", "model", "the same, for reviewers (a full first review)",
+            none="the reviewer command's own"),
+    Setting("reviewer_followup_model", "sonnet", "Agents", "model",
+            "the same, for later review rounds and light reviews"),
+    Setting("tour_model", "sonnet", "Agents", "model",
+            "claude's --model for the agent that writes guided review tours"),
+    Setting("review", True, "Review", "on/off", "a reviewer agent checks each task before it's ready"),
+    Setting("review_rounds", 2, "Review", "number",
+            "reviews a task gets before it is ready anyway, findings listed",
+            least=1, says="a number of rounds, 1 or more", metavar="N"),
+    Setting("light_review_lines", 40, "Review", "number",
+            "a change of at most this many lines in at most 2 files gets a light review",
+            least=0, says="a number of lines, or 0 for docs-only changes alone", metavar="LINES"),
+    Setting("board_layout", "grouped", "Board", "choice", "how the board lists tasks",
+            choices=("grouped", "compact")),
+    Setting("board_bottom_gap", 1, "Board", "number",
+            "empty rows at the board's bottom, under Rex's minimized-pane capsules (0: none)",
+            least=0, says="rows, or 0 for none", metavar="ROWS"),
+    Setting("board_repos", True, "Board", "on/off",
+            "the board's top line counts the tasks that need you or are ready in other repositories"),
+    Setting("news", "type", "News", "choice",
+            "how news reaches the coordinator: typed into its pane (type), or read by its "
+            "Monitor tool from `bullpen news --follow` (monitor)", repo_only=True, choices=("type", "monitor")),
+    Setting("notify", "needs", "News", "choice",
+            "native notifications: when a task needs you (needs), also when one is ready, "
+            "finished or auto-accepted (all), or none (off)", choices=NOTIFY),
+    Setting("stuck_after", 20, "News", "number",
+            "news when a working agent shows no progress this long (0: never)",
+            least=0, says="minutes, or 0 to turn it off", metavar="MINUTES"),
+    Setting("triage_minutes", 10, "News", "number",
+            "how long a task can wait on its coordinator before it needs the person",
+            least=0, says="minutes", metavar="MINUTES"),
+    # [{"id": "c1", "block": ..., "session": ..., "board": {block, session}}]
+    Setting("coordinators", [], None, "file", repo_only=True),
+    Setting("next_coordinator", 1, None, "file", repo_only=True),
+]
+SETTING = {s.name: s for s in SETTINGS}
+
+DEFAULT_CONFIG = {s.name: s.default for s in SETTINGS}
 # Settings that belong to one repository: the global config.json can't hold them.
-REPO_ONLY = ("prefix", "next", "base", "coordinators", "next_coordinator", "news", "push_remote")
+REPO_ONLY = tuple(s.name for s in SETTINGS if s.repo_only)
 # What bullpen notes for itself in a repo's config.json.
 INTERNAL = ("root", "triage_migrated", "stops_migrated", "layered")
 
@@ -850,7 +924,6 @@ def type_news(repo, line, to=None):
 # in notify.json, and once none has come for NOTIFY_QUIET seconds the watcher's
 # outbox round (`_flush`) sends "3 tasks need you: BP-3, BP-4, BP-5".
 
-NOTIFY = ("all", "needs", "off")
 NOTIFY_BURST = 10  # seconds
 NOTIFY_QUIET = 3
 
@@ -883,7 +956,7 @@ def notify(repo, t, old):
     """Tell the person of the task's change, if notify says to and they aren't looking.
     Never fails: a notification that can't go out is noted in notify.log."""
     n = notice(t, old)
-    level = repo.cfg.get("notify") or "needs"
+    level = repo.cfg["notify"]
     if not n or level == "off" or (level == "needs" and n[0] != "needs"):
         return
     try:
@@ -1926,7 +1999,7 @@ def start_queued(repo, by, how):
         news(repo, by, "queue", f"{ids} can start ({why}), but the usage limit is reached "
              f"({limit_phrase(lim.get('resets'))}): `bullpen start` them after the reset", everyone=True)
         return
-    room = repo.cfg.get("max_running", 3) - running_count(repo)
+    room = repo.cfg["max_running"] - running_count(repo)
     session = session_for(repo)
     for t in sorted(queued, key=lambda t: int(t["id"].rsplit("-", 1)[1]))[:max(room, 0)]:
         try:
@@ -2614,7 +2687,7 @@ def ready(repo, t, args):
             t["tour"]["stale"] = True
     t.pop("from_ready", None)
     local = not repo.has_origin()
-    if not repo.cfg.get("review", True):
+    if not repo.cfg["review"]:
         t.pop("tour_sent", None)  # no reviewer checks the person's comments with review off
     base_ref = task_base_ref(repo, t)
     ahead = int(git(wt, "rev-list", "--count", f"{base_ref}..HEAD").stdout.strip())
@@ -2629,7 +2702,7 @@ def ready(repo, t, args):
     if local:
         t["local"] = True
         t.update(why=None, summary=summary.strip() or t.get("summary"), commits=ahead)
-        if repo.cfg.get("review", True):
+        if repo.cfg["review"]:
             said = review_at_ready(repo, t, base_ref)
             print(f"local branch {t['branch']} ({commits(ahead)} ahead of {base_ref}; no remote, "
                   f"so nothing pushed). {said}")
@@ -2648,7 +2721,7 @@ def ready(repo, t, args):
                  "--title", f"{t['title']} ({t['id']})", "--body-file", "-"], cwd=wt, input=body)
         t["pr"] = p.stdout.strip().splitlines()[-1]
     t.update(why=None, summary=summary.strip() or t.get("summary"), commits=ahead)
-    if repo.cfg.get("review", True):
+    if repo.cfg["review"]:
         said = review_at_ready(repo, t, base_ref)
         print(f"pushed {t['branch']}; pull request: {t['pr']}. {said}")
         return
@@ -2846,7 +2919,7 @@ def first_kind(repo, t, base_ref):
     if mode != "auto":
         return mode, f"set for {t['id']}"
     files, lines, docs = change_size(t["worktree"], base_ref)
-    limit = repo.cfg.get("light_review_lines", DEFAULT_CONFIG["light_review_lines"])
+    limit = repo.cfg["light_review_lines"]
     if docs:
         return "light", "docs only"
     if lines is not None and lines <= limit and files <= 2:
@@ -2925,7 +2998,7 @@ def start_review(repo, t, base_ref):
     close_reviewer(t)
     sent = t.get("tour_sent")
     n = old.get("round", 0) + (0 if sent else 1)
-    rounds = repo.cfg.get("review_rounds", 2)
+    rounds = repo.cfg["review_rounds"]
     briefs = repo.dir / "briefs"
     wt = t["worktree"]
     # the round the next one follows up on: the last one with a verdict
@@ -3002,7 +3075,7 @@ def cmd_verdict(args):
     findings = repo.dir / "briefs" / (f"{t['id']}.tour-{r['tour']}.review.findings.md" if tour
                                       else f"{t['id']}.review-{r['round']}.findings.md")
     findings.write_text(text + "\n")
-    rounds = repo.cfg.get("review_rounds", 2)
+    rounds = repo.cfg["review_rounds"]
     r.update(verdict="approved" if args.verdict == "approve" else "changes", findings=str(findings))
     reviewer = (r.get("session"), r.get("block"))
     unindex_block(r["block"])
@@ -4228,7 +4301,7 @@ def cmd_accept(args):
     keys = keys_hash()
     if t.get("pr"):
         p = None if merged_outside else run(
-            [repo.gh(), "pr", "merge", t["pr"], f"--{repo.cfg.get('merge', 'rebase')}"],
+            [repo.gh(), "pr", "merge", t["pr"], f"--{repo.cfg['merge']}"],
             cwd=repo.root, check=False)
         if p and p.returncode != 0:
             raise Fail(f"merge refused: {(p.stderr or p.stdout).strip()}")
@@ -4244,7 +4317,7 @@ def cmd_accept(args):
     set_status(t, "done", t.get("why"))
     t.update(block=None, worktree=None, auto_accepted=bool(getattr(args, "auto", False)))
     repo.save_task(t)
-    mode = repo.cfg.get("merge", "rebase")
+    mode = repo.cfg["merge"]
     if t.get("pr"):
         print(f"{t['id']} done (merged {t['pr']})")
         how = (f"{pr_short(t['pr'])} was merged outside bullpen" if merged_outside
@@ -4307,7 +4380,7 @@ def merge_locally(repo, t):
     says. On any failure, raise with the reason and leave the task, its worktree and its
     branch as they were (a rebase that went through stays: the branch is still intact)."""
     base, branch, wt = t["base"], t["branch"], t.get("worktree")
-    mode = repo.cfg.get("merge", "rebase")
+    mode = repo.cfg["merge"]
     if git(repo.root, "rev-parse", "-q", "--verify", f"refs/heads/{branch}", check=False).returncode != 0:
         raise Fail(f"merge refused: {t['id']}'s branch {branch} is gone")
     old = git(repo.root, "rev-parse", f"refs/heads/{base}").stdout.strip()
@@ -4364,8 +4437,8 @@ def move_base(repo, base, old, new):
 def rebase_others(repo, accepted):
     """After an accept, bring the other open tasks on the same base up to date: tell a
     working agent to rebase, rebase one between turns, and leave a running review be.
-    One news line sums it up. Off with "rebase_others": false in config.json."""
-    if not repo.cfg.get("rebase_others", True):
+    One news line sums it up. Off with `config --rebase-others off`."""
+    if not repo.cfg["rebase_others"]:
         return
     base = accepted["base"]
     others = [o for o in repo.tasks() if o["id"] != accepted["id"] and o["status"] not in (*CLOSED, "finished")
@@ -4424,7 +4497,7 @@ def rebase_other(repo, t, accepted):
             keep_approval(t, ref)
             repo.save_task(t)
             return f"{t['id']} rebased, its approval kept ({kept})"
-        if t["status"] == "ready" and repo.cfg.get("review", True):
+        if t["status"] == "ready" and repo.cfg["review"]:
             start_review(repo, t, ref)
             return f"{t['id']} rebased, but its patch changed: a reviewer checks it again"
     repo.save_task(t)  # same status: it stays where it was
@@ -4723,7 +4796,7 @@ def status_detail(repo, t, every, at=None):
         return "Its agent exited. r resumes it."
     if st == "review":
         kind = BOARD_KINDS.get(r.get("kind"), "review" if r.get("kind") else "reviewer")
-        return f"{kind[0].upper()}{kind[1:]} on round {rnd} of {repo.cfg.get('review_rounds', 2)}."
+        return f"{kind[0].upper()}{kind[1:]} on round {rnd} of {repo.cfg['review_rounds']}."
     if st == "ready" and why.startswith("Nothing to merge"):
         return "Done, with nothing to merge."
     if st == "finished":
@@ -5138,63 +5211,67 @@ def cmd_review_mode(args):
     print(f"{t['id']}'s first review: {args.mode}{later}")
 
 
-# The flags `config` takes for each setting, for messages.
-PER_REPO_FLAGS = ("prefix", "base", "news", "board_others", "coordinator", "push_remote")
+# The flags `config` takes that are per repository, for messages: the repo-only
+# settings', and --board-others with its --coordinator (per board).
+PER_REPO_FLAGS = tuple(s.name for s in SETTINGS if s.repo_only and s.kind != "file") + \
+    ("board_others", "coordinator")
+
+
+def config_flags(p):
+    """config's flag for each setting that has one, from SETTINGS."""
+    for s in SETTINGS:
+        if s.kind == "file":
+            continue
+        if s.kind == "choice":
+            p.add_argument(s.flag, choices=s.choices, help=s.full_help())
+        elif s.kind == "on/off":
+            p.add_argument(s.flag, choices=["on", "off"], help=s.full_help())
+        elif s.kind == "number":
+            p.add_argument(s.flag, type=int, metavar=s.metavar, help=s.full_help())
+        else:  # text, model
+            p.add_argument(s.flag, metavar=s.metavar or ("MODEL" if s.kind == "model" else None),
+                           help=s.full_help())
+
+
+def setting_value(s, v):
+    """The value config's flag gives setting s, checked."""
+    if s.kind == "on/off":
+        return v == "on"
+    if s.kind == "number" and v < s.least:
+        raise Fail(f"{s.flag} takes {s.says}")
+    if s.pattern and not re.fullmatch(s.pattern, v):
+        raise Fail(f"{s.name} must be {s.says}")
+    if s.clears:
+        return v.strip() or None
+    return v
 
 
 def config_changes(args):
     """{key: value} for the settings config's flags set, each checked."""
     ch = {}
-    if args.prefix:
-        if not re.fullmatch(r"[A-Z]{2,5}", args.prefix):
-            raise Fail("prefix must be 2 to 5 capital letters")
-        ch["prefix"] = args.prefix
-    if args.base:
-        ch["base"] = args.base
-    if getattr(args, "push_remote", None) is not None:
-        ch["push_remote"] = args.push_remote.strip() or None  # "": off
-    for key in ("workers", "merge", "news", "board_layout", "notify"):
-        if getattr(args, key):
-            ch[key] = getattr(args, key)
-    for key in ("review", "auto_accept", "board_repos"):
-        if getattr(args, key):
-            ch[key] = getattr(args, key) == "on"
-    for key, least, says in (("stuck_after", 0, "minutes, or 0 to turn it off"),
-                             ("light_review_lines", 0, "a number of lines, or 0 for docs-only changes alone"),
-                             ("board_bottom_gap", 0, "rows, or 0 for none"),
-                             ("triage_minutes", 0, "minutes"),
-                             ("max_running", 1, "a number of tasks, 1 or more"),
-                             ("review_rounds", 1, "a number of rounds, 1 or more")):
-        n = getattr(args, key)
-        if n is not None:
-            if n < least:
-                raise Fail(f"--{key.replace('_', '-')} takes {says}")
-            ch[key] = n
-    for role, model in (("worker", args.worker_model or args.model),
-                        ("reviewer", args.reviewer_model or args.model)):
-        if model:
-            ch[f"{role}_model"] = model  # "default" too: it drops the command's own --model
-    if args.reviewer_followup_model or args.model:
-        ch["reviewer_followup_model"] = args.reviewer_followup_model or args.model
-    if args.tour_model:
-        ch["tour_model"] = args.tour_model
-    for name in ("setup", "teardown"):
-        if getattr(args, name) is not None:
-            ch[name] = getattr(args, name).strip() or None  # "": back to .bullpen/<name>.sh
+    for s in SETTINGS:
+        v = getattr(args, s.name, None) if s.kind != "file" else None
+        if v is not None and (v != "" or s.clears):
+            ch[s.name] = setting_value(s, v)
+    if args.model:  # --model is each role's, unless its own flag says otherwise
+        for key in ("worker_model", "reviewer_model", "reviewer_followup_model"):
+            ch.setdefault(key, args.model)  # "default" too: it drops the command's own --model
     return ch
 
 
 def check_unset(keys, repo=None):
     """The keys --unset names, checked: settings bullpen has (or this repo's config.json
-    has), and not one only a repository has, unless it is the repo's base."""
+    has), and not one only a repository has, unless the repo's own is just switched
+    off (base, push_remote)."""
+    droppable = [k for k in DEFAULT_CONFIG if k not in REPO_ONLY or (repo and DEFAULT_CONFIG[k] is None)]
     for k in keys:
-        if k in REPO_ONLY and not (repo and k in ("base", "push_remote")):
+        if k in REPO_ONLY and k not in droppable:
             raise Fail(f"{k} is this repository's own: " + (
                 "it can't be in the global config.json" if not repo else f"change it with --{k.replace('_', '-')}"))
         if k in INTERNAL or (k not in DEFAULT_CONFIG and not (repo and k in repo.own)
                              and k not in read_global_file()):
             raise Fail(f"no setting {k}: it is one of " + ", ".join(
-                k for k in DEFAULT_CONFIG if k not in REPO_ONLY or k in ("base", "push_remote")))
+                k for k in DEFAULT_CONFIG if k not in REPO_ONLY or DEFAULT_CONFIG[k] is None))
     return keys
 
 
@@ -5264,17 +5341,10 @@ def config_value(v):
     return v if isinstance(v, str) else json.dumps(v)
 
 
-# `config` lists the settings in these groups, in this order; one not named here goes
-# under "Other".
-CONFIG_GROUPS = [
-    ("Tasks", ["prefix", "base", "max_running", "merge", "rebase_others", "push_remote", "auto_accept",
-               "setup", "teardown", "gh"]),
-    ("Agents", ["worker", "coordinator_cmd", "reviewer", "tour", "workers", "worker_model",
-                "reviewer_model", "reviewer_followup_model", "tour_model"]),
-    ("Review", ["review", "review_rounds", "light_review_lines"]),
-    ("Board", ["board_layout", "board_bottom_gap", "board_repos"]),
-    ("News", ["news", "notify", "stuck_after", "triage_minutes"]),
-]
+# The groups `config` lists the settings in, in SETTINGS's order; a setting not in
+# one goes under "Other".
+CONFIG_GROUPS = [(g, [s.name for s in SETTINGS if s.group == g])
+                 for g in dict.fromkeys(s.group for s in SETTINGS if s.group)]
 
 
 def config_groups(keys):
@@ -6476,7 +6546,7 @@ def cmd_review(args):
         raise Fail(f"{t['id']} has had no review: its worker starts one with `ready`")
     if r.get("verdict") or not (t["status"] == "review" or on_reviewer(t)):
         raise Fail(f"{is_status(t)}, not waiting on a reviewer")
-    rounds = repo.cfg.get("review_rounds", 2)
+    rounds = repo.cfg["review_rounds"]
     if r.get("round", 0) >= rounds and r.get("kind") != "tour":
         raise Fail(f"{t['id']} has used its {rounds} review rounds: `bullpen ask {t['id']}` the person")
     start_review(repo, t, task_base_ref(repo, t))
@@ -7719,58 +7789,14 @@ def parser():
                         "global one (or the default) applies; with --global, drop the global one (repeatable)")
     p.add_argument("--json", action="store_true",
                    help="print the settings as JSON, with each one's source under \"sources\"")
-    p.add_argument("--prefix", help="the letters new task IDs start with, like BP (2 to 5 capitals)")
-    p.add_argument("--base", help="the branch tasks start from and open PRs against (default: the repo's default branch)")
-    p.add_argument("--push-remote", metavar="REMOTE",
-                   help="local mode: push the base branch to this remote (a backup, not origin) after "
-                        "each accept, and when `up` finds it behind (\"\" turns it off)")
-    p.add_argument("--workers", choices=["float", "tabs"],
-                   help="new workers as capsules in the coordinator's tab (float) or as tabs")
-    p.add_argument("--review", choices=["on", "off"], help="a reviewer agent checks each task")
-    p.add_argument("--merge", choices=["rebase", "squash", "merge"], help="how accept merges a PR")
-    p.add_argument("--stuck-after", type=int, metavar="MINUTES",
-                   help="news when a working agent shows no progress this long (0: never)")
-    p.add_argument("--news", choices=["type", "monitor"],
-                   help="how news reaches the coordinator: typed into its pane, or read by "
-                        "its Monitor tool from `bullpen news --follow`")
+    config_flags(p)
     p.add_argument("--model", help="claude's --model for workers and reviewers, follow-up ones too "
-                   "(an alias like opus, or a model ID; default: let Claude Code pick)")
-    p.add_argument("--worker-model", metavar="MODEL", help="the same, for workers only")
-    p.add_argument("--reviewer-model", metavar="MODEL", help="the same, for reviewers only (a full first review)")
-    p.add_argument("--reviewer-followup-model", metavar="MODEL",
-                   help="the same, for later review rounds and light reviews (default sonnet)")
-    p.add_argument("--tour-model", metavar="MODEL",
-                   help="claude's --model for the agent that writes guided review tours (default sonnet)")
-    p.add_argument("--light-review-lines", type=int, metavar="LINES",
-                   help="a change of at most this many lines in at most 2 files gets a light review (default 40)")
-    p.add_argument("--board-layout", choices=["grouped", "compact"], help="how the board lists tasks")
-    p.add_argument("--board-bottom-gap", type=int, metavar="ROWS",
-                   help="empty rows at the board's bottom, under Rex's minimized-pane capsules (default 1; 0: none)")
+                   "(an alias like opus, or a model ID; \"default\": let Claude Code pick)")
     p.add_argument("--board-others", choices=["on", "off"],
                    help="with several coordinators: this coordinator's board shows the other ones' tasks too "
                         "(default off; the board's o key)")
-    p.add_argument("--board-repos", choices=["on", "off"],
-                   help="the board's top line counts the tasks that need you or are ready in other "
-                        "repositories (default on)")
     p.add_argument("--coordinator", metavar="ID",
                    help="the coordinator --board-others is for (default: the one whose pane or board runs it)")
-    p.add_argument("--auto-accept", choices=["on", "off"],
-                   help="accept (merge) a task by itself once review approves it (default off)")
-    p.add_argument("--max-running", type=int, metavar="N",
-                   help="tasks working at once (review doesn't count); the queue starts more as they hand off (default 3)")
-    p.add_argument("--review-rounds", type=int, metavar="N",
-                   help="reviews a task gets before it is ready anyway, findings listed (default 2)")
-    p.add_argument("--triage-minutes", type=int, metavar="MINUTES",
-                   help="how long a task can wait on its coordinator before it needs the person (default 10)")
-    p.add_argument("--notify", choices=NOTIFY,
-                   help="native notifications: when a task needs you (needs, the default), also when one is "
-                        "ready, finished or auto-accepted (all), or none (off)")
-    p.add_argument("--setup", metavar="CMD",
-                   help="a command run in each new worktree before its worker starts, over "
-                        ".bullpen/setup.sh (\"\" clears it)")
-    p.add_argument("--teardown", metavar="CMD",
-                   help="a command run in a worktree before accept, close or drop removes it, over "
-                        ".bullpen/teardown.sh (\"\" clears it)")
     p.set_defaults(fn=cmd_config)
 
     p = sub.add_parser("news", help="print news logged since the last time; --follow keeps printing")
