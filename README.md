@@ -163,6 +163,11 @@ with `a`, `y`. `?` lists every key, one short line each, and what the marks
 mean; on a narrow or short board `j` `k` `space` `b` scroll it, and any other key
 closes it. The key line always ends in `?`: when the task's keys fill it, its
 last keys give way, not `?`.
+What a key did shows above the key line, wrapped over up to three rows: green
+when it worked ("Accepted BP-7."), red when a command failed, with its reason,
+and plain otherwise (`l` says "Compact layout.", `o` "Showing c2's tasks too.").
+A green or plain message goes with the next key; a red one stays while you move
+around, until the next thing you do to a task, or `esc`.
 `bullpen up --no-board` leaves the board out. Accept, drop, start and resume
 run in the background, with a spinner on the task, so the board stays usable
 meanwhile; a peek keeps the worker's colours and updates until you press a key.

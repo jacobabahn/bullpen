@@ -14,7 +14,7 @@
 mod model;
 mod ui;
 
-use model::{Action, Config, Prompt, Question, Task, TourShow};
+use model::{Action, Config, Layout, Prompt, Question, Task, TourShow};
 use notify::{RecursiveMode, Watcher};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::path::{Path, PathBuf};
@@ -46,6 +46,7 @@ pub const BOARD_KEYS: &[(&str, &[(&str, &str)])] = &[
         ("l", "switch layout"),
         ("f", "show closed tasks too"),
         ("o", "other coordinators' tasks too"),
+        ("esc", "put a red message away"),
         ("?", "this list"),
         ("q", "quit the board"),
     ]),
@@ -125,6 +126,54 @@ impl Job {
     }
 }
 
+/// What a message on the board is: a failure (red, and kept until the next action on
+/// a task), something that worked (green), or just information.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Kind {
+    #[default]
+    Info,
+    Done,
+    Failed,
+}
+
+/// The board's message line: what just happened. It wraps to a few rows.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Note {
+    pub text: String,
+    pub kind: Kind,
+}
+
+impl Note {
+    fn new(kind: Kind, text: impl Into<String>) -> Note {
+        Note { text: text.into(), kind }
+    }
+    pub fn info(text: impl Into<String>) -> Note {
+        Note::new(Kind::Info, text)
+    }
+    pub fn done(text: impl Into<String>) -> Note {
+        Note::new(Kind::Done, text)
+    }
+    pub fn failed(text: impl Into<String>) -> Note {
+        Note::new(Kind::Failed, text)
+    }
+    /// What a command said: the line given when it worked, else its error.
+    fn of(ok: bool, worked: impl Into<String>, err: String) -> Note {
+        if ok { Note::done(worked) } else { Note::failed(err) }
+    }
+    pub fn is_empty(&self) -> bool {
+        self.text.is_empty()
+    }
+    pub fn clear(&mut self) {
+        *self = Note::default();
+    }
+}
+
+impl PartialEq<&str> for Note {
+    fn eq(&self, other: &&str) -> bool {
+        self.text == *other
+    }
+}
+
 pub struct App {
     pub dir: PathBuf,
     pub root: PathBuf,
@@ -139,7 +188,7 @@ pub struct App {
     pub others: model::OtherRepos,
     pub sel: Option<String>,
     pub finished: bool,
-    pub msg: String,
+    pub msg: Note,
     /// the first row shown, when the tasks don't all fit
     pub top: usize,
     /// a y/n question shown on the task's row
@@ -212,6 +261,12 @@ fn run(bullpen: &Path, root: &Path, args: &[String]) -> (bool, String) {
 /// is the line to show, since Rex runs the old keys until its config is reloaded.
 fn keys_changed(job: Job, out: &str) -> bool {
     job == Job::Accept && out.starts_with("Keys changed")
+}
+
+/// Does this key do something to a task (or leave the board for the coordinator)?
+/// Esc counts too: it puts a failure away.
+fn acts_on_task(code: KeyCode, ch: Option<char>) -> bool {
+    matches!(code, KeyCode::Enter | KeyCode::Esc) || ch.is_some_and(|c| "adsrpvtigc".contains(c))
 }
 
 /// The last line a command said, without its "bullpen: ".
@@ -290,7 +345,7 @@ impl App {
             self.sel = Some(id.to_string());
             self.pending = None; // a question about the task that was selected
         } else if let Some(t) = self.tasks.iter().find(|t| t.id == id && self.cfg.hides(t, self.me.as_deref())) {
-            self.msg = format!("{id} is {}'s: o shows it.", t.coordinator.as_deref().unwrap_or("another coordinator"));
+            self.msg = Note::info(format!("{id} is {}'s: o shows it.", t.coordinator.as_deref().unwrap_or("another coordinator")));
         }
     }
 
@@ -307,7 +362,7 @@ impl App {
     /// Show or hide the other coordinators' tasks, and remember it for this board.
     fn toggle_others(&mut self) {
         let Some(me) = self.me.clone().filter(|_| self.cfg.coordinators.len() > 1) else {
-            self.msg = "Only one coordinator: every task is shown.".into();
+            self.msg = Note::info("One coordinator: every task is shown.");
             return;
         };
         let on = !self.cfg.shows_others(Some(&me));
@@ -317,9 +372,17 @@ impl App {
         }
         self.top = 0;
         let (ok, out) = self.bp(&["config", "--board-others", if on { "on" } else { "off" }, "--coordinator", &me]);
-        if !ok {
-            self.msg = out;
-        }
+        let theirs = match self.cfg.coordinators.iter().filter(|c| **c != me).collect::<Vec<_>>()[..] {
+            [one] => format!("{one}'s tasks"),
+            _ => "other coordinators' tasks".into(),
+        };
+        self.msg = if !ok {
+            Note::failed(out)
+        } else if on {
+            Note::info(format!("Showing {theirs} too."))
+        } else {
+            Note::info(format!("Hiding {theirs}."))
+        };
     }
 
     pub fn current(&self) -> Option<&Task> {
@@ -351,7 +414,7 @@ impl App {
     fn still(&mut self, id: &str) -> bool {
         match self.job(id) {
             Some(j) => {
-                self.msg = format!("{id} is still {}.", j.doing().to_lowercase());
+                self.msg = Note::info(format!("{id} is still {}.", j.doing().to_lowercase()));
                 true
             }
             None => false,
@@ -395,7 +458,7 @@ impl App {
             self.pending = Some((Action::DropForce, id));
             self.msg.clear();
         } else {
-            self.msg = if !ok || keys_changed(job, &out) { out } else { format!("{} {id}.", job.done()) };
+            self.msg = if keys_changed(job, &out) { Note::done(out) } else { Note::of(ok, format!("{} {id}.", job.done()), out) };
         }
     }
 
@@ -452,7 +515,7 @@ impl App {
             Some(p) => *shown = Some(p),
             None => {
                 self.mode = Mode::Normal;
-                self.msg = out;
+                self.msg = Note::failed(out);
             }
         }
     }
@@ -467,8 +530,8 @@ impl App {
                 self.peek();
             }
             Some(Question::Ask) => self.mode = Mode::Tell { id: t.id.clone(), text: String::new(), reply: true },
-            None if t.needs_you() => self.msg = format!("{} isn't asking anything here: ⏎ opens its pane.", t.id),
-            None => self.msg = format!("{} doesn't need you.", t.id),
+            None if t.needs_you() => self.msg = Note::info(format!("{} asks nothing here: ⏎ opens it.", t.id)),
+            None => self.msg = Note::info(format!("{} doesn't need you.", t.id)),
         }
     }
 
@@ -483,14 +546,14 @@ impl App {
             KeyCode::Enter => {
                 self.mode = Mode::Normal;
                 let (ok, out) = if reviewer { self.bp(&["go", &id, "--review"]) } else { self.bp(&["go", &id]) };
-                self.msg = if ok { format!("Opened {id}.") } else { out };
+                self.msg = Note::of(ok, format!("Opened {id}."), out);
             }
             KeyCode::Char(c) => {
                 let Some(p) = prompt else { return };
                 let (Some((key, label)), Some(pid)) = (p.option(c), p.id.as_deref()) else { return };
                 self.mode = Mode::Normal;
                 let (ok, out) = self.bp(&["answer", &id, key, "--prompt", pid]);
-                self.msg = if ok { format!("Answered {id}: {label}.") } else { out };
+                self.msg = Note::of(ok, format!("Answered {id}: {label}."), out);
             }
             _ => {}
         }
@@ -500,19 +563,22 @@ impl App {
     /// opens when it's done; a stale one asks first.
     fn tour(&mut self, t: &Task) {
         if !t.tourable() {
-            self.msg = format!("{} can't have a tour yet: only a task that's ready or in review, whose code isn't changing.", t.id);
+            self.msg = Note::info(match t.status.as_str() {
+                "finished" => format!("{} has no code to tour.", t.id),
+                _ => format!("{} gets a tour once it's in review.", t.id),
+            });
             return;
         }
         if !t.tour_writing() {
             let (bullpen, root) = (self.bullpen.clone(), self.root.clone());
             let (ok, out) = run(&bullpen, &root, &["tour".into(), t.id.clone(), "--show".into(), "--json".into()]);
             if !ok {
-                self.msg = last_line(&out);
+                self.msg = Note::failed(last_line(&out));
                 return;
             }
             if TourShow::parse(&out).is_some_and(|s| s.state == "stale") {
                 self.mode = Mode::Stale { id: t.id.clone() };
-                self.msg = format!("{}'s tour is stale: the code changed since it was written.", t.id);
+                self.msg = Note::info(format!("{}'s tour is stale: the code changed.", t.id));
                 return;
             }
         }
@@ -526,7 +592,7 @@ impl App {
             args.push("--new");
         }
         let (ok, out) = self.bp(&args);
-        self.msg = if ok { format!("{}.", model::capitalize(&out)) } else { out };
+        self.msg = Note::of(ok, format!("{}.", model::capitalize(&out)), out);
     }
 
     /// A key while g asks about a stale tour.
@@ -537,7 +603,7 @@ impl App {
         match ch {
             Some('n') => self.open_tour(&id, true),
             Some('o') => self.open_tour(&id, false),
-            _ => self.msg = "Cancelled.".into(),
+            _ => self.msg = Note::info("Cancelled."),
         }
     }
 
@@ -578,11 +644,8 @@ impl App {
                         self.mode = Mode::Normal;
                         if !text.is_empty() {
                             let (ok, out) = self.bp(&[if reply { "reply" } else { "tell" }, &id, &text]);
-                            self.msg = match (ok, reply) {
-                                (true, true) => format!("Sent {id}'s answer to its coordinator."),
-                                (true, false) => format!("Sent to {id}."),
-                                (false, _) => out,
-                            };
+                            let sent = if reply { format!("Answer sent to {id}'s coordinator.") } else { format!("Sent to {id}.") };
+                            self.msg = Note::of(ok, sent, out);
                         }
                     }
                     KeyCode::Esc => self.mode = Mode::Normal,
@@ -601,11 +664,14 @@ impl App {
             KeyCode::Char(c) => Some(c),
             _ => None,
         };
-        self.msg.clear();
+        // a failure stays while you look around, until the next action on a task (or esc)
+        if self.msg.kind != Kind::Failed || self.pending.is_some() || acts_on_task(k.code, ch) {
+            self.msg.clear();
+        }
 
         if let Some((action, tid)) = self.pending.take() {
             if !matches!(ch, Some('y' | 'Y')) {
-                self.msg = "Cancelled.".into();
+                self.msg = Note::info("Cancelled.");
                 return true;
             }
             let job = match action {
@@ -636,19 +702,21 @@ impl App {
                 self.cfg.layout = layout;
                 self.top = 0;
                 let (ok, out) = self.bp(&["config", "--board-layout", layout.name()]);
-                if !ok {
-                    self.msg = out;
-                }
+                let said = match layout {
+                    Layout::Grouped => "Grouped layout.",
+                    Layout::Compact => "Compact layout.",
+                };
+                self.msg = if ok { Note::info(said) } else { Note::failed(out) };
             }
             (_, Some('f')) => self.finished = !self.finished,
             (_, Some('o')) => self.toggle_others(),
             (_, Some('c')) => {
                 let (ok, out) = self.bp(&["go"]);
-                self.msg = if ok { "Opened the coordinator.".into() } else { out };
+                self.msg = Note::of(ok, "Opened the coordinator.", out);
             }
             (_, Some('n')) => match self.next_needing(i, None) {
                 Some(id) => self.sel = Some(id),
-                None => self.msg = "Nothing needs you.".into(),
+                None => self.msg = Note::info("Nothing needs you."),
             },
             _ => self.task_key(k.code, ch),
         }
@@ -665,16 +733,16 @@ impl App {
                 // a pane that opens in another tab shows nothing here: say it worked
                 self.msg = if reviewer {
                     let (ok, out) = self.bp(&["go", sel, "--review"]);
-                    if ok { format!("Opened {sel}'s reviewer.") } else { out }
+                    Note::of(ok, format!("Opened {sel}'s reviewer."), out)
                 } else if cur.block.is_some() {
                     let (ok, out) = self.bp(&["go", sel]);
-                    if ok { format!("Opened {sel}.") } else { out }
+                    Note::of(ok, format!("Opened {sel}."), out)
                 } else {
-                    match cur.status.as_str() {
+                    Note::info(match cur.status.as_str() {
                         "todo" => "Not started yet: s starts it.".into(),
                         "stopped" => "Its agent exited: r resumes it.".into(),
                         _ => format!("{sel} has no pane open."),
-                    }
+                    })
                 };
             }
             (_, Some('a')) => {
@@ -682,7 +750,7 @@ impl App {
                     "ready" => Action::Accept,
                     "finished" => Action::Close,
                     _ => {
-                        self.msg = "Only a task that's ready to accept, or finished, can be accepted.".into();
+                        self.msg = Note::info(if cur.closed() { format!("{sel} is closed already.") } else { format!("{sel} isn't ready yet.") });
                         return;
                     }
                 };
@@ -706,7 +774,10 @@ impl App {
                 self.peek_due = Instant::now();
                 self.peek();
             }
-            (_, Some('v')) => self.msg = self.bp(&["diff", sel, "--pane"]).1,
+            (_, Some('v')) => {
+                let (ok, out) = self.bp(&["diff", sel, "--pane"]);
+                self.msg = Note::of(ok, format!("Opened {sel}'s diff."), out);
+            }
             (_, Some('t')) => self.mode = Mode::Tell { id: sel.into(), text: String::new(), reply: false },
             (_, Some('i')) => self.answer(&cur),
             (_, Some('g')) => self.tour(&cur),
@@ -833,7 +904,7 @@ fn main() {
         repo_name,
         sel: select,
         finished,
-        msg: if reloaded { "Reloaded: the board was rebuilt.".into() } else { String::new() },
+        msg: if reloaded { Note::info("Reloaded: the board was rebuilt.") } else { Note::default() },
         top: 0,
         pending: None,
         running: Vec::new(),
@@ -864,7 +935,7 @@ fn main() {
                 let err = Command::new(&exe).args(app.restart_args()).exec(); // returns only if it failed
                 term = ratatui::init();
                 app.exe = None; // don't try again
-                app.msg = format!("Couldn't reload the rebuilt board: {err}");
+                app.msg = Note::failed(format!("Couldn't reload the rebuilt board: {err}"));
             }
         }
         app.settle();
@@ -890,7 +961,7 @@ fn main() {
     }
     // Let a command that's still running finish: it writes to the board as it goes.
     while !app.running.is_empty() {
-        app.msg = format!("Waiting for {} to finish…", app.running[0].0);
+        app.msg = Note::info(format!("Waiting for {} to finish…", app.running[0].0));
         let _ = term.draw(|f| ui::draw(f, &mut app));
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(Msg::Done { id, .. }) => app.running.retain(|(x, _)| *x != id),
@@ -920,7 +991,7 @@ mod tests {
             repo_name: "repo".into(),
             sel: None,
             finished: false,
-            msg: String::new(),
+            msg: Note::default(),
             top: 0,
             pending: None,
             running: Vec::new(),
@@ -980,7 +1051,7 @@ mod tests {
         a.me = Some("c1".into());
         press(&mut a, 'o');
         assert!(a.cfg.board_others.is_empty());
-        assert_eq!(a.msg, "Only one coordinator: every task is shown.");
+        assert_eq!(a.msg, "One coordinator: every task is shown.");
     }
 
     #[test]
@@ -1018,7 +1089,13 @@ mod tests {
         a.settle();
         press(&mut a, 'a');
         assert!(a.pending.is_none());
-        assert_eq!(a.msg, "Only a task that's ready to accept, or finished, can be accepted.");
+        assert_eq!(a.msg, "BP-1 isn't ready yet.");
+        let mut a = app(vec![task("BP-1", "done")]);
+        a.finished = true;
+        a.settle();
+        press(&mut a, 'a');
+        assert!(a.pending.is_none());
+        assert_eq!(a.msg, "BP-1 is closed already.");
     }
 
     #[test]
@@ -1028,7 +1105,7 @@ mod tests {
             a.settle();
             press(&mut a, 'c');
             assert!(a.pending.is_none() && a.running.is_empty(), "{status}");
-            assert!(a.msg.contains("can't run"), "{status}: {}", a.msg); // it tried `bullpen go`
+            assert!(a.msg.text.contains("can't run"), "{status}: {}", a.msg.text); // it tried `bullpen go`
         }
     }
 
@@ -1089,7 +1166,7 @@ mod tests {
         // an option runs `bullpen answer BP-1 2 --prompt ab12` (there's no bullpen here)
         press(&mut a, '2');
         assert!(matches!(a.mode, Mode::Normal));
-        assert!(a.msg.contains("can't run"), "{}", a.msg);
+        assert!(a.msg.text.contains("can't run"), "{}", a.msg.text);
         // esc goes back without answering
         a.answer(&needs("BP-1", false, "prompt"));
         a.answer_key(KeyCode::Esc);
@@ -1124,7 +1201,7 @@ mod tests {
         }
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(matches!(a.mode, Mode::Normal));
-        assert!(a.msg.contains("can't run"), "{}", a.msg); // it tried `bullpen reply`
+        assert!(a.msg.text.contains("can't run"), "{}", a.msg.text); // it tried `bullpen reply`
     }
 
     #[test]
@@ -1133,7 +1210,7 @@ mod tests {
         a.settle();
         press(&mut a, 'i');
         assert!(matches!(a.mode, Mode::Normal));
-        assert_eq!(a.msg, "BP-1 isn't asking anything here: ⏎ opens its pane.");
+        assert_eq!(a.msg, "BP-1 asks nothing here: ⏎ opens it.");
         press(&mut a, 'j');
         press(&mut a, 'i');
         assert_eq!(a.msg, "BP-2 doesn't need you.");
@@ -1151,7 +1228,7 @@ mod tests {
         let mut a = app(vec![task("BP-4", "finished")]);
         a.sel = Some("BP-4".into());
         a.done("BP-4".into(), Job::Close, true, String::new());
-        assert_eq!((a.msg.as_str(), a.sel.as_deref()), ("Closed BP-4.", Some("BP-4")));
+        assert_eq!((a.msg.text.as_str(), a.sel.as_deref()), ("Closed BP-4.", Some("BP-4")));
         // a failed accept, or a selection already moved elsewhere, stays put
         let mut a = app(vec![task("BP-1", "ready"), task("BP-2", "needs"), task("BP-3", "ready")]);
         a.sel = Some("BP-1".into());
@@ -1231,6 +1308,94 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         std::fs::write(path, text).unwrap();
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // A program just written can't run while another test's fork still holds it
+        // open for writing (ETXTBSY): wait until it runs.
+        for _ in 0..200 {
+            let run = Command::new(path).arg("--ready").stdout(Stdio::null()).stderr(Stdio::null()).status();
+            match run {
+                Err(e) if e.raw_os_error() == Some(26) => std::thread::sleep(Duration::from_millis(10)),
+                _ => break,
+            }
+        }
+    }
+
+    /// An app whose bullpen is this script.
+    fn with_bullpen(d: &Scratch, tasks: Vec<Task>, script: &str) -> App {
+        let exe = d.0.join("bullpen");
+        program(&exe, script);
+        let mut a = app(tasks);
+        (a.bullpen, a.root) = (exe, d.0.clone());
+        a.settle();
+        a
+    }
+
+    fn key(a: &mut App, code: KeyCode) {
+        a.key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    #[test]
+    fn a_failure_stays_until_the_next_action_on_a_task() {
+        let d = Scratch::new("failure");
+        let fails = "#!/bin/sh\necho 'bullpen: the coordinator has no pane' >&2\nexit 1\n";
+        let mut a = with_bullpen(&d, vec![task("BP-1", "needs"), task("BP-2", "ready")], fails);
+        press(&mut a, 'c');
+        assert_eq!(a.msg, Note::failed("the coordinator has no pane"));
+        // looking around keeps it: moving, n, f, the help and back
+        for c in ['j', 'k', 'n', 'f', 'f', 'x', '?', 'q'] {
+            press(&mut a, c);
+            assert_eq!(a.msg, "the coordinator has no pane", "after {c}");
+        }
+        key(&mut a, KeyCode::Down);
+        assert_eq!(a.msg.kind, Kind::Failed);
+        // esc puts it away
+        key(&mut a, KeyCode::Esc);
+        assert!(a.msg.is_empty());
+        // an action on a task does too, saying its own thing
+        press(&mut a, 'c');
+        a.sel = Some("BP-1".into());
+        press(&mut a, 'a');
+        assert_eq!(a.msg, Note::info("BP-1 isn't ready yet."));
+        // which, not being a failure, goes with the next key
+        press(&mut a, 'j');
+        assert!(a.msg.is_empty());
+
+        // a background command's result: green when it worked, red and kept when not
+        a.done("BP-2".into(), Job::Accept, true, String::new());
+        assert_eq!(a.msg, Note::done("Accepted BP-2."));
+        press(&mut a, 'k');
+        assert!(a.msg.is_empty());
+        a.done("BP-2".into(), Job::Accept, false, "BP-2's branch doesn't merge cleanly".into());
+        assert_eq!(a.msg, Note::failed("BP-2's branch doesn't merge cleanly"));
+        press(&mut a, 'j');
+        assert_eq!(a.msg.kind, Kind::Failed);
+        // a y/n answered is an action
+        press(&mut a, 'a');
+        assert!(a.msg.is_empty() && a.pending.is_some());
+    }
+
+    #[test]
+    fn l_and_o_say_what_they_did() {
+        let d = Scratch::new("say");
+        let c = |id: &str, who: &str| owned(id, "needs", who);
+        let mut a = with_bullpen(&d, vec![c("BP-1", "c1"), c("BP-2", "c2")], "#!/bin/sh\nexit 0\n");
+        a.cfg.coordinators = vec!["c1".into(), "c2".into()];
+        a.me = Some("c1".into());
+        press(&mut a, 'o');
+        assert_eq!(a.msg, Note::info("Showing c2's tasks too."));
+        press(&mut a, 'o');
+        assert_eq!(a.msg, "Hiding c2's tasks.");
+        a.cfg.coordinators.push("c3".into());
+        press(&mut a, 'o');
+        assert_eq!(a.msg, "Showing other coordinators' tasks too.");
+        press(&mut a, 'l');
+        assert_eq!(a.msg, Note::info("Compact layout."));
+        press(&mut a, 'l');
+        assert_eq!(a.msg, "Grouped layout.");
+        // a setting that can't be saved says why, in red
+        let d = Scratch::new("say-fails");
+        let mut a = with_bullpen(&d, vec![], "#!/bin/sh\necho 'bullpen: config.json is read-only' >&2\nexit 1\n");
+        press(&mut a, 'l');
+        assert_eq!(a.msg, Note::failed("config.json is read-only"));
     }
 
     /// A bullpen that logs its arguments, says the tour's state is `state` to
@@ -1245,14 +1410,6 @@ mod tests {
              *) echo \"opened $2's tour\" ;;\nesac\n",
             log = log.display()
         ));
-        // A program just written can't run while another test's fork still holds it
-        // open for writing (ETXTBSY): wait until it runs.
-        for _ in 0..200 {
-            match Command::new(&exe).arg("--ready").stdout(Stdio::null()).status() {
-                Err(e) if e.raw_os_error() == Some(26) => std::thread::sleep(Duration::from_millis(10)),
-                _ => break,
-            }
-        }
         exe
     }
 
@@ -1267,7 +1424,8 @@ mod tests {
             a.settle();
             press(&mut a, 'g');
             assert!(matches!(a.mode, Mode::Normal));
-            assert_eq!(a.msg, "BP-1 can't have a tour yet: only a task that's ready or in review, whose code isn't changing.");
+            let said = if status == "finished" { "BP-1 has no code to tour." } else { "BP-1 gets a tour once it's in review." };
+            assert_eq!(a.msg, said);
         }
     }
 
@@ -1301,7 +1459,7 @@ mod tests {
         a.settle();
         press(&mut a, 'g');
         assert!(matches!(&a.mode, Mode::Stale { id } if id == "BP-1"));
-        assert_eq!(a.msg, "BP-1's tour is stale: the code changed since it was written.");
+        assert_eq!(a.msg, "BP-1's tour is stale: the code changed.");
         press(&mut a, 'n');
         assert!(matches!(a.mode, Mode::Normal));
         assert_eq!(calls(&d).last().unwrap(), "tour BP-1 --pane --new");

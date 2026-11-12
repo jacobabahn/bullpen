@@ -1,7 +1,7 @@
 //! Drawing the board. It sits in a narrow pane, so every line is cut to fit.
 
 use crate::model::{self, fit, pad, width, Action, Layout, Task, STALE};
-use crate::{App, Mode};
+use crate::{App, Kind, Mode};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -164,6 +164,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // bottom (the detail panel, message line, keys, scroll mark) sits on top of it
     let h = h - bottom_gap(app, h, 4 + footer);
     app.height = h as u16;
+    // the message wraps; its rows past the first come off the list (while one row of it is left)
+    let msg = message(app, w, h.saturating_sub(4 + footer) + 1);
+    let footer = footer + msg.len().saturating_sub(1);
     // by field, not app.groups(): app.top changes while these are in use
     let groups = model::shown_groups(&app.tasks, &app.cfg, app.me.as_deref(), app.finished);
     let cur_id = app.current().map(|t| t.id.clone());
@@ -342,16 +345,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         }
     }
     let last = h.saturating_sub(1);
-    // the message line: what just happened, else what's still running
-    let line = if !app.msg.is_empty() {
-        span(fit(&app.msg, w.saturating_sub(2)), bold())
-    } else if let Some((id, job)) = app.running.last() {
-        let more = if app.running.len() > 1 { format!(" (+{} more)", app.running.len() - 1) } else { String::new() };
-        span(fit(&format!("{} {id}…{more}", job.doing()), w.saturating_sub(2)), dim())
-    } else {
-        span("", dim())
-    };
-    put(buf, area, h.saturating_sub(2), 1, line);
+    let first = h.saturating_sub(1 + msg.len());
+    for (j, line) in msg.into_iter().enumerate() {
+        put(buf, area, first + j, 1, line);
+    }
     if let Mode::Tell { id, text, .. } = &app.mode {
         let x = input_line(buf, area, last, &format!("Tell {id}:"), text);
         f.set_cursor_position(Position::new(area.x + x as u16, area.y + last as u16));
@@ -376,6 +373,29 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     } else {
         put(buf, area, last, 1, key_row(model::task_keys(cur), w));
     }
+}
+
+/// How many rows a message wraps to, at most.
+const MESSAGE_LINES: usize = 3;
+
+/// The message rows above the keys, at most `most` of them: what just happened (a
+/// failure red, what worked green), else what's still running.
+fn message(app: &App, w: usize, most: usize) -> Vec<Span<'static>> {
+    let room = w.saturating_sub(2);
+    if !app.msg.is_empty() {
+        let style = match app.msg.kind {
+            Kind::Failed => bold().fg(Color::Red),
+            Kind::Done => bold().fg(Color::Green),
+            Kind::Info => bold(),
+        };
+        let lines = model::wrap(&app.msg.text, room, MESSAGE_LINES.min(most).max(1));
+        return lines.into_iter().map(|l| span(l, style)).collect();
+    }
+    if let Some((id, job)) = app.running.last() {
+        let more = if app.running.len() > 1 { format!(" (+{} more)", app.running.len() - 1) } else { String::new() };
+        return vec![span(fit(&format!("{} {id}…{more}", job.doing()), room), dim())];
+    }
+    vec![]
 }
 
 /// How many lines of detail the selected task gets.
@@ -574,6 +594,7 @@ fn title_line(app: &App, t: &Task, selected: bool, w: usize, idw: usize, now: ch
 mod tests {
     use super::*;
     use crate::model::Config;
+    use crate::Note;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
     use std::time::Instant;
@@ -591,7 +612,7 @@ mod tests {
             others: Default::default(),
             sel: None,
             finished: false,
-            msg: String::new(),
+            msg: Note::default(),
             top: 0,
             pending: None,
             running: Vec::new(),
@@ -776,6 +797,60 @@ mod tests {
     }
 
     #[test]
+    fn a_message_wraps_to_three_rows_in_its_colour_above_the_keys() {
+        let ts: Vec<Task> = (1..=4).map(|i| ready(&format!("BP-{i}"))).collect();
+        let mut a = app(ts, 1, Layout::Grouped);
+        let quiet = screen(&mut a, 42, 16);
+        a.msg = Note::failed(
+            "BP-1 can't be accepted: its branch has conflicts with main in board/src/ui.rs. Rebase it, then accept it again.",
+        );
+        let mut term = Terminal::new(TestBackend::new(42, 16)).unwrap();
+        term.draw(|f| draw(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let s: Vec<String> =
+            (0..16).map(|y| (0..42).map(|x| buf[(x, y)].symbol()).collect::<String>().trim_end().to_string()).collect();
+        // three rows, the last cut, then the keys and the capsules' row
+        assert_eq!(
+            s[11..14],
+            [
+                " BP-1 can't be accepted: its branch has",
+                " conflicts with main in board/src/ui.rs.",
+                " Rebase it, then accept it again.",
+            ]
+            .map(String::from),
+            "{s:#?}"
+        );
+        assert!(row(&s, 1).starts_with(" a accept"), "{s:#?}");
+        assert_eq!(row(&s, 0), "");
+        assert_eq!(buf[(1, 11)].fg, Color::Red);
+        assert_eq!(buf[(1, 13)].fg, Color::Red);
+        // the list gives up two rows for it, and says there's more below
+        assert_eq!(s[10], "", "{s:#?}");
+        assert!(s[9].ends_with('↓'), "{s:#?}");
+        assert_eq!(s[2..9], quiet[2..9], "{s:#?}");
+
+        // a longer one is cut at three rows
+        a.msg = Note::failed("word ".repeat(40));
+        let s = screen(&mut a, 42, 16);
+        assert!(s[13].ends_with('…') && s[10].is_empty(), "{s:#?}");
+
+        // what worked is green, and one row
+        a.msg = Note::done("Accepted BP-1.");
+        term.draw(|f| draw(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        assert_eq!(buf[(1, 13)].symbol(), "A");
+        assert_eq!(buf[(1, 13)].fg, Color::Green);
+
+        // in the compact layout the detail panel moves up over the list instead
+        a.cfg.layout = Layout::Compact;
+        a.msg = Note::failed("word ".repeat(12));
+        let s = screen(&mut a, 42, 16);
+        assert!(s[13].starts_with(" word") && s[12].starts_with(" word") && s[14].starts_with(" a accept"), "{s:#?}");
+        assert!(s[7].starts_with(" ───"), "{s:#?}");
+        assert!(s[8].starts_with(" BP-1  Task BP-1"), "{s:#?}");
+    }
+
+    #[test]
     fn the_last_row_is_left_for_rexs_capsules() {
         let mut a = app(vec![ready("BP-1")], 1, Layout::Grouped);
         let s = screen(&mut a, 46, 12);
@@ -783,7 +858,7 @@ mod tests {
         assert!(row(&s, 1).starts_with(" a accept  g tour  d drop"), "{s:#?}");
         assert!(row(&s, 1).ends_with("? keys"), "{s:#?}");
 
-        a.msg = "Accepted BP-1".into();
+        a.msg = Note::done("Accepted BP-1");
         let s = screen(&mut a, 40, 12);
         assert_eq!(row(&s, 2), " Accepted BP-1");
         assert_eq!(row(&s, 0), "");
@@ -1010,9 +1085,9 @@ mod tests {
     fn a_stale_tour_asks_on_the_last_row() {
         let mut a = app(vec![ready("BP-1")], 1, Layout::Grouped);
         a.mode = Mode::Stale { id: "BP-1".into() };
-        a.msg = "BP-1's tour is stale: the code changed since it was written.".into();
+        a.msg = Note::info("BP-1's tour is stale: the code changed.");
         let s = screen(&mut a, 70, 10);
-        assert_eq!(row(&s, 2), " BP-1's tour is stale: the code changed since it was written.");
+        assert_eq!(row(&s, 2), " BP-1's tour is stale: the code changed.");
         assert_eq!(row(&s, 1), " n new tour   o the old one   esc cancels");
     }
 
@@ -1078,7 +1153,7 @@ mod tests {
     #[test]
     fn a_gap_of_none_is_the_old_layout() {
         let mut a = app(vec![ready("BP-1")], 0, Layout::Grouped);
-        a.msg = "Accepted BP-1".into();
+        a.msg = Note::done("Accepted BP-1");
         let s = screen(&mut a, 46, 12);
         assert_eq!(row(&s, 1), " Accepted BP-1");
         assert!(row(&s, 0).starts_with(" a accept  g tour  d drop"), "{s:#?}");
