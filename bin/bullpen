@@ -4874,6 +4874,8 @@ def is_status(t):
     """ "BP-3 is queued (todo)", "BP-3 needs you (stopped)": a task's status in the
     board's words, for errors."""
     words = status_words(t["status"])
+    if words.startswith("coordinator"):
+        return f"{t['id']}'s {words.replace(' on it', ' is on it', 1)}"
     return f"{t['id']} {words}" if words.startswith("needs") else f"{t['id']} is {words}"
 
 

@@ -2102,7 +2102,7 @@ class BullpenTest(unittest.TestCase):
         for args in ((), ("--stat",), ("--pane",)):
             p = self.bp("diff", tid, *args, ok=False)
             self.assertEqual(p.returncode, 1)
-            self.assertIn("BP-1 has no worktree (it is todo)", p.stderr)
+            self.assertIn("BP-1 is queued (todo), with no worktree", p.stderr)
         self.assertEqual(self.api("session.new_layer"), [])
 
     def test_diff_pane_opens_over_the_board_and_goes_back_after(self):
@@ -3088,7 +3088,7 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(len([a for a in self.rex_calls() if a[0] == "split"]), 2)
         out = self.bp("up").stdout  # from elsewhere: as before, nothing new
         self.assertEqual(out, "Coordinators c1 and c2 already running.\n")
-        self.assertIn("coordinators already running: c1 (blk1), c2", self.bp("up", "--verbose").stdout)
+        self.assertIn("coordinators already running: c1 (blk1), c2 (", self.bp("up", "--verbose").stdout)
         self.assertEqual([a[0] for a in self.rex_calls()].count("run"), 1)
 
     def test_board_others_is_a_setting_per_board(self):
@@ -3665,7 +3665,7 @@ class BullpenTest(unittest.TestCase):
         self.commit_and_ready(tid)
         self.verdict(tid, "changes", "Fix it.")
         self.assertEqual(self.show(tid)["status"], "working")
-        self.assertIn("isn't waiting on a reviewer", self.bp("review", tid, ok=False).stderr)
+        self.assertIn(", not waiting on a reviewer", self.bp("review", tid, ok=False).stderr)
 
     def test_review_is_refused_for_a_worker_stopped_after_ready_was_undone(self):
         tid = self.start_task()
@@ -3677,9 +3677,9 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.show(tid)["review"]["verdict"], "approved")
         self.bp("_event", blk, "error", "", "boom")
         self.assertEqual(self.show(tid)["status"], "triage")
-        self.assertIn("isn't waiting on a reviewer", self.bp("review", tid, ok=False).stderr)
+        self.assertIn(", not waiting on a reviewer", self.bp("review", tid, ok=False).stderr)
         self.bp("_event", blk, "blocked", "permission", "Allow rm?")
-        self.assertIn("isn't waiting on a reviewer", self.bp("review", tid, ok=False).stderr)
+        self.assertIn(", not waiting on a reviewer", self.bp("review", tid, ok=False).stderr)
         self.assertEqual(self.show(tid)["status"], "needs")
 
     def test_a_ready_task_whose_worker_works_again_is_working_again(self):
@@ -4174,7 +4174,7 @@ class BullpenTest(unittest.TestCase):
         tid = self.start_task()
         t = self.show(tid)
         wt, blk = t["worktree"], t["block"]
-        self.assertIn("not ready or finished", self.bp("accept", tid, ok=False).stderr)
+        self.assertIn("not ready to accept or finished", self.bp("accept", tid, ok=False).stderr)
         self.finish(tid)
         p = self.bp("accept", tid)
         self.assertIn(f"{tid} closed", p.stdout)
@@ -4185,7 +4185,7 @@ class BullpenTest(unittest.TestCase):
         self.assertNotIn("bullpen/", sh("git", "-C", str(self.repo), "branch"))
         self.assertEqual(self.news()[-1], "bullpen · BP-1 closed (finished, nothing to merge)")
         self.assertFalse((self.fake / "gh.log").exists())  # no PR to merge
-        self.assertIn("not ready or finished", self.bp("accept", tid, ok=False).stderr)
+        self.assertIn("not ready to accept or finished", self.bp("accept", tid, ok=False).stderr)
 
     def test_close_starts_what_waited_on_it(self):
         tid = self.start_task("First")
