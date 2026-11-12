@@ -4019,7 +4019,7 @@ class BullpenTest(unittest.TestCase):
         out = self.bp("--help").stdout
         for name in ("_event", "_stuck", "_flush", "_prs", "_limit", "_gone", "_auto_accept"):
             self.assertNotIn(name, out)
-        self.assertIn("{up,go,hide,", out)
+        self.assertIn("{up,go,pick,hide,", out)
         self.assertIn("accept", out)
         self.bp("_flush")  # still there for the watcher
         self.bp("_limit")
