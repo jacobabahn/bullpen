@@ -25,6 +25,8 @@ repo has no remote, your local branch).
 
   It refuses if your branch changes anything against `{base}`; use `ready` then.
   There is no review; the person closes the task. End your turn.
+- While you work, run only the tests for what you're changing. Run the full suite
+  once, right before `ready`; the reviewer won't run it again.
 - When the work is done and checked: commit everything, write the pull request
   description to a file (what changed, why, and how you checked it), and run
 

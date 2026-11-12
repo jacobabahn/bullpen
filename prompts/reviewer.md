@@ -19,7 +19,9 @@ The worker's brief: `{brief}`
 
 - Never edit, create or delete files in the worktree, commit, push, or switch
   branches. Scratch files go in a temporary directory outside it.
-- Running the tests, the program or read-only commands is fine and expected.
+- Running the program, read-only commands and the specific tests that check a
+  claim is fine and expected. Never run the full test suite: the worker ran it
+  once, right before `ready`, and it passed.
 - Don't ask the person anything and don't wait for input: decide.
 
 ## Your verdict
