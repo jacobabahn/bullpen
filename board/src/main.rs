@@ -25,12 +25,12 @@ Moving
   n            select the next task that needs you
   ⏎            open the worker's pane (the reviewer's, in review)
   c            back to the coordinator, panes put away
-               (on a finished task: close it, below)
 
 Acting on the selected task
-  a            accept: merge its PR (or local branch) and clean up
-  c            close a finished task (nothing to merge): remove its
-               worktree, branch and pane
+  a            accept: merge its PR (or local branch) and clean up;
+               on a finished task (nothing to merge), close it:
+               remove its worktree, branch and pane. Then the next
+               task that needs you is selected
   d            drop: close its PR, pane and worktree
   t            tell its worker something
   p            peek at the end of its worker's screen (live)
@@ -73,7 +73,7 @@ impl Job {
     fn args(self, id: &str) -> Vec<String> {
         let a: &[&str] = match self {
             Job::Accept => &["accept", id],
-            Job::Close => &["close", id],
+            Job::Close => &["accept", id], // accept closes a finished task
             Job::Drop => &["drop", id],
             Job::DropForce => &["drop", id, "--force"],
             Job::Start => &["start", id],
@@ -250,8 +250,24 @@ impl App {
         });
     }
 
+    /// The next task after position `i` that needs you (wrapping round), other than `skip`.
+    fn next_needing(&self, i: usize, skip: Option<&str>) -> Option<String> {
+        let order = self.order();
+        let needs: Vec<usize> =
+            (0..order.len()).filter(|&j| order[j].needs_you() && Some(order[j].id.as_str()) != skip).collect();
+        needs.iter().find(|&&j| j > i).or(needs.first()).map(|&j| order[j].id.clone())
+    }
+
     fn done(&mut self, id: String, job: Job, ok: bool, out: String) {
         self.running.retain(|(x, _)| *x != id);
+        // accepted or closed: on to the next task that needs you, to run down a queue
+        // (unless the selection already moved off it)
+        if ok && matches!(job, Job::Accept | Job::Close) && self.sel.as_deref() == Some(id.as_str()) {
+            let i = self.order().iter().position(|t| t.id == id).unwrap_or(0);
+            if let Some(next) = self.next_needing(i, Some(&id)) {
+                self.sel = Some(next);
+            }
+        }
         if job == Job::Drop && !ok && out.contains("uncommitted") && self.pending.is_none() {
             // ask again on its row, about losing the changes this time
             self.sel = Some(id.clone());
@@ -369,24 +385,14 @@ impl App {
             }
             (_, Some('f')) => self.finished = !self.finished,
             (_, Some('o')) => self.toggle_others(),
-            (_, Some('c')) if self.current().is_some_and(|t| t.status == "finished") => {
-                let id = self.current().map(|t| t.id.clone()).unwrap_or_default();
-                if !self.still(&id) {
-                    self.pending = Some((Action::Close, id));
-                }
-            }
             (_, Some('c')) => {
                 let (ok, out) = self.bp(&["go"]);
                 self.msg = if ok { "Opened the coordinator.".into() } else { out };
             }
-            (_, Some('n')) => {
-                let order = self.order();
-                let needs: Vec<usize> = (0..order.len()).filter(|&j| order[j].needs_you()).collect();
-                match needs.iter().find(|&&j| j > i).or(needs.first()) {
-                    Some(&j) => self.sel = Some(ids[j].clone()),
-                    None => self.msg = "Nothing needs you.".into(),
-                }
-            }
+            (_, Some('n')) => match self.next_needing(i, None) {
+                Some(id) => self.sel = Some(id),
+                None => self.msg = "Nothing needs you.".into(),
+            },
             _ => self.task_key(k.code, ch),
         }
         true
@@ -415,12 +421,16 @@ impl App {
                 };
             }
             (_, Some('a')) => {
-                if cur.status == "finished" {
-                    self.msg = "It has nothing to merge: c closes it.".into();
-                } else if cur.status != "ready" {
-                    self.msg = "Only a task that's ready to accept can be accepted.".into();
-                } else if !self.still(sel) {
-                    self.pending = Some((Action::Accept, sel.into()));
+                let action = match cur.status.as_str() {
+                    "ready" => Action::Accept,
+                    "finished" => Action::Close,
+                    _ => {
+                        self.msg = "Only a task that's ready to accept, or finished, can be accepted.".into();
+                        return;
+                    }
+                };
+                if !self.still(sel) {
+                    self.pending = Some((action, sel.into()));
                 }
             }
             (_, Some('d')) if !cur.closed() => {
@@ -684,38 +694,73 @@ mod tests {
     }
 
     #[test]
-    fn c_closes_a_finished_task_after_y() {
+    fn a_closes_a_finished_task_after_y() {
         let mut a = app(vec![task("BP-1", "finished")]);
         a.settle();
-        press(&mut a, 'c');
+        press(&mut a, 'a');
         assert_eq!(a.pending, Some((Action::Close, "BP-1".into())));
         press(&mut a, 'y');
         assert_eq!(a.job("BP-1"), Some(Job::Close));
-        assert_eq!(Job::Close.args("BP-1"), vec!["close", "BP-1"]);
+        assert_eq!(Job::Close.args("BP-1"), vec!["accept", "BP-1"]);
         // n cancels
         let mut a = app(vec![task("BP-1", "finished")]);
         a.settle();
-        press(&mut a, 'c');
+        press(&mut a, 'a');
         press(&mut a, 'n');
         assert!(a.running.is_empty() && a.pending.is_none());
         assert_eq!(a.msg, "Cancelled.");
     }
 
     #[test]
-    fn c_on_any_other_task_goes_to_the_coordinator() {
+    fn a_accepts_a_ready_task_after_y() {
         let mut a = app(vec![task("BP-1", "ready")]);
         a.settle();
-        press(&mut a, 'c');
-        assert!(a.pending.is_none());
-        assert!(a.msg.contains("can't run"), "{}", a.msg); // it tried `bullpen go`
+        press(&mut a, 'a');
+        assert_eq!(a.pending, Some((Action::Accept, "BP-1".into())));
+        press(&mut a, 'y');
+        assert_eq!(a.job("BP-1"), Some(Job::Accept));
+        assert_eq!(Job::Accept.args("BP-1"), vec!["accept", "BP-1"]);
     }
 
     #[test]
-    fn a_on_a_finished_task_points_at_c() {
-        let mut a = app(vec![task("BP-1", "finished")]);
+    fn a_on_a_task_that_isnt_done_says_so() {
+        let mut a = app(vec![task("BP-1", "working")]);
         a.settle();
         press(&mut a, 'a');
         assert!(a.pending.is_none());
-        assert_eq!(a.msg, "It has nothing to merge: c closes it.");
+        assert_eq!(a.msg, "Only a task that's ready to accept, or finished, can be accepted.");
+    }
+
+    #[test]
+    fn c_always_goes_to_the_coordinator() {
+        for status in ["ready", "finished", "needs"] {
+            let mut a = app(vec![task("BP-1", status)]);
+            a.settle();
+            press(&mut a, 'c');
+            assert!(a.pending.is_none() && a.running.is_empty(), "{status}");
+            assert!(a.msg.contains("can't run"), "{status}: {}", a.msg); // it tried `bullpen go`
+        }
+    }
+
+    #[test]
+    fn after_an_accept_the_next_task_that_needs_you_is_selected() {
+        let mut a = app(vec![task("BP-1", "ready"), task("BP-2", "needs"), task("BP-3", "ready"), task("BP-4", "finished")]);
+        a.sel = Some("BP-3".into());
+        a.settle();
+        a.done("BP-3".into(), Job::Accept, true, String::new());
+        assert_eq!(a.msg, "Accepted BP-3.");
+        assert_eq!(a.sel.as_deref(), Some("BP-2"));
+        // a closed one too; with nothing needing you the selection stays
+        let mut a = app(vec![task("BP-4", "finished")]);
+        a.sel = Some("BP-4".into());
+        a.done("BP-4".into(), Job::Close, true, String::new());
+        assert_eq!((a.msg.as_str(), a.sel.as_deref()), ("Closed BP-4.", Some("BP-4")));
+        // a failed accept, or a selection already moved elsewhere, stays put
+        let mut a = app(vec![task("BP-1", "ready"), task("BP-2", "needs"), task("BP-3", "ready")]);
+        a.sel = Some("BP-1".into());
+        a.done("BP-1".into(), Job::Accept, false, "merge refused".into());
+        assert_eq!(a.sel.as_deref(), Some("BP-1"));
+        a.done("BP-3".into(), Job::Accept, true, String::new());
+        assert_eq!(a.sel.as_deref(), Some("BP-1"));
     }
 }

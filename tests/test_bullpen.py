@@ -3467,6 +3467,23 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.news()[-1], "bullpen · BP-1 closed (finished, nothing to merge)")
         self.assertIn("not finished", self.bp("close", tid, ok=False).stderr)
 
+    def test_accept_closes_a_finished_task(self):
+        tid = self.start_task()
+        t = self.show(tid)
+        wt, blk = t["worktree"], t["block"]
+        self.assertIn("not ready or finished", self.bp("accept", tid, ok=False).stderr)
+        self.finish(tid)
+        p = self.bp("accept", tid)
+        self.assertIn(f"{tid} closed", p.stdout)
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["closed"], t["worktree"], t["block"]), ("done", True, None, None))
+        self.assertFalse(Path(wt).exists())
+        self.assertFalse((self.fake / "alive" / blk).exists())
+        self.assertNotIn("bullpen/", sh("git", "-C", str(self.repo), "branch"))
+        self.assertEqual(self.news()[-1], "bullpen · BP-1 closed (finished, nothing to merge)")
+        self.assertFalse((self.fake / "gh.log").exists())  # no PR to merge
+        self.assertIn("not ready or finished", self.bp("accept", tid, ok=False).stderr)
+
     def test_close_starts_what_waited_on_it(self):
         tid = self.start_task("First")
         self.bp("add", "Second", "--brief", "x", "--after", tid)
@@ -3817,6 +3834,19 @@ class LocalModeTest(unittest.TestCase):
         self.assertEqual(self.show(tid)["status"], "done")
         self.assertFalse(Path(wt).exists())
         self.assertEqual(self.git("log", "-1", "--format=%s", "main"), "Other work on main")  # nothing merged
+
+    def test_accept_closes_a_finished_task_without_a_remote(self):
+        tid = self.start_task()
+        wt = self.show(tid)["worktree"]
+        f = self.tmp / "f.md"
+        f.write_text("Answered the question.")
+        self.bp("finish", tid, "--summary-file", str(f), cwd=wt)
+        main = self.git("rev-parse", "main")
+        self.bp("accept", tid)
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["closed"]), ("done", True))
+        self.assertFalse(Path(wt).exists())
+        self.assertEqual(self.git("rev-parse", "main"), main)  # nothing merged
 
     def test_start_uses_the_local_base(self):
         tid = self.start_task()

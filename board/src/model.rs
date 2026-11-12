@@ -587,8 +587,8 @@ fn status_detail(t: &Task, rounds: u32, at: DateTime<FixedOffset>) -> String {
         "review" => format!("Reviewer on round {round} of {rounds}."),
         "ready" if why.starts_with("Nothing to merge") => "Done, with nothing to merge.".into(),
         "finished" => match first_line(t.summary.as_deref()).as_str() {
-            "" => "Finished, nothing to merge. c closes it.".into(),
-            line => format!("Finished, nothing to merge: {line} c closes it."),
+            "" => "Finished, nothing to merge. a closes it.".into(),
+            line => format!("Finished, nothing to merge: {line} a closes it."),
         },
         "ready" => match &t.rebased {
             Some(base) => format!("{} Rebased onto {base}.", ready_detail(&pr, &r)),
@@ -638,7 +638,7 @@ pub fn task_keys(t: Option<&Task>) -> Vec<(&'static str, &'static str)> {
         "stopped" => vec![("r", "resume"), ("p", "peek"), ("d", "drop")],
         "review" => vec![("⏎", "reviewer"), ("p", "peek")],
         "ready" => vec![("a", "accept"), ("d", "drop"), ("⏎", "open")],
-        "finished" => vec![("c", "close"), ("d", "drop"), ("⏎", "open")],
+        "finished" => vec![("a", "close"), ("d", "drop"), ("⏎", "open")],
         "working" => vec![("⏎", "open"), ("t", "tell"), ("p", "peek")],
         "todo" => vec![("s", "start"), ("d", "drop")],
         _ => Vec::new(),
@@ -1063,7 +1063,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_finished_task_shows_its_summary_and_closes_with_c() {
+    fn a_finished_task_shows_its_summary_and_closes_with_a() {
         let summary = Some("# Recorded the demo video\n\nSaved to ~/Movies/demo.mov".to_string());
         let t = Task { summary, worktree: Some("/w".into()), ..task("BP-3", "finished") };
         let tasks = vec![task("BP-1", "ready"), t.clone(), task("BP-2", "working")];
@@ -1071,9 +1071,9 @@ pub(crate) mod tests {
         assert_eq!(heads, vec!["Ready to accept", "Finished", "Working"]);
         assert_eq!(mark("finished"), "◆");
         assert!(!t.needs_you() && !t.flagged() && !t.closed());
-        assert_eq!(task_detail(&t, 2, now()), "Finished, nothing to merge: Recorded the demo video. c closes it.");
-        assert_eq!(task_detail(&task("BP-3", "finished"), 2, now()), "Finished, nothing to merge. c closes it.");
-        assert_eq!(task_keys(Some(&t))[0], ("c", "close"));
+        assert_eq!(task_detail(&t, 2, now()), "Finished, nothing to merge: Recorded the demo video. a closes it.");
+        assert_eq!(task_detail(&task("BP-3", "finished"), 2, now()), "Finished, nothing to merge. a closes it.");
+        assert_eq!(task_keys(Some(&t))[0], ("a", "close"));
         assert!(task_keys(Some(&t)).contains(&("v", "diff")));
         assert_eq!(confirm_text(Action::Close, &t, "rebase"), "Close it and remove its worktree?");
         assert_eq!(task_stat(&t), "");
@@ -1084,7 +1084,7 @@ pub(crate) mod tests {
         link_waits(&mut ts);
         assert!(ts[1].waits.is_empty());
         let t: Task = serde_json::from_str(r#"{"id":"BP-3","status":"finished","summary":"Notes in ~/n.md"}"#).unwrap();
-        assert_eq!(task_detail(&t, 2, now()), "Finished, nothing to merge: Notes in ~/n.md. c closes it.");
+        assert_eq!(task_detail(&t, 2, now()), "Finished, nothing to merge: Notes in ~/n.md. a closes it.");
     }
 
     #[test]

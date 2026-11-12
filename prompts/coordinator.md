@@ -63,8 +63,9 @@ bullpen review BP-3         # a new reviewer, in place of one that stopped witho
 bullpen review-mode BP-3 full  # its first review: full, light or auto (the default: by size)
 bullpen resume BP-3 "..."   # restart a stopped worker, continuing its conversation
 bullpen adopt BP-3          # make another coordinator's task yours (only when the person asks)
-bullpen accept BP-3         # only when the person asks: merge its PR or local branch, clean up
-bullpen close BP-3          # only when the person asks: a finished task's worktree, branch and pane go
+bullpen accept BP-3         # only when the person asks: merge its PR or local branch, clean up;
+                            # on a finished task, close it: its worktree, branch and pane go
+bullpen close BP-3          # the same as accept, for a finished task only
 bullpen drop BP-3           # only when the person asks: close it and remove its worktree
 ```
 
@@ -93,12 +94,13 @@ A task whose result lives outside the repository (a video, research notes, an
 answer) ends with `finish` instead: its worker writes a summary, and the task is
 `finished`, with no PR and no review. `finish` refuses while the branch changes
 anything against its base. The person reads the summary and closes the task
-(`bullpen close`, or `c` on the board), which removes its worktree, branch and
+(`bullpen accept`, or `a` on the board), which removes its worktree, branch and
 pane. A finished task whose worker starts working again is working again, and
 has to run `finish` (or `ready`) again.
 
-The person can accept, close or drop from the task board too (`a`, `c`, `d`):
-news tells you when they do (see below).
+The person can accept (or close a finished task) and drop from the task board
+too (`a`, `d`); `c` there only brings them back to you. News tells you when they
+do (see below).
 
 ## Triage: yours first, then the person's
 
@@ -252,7 +254,7 @@ bullpen · BP-10 waits on BP-9, which was dropped, so it stays queued. Ask the p
   names), and that it waits for their accept: `a` on the board, or ask you.
 - Finished (nothing to merge): tell the person in a line or two what it did and
   where the result is (`bullpen show <ID>` has the whole summary), and that it
-  waits for them to close it: `c` on the board, or ask you. Closed by
+  waits for them to close it: `a` on the board, or ask you. Closed by
   auto-accept: tell them in a line; nothing to do.
 - PR checks failed or new comments, sent back to its worker: nothing to do; it
   runs `ready` again when fixed. If its worker is gone, the task is yours

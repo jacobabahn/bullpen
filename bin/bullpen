@@ -1948,7 +1948,8 @@ def cmd_finish(args):
 
 
 def cmd_close(args):
-    """(the person's call) close a finished task: its worktree, branch and pane go."""
+    """(the person's call) close a finished task: its worktree, branch and pane go.
+    `accept` does the same on a finished task; this stays as another name for it."""
     repo = Repo(repo_root())
     t = repo.task(args.id)
     if t["status"] != "finished":
@@ -2355,8 +2356,10 @@ def cmd_accept(args):
     repo = getattr(args, "repo", None) or Repo(repo_root())
     t = repo.task(args.id)
     merged_outside = (t.get("gh") or {}).get("state") == "merged"
+    if t["status"] == "finished" and not merged_outside:
+        return close_task(repo, t)  # the person's yes on work with nothing to merge
     if t["status"] != "ready" and not merged_outside:
-        raise Fail(f"{t['id']} is {t['status']}, not ready")
+        raise Fail(f"{t['id']} is {t['status']}, not ready or finished")
     if t.get("pr"):
         p = None if merged_outside else run(
             [repo.gh(), "pr", "merge", t["pr"], f"--{repo.cfg.get('merge', 'rebase')}"],
@@ -4135,11 +4138,11 @@ def parser():
     p.add_argument("text", nargs="+", help="the line")
     p.set_defaults(fn=cmd_note)
 
-    p = sub.add_parser("accept", help="(the person's call) merge a ready task's PR, or its local branch without a remote (config --merge), and clean up")
+    p = sub.add_parser("accept", help="(the person's call) merge a ready task's PR, or its local branch without a remote (config --merge), and clean up; on a finished task (nothing to merge), close it")
     p.add_argument("id", help="the task, like BP-3")
     p.set_defaults(fn=cmd_accept)
 
-    p = sub.add_parser("close", help="(the person's call) close a finished task: remove its worktree, branch and pane")
+    p = sub.add_parser("close", help="(the person's call) close a finished task: remove its worktree, branch and pane (the same as accept on it)")
     p.add_argument("id", help="the task, like BP-3")
     p.set_defaults(fn=cmd_close)
 

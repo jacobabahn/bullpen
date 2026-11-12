@@ -26,7 +26,7 @@ bullpen up            # in a Rex pane in your repository: the coordinator and it
 Then tell the coordinator what you want ("fix the login redirect and cover it
 with a test"). It adds tasks and starts a worker for each. Watch the board: `n`
 selects the next task that needs you, `⏎` opens its pane, and `a` accepts (merges)
-a ready one. The words used here are in [GLOSSARY.md](GLOSSARY.md).
+a ready one, or closes a finished one. The words used here are in [GLOSSARY.md](GLOSSARY.md).
 
 ## Install
 
@@ -84,10 +84,12 @@ the end of the key line. `bullpen config --board-bottom-gap 0` takes the row
 back (or give more rows); a board too short to spare it drops the gap first.
 
 The keys at the bottom follow the selected task: `⏎` opens its worker (or its
-reviewer), `a` accepts and `d` drops (each asks y/n first), `t` tells, `p`
-peeks, `v` shows its diff, `s` starts, `r` resumes, `c` goes back to the
-coordinator (on a finished task, `c` closes it, after y/n), `n` selects the next
-task that needs you. `?` lists them all.
+reviewer), `a` accepts a ready task or closes a finished one and `d` drops
+(each asks y/n first, the question saying which), `t` tells, `p` peeks, `v`
+shows its diff, `s` starts, `r` resumes, `c` goes back to the coordinator, `n`
+selects the next task that needs you. Once an accept or close goes through, the
+next task that needs you is selected, so you can run down a queue of ready tasks
+with `a`, `y`. `?` lists them all.
 `bullpen up --no-board` leaves the board out. Accept, drop, start and resume
 run in the background, with a spinner on the task, so the board stays usable
 meanwhile; a peek keeps the worker's colours and updates until you press a key.
@@ -134,8 +136,9 @@ bullpen ask BP-1 "..."   # (coordinator) BP-1 needs you: the question shows on t
 bullpen ok BP-1       # (coordinator) a task in triage is seen to: back to work, nothing typed
 bullpen review BP-1   # (coordinator) a new reviewer for one that stopped without a verdict
 bullpen note BP-1 "..."   # an informational line on the board
-bullpen accept BP-1   # merge its PR (or local branch; rebase), close its pane, remove its worktree
-bullpen close BP-1    # a finished task (nothing to merge): remove its worktree, branch and pane
+bullpen accept BP-1   # merge its PR (or local branch; rebase), close its pane, remove its worktree;
+                      # a finished task (nothing to merge): remove its worktree, branch and pane
+bullpen close BP-1    # the same as accept, for a finished task only
 bullpen drop BP-1     # close its PR, pane and worktree without merging
 ```
 
@@ -302,7 +305,8 @@ Otherwise the task is `finished`, with the summary kept as `ready` keeps it: no 
 no review. The news says `BP-3 finished (nothing to merge): <first line of the
 summary>`, and the board lists it under "Finished" with that line.
 
-You close it with `c` on the board or `bullpen close BP-3`: its worktree, branch
+You close it with `a` on the board or `bullpen accept BP-3` (`bullpen close BP-3`
+does the same): its worktree, branch
 and worker pane go, with no warning about losing work (there is nothing to merge),
 and it counts as done, so tasks added `--after` it start. With auto-accept on (or
 the task's `--auto-accept`), a finished task closes by itself, with a news line.
