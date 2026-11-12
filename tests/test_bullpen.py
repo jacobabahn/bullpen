@@ -1885,6 +1885,23 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.focused()[-1], "blk2")
         self.assertEqual(sel.read_text(), "BP-2\n")
 
+    def test_go_board_with_a_task_uses_a_board_that_shows_it(self):
+        other = self.two_coordinators()
+        board1 = self.coordinators()[0]["board"]["block"]
+        theirs = self.bp_in(other, "add", "Theirs", "--brief", "x").stdout.strip()
+        f = next((self.tmp / "state").rglob("config.json"))
+        cfg = json.loads(f.read_text())
+        cfg["coordinators"][1]["board"] = None  # c2 has no board
+        f.write_text(json.dumps(cfg))
+        sel = f.parent / "select"
+        p = self.bp("go", theirs, "--board", ok=False)  # c1's board hides c2's tasks
+        self.assertIn(f"no board shows {theirs}: it is c2's, which has no board (o on a board shows it)", p.stderr)
+        self.assertFalse(sel.exists())
+        self.bp("config", "--board-others", "on", "--coordinator", "c1")  # now c1's shows it
+        self.bp("go", theirs, "--board")
+        self.assertEqual(self.focused()[-1], board1)
+        self.assertEqual((sel / "c1").read_text(), f"{theirs}\n")
+
     def test_go_repo_goes_to_a_task_of_another_repo(self):
         here = self.start_task("Here")
         shop = self.other_repo("shop")

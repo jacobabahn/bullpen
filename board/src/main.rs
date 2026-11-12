@@ -283,9 +283,14 @@ impl App {
             .is_some_and(|age| age < Duration::from_secs(30));
         let _ = std::fs::remove_file(&path);
         let id = text.trim();
-        if fresh && self.tasks.iter().any(|t| t.id == id) && self.sel.as_deref() != Some(id) {
+        if !fresh || self.sel.as_deref() == Some(id) {
+            return;
+        }
+        if self.order().iter().any(|t| t.id == id) {
             self.sel = Some(id.to_string());
             self.pending = None; // a question about the task that was selected
+        } else if let Some(t) = self.tasks.iter().find(|t| t.id == id && self.cfg.hides(t, self.me.as_deref())) {
+            self.msg = format!("{id} is {}'s: o shows it.", t.coordinator.as_deref().unwrap_or("another coordinator"));
         }
     }
 
@@ -1191,9 +1196,19 @@ mod tests {
         a.take_select();
         assert_eq!(a.sel.as_deref(), Some("BP-2"));
         assert!(!file.exists());
-        std::fs::write(d.0.join("select").join("c2"), "BP-1").unwrap(); // another coordinator's board's
+        a.cfg.coordinators = vec!["c1".into(), "c2".into()];
+        a.tasks.push(owned("BP-3", "todo", "c2"));
+        ask("BP-3"); // shown only with o: say so, and stay put
         a.take_select();
         assert_eq!(a.sel.as_deref(), Some("BP-2"));
+        assert_eq!(a.msg, "BP-3 is c2's: o shows it.");
+        a.cfg.board_others = vec!["c1".into()];
+        ask("BP-3");
+        a.take_select();
+        assert_eq!(a.sel.as_deref(), Some("BP-3"));
+        std::fs::write(d.0.join("select").join("c2"), "BP-1").unwrap(); // another coordinator's board's
+        a.take_select();
+        assert_eq!(a.sel.as_deref(), Some("BP-3"));
     }
 
     /// A scratch folder of its own for a test, removed at the end.

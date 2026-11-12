@@ -194,7 +194,8 @@ four actions, also in the command palette under Bullpen, and binds:
   first. `↑` `↓` (or `ctrl+p` `ctrl+n`) move, `⏎` goes to that task as
   `bullpen go` does, and `esc` closes the picker. A task without a pane (queued
   or stopped, say) opens its board with that task selected, where its keys
-  (`s`, `r`, `i`) are. If even that fails, the picker says why after the count
+  (`s`, `r`, `i`) are: its coordinator's board, else one that shows other
+  coordinators' tasks (`o`). If even that fails, the picker says why after the count
   and stays open. It works from any pane
   (`bullpen pick --pane`; `bullpen pick` runs it in the terminal you're in).
 

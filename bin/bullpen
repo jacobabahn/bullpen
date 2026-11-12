@@ -5006,12 +5006,16 @@ def pane_target(repo, args):
 
 
 def task_board(repo, t):
-    """(coordinator, board) of the board a task is on: its owner's, else any."""
+    """(coordinator, board) of a board that shows the task: its owner's, else any
+    other that shows it (one showing other coordinators' tasks too)."""
     own = home_of(repo, t)
-    for c in [own] + repo.cfg["coordinators"]:
-        if c.get("board"):
-            return c, c["board"]
-    raise Fail("no board: run `bullpen up`")
+    boards = [c for c in [own] + repo.cfg["coordinators"] if c.get("board")]
+    if not boards:
+        raise Fail("no board: run `bullpen up`")
+    c = next((c for c in boards if on_board(repo, c, t)), None)
+    if not c:
+        raise Fail(f"no board shows {t['id']}: it is {own['id']}'s, which has no board (o on a board shows it)")
+    return c, c["board"]
 
 
 def select_on_board(repo, tid):
