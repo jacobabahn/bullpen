@@ -142,10 +142,12 @@ class FlowTest(BullpenTest):
         self.assertIn("--continue", cmd)
         self.assertEqual(self.show(tid)["status"], "working")
 
-    def test_unknown_block_events_are_ignored(self):
+    def test_events_from_panes_that_arent_a_tasks_are_ignored(self):
         self.start_task()
         before = len(self.typed())
         self.bp("_event", "stranger", "blocked", "permission", "x")
+        self.bp("_event", "blk2", "done", "", "")  # the board's
+        self.bp("_gone", "blk2")
         self.assertEqual(len(self.typed()), before)
 
     def test_accept_merges_and_cleans_up(self):

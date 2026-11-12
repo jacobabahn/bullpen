@@ -248,13 +248,6 @@ class NewsTest(BullpenTest):
             p = self.bp("hide", "--from", pane, ok=False)
             self.assertEqual(p.returncode, 3)
 
-    def test_board_pane_events_are_ignored(self):
-        self.start_task()
-        before = len(self.typed())
-        self.bp("_event", "blk2", "done", "", "")
-        self.bp("_gone", "blk2")
-        self.assertEqual(len(self.typed()), before)
-
     def test_go_focuses_coordinator_and_board(self):
         self.start_task()
         self.bp("go")

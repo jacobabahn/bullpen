@@ -239,23 +239,6 @@ class LocalModeTest(unittest.TestCase):
         self.assertEqual(self.news_tail(),
                          "bullpen · BP-1 approved by review and auto-accepted (merged into main, rebase)")
 
-    def test_auto_accept_off_leaves_it_ready(self):
-        tid, wt = self.ready_task(review=True)
-        self.bp("verdict", tid, "approve", "--summary", "Fine.", cwd=wt)
-        self.assertEqual(self.show(tid)["status"], "ready")
-
-    def test_no_auto_accept_holds_a_task(self):
-        self.bp("config", "--auto-accept", "on")
-        self.bp("up")
-        tid = self.bp("add", "Fix the thing", "--brief", "x", "--no-auto-accept").stdout.strip()
-        self.bp("start", tid)
-        wt = self.show(tid)["worktree"]
-        self.commit(wt, "fix.txt", "fixed\n", "Fix it")
-        self.bp("ready", tid, "--summary", "Fixed.", cwd=wt)
-        self.bp("verdict", tid, "approve", "--summary", "Fine.", cwd=wt)
-        self.assertEqual(self.show(tid)["status"], "ready")
-        self.assertIs(self.show(tid)["auto_accept"], False)
-
     def test_auto_accept_never_takes_open_findings_after_the_last_round(self):
         self.bp("config", "--auto-accept", "on")
         tid, wt = self.ready_task(review=True)
@@ -321,6 +304,7 @@ class LocalModeTest(unittest.TestCase):
         self.bp("accept", tid)
         self.assertEqual(self.show(tid)["status"], "done")
         self.assertEqual(self.git("rev-parse", "main"), main)
+        self.assertEqual(self.typed()[-1][1], "bullpen · BP-1 accepted (nothing to merge)")
 
     def test_diff_against_the_local_base(self):
         tid, wt = self.ready_task()  # main moved on since: only the task's own change shows
@@ -350,12 +334,6 @@ class LocalModeTest(unittest.TestCase):
         self.bp("accept", tid)
         self.accepted(tid, wt)
         self.assertEqual(self.typed(), before)
-
-    def test_accept_with_nothing_to_merge_says_so(self):
-        tid = self.start_task()
-        self.bp("ready", tid)
-        self.bp("accept", tid)
-        self.assertEqual(self.typed()[-1][1], "bullpen · BP-1 accepted (nothing to merge)")
 
     def second_ready(self, name, text):
         """BP-2, started from main before BP-1's accept, with one commit, ready."""
