@@ -118,8 +118,13 @@ It groups tasks by what you do next: needs you, coordinator on it (dimmed: see
 [Triage](#triage)), ready to accept, finished (nothing to merge, see
 [Finish](#finish-with-nothing-to-merge)), in review, working, queued; `f` adds
 the closed ones (accepted, closed, dropped). `l` switches to a compact layout,
-one line per task with the selected task's detail at the bottom (what its agent
-is doing first).
+one line per task under its group's name (dim), with the selected task's detail
+at the bottom (what its agent is doing first). A board with tasks but none to
+show says why: "Nothing open. f shows 2 closed.", or "Nothing of yours open. o
+shows 4 of c3's." Under 12 rows the list takes the blank rows, the scroll mark
+sits at the end of its last row, and a message takes the key row; under 36
+columns an ID is followed by one space, and (grouped) a task's age starts its
+detail line.
 
 Each task starts with its mark, the same one `?` shows under "Marks":
 
@@ -214,7 +219,8 @@ in the order `?` lists them:
 | `?` | every key, one short line each, and the marks |
 | `q` | quit the board, once you say `y` (`ctrl+c` quits at once) |
 
-The `y`/`n` question for `a` and `d` says which of the two it is, and in red,
+The `y`/`n` question for `a` and `d` goes above the key line, and the task keeps
+its title with `y / n` in place of its age. It says which of the two it is, and in red,
 first, what could go wrong: checks failing or still running, changes asked for,
 not reviewed, a worker or reviewer still running; a drop is always red. Once
 an accept or close goes through, the next task that needs you is selected, else
@@ -228,7 +234,9 @@ usable meanwhile.
 
 What a key did shows above the key line, wrapped over up to three rows: green
 when it worked ("Accepted BP-7."), red when a command failed, with its reason,
-and plain otherwise (`l` says "Compact layout.", `o` "Showing c2's tasks too.").
+and plain otherwise (`l` says "Compact layout.", `o` "Showing c2's tasks too.",
+`f` "Showing closed tasks too."). A peek that can't read the screen says why
+(its agent isn't running), and its foot drops "live".
 A green or plain message goes with the next key; a red one stays while you move
 around, until the next thing you do to a task, or `esc`.
 

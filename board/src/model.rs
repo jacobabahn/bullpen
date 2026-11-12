@@ -830,6 +830,27 @@ pub fn hidden(tasks: &[Task], cfg: &Config, me: Option<&str>, closed: bool) -> V
         .collect()
 }
 
+/// What a board with nothing to show says instead, the first line bold: that there
+/// are no tasks yet, or what the tasks it has are hidden behind (`o`, `f`).
+pub fn empty_board(tasks: &[Task], cfg: &Config, me: Option<&str>, closed: bool) -> Vec<String> {
+    if tasks.is_empty() {
+        return vec!["No tasks yet.".into(), "Tell the coordinator what you want done.".into()];
+    }
+    let hidden = hidden(tasks, cfg, me, closed);
+    let mut out = vec![if hidden.is_empty() { "Nothing open." } else { "Nothing of yours open." }.to_string()];
+    let n: usize = hidden.iter().map(|(_, n)| n).sum();
+    match &hidden[..] {
+        [] => {}
+        [(c, _)] => out.push(format!("o shows {n} of {c}'s.")),
+        _ => out.push(format!("o shows {n} of other coordinators'.")),
+    }
+    let shut = tasks.iter().filter(|t| t.closed() && !cfg.hides(t, me)).count();
+    if !closed && shut > 0 {
+        out.push(format!("f shows {shut} closed."));
+    }
+    out
+}
+
 /// The header's note of what's hidden: "+4 in c2 · o shows", "" when nothing is.
 /// Without `key` (on a crowded top line) it's "+4 in c2".
 pub fn hidden_hint(hidden: &[(String, usize)], key: bool) -> String {
@@ -1329,7 +1350,7 @@ pub fn wrap(text: &str, w: usize, lines: usize) -> Vec<String> {
     out
 }
 
-fn split_at_width(s: &str, w: usize) -> (String, String) {
+pub fn split_at_width(s: &str, w: usize) -> (String, String) {
     let mut used = 0;
     for (i, c) in s.char_indices() {
         let cw = c.width().unwrap_or(0);

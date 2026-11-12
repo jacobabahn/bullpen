@@ -77,8 +77,9 @@ fn span(text: impl Into<String>, style: Style) -> Span<'static> {
 enum Row<'a> {
     Head(String),
     Title(&'a Task),
-    /// a line under a task; loud when it says what the task needs from you
-    Detail(&'a Task, String, bool),
+    /// a line under a task; loud when it says what the task needs from you; its first
+    /// columns (on a narrow board) the task's age
+    Detail(&'a Task, String, bool, usize),
     Gap,
 }
 
@@ -115,12 +116,12 @@ fn key_line(keys: &[(&str, &str)]) -> Line<'static> {
     Line::from(spans)
 }
 
-/// A peek's foot: it's live, the keys that act from it, and esc. Keys drop from the
+/// A peek's foot: it's live (while it reads the screen), the keys that act from it, and esc. Keys drop from the
 /// right of the middle until it fits; esc stays.
-fn peek_foot(w: usize) -> Line<'static> {
+fn peek_foot(w: usize, live: bool) -> Line<'static> {
     let mut keys = vec![("t", "tell"), ("⏎", "open"), ("i", "answer"), ("a", "accept"), ("v", "diff")];
     loop {
-        let mut spans = vec![span("live · ", dim())];
+        let mut spans = if live { vec![span("live · ", dim())] } else { vec![] };
         spans.extend(key_line(&keys).spans);
         if !keys.is_empty() {
             spans.push(span("  ", Style::new()));
@@ -155,10 +156,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if let Mode::Overlay { title, lines, peek } = &app.mode {
         let (area, w, h) = (full, full.width as usize, app.height as usize);
         put(buf, area, 0, 1, span(fit(title, w.saturating_sub(2)), bold()));
+        // a peek that can't read the screen says why, in bold
+        let failed = peek.is_some() && app.peek_failed;
         for (j, line) in lines.iter().take(h.saturating_sub(3)).enumerate() {
-            put(buf, area, 2 + j, 1, screen_line(line));
+            let line = if failed { Line::from(span(line.clone(), bold())) } else { screen_line(line) };
+            put(buf, area, 2 + j, 1, line);
         }
-        let foot = if peek.is_some() { peek_foot(w) } else { Line::from(span("any key returns", dim())) };
+        let foot = if peek.is_some() { peek_foot(w, !failed) } else { Line::from(span("any key returns", dim())) };
         put(buf, area, h.saturating_sub(1), 1, foot);
         return;
     }
@@ -183,20 +187,41 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let (w, h) = (area.width as usize, area.height as usize);
 
     let layout = app.cfg.layout;
-    let footer = if layout == Layout::Grouped { 3 } else { 7 };
+    // a short board gives the list the rows a tall one spends on space: no row of its
+    // own for the scroll mark, no blank line above the keys, and a message on the key row
+    let short = h < SHORT;
+    // a narrow one puts one space after the IDs, and (grouped) a task's age on its detail line
+    let narrow = w < NARROW;
+    let footer = match (layout, short) {
+        (Layout::Grouped, false) => 3,
+        (Layout::Grouped, true) => 1,
+        (Layout::Compact, false) => 7,
+        (Layout::Compact, true) => 6,
+    };
+    // the rows above the list: the top line and a blank one, and on a tall board one
+    // under it for the scroll mark
+    let chrome = if short { 2 } else { 3 };
     // from here on h is the board's height above the gap: everything at the
     // bottom (the detail panel, message line, keys, scroll mark) sits on top of it
     let h = h - bottom_gap(app, h, 4 + footer);
     app.height = h as u16;
-    // the message wraps; its rows past the first come off the list (while one row of it is left)
-    let msg = message(app, w, h.saturating_sub(4 + footer) + 1);
-    let footer = footer + msg.len().saturating_sub(1);
+    // the message (or the y/n question) wraps; its rows past the first come off the
+    // list (while one row of it is left). On a short board it's one row, on the key
+    // row unless something else is asked there
+    let msg = message(app, w, if short { 1 } else { h.saturating_sub(chrome + 1 + footer) + 1 });
+    let msg_on_keys = short && !msg.is_empty() && app.pending.is_none() && matches!(app.mode, Mode::Normal);
+    let footer = match (short, msg_on_keys) {
+        (true, true) => footer,
+        (true, false) => footer + msg.len(),
+        (false, _) => footer + msg.len().saturating_sub(1),
+    };
     // by field, not app.groups(): app.top changes while these are in use
-    let groups = model::shown_groups(&app.tasks, &app.cfg, app.me.as_deref(), app.finished);
+    let groups = model::shown_groups(&app.tasks, &app.cfg, app.me.as_deref(), app.closed);
     let cur_id = app.current().map(|t| t.id.clone());
     let is_cur = |t: &Task| Some(&t.id) == cur_id.as_ref();
     // IDs share a column as wide as the longest, so titles and details line up
     let idw = groups.iter().flat_map(|(_, ts)| ts).map(|t| width(&t.id)).max().unwrap_or(0);
+    let age_on_detail = narrow && layout == Layout::Grouped;
     // from under the ID to the right edge
     let detail_w = w.saturating_sub(5);
 
@@ -206,7 +231,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let auto = if app.cfg.auto_accept { " · auto-accept" } else { "" };
     // with several coordinators: whose board this is, and how many of the other
     // ones' tasks it hides (`o` shows them, dimmed)
-    let hidden = model::hidden(&app.tasks, &app.cfg, app.me.as_deref(), app.finished);
+    let hidden = model::hidden(&app.tasks, &app.cfg, app.me.as_deref(), app.closed);
     let left = |key: bool| {
         let hint = model::hidden_hint(&hidden, key);
         let hint = if hint.is_empty() { hint } else { format!(" · {hint}") };
@@ -240,12 +265,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let now = model::now();
     let mut rows: Vec<Row> = Vec::new();
     for (gi, (heading, ts)) in groups.iter().enumerate() {
-        if gi > 0 {
+        // the compact layout's group names, dim, sit where the grouped one leaves a blank row
+        if gi > 0 && layout == Layout::Grouped {
             rows.push(Row::Gap);
         }
-        if layout == Layout::Grouped {
-            rows.push(Row::Head(format!("{heading}  {}", ts.len())));
-        }
+        rows.push(Row::Head(format!("{heading}  {}", ts.len())));
         for t in ts {
             rows.push(Row::Title(t));
             if layout == Layout::Grouped {
@@ -264,21 +288,29 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                     1
                 };
                 let text = if doing.is_empty() { model::detail_with_auto(t, &app.cfg, now) } else { doing };
-                for d in model::wrap(&text, detail_w, lines) {
+                // on a narrow board the age starts the first line, off the title's
+                let age = if age_on_detail { model::ago(t.stamp(), now) } else { String::new() };
+                let text = match (age.is_empty(), text.is_empty()) {
+                    (true, _) => text,
+                    (false, true) => age.clone(),
+                    (false, false) => format!("{age} · {text}"),
+                };
+                for (i, d) in model::wrap(&text, detail_w, lines).into_iter().enumerate() {
                     if !d.is_empty() {
-                        rows.push(Row::Detail(t, d, loud_detail(app, t)));
+                        let lead = if i == 0 { width(&age) } else { 0 };
+                        rows.push(Row::Detail(t, d, loud_detail(app, t), lead));
                     }
                 }
                 let stat = model::stat_line(t);
                 if !stat.is_empty() {
-                    rows.push(Row::Detail(t, stat, false));
+                    rows.push(Row::Detail(t, stat, false, 0));
                 }
             }
         }
     }
 
     // keep the selected task in view with its details, starting at a heading or a task
-    let avail = h.saturating_sub(3 + footer).max(1); // one line spare for the scroll mark
+    let avail = h.saturating_sub(chrome + footer).max(1);
     let sel_row = rows.iter().position(|r| matches!(r, Row::Title(t) if is_cur(t)));
     let mut top = app.top;
     if let Some(i) = sel_row {
@@ -302,9 +334,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
     app.top = top;
 
-    if app.tasks.is_empty() {
-        put(buf, area, 2, 1, span("No tasks yet.", bold()));
-        put(buf, area, 3, 1, span(fit("Tell the coordinator what you want done.", w.saturating_sub(2)), dim()));
+    if groups.is_empty() {
+        let lines = model::empty_board(&app.tasks, &app.cfg, app.me.as_deref(), app.closed);
+        for (j, line) in lines.iter().enumerate() {
+            put(buf, area, 2 + j, 1, span(fit(line, w.saturating_sub(2)), if j == 0 { bold() } else { dim() }));
+        }
     }
 
     for (j, row) in rows.iter().skip(top).take(avail).enumerate() {
@@ -316,6 +350,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             }
         }
         match row {
+            Row::Head(text) if layout == Layout::Compact => put(buf, area, y, 1, span(fit(text, w.saturating_sub(4)), dim())),
             Row::Head(text) => put(buf, area, y, 1, span(text.clone(), bold())),
             Row::Title(t) => {
                 // a task with a command running gets a spinner in place of its mark
@@ -332,20 +367,29 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                     None => span(model::mark(&t.status), mark_style(&t.status)),
                 };
                 put(buf, area, y, 1, mark);
-                put(buf, area, y, 3, title_line(app, t, is_cur(t), w, idw, now));
+                put(buf, area, y, 3, title_line(app, t, is_cur(t), w, idw, narrow, !age_on_detail, now));
             }
-            // the selected task's lines sit on the tint, its whole block, and drop dim as its title does
-            Row::Detail(t, text, _) if is_cur(t) => {
-                put(buf, area, y, 3, span(pad(&fit(text, detail_w), detail_w), Style::new().bg(TINT)));
-            }
-            Row::Detail(_, text, loud) => {
-                put(buf, area, y, 3, span(fit(text, detail_w), if *loud { Style::new() } else { dim() }));
+            Row::Detail(t, text, loud, lead) => {
+                // the selected task's lines sit on the tint, its whole block, and drop dim as its title does
+                let style = if is_cur(t) {
+                    Style::new().bg(TINT)
+                } else if *loud {
+                    Style::new()
+                } else {
+                    dim()
+                };
+                let text = fit(text, detail_w);
+                let text = if is_cur(t) { pad(&text, detail_w) } else { text };
+                let (age, rest) = model::split_at_width(&text, *lead);
+                put(buf, area, y, 3, Line::from(vec![span(age, age_style(t, is_cur(t), now)), span(rest, style)]));
             }
             Row::Gap => {}
         }
     }
     if top + avail < rows.len() {
-        put(buf, area, 2 + avail, w.saturating_sub(3), span("↓", dim()));
+        // a short board's goes at the end of the list's last row, past the ages
+        let (y, x) = if short { (1 + avail, w.saturating_sub(2)) } else { (2 + avail, w.saturating_sub(3)) };
+        put(buf, area, y, x, span("↓", dim()));
     }
     if top > 0 {
         put(buf, area, 1, w.saturating_sub(3), span("↑", dim()));
@@ -373,6 +417,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         }
     }
     let last = h.saturating_sub(1);
+    if msg_on_keys {
+        put(buf, area, last, 1, msg.into_iter().next().unwrap_or_default());
+        return;
+    }
     let first = h.saturating_sub(1 + msg.len());
     for (j, line) in msg.into_iter().enumerate() {
         put(buf, area, first + j, 1, line);
@@ -406,20 +454,35 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
 }
 
+/// A board with fewer rows than this is short: the list gets the rows of space.
+const SHORT: usize = 12;
+/// A board with fewer columns than this is narrow: the titles get the room.
+const NARROW: usize = 36;
+
 /// How many rows a message wraps to, at most.
 const MESSAGE_LINES: usize = 3;
 
-/// The message rows above the keys, at most `most` of them: what just happened (a
-/// failure red, what worked green), else what's still running.
+/// The message rows above the keys, at most `most` of them: the y/n question being
+/// asked (red when risky), what just happened (a failure red, what worked green),
+/// else what's still running.
 fn message(app: &App, w: usize, most: usize) -> Vec<Span<'static>> {
     let room = w.saturating_sub(2);
+    let most = MESSAGE_LINES.min(most).max(1);
+    if let Some((action, t)) = app.pending.as_ref().and_then(|(a, id)| Some((*a, app.tasks.iter().find(|t| &t.id == id)?))) {
+        let tone = if model::confirm_risky(action, t, &app.cfg) { Color::Red } else { Color::Green };
+        // the fullest words that fit the rows there are, else the shortest, cut
+        let texts: Vec<String> = model::confirm_texts(action, t, &app.cfg).iter().map(|q| format!("{}: {q}", t.id)).collect();
+        let text = texts.iter().find(|q| model::wrap(q, room, usize::MAX).len() <= most).unwrap_or(&texts[texts.len() - 1]);
+        let style = bold().fg(tone);
+        return model::wrap(text, room, most).into_iter().map(|l| span(l, style)).collect();
+    }
     if !app.msg.is_empty() {
         let style = match app.msg.kind {
             Kind::Failed => bold().fg(Color::Red),
             Kind::Done => bold().fg(Color::Green),
             Kind::Info => bold(),
         };
-        let lines = model::wrap(&app.msg.text, room, MESSAGE_LINES.min(most).max(1));
+        let lines = model::wrap(&app.msg.text, room, most);
         return lines.into_iter().map(|l| span(l, style)).collect();
     }
     if let Some((id, job)) = app.running.last() {
@@ -595,36 +658,54 @@ fn loud_detail(app: &App, t: &Task) -> bool {
     matches!(t.status.as_str(), "needs" | "stopped" | "ready" | "finished") && !app.cfg.theirs(t, app.me.as_deref())
 }
 
-/// A task's line: its ID, title and age, or the y/n question it's waiting on.
-fn title_line(app: &App, t: &Task, selected: bool, w: usize, idw: usize, now: chrono::DateTime<chrono::FixedOffset>) -> Line<'static> {
-    let id = pad(&t.id, idw);
-    let left = format!("{id}  ");
-    let width_all = w.saturating_sub(5); // from column 3 to the header's right edge
-
-    if let Some((action, tid)) = &app.pending {
-        if *tid == t.id {
-            // the row becomes the question, in place: nothing below moves
-            let tone = if model::confirm_risky(*action, t, &app.cfg) { Color::Red } else { Color::Green };
-            let texts = model::confirm_texts(*action, t, &app.cfg);
-            let yn = "y / n";
-            let line = format!("{left}{}", model::first_fit(&texts, width_all.saturating_sub(width(&left) + width(yn) + 2)));
-            let line = pad(&line, width_all.saturating_sub(width(yn))) + yn;
-            return Line::from(span(line, rev().add_modifier(Modifier::BOLD).fg(tone)));
-        }
-    }
-
-    let age = model::ago(t.stamp(), now);
-    let title = fit(&model::shown_title(t, &app.cfg, app.me.as_deref()), width_all.saturating_sub(width(&left) + width(&age) + 2));
-    let middle = pad(&format!("  {title}"), width_all.saturating_sub(idw + width(&age)));
+/// A task's age's style: red once it has needed you STALE seconds, on the tint when selected.
+fn age_style(t: &Task, selected: bool, now: chrono::DateTime<chrono::FixedOffset>) -> Style {
     let stale = t.needs_you() && model::seconds_in_status(t, now) >= STALE;
+    match (selected, stale) {
+        (true, true) => Style::new().bg(TINT).fg(Color::Red).add_modifier(Modifier::BOLD),
+        (true, false) => Style::new().bg(TINT),
+        (false, true) => bold().fg(Color::Red),
+        (false, false) => dim(),
+    }
+}
+
+/// A task's line: its ID, title and age (on a narrow board one space after the ID,
+/// and without the age when its detail line has it). Asked y/n about, it keeps its
+/// title, in the question's colour, with "y / n" for the age; the question is above the keys.
+#[allow(clippy::too_many_arguments)]
+fn title_line(
+    app: &App,
+    t: &Task,
+    selected: bool,
+    w: usize,
+    idw: usize,
+    narrow: bool,
+    with_age: bool,
+    now: chrono::DateTime<chrono::FixedOffset>,
+) -> Line<'static> {
+    let id = pad(&t.id, idw);
+    let gap = if narrow { " " } else { "  " };
+    let width_all = w.saturating_sub(5); // from column 3 to the header's right edge
+    let asked = app.pending.as_ref().filter(|(_, tid)| *tid == t.id);
+
+    let age = match asked {
+        Some(_) => "y / n".to_string(),
+        None if with_age => model::ago(t.stamp(), now),
+        None => String::new(),
+    };
+    let room = width_all.saturating_sub(idw + width(gap) + if age.is_empty() { 0 } else { width(&age) + 2 });
+    let title = fit(&model::shown_title(t, &app.cfg, app.me.as_deref()), room);
+    let middle = pad(&format!("{gap}{title}"), width_all.saturating_sub(idw + width(&age)));
     // the ID in reverse video, off the tint: that shows in any theme. Dim text is hard
     // to read on the tint, so the rest of the row drops it
-    let (id_style, title_style, age_style) = if selected {
-        let on = Style::new().bg(TINT);
-        (rev().add_modifier(Modifier::BOLD), on, if stale { on.fg(Color::Red).add_modifier(Modifier::BOLD) } else { on })
+    let (id_style, title_style, age_style) = if let Some((action, _)) = asked {
+        let tone = if model::confirm_risky(*action, t, &app.cfg) { Color::Red } else { Color::Green };
+        (rev().add_modifier(Modifier::BOLD).fg(tone), bold().fg(tone), bold().fg(tone))
+    } else if selected {
+        (rev().add_modifier(Modifier::BOLD), Style::new().bg(TINT), age_style(t, true, now))
     } else {
         let title = if t.closed() || t.triage() || app.cfg.theirs(t, app.me.as_deref()) { dim() } else { Style::new() };
-        (dim(), title, if stale { bold().fg(Color::Red) } else { dim() })
+        (dim(), title, age_style(t, false, now))
     };
     // the ID's padding goes with the title, so only the ID itself is reversed
     let id_pad = id[t.id.len()..].to_string();
@@ -652,7 +733,7 @@ mod tests {
             tasks,
             others: Default::default(),
             sel: None,
-            finished: false,
+            closed: false,
             msg: Note::default(),
             top: 0,
             pending: None,
@@ -662,6 +743,7 @@ mod tests {
             started: Instant::now(),
             tx,
             peeking: false,
+            peek_failed: false,
             peek_due: Instant::now(),
             exe: None,
         }
@@ -709,29 +791,41 @@ mod tests {
 
         a.pending = Some((Action::Accept, "BP-8".into()));
         let s = screen(&mut a, 42, 24);
-        assert!(s.iter().any(|r| r.contains("BP-8  Checks failing. Accept?   y / n")), "{s:#?}");
-        assert_eq!(row(&s, 1), " y accept anyway   any other key cancels");
-        assert_eq!(tone_of(&mut a, 42, 24, "Checks failing"), Some(Color::Red));
+        // the task keeps its title, y / n for its age, and the whole question is above the keys
+        assert!(s.iter().any(|r| r == " ✔ BP-8  Task BP-8                 y / n"), "{s:#?}");
+        assert_eq!(
+            s[20..23],
+            [
+                " BP-8: Checks failing, review asks for",
+                " changes. Accept and rebase-merge anyway?",
+                " y accept anyway   any other key cancels",
+            ]
+            .map(String::from),
+            "{s:#?}"
+        );
+        assert_eq!(tone_of(&mut a, 42, 24, "BP-8: Checks failing"), Some(Color::Red));
+        assert_eq!(tone_of(&mut a, 42, 24, "Task BP-8"), Some(Color::Red));
         assert_eq!(tone_of(&mut a, 42, 24, "y accept anyway"), Some(Color::Red));
-        let s = screen(&mut a, 70, 24);
-        assert!(s.iter().any(|r| r.contains("BP-8  Checks failing. Accept and rebase-merge anyway?")), "{s:#?}");
+        // with fewer rows, the shorter words that fit
+        let s = screen(&mut a, 42, 11);
+        assert_eq!(row(&s, 2), " BP-8: Checks failing. Accept anyway?", "{s:#?}");
+        assert!(s.iter().any(|r| r.contains("BP-8  Task BP-8")), "{s:#?}");
 
         // a safe accept stays green, its key row plain
         a.pending = Some((Action::Accept, "BP-7".into()));
         let s = screen(&mut a, 42, 24);
-        assert!(s.iter().any(|r| r.contains("BP-7  Accept and rebase-merge?")), "{s:#?}");
+        assert_eq!(row(&s, 2), " BP-7: Accept and rebase-merge?", "{s:#?}");
         assert_eq!(row(&s, 1), " y accept   any other key cancels");
-        assert_eq!(tone_of(&mut a, 42, 24, "Accept and rebase"), Some(Color::Green));
+        assert_eq!(tone_of(&mut a, 42, 24, "BP-7: Accept"), Some(Color::Green));
         assert_eq!(tone_of(&mut a, 42, 24, "y accept"), Some(Color::Reset));
 
         // a drop says whose agent it stops, and the key row is red too
         a.pending = Some((Action::Drop, "BP-9".into()));
         let s = screen(&mut a, 42, 24);
-        assert!(s.iter().any(|r| r.contains("BP-9  Worker running. Drop it?  y / n")), "{s:#?}");
+        assert_eq!(s[20..22], [" BP-9: Its worker is still running. Drop", " it and close PR #43?"].map(String::from), "{s:#?}");
         assert_eq!(row(&s, 1), " y drop and close PR #43   n cancels");
         assert_eq!(tone_of(&mut a, 42, 24, "y drop"), Some(Color::Red));
-        let s = screen(&mut a, 70, 24);
-        assert!(s.iter().any(|r| r.contains("BP-9  Worker running. Drop it and close PR #43?")), "{s:#?}");
+        assert!(s.iter().any(|r| r.contains("BP-9  Task BP-9") && r.ends_with("y / n")), "{s:#?}");
     }
 
     #[test]
@@ -1259,7 +1353,7 @@ mod tests {
             t("BP-9", "review", 9),
             t("BP-10", "done", 9),
         ], 1, Layout::Grouped);
-        a.finished = true; // closed tasks shown
+        a.closed = true; // closed tasks shown
         a.sel = Some("BP-1".into());
         let mut term = Terminal::new(TestBackend::new(42, 48)).unwrap();
         term.draw(|f| draw(f, &mut a)).unwrap();
@@ -1399,16 +1493,151 @@ mod tests {
 
     #[test]
     fn a_short_board_drops_the_gap_before_the_keys() {
-        // grouped: header, blank, one row, scroll mark and three footer rows
-        for h in [7u16, 4, 2] {
+        // grouped and short: header, blank, one row and the keys
+        for h in [5u16, 4, 2] {
             let mut a = app(vec![ready("BP-1")], 1, Layout::Grouped);
             let s = screen(&mut a, 40, h);
             assert!(row(&s, 0).starts_with(" a accept"), "height {h}: {s:#?}");
         }
         let mut a = app(vec![ready("BP-1")], 1, Layout::Grouped);
-        let s = screen(&mut a, 40, 8);
+        let s = screen(&mut a, 40, 6);
         assert_eq!(row(&s, 0), "");
         assert!(row(&s, 1).starts_with(" a accept"), "{s:#?}");
         assert!(s[2].contains("BP-1"), "the task still shows: {s:#?}");
+    }
+
+    #[test]
+    fn a_board_with_tasks_but_none_shown_says_why() {
+        let closed = |id: &str| Task { status: "done".into(), ..ready(id) };
+        let mut a = app(vec![closed("BP-1"), closed("BP-2")], 1, Layout::Grouped);
+        let s = screen(&mut a, 42, 12);
+        assert_eq!(s[2..4], [" Nothing open.", " f shows 2 closed."].map(String::from), "{s:#?}");
+        a.closed = true;
+        let s = screen(&mut a, 42, 12);
+        assert_eq!(s[2], " Closed  2", "{s:#?}");
+
+        // only another coordinator's: o shows them
+        let c3 = |id: &str| Task { coordinator: Some("c3".into()), ..ready(id) };
+        let mut a = app(vec![c3("BP-3"), c3("BP-4"), Task { coordinator: Some("c1".into()), ..closed("BP-5") }], 1, Layout::Grouped);
+        a.cfg.coordinators = vec!["c1".into(), "c3".into()];
+        a.me = Some("c1".into());
+        let s = screen(&mut a, 42, 12);
+        assert_eq!(s[2..5], [" Nothing of yours open.", " o shows 2 of c3's.", " f shows 1 closed."].map(String::from), "{s:#?}");
+
+        // and none at all
+        let mut a = app(vec![], 1, Layout::Grouped);
+        let s = screen(&mut a, 42, 12);
+        assert_eq!(s[2], " No tasks yet.", "{s:#?}");
+    }
+
+    fn asks(id: &str) -> Task {
+        Task { status: "needs".into(), why: Some("Asks: python3 or python?".into()), ..ready(id) }
+    }
+
+    #[test]
+    fn a_short_board_gives_the_list_its_spare_rows() {
+        let tasks = vec![asks("BP-1"), asks("BP-2"), ready("BP-3")];
+        let mut a = app(tasks.clone(), 1, Layout::Grouped);
+        let s = screen(&mut a, 42, 10);
+        // header, blank, seven list rows, the keys, the capsules' row
+        assert_eq!(s[1..9], [
+            "",
+            " Needs you  2",
+            "▌● BP-1  Task BP-1",
+            "▌  Asks: python3 or python?",
+            "▌● BP-2  Task BP-2",
+            "▌  Asks: python3 or python?",
+            "                                        ↓",
+            " ⏎ open  t tell  p peek            ? keys",
+        ].map(String::from), "{s:#?}");
+        assert_eq!(row(&s, 0), "");
+        // the scroll mark is past the ages, and the list moves down under it
+        a.sel = Some("BP-3".into());
+        let s = screen(&mut a, 42, 10);
+        assert!(s[1].ends_with('↑') && s[3].contains("BP-3"), "{s:#?}");
+
+        // a message takes the key row, and the list keeps its rows
+        a.sel = None;
+        a.msg = Note::done("Accepted BP-0.");
+        let s = screen(&mut a, 42, 10);
+        assert_eq!(row(&s, 1), " Accepted BP-0.");
+        assert!(s[7].ends_with('↓'), "{s:#?}");
+        // a y/n question gets a row of its own above the keys
+        a.msg = Note::default();
+        a.pending = Some((Action::Drop, "BP-1".into()));
+        let s = screen(&mut a, 42, 10);
+        assert_eq!(row(&s, 2), " BP-1: Drop it?");
+        assert_eq!(row(&s, 1), " y drop   any other key cancels");
+
+        // a tall board keeps its blank rows
+        let mut a = app(tasks, 1, Layout::Grouped);
+        let s = screen(&mut a, 42, 12);
+        assert_eq!(s[8], "", "{s:#?}");
+        assert!(s[7].ends_with('↓') && !s[7].contains("Ready"), "{s:#?}");
+    }
+
+    #[test]
+    fn a_narrow_board_puts_one_space_after_the_id_and_the_age_on_the_detail() {
+        let old = (model::now() - chrono::Duration::minutes(12)).to_rfc3339();
+        let tasks = vec![
+            Task { title: "Fix the login redirect after sign-in".into(), since: Some(old), ..asks("BP-3") },
+            Task { title: "Paginate the orders list".into(), why: None, ..ready("BP-10") },
+        ];
+        let mut a = app(tasks.clone(), 0, Layout::Grouped);
+        let s = screen(&mut a, 30, 16);
+        assert_eq!(s[2..10], [
+            " Needs you  1",
+            "▌● BP-3  Fix the login redi…",
+            "▌  12m · Asks: python3 or",
+            "▌  python?",
+            "",
+            " Ready to accept  1",
+            " ✔ BP-10 Paginate the order…",
+            "   Done.",
+        ].map(String::from), "{s:#?}");
+        // a needs task's age is still red after five minutes
+        assert_eq!(tone_of(&mut a, 30, 14, "12m"), Some(Color::Red));
+
+        // at 36 columns the age is back on the title
+        let s = screen(&mut a, 36, 16);
+        assert!(s[3].ends_with("12m") && s[3].contains("BP-3   Fix"), "{s:#?}");
+        assert_eq!(s[4], "▌  Asks: python3 or python?", "{s:#?}");
+
+        // compact: no detail lines, so the age stays on the title
+        let mut a = app(tasks, 0, Layout::Compact);
+        let s = screen(&mut a, 30, 20);
+        assert!(s.iter().any(|r| r.starts_with("▌● BP-3  Fix the l") && r.ends_with("12m")), "{s:#?}");
+    }
+
+    #[test]
+    fn the_compact_layout_names_its_groups_dim() {
+        let tasks = vec![asks("BP-1"), ready("BP-2"), Task { status: "working".into(), ..ready("BP-3") }];
+        let mut a = app(tasks, 0, Layout::Compact);
+        a.sel = Some("BP-2".into());
+        let s = screen(&mut a, 42, 20);
+        assert_eq!(s[2..8], [
+            " Needs you  1",
+            "▌● BP-1  Task BP-1",
+            " Ready to accept  1",
+            " ✔ BP-2  Task BP-2",
+            " Working  1",
+            " ⠋ BP-3  Task BP-3",
+        ].map(String::from), "{s:#?}");
+        let mut term = Terminal::new(TestBackend::new(42, 20)).unwrap();
+        term.draw(|f| draw(f, &mut a)).unwrap();
+        assert!(term.backend().buffer()[(1, 4)].modifier.contains(Modifier::DIM));
+    }
+
+    #[test]
+    fn a_peek_that_cant_read_the_screen_says_why_and_isnt_live() {
+        let mut a = app(vec![ready("BP-3")], 0, Layout::Grouped);
+        a.mode = Mode::Overlay { title: "BP-3  Fix it".into(), lines: vec!["BP-3's agent isn't running.".into()], peek: Some("BP-3".into()) };
+        a.peek_failed = true;
+        let s = screen(&mut a, 42, 12);
+        assert_eq!(s[2], " BP-3's agent isn't running.");
+        assert_eq!(row(&s, 0), " t tell  ⏎ open  i answer  esc returns");
+        a.peek_failed = false;
+        let s = screen(&mut a, 42, 12);
+        assert!(row(&s, 0).starts_with(" live · "), "{s:#?}");
     }
 }

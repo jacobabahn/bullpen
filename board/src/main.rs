@@ -192,7 +192,8 @@ pub struct App {
     /// what needs you or is ready in other repositories, looked at every few seconds
     pub others: model::OtherRepos,
     pub sel: Option<String>,
-    pub finished: bool,
+    /// `f`: closed tasks shown too
+    pub closed: bool,
     pub msg: Note,
     /// the first row shown, when the tasks don't all fit
     pub top: usize,
@@ -208,6 +209,8 @@ pub struct App {
     tx: Sender<Msg>,
     /// a peek read is in flight
     peeking: bool,
+    /// the peek's last read failed: it shows why, and isn't live
+    pub peek_failed: bool,
     /// when the peek reads the screen again
     peek_due: Instant,
     /// the board's own program, as it was when it started: replaced, the board reloads
@@ -241,7 +244,7 @@ enum Msg {
     Redraw,
     Changed,
     Done { id: String, job: Job, ok: bool, out: String },
-    Peeked { id: String, text: String },
+    Peeked { id: String, text: String, ok: bool },
     Prompted { id: String, prompt: Option<Prompt>, out: String },
 }
 
@@ -284,6 +287,14 @@ fn peek_key(code: KeyCode) -> Option<bool> {
     }
 }
 
+/// What a command failed with, as a sentence: "BP-3's agent isn't running."
+fn said(line: &str) -> String {
+    match line.chars().last() {
+        Some('.' | '!' | '?') | None => line.to_string(),
+        _ => format!("{line}."),
+    }
+}
+
 /// The last line a command said, without its "bullpen: ".
 fn last_line(text: &str) -> String {
     let last = text.trim().lines().last().unwrap_or("");
@@ -322,8 +333,8 @@ impl App {
         if let Some(sel) = &self.sel {
             a.extend(["--select".into(), sel.clone()]);
         }
-        if self.finished {
-            a.extend(["--finished".into(), "on".into()]);
+        if self.closed {
+            a.extend(["--closed".into(), "on".into()]);
         }
         a.extend(["--reloaded".into(), "on".into()]);
         a
@@ -366,7 +377,7 @@ impl App {
 
     /// The groups the board shows: without the tasks it hides.
     pub fn groups(&self) -> Vec<(&'static str, Vec<&Task>)> {
-        model::shown_groups(&self.tasks, &self.cfg, self.me.as_deref(), self.finished)
+        model::shown_groups(&self.tasks, &self.cfg, self.me.as_deref(), self.closed)
     }
 
     /// The tasks in the order the board shows them.
@@ -508,17 +519,20 @@ impl App {
         let lines = self.height.saturating_sub(4).max(1).to_string();
         let args = vec!["peek".into(), id.clone(), "--lines".into(), lines, "--vt".into()];
         std::thread::spawn(move || {
-            let (_, text) = run(&bullpen, &root, &args);
-            let _ = tx.send(Msg::Peeked { id, text });
+            let (ok, text) = run(&bullpen, &root, &args);
+            // a screen that can't be read: why, in the board's words
+            let text = if ok { text } else { said(&last_line(&text)) };
+            let _ = tx.send(Msg::Peeked { id, text, ok });
         });
     }
 
-    fn peeked(&mut self, id: String, text: String) {
+    fn peeked(&mut self, id: String, text: String, ok: bool) {
         self.peeking = false;
         self.peek_due = Instant::now() + PEEK_EVERY;
         if let Mode::Overlay { peek: Some(p), lines, .. } = &mut self.mode {
             if *p == id {
                 *lines = text.lines().map(String::from).collect();
+                self.peek_failed = !ok;
             }
         }
     }
@@ -750,7 +764,14 @@ impl App {
                 };
                 self.msg = if ok { Note::info(said) } else { Note::failed(out) };
             }
-            (_, Some('f')) => self.finished = !self.finished,
+            (_, Some('f')) => {
+                self.closed = !self.closed;
+                self.top = 0;
+                // a failure stays while you look around
+                if self.msg.kind != Kind::Failed {
+                    self.msg = Note::info(if self.closed { "Showing closed tasks too." } else { "Hiding closed tasks." });
+                }
+            }
             (_, Some('o')) => self.toggle_others(),
             (_, Some('c')) => {
                 let (ok, out) = self.bp(&["go"]);
@@ -818,6 +839,7 @@ impl App {
                     lines: vec!["…".into()],
                     peek: Some(sel.into()),
                 };
+                self.peek_failed = false;
                 self.peek_due = Instant::now();
                 self.peek();
             }
@@ -851,7 +873,7 @@ impl App {
         match m {
             Msg::Key(k) => return self.key(k),
             Msg::Done { id, job, ok, out } => self.done(id, job, ok, out),
-            Msg::Peeked { id, text } => self.peeked(id, text),
+            Msg::Peeked { id, text, ok } => self.peeked(id, text, ok),
             Msg::Prompted { id, prompt, out } => self.prompted(id, prompt, out),
             Msg::Redraw | Msg::Changed => {}
         }
@@ -874,7 +896,7 @@ pub struct Args {
     bullpen: PathBuf,
     me: Option<String>,
     select: Option<String>,
-    finished: bool,
+    closed: bool,
     reloaded: bool,
 }
 
@@ -890,7 +912,8 @@ fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--bullpen" => bullpen = Some(PathBuf::from(v)),
             "--coordinator" => out.me = Some(v),
             "--select" => out.select = Some(v),
-            "--finished" => out.finished = v == "on",
+            // --finished: what a board from before it was renamed restarts with
+            "--closed" | "--finished" => out.closed = v == "on",
             "--reloaded" => out.reloaded = v == "on",
             _ => return Err(format!("unknown argument {a}")),
         }
@@ -904,7 +927,7 @@ fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<Args, String> {
 }
 
 fn main() {
-    let Args { dir, root, bullpen, me, select, finished, reloaded } = match parse_args(std::env::args().skip(1)) {
+    let Args { dir, root, bullpen, me, select, closed, reloaded } = match parse_args(std::env::args().skip(1)) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("bullpen-board: {e}");
@@ -952,7 +975,7 @@ fn main() {
         me,
         repo_name,
         sel: select,
-        finished,
+        closed,
         msg: if reloaded { Note::info("Reloaded: the board was rebuilt.") } else { Note::default() },
         top: 0,
         pending: None,
@@ -962,6 +985,7 @@ fn main() {
         started: Instant::now(),
         tx,
         peeking: false,
+        peek_failed: false,
         peek_due: Instant::now(),
         exe: exe.and_then(|p| ExeId::of(&p).map(|id| (p, id))),
     };
@@ -1039,7 +1063,7 @@ mod tests {
             me: None,
             repo_name: "repo".into(),
             sel: None,
-            finished: false,
+            closed: false,
             msg: Note::default(),
             top: 0,
             pending: None,
@@ -1049,6 +1073,7 @@ mod tests {
             started: Instant::now(),
             tx,
             peeking: false,
+            peek_failed: false,
             peek_due: Instant::now(),
             exe: None,
         }
@@ -1140,7 +1165,7 @@ mod tests {
         assert!(a.pending.is_none());
         assert_eq!(a.msg, "BP-1 isn't ready yet.");
         let mut a = app(vec![task("BP-1", "done")]);
-        a.finished = true;
+        a.closed = true;
         a.settle();
         press(&mut a, 'a');
         assert!(a.pending.is_none());
@@ -1695,14 +1720,39 @@ mod tests {
                 bullpen: a.bullpen.clone(),
                 me: Some("c2".into()),
                 select: Some("BP-2".into()),
-                finished: true,
+                closed: true,
                 reloaded: true,
             }
         );
-        a.finished = false;
+        a.closed = false;
         a.me = None;
         a.sel = None;
         let args = parse_args(a.restart_args()).unwrap();
-        assert_eq!((args.me, args.select, args.finished), (None, None, false));
+        assert_eq!((args.me, args.select, args.closed), (None, None, false));
+    }
+
+    #[test]
+    fn f_says_whether_closed_tasks_show_and_an_old_boards_finished_still_works() {
+        let mut a = app(vec![task("BP-1", "ready"), task("BP-2", "done")]);
+        press(&mut a, 'f');
+        assert!(a.closed);
+        assert_eq!(a.msg, "Showing closed tasks too.");
+        press(&mut a, 'f');
+        assert_eq!((a.closed, a.msg.text.as_str()), (false, "Hiding closed tasks."));
+        // a board from before --closed restarts the new one with --finished
+        let argv = ["--dir", "d", "--root", "r", "--bullpen", "b", "--finished", "on"].map(String::from);
+        assert!(parse_args(argv).unwrap().closed);
+    }
+
+    #[test]
+    fn a_failed_peek_says_why_without_bullpens_prefix() {
+        let mut a = app(vec![task("BP-3", "stopped")]);
+        a.mode = Mode::Overlay { title: "BP-3".into(), lines: vec!["…".into()], peek: Some("BP-3".into()) };
+        a.peeked("BP-3".into(), said(&last_line("bullpen: BP-3's agent isn't running\n")), false);
+        assert!(a.peek_failed);
+        assert!(matches!(&a.mode, Mode::Overlay { lines, .. } if lines == &["BP-3's agent isn't running."]));
+        // once it reads the screen again, it's live
+        a.peeked("BP-3".into(), "$ cargo test".into(), true);
+        assert!(!a.peek_failed);
     }
 }
