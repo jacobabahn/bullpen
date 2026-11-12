@@ -4,7 +4,9 @@
 use chrono::{DateTime, FixedOffset, Local};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant, SystemTime};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// A field the board can do without: a value of a shape it doesn't expect reads
@@ -307,6 +309,9 @@ pub struct Config {
     /// rows the board leaves empty at its bottom, for Rex's minimized-pane capsules
     /// (`bullpen config --board-bottom-gap`; 0: none)
     pub bottom_gap: usize,
+    /// the top line counts what needs you or is ready in other repositories
+    /// (`bullpen config --board-repos`)
+    pub other_repos: bool,
 }
 
 impl Config {
@@ -413,6 +418,7 @@ impl Config {
                 .unwrap_or_default(),
             worker_model: v["worker_model"].as_str().map(String::from),
             bottom_gap: v["board_bottom_gap"].as_u64().unwrap_or(1) as usize,
+            other_repos: v["board_repos"].as_bool().unwrap_or(true),
         }
     }
 }
@@ -434,6 +440,121 @@ pub fn load_tasks(dir: &Path) -> Vec<Task> {
         link_doing(&mut out, &state.join("doing"));
     }
     out
+}
+
+/// Another repository with tasks that need you or are ready, for the top line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoCount {
+    pub name: String,
+    /// needs you (needs or stopped)
+    pub needs: usize,
+    /// waits on your accept or close (ready or finished)
+    pub ready: usize,
+}
+
+/// How often the board looks at the other repositories: their tasks aren't watched.
+pub const OTHERS_EVERY: Duration = Duration::from_secs(10);
+
+/// The other repositories' counts, kept between looks. A look reads each one's
+/// config.json and the time its tasks folder last changed (bullpen writes a task by
+/// renaming a new file into it), and reads its tasks again only when that changed.
+#[derive(Default)]
+pub struct OtherRepos {
+    pub counts: Vec<RepoCount>,
+    /// by state folder: when its tasks folder changed, and its needs and ready
+    seen: HashMap<PathBuf, (SystemTime, usize, usize)>,
+    looked: Option<Instant>,
+}
+
+impl OtherRepos {
+    /// Look again if the last look is OTHERS_EVERY old.
+    pub fn refresh(&mut self, me: &Path) {
+        if self.looked.is_some_and(|t| t.elapsed() < OTHERS_EVERY) {
+            return;
+        }
+        self.looked = Some(Instant::now());
+        self.look(me);
+    }
+
+    /// The repositories beside me (<state>/repos/*) whose checkout is still there,
+    /// each with what needs you and what's ready; those with neither are left out.
+    pub fn look(&mut self, me: &Path) {
+        let Some(repos) = me.parent() else { return };
+        let mut dirs: Vec<PathBuf> = std::fs::read_dir(repos)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|d| d.file_name() != me.file_name())
+            .collect();
+        dirs.sort();
+        let mut counts = Vec::new();
+        let mut seen = HashMap::new();
+        for dir in dirs {
+            let cfg = read_object(&dir.join("config.json"));
+            let Some(root) = cfg.get("root").and_then(|r| r.as_str()).map(PathBuf::from) else { continue };
+            if !root.is_dir() {
+                continue; // its checkout is gone
+            }
+            let changed = std::fs::metadata(dir.join("tasks")).and_then(|m| m.modified()).ok();
+            let Some(changed) = changed else { continue }; // no tasks yet
+            // a change in the same second as the last look may share its time: read again
+            let settled = changed.elapsed().is_ok_and(|a| a > Duration::from_secs(2));
+            let (needs, ready) = match self.seen.get(&dir) {
+                Some(&(t, n, r)) if t == changed && settled => (n, r),
+                _ => count_tasks(&dir.join("tasks")),
+            };
+            seen.insert(dir, (changed, needs, ready));
+            if needs + ready > 0 {
+                let name = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                counts.push(RepoCount { name, needs, ready });
+            }
+        }
+        self.seen = seen;
+        self.counts = counts;
+    }
+}
+
+/// How many tasks in a tasks folder need you, and how many are ready or finished.
+fn count_tasks(tasks: &Path) -> (usize, usize) {
+    let (mut needs, mut ready) = (0, 0);
+    for p in std::fs::read_dir(tasks).into_iter().flatten().flatten().map(|e| e.path()) {
+        if p.extension().is_none_or(|x| x != "json") {
+            continue;
+        }
+        match read_object(&p).get("status").and_then(|s| s.as_str()) {
+            Some("needs" | "stopped") => needs += 1,
+            Some("ready" | "finished") => ready += 1,
+            _ => {}
+        }
+    }
+    (needs, ready)
+}
+
+/// The other repositories on the top line in at most w columns: "shop: 1 needs you,
+/// 2 ready · web: 1 ready", else as marks ("shop ●1 ✔2 · web ✔1"), cut to fit.
+pub fn others_text(counts: &[RepoCount], w: usize) -> String {
+    let words = |c: &RepoCount| {
+        let parts: Vec<String> = [(c.needs, "needs you"), (c.ready, "ready")]
+            .into_iter()
+            .filter(|(n, _)| *n > 0)
+            .map(|(n, what)| format!("{n} {what}"))
+            .collect();
+        format!("{}: {}", c.name, parts.join(", "))
+    };
+    let marks = |c: &RepoCount| {
+        let parts: Vec<String> = [(c.needs, mark("needs")), (c.ready, mark("ready"))]
+            .into_iter()
+            .filter(|(n, _)| *n > 0)
+            .map(|(n, m)| format!("{m}{n}"))
+            .collect();
+        format!("{} {}", c.name, parts.join(" "))
+    };
+    let long = counts.iter().map(words).collect::<Vec<_>>().join(" · ");
+    if width(&long) <= w {
+        return long;
+    }
+    fit(&counts.iter().map(marks).collect::<Vec<_>>().join(" · "), w)
 }
 
 /// A pane's name as a file name, as bullpen and the watcher write it.
@@ -954,8 +1075,85 @@ pub(crate) mod tests {
                 board_others: Vec::new(),
                 worker_model: None,
                 bottom_gap: 1,
+                other_repos: true,
             }
         }
+    }
+
+    /// A state folder of its own under the system's temp folder, removed when dropped.
+    struct TempState(PathBuf);
+
+    impl TempState {
+        fn new(name: &str) -> TempState {
+            let d = std::env::temp_dir().join(format!("bullpen-board-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&d);
+            std::fs::create_dir_all(d.join("repos")).unwrap();
+            TempState(d)
+        }
+
+        /// A repository's state: its checkout (made unless gone) and tasks of these statuses.
+        fn repo(&self, name: &str, gone: bool, statuses: &[&str]) -> PathBuf {
+            let root = self.0.join("checkouts").join(name);
+            if !gone {
+                std::fs::create_dir_all(&root).unwrap();
+            }
+            let dir = self.0.join("repos").join(name);
+            std::fs::create_dir_all(dir.join("tasks")).unwrap();
+            std::fs::write(dir.join("config.json"), serde_json::json!({"root": root}).to_string()).unwrap();
+            for (i, st) in statuses.iter().enumerate() {
+                let t = serde_json::json!({"id": format!("BP-{}", i + 1), "status": st});
+                std::fs::write(dir.join("tasks").join(format!("BP-{}.json", i + 1)), t.to_string()).unwrap();
+            }
+            dir
+        }
+    }
+
+    impl Drop for TempState {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn the_other_repos_are_counted_without_this_one() {
+        let st = TempState::new("others");
+        let me = st.repo("proj", false, &["needs", "ready"]);
+        st.repo("shop", false, &["needs", "stopped", "ready", "finished", "working", "triage"]);
+        st.repo("quiet", false, &["working", "todo", "done"]); // nothing for you: left out
+        st.repo("gone", true, &["needs"]); // its checkout is gone: left out
+        st.repo("web", false, &["ready"]);
+        let mut o = OtherRepos::default();
+        o.look(&me);
+        assert_eq!(
+            o.counts,
+            vec![
+                RepoCount { name: "shop".into(), needs: 2, ready: 2 },
+                RepoCount { name: "web".into(), needs: 0, ready: 1 },
+            ]
+        );
+        // a task changes: the next look sees it
+        std::fs::write(st.0.join("repos/web/tasks/BP-2.json"), r#"{"id": "BP-2", "status": "needs"}"#).unwrap();
+        o.look(&me);
+        assert_eq!(o.counts[1], RepoCount { name: "web".into(), needs: 1, ready: 1 });
+        // refresh looks at most every OTHERS_EVERY
+        std::fs::remove_dir_all(st.0.join("repos/web")).unwrap();
+        o.refresh(&me);
+        o.refresh(&me);
+        assert_eq!(o.counts.len(), 1);
+        std::fs::remove_dir_all(st.0.join("repos/shop")).unwrap();
+        o.refresh(&me);
+        assert_eq!(o.counts.len(), 1);
+    }
+
+    #[test]
+    fn the_other_repos_shrink_to_marks_when_the_words_dont_fit() {
+        let counts = vec![
+            RepoCount { name: "shop".into(), needs: 1, ready: 2 },
+            RepoCount { name: "web".into(), needs: 0, ready: 1 },
+        ];
+        assert_eq!(others_text(&counts, 80), "shop: 1 needs you, 2 ready · web: 1 ready");
+        assert_eq!(others_text(&counts, 30), "shop ●1 ✔2 · web ✔1");
+        assert_eq!(width(&others_text(&counts, 10)), 10);
     }
 
     fn task(id: &str, status: &str) -> Task {
@@ -1097,16 +1295,7 @@ pub(crate) mod tests {
 
     #[test]
     fn auto_accept_says_when_a_task_differs_or_waits() {
-        let cfg = |on| Config {
-            layout: Layout::Grouped,
-            review_rounds: 2,
-            merge: "rebase".into(),
-            auto_accept: on,
-            coordinators: Vec::new(),
-            board_others: Vec::new(),
-            worker_model: None,
-            bottom_gap: 1,
-        };
+        let cfg = |on| Config { auto_accept: on, ..Config::default_for_test() };
         let approved = Some(Review { round: Some(1), verdict: Some("approved".into()), kind: None, block: None });
         let t = Task { pr: Some("https://github.com/me/repo/pull/4".into()), review: approved, ..task("BP-1", "ready") };
         assert_eq!(detail_with_auto(&t, &cfg(true), now()), "PR #4, approved by review.");

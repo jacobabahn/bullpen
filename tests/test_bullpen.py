@@ -1633,6 +1633,76 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(nxt(first), self.block(a))
         self.assertEqual(nxt(self.block(a)), self.block(b))  # wraps around
 
+    def other_repo(self, name):
+        """A second repository, with no remote (local mode), bullpen's state beside proj's."""
+        d = self.tmp / name
+        sh("git", "init", "-q", "-b", "main", str(d))
+        (d / "README").write_text("hi\n")
+        sh("git", "-C", str(d), "add", ".")
+        sh("git", "-C", str(d), "commit", "-qm", "init")
+        return d
+
+    def test_ls_all_repos_lists_each_repo_with_something_open(self):
+        self.bp("add", "Here", "--brief", "x")
+        shop = self.other_repo("shop")
+        self.bp("add", "Sell it", "--brief", "x", cwd=shop)
+        self.bp("add", "Ship it", "--brief", "x", cwd=shop)
+        quiet = self.other_repo("quiet")
+        self.bp("add", "Done already", "--brief", "x", cwd=quiet)
+        self.bp("drop", "BP-1", cwd=quiet)  # nothing open: left out
+        gone = self.other_repo("gone")
+        self.bp("add", "Lost", "--brief", "x", cwd=gone)
+        shutil.rmtree(gone)  # its checkout is gone: left out
+        out = self.bp("ls", "--all-repos", cwd=self.tmp).stdout  # works outside a repository
+        self.assertEqual([l.split()[:2] for l in out.splitlines() if l], [
+            ["proj", f"({self.repo})"], ["BP-1", "queued"],
+            ["shop", f"({shop})"], ["BP-1", "queued"], ["BP-2", "queued"]])
+        self.assertIn("  BP-2    queued (todo) Ship it", out)
+        self.assertNotIn("Done already", out)
+        with_closed = self.bp("ls", "--all-repos", "--all").stdout
+        self.assertIn("Done already", with_closed)
+        self.assertNotIn("Lost", with_closed)
+        js = json.loads(self.bp("ls", "--all-repos", "--json").stdout)
+        self.assertEqual([(g["repo"], [t["id"] for t in g["tasks"]]) for g in js],
+                         [(str(self.repo), ["BP-1"]), (str(shop), ["BP-1", "BP-2"])])
+        self.assertEqual(self.bp("ls").stdout.count("BP-"), 1)  # plain ls: this repo's alone
+        self.bp("drop", "BP-1")
+        self.bp("drop", "BP-1", cwd=shop)
+        self.bp("drop", "BP-2", cwd=shop)
+        self.assertEqual(self.bp("ls", "--all-repos").stdout, "no open tasks in any repository "
+                         "(--all shows finished ones)\n")
+
+    def test_go_next_all_repos_goes_across_repos(self):
+        here = self.start_task("Here")
+        shop = self.other_repo("shop")
+        self.bp("up", cwd=shop)
+        self.bp("add", "Sell it", "--brief", "x", cwd=shop)
+        self.bp("start", "BP-1", cwd=shop)
+        theirs = json.loads(self.bp("show", "BP-1", "--json", cwd=shop).stdout)["block"]
+        p = self.bp("go", "--next", "--all-repos", "--from", "elsewhere")
+        self.assertIn("nothing needs you in any repository; showing the board", p.stderr)
+        self.bp("_event", self.block(here), "blocked", "question", "Which?")
+        self.bp("_event", theirs, "blocked", "question", "Which?", cwd=shop)
+        go = lambda frm, *more: json.loads(self.bp("go", "--next", "--json", "--from", frm, *more).stdout)
+        first = go("elsewhere", "--all-repos")
+        self.assertEqual((first["block"], first["name"]), (self.block(here), here))  # waiting longest
+        second = go(first["block"], "--all-repos")
+        self.assertEqual((second["block"], second["name"]), (theirs, "shop BP-1"))
+        self.assertEqual(go(theirs, "--all-repos")["block"], self.block(here))  # back from the other repo
+        self.assertEqual(go(self.block(here))["block"], self.block(here))  # without it: this repo only
+        self.bp("go", "--next", "--all-repos", "--from", self.block(here))
+        layer = json.loads((self.fake / "reg.json").read_text())["blocks"][theirs]["layer"]
+        self.assertEqual(self.api("session.set_layer_state")[-1], {"layer_id": layer, "state": "normal", "focus": True})
+        self.assertIn("goes with --next", self.bp("go", "--all-repos", ok=False).stderr)
+
+    def test_board_repos_is_a_setting_global_too(self):
+        cfg = lambda: json.loads(self.bp("config", "--json").stdout)
+        self.assertEqual((cfg()["board_repos"], cfg()["sources"]["board_repos"]), (True, "default"))
+        self.bp("config", "--global", "--board-repos", "off")
+        self.assertEqual((cfg()["board_repos"], cfg()["sources"]["board_repos"]), (False, "global"))
+        self.bp("config", "--board-repos", "on")
+        self.assertEqual((cfg()["board_repos"], cfg()["sources"]["board_repos"]), (True, "repo"))
+
     def change_things(self, tid):
         """A committed new file, an uncommitted edit and an untracked file."""
         wt = self.show(tid)["worktree"]

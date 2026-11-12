@@ -125,6 +125,8 @@ pub struct App {
     pub repo_name: String,
     pub cfg: Config,
     pub tasks: Vec<Task>,
+    /// what needs you or is ready in other repositories, looked at every few seconds
+    pub others: model::OtherRepos,
     pub sel: Option<String>,
     pub finished: bool,
     pub msg: String,
@@ -244,6 +246,11 @@ impl App {
     fn reload(&mut self) {
         self.cfg = Config::load(&self.dir);
         self.tasks = model::load_tasks(&self.dir);
+        if self.cfg.other_repos {
+            self.others.refresh(&self.dir);
+        } else {
+            self.others = Default::default();
+        }
     }
 
     /// The groups the board shows: without the tasks it hides.
@@ -719,6 +726,7 @@ fn main() {
     let mut app = App {
         cfg: Config::load(&dir),
         tasks: Vec::new(),
+        others: Default::default(),
         dir,
         root,
         bullpen,
@@ -805,6 +813,7 @@ mod tests {
         App {
             cfg: Config::load(&dir),
             tasks,
+            others: Default::default(),
             root: dir.clone(),
             bullpen: dir.join("no-bullpen"),
             dir,

@@ -190,7 +190,16 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let auto = auto.as_str();
     let shown: Vec<&Task> = groups.iter().flat_map(|(_, ts)| ts.iter().copied()).collect();
     let count = counts(&shown, w.saturating_sub(width(&name) + width(auto) + 5));
-    put(buf, area, 0, w.saturating_sub(2 + count.width()).max(1), count);
+    let count_x = w.saturating_sub(2 + count.width()).max(1);
+    // then the other repositories with something for you, in what room is left
+    let others_x = 1 + width(&name) + width(auto) + 3;
+    let room = count_x.saturating_sub(others_x + 2);
+    if !app.others.counts.is_empty() && room >= 8 {
+        let style = if app.others.counts.iter().any(|c| c.needs > 0) { Style::new().fg(AMBER) } else { dim() };
+        put(buf, area, 0, others_x - 3, span(" · ", dim()));
+        put(buf, area, 0, others_x, span(model::others_text(&app.others.counts, room), style));
+    }
+    put(buf, area, 0, count_x, count);
     put(buf, area, 0, 1 + width(&name), span(auto, dim()));
     put(buf, area, 0, 1, span(name, bold()));
 
@@ -441,6 +450,7 @@ mod tests {
             repo_name: "repo".into(),
             cfg: Config { bottom_gap: gap, layout, ..Config::default_for_test() },
             tasks,
+            others: Default::default(),
             sel: None,
             finished: false,
             msg: String::new(),
@@ -490,6 +500,19 @@ mod tests {
         assert!(!s[0].contains("o shows") && s[0].ends_with("✔ 3"), "{s:#?}");
         assert!(s.iter().any(|r| r.contains("BP-2  c2 · Task BP-2")), "{s:#?}");
         assert!(s.iter().any(|r| r.contains("BP-1  Task BP-1")), "{s:#?}");
+    }
+
+    #[test]
+    fn the_header_counts_the_other_repos_in_the_room_left() {
+        let mut a = app(vec![ready("BP-1")], 1, Layout::Grouped);
+        a.others.counts = vec![model::RepoCount { name: "shop".into(), needs: 1, ready: 2 }];
+        let s = screen(&mut a, 60, 10);
+        assert!(s[0].starts_with(" repo · shop: 1 needs you, 2 ready"), "{s:#?}");
+        assert!(s[0].ends_with("✔ 1"), "{s:#?}"); // this repo's counts keep their place
+        let s = screen(&mut a, 30, 10);
+        assert!(s[0].starts_with(" repo · shop ●1 ✔2"), "{s:#?}");
+        let s = screen(&mut a, 20, 10); // no room: left out
+        assert!(!s[0].contains("shop"), "{s:#?}");
     }
 
     fn busy(id: &str, status: &str, text: &str) -> Task {

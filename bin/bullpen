@@ -61,6 +61,7 @@ DEFAULT_CONFIG = {
     "teardown": None,        # one run in a worktree before it is removed (over .bullpen/teardown.sh)
     "max_running": 3,        # tasks working or in review at once; the queue starts more as they finish
     "rebase_others": True,   # accept rebases the other open tasks onto the new base
+    "board_repos": True,     # the board's top line counts what needs you or is ready in other repos
 }
 
 # Settings that belong to one repository: the global config.json can't hold them.
@@ -592,6 +593,20 @@ def find_repo(from_block=None):
     if best:
         return Repo(best[1])
     raise Fail("no bullpen here: run `bullpen up` in a repository first")
+
+
+def known_repos():
+    """Every repository bullpen has state for (<state>/repos/*) whose checkout is still
+    there, by state folder."""
+    out = []
+    for cfg in sorted((STATE / "repos").glob("*/config.json")):
+        try:
+            root = (read_json(cfg, {}) or {}).get("root")
+        except ValueError:
+            continue  # a config.json caught half-written, or broken: that repo's own commands say so
+        if root and Path(root).is_dir():
+            out.append(Repo(root))
+    return out
 
 
 # ---------- Rex ----------
@@ -2985,21 +3000,50 @@ def status_words(status):
 
 
 def cmd_ls(args):
+    if args.all_repos:
+        return ls_repos(args)
     repo = Repo(repo_root())
-    tasks = [t for t in repo.tasks() if args.all or t["status"] not in CLOSED]
+    tasks = listed(repo, args)
     if args.json:
         print(json.dumps(tasks, indent=2))
         return
     if not tasks:
         print("no open tasks" + ("" if args.all else " (--all shows finished ones)"))
+    for line in ls_lines(repo, tasks):
+        print(line)
+
+
+def listed(repo, args):
+    """The tasks `ls` lists: the open ones, or all with --all."""
+    return [t for t in repo.tasks() if args.all or t["status"] not in CLOSED]
+
+
+def ls_lines(repo, tasks):
     every = {t["id"]: t for t in repo.tasks()}
     width = max((len(status_words(t["status"])) for t in tasks), default=0)
     for t in tasks:
         done = t["status"] == "finished" and "nothing to merge: " + ((t.get("summary") or "").splitlines() or [""])[0]
         extra = done or waits_phrase(repo, t, every) or stuck_phrase(t) or t.get("why") or t.get("pr") or (f"local branch {t['branch']}" if t.get("local") else "")
         model = own_model(repo, t)
-        print(f"{t['id']:<7} {status_words(t['status']):<{width}} {t['title']}" + (f"  ({extra})" if extra else "")
-              + (f"  [model {model}]" if model else ""))
+        yield (f"{t['id']:<7} {status_words(t['status']):<{width}} {t['title']}" + (f"  ({extra})" if extra else "")
+               + (f"  [model {model}]" if model else ""))
+
+
+def ls_repos(args):
+    """`ls --all-repos`: the open tasks of every repository bullpen knows, by repository.
+    One with nothing open, or whose checkout is gone, is left out."""
+    groups = [(r, ts) for r in known_repos() for ts in [listed(r, args)] if ts]
+    if args.json:
+        print(json.dumps([{"repo": str(r.root), "tasks": ts} for r, ts in groups], indent=2))
+        return
+    if not groups:
+        print("no open tasks in any repository" + ("" if args.all else " (--all shows finished ones)"))
+    for i, (r, ts) in enumerate(groups):
+        if i:
+            print()
+        print(f"{r.root.name}  ({r.root})")
+        for line in ls_lines(r, ts):
+            print("  " + line)
 
 
 def model_line(repo, t):
@@ -3171,7 +3215,7 @@ def config_changes(args):
     for key in ("workers", "merge", "news", "board_layout", "notify"):
         if getattr(args, key):
             ch[key] = getattr(args, key)
-    for key in ("review", "auto_accept"):
+    for key in ("review", "auto_accept", "board_repos"):
         if getattr(args, key):
             ch[key] = getattr(args, key) == "on"
     for key, least, says in (("stuck_after", 0, "minutes, or 0 to turn it off"),
@@ -3317,19 +3361,27 @@ def cmd_guide(args):
 # ---------- getting around: go, board, keys ----------
 
 def go_target(repo, args):
-    """(session, block, name) of the pane `go` should focus."""
+    """(repo, session, block, name) of the pane `go` should focus."""
     if args.next:
         # only over the tasks the board of the pane's coordinator shows
         c = pane_coordinator(repo, args.from_block)
-        needs = sorted((t for t in repo.tasks() if t["status"] == "needs" and t.get("block")
-                        and on_board(repo, c, t)),
-                       key=lambda t: t.get("since") or t.get("updated") or "")
+        needs = [(repo, t) for t in repo.tasks() if t["status"] == "needs" and t.get("block")
+                 and on_board(repo, c, t)]
+        if args.all_repos:  # and every other repository's, whoever's board they're on
+            needs += [(r, t) for r in known_repos() if r.dir != repo.dir
+                      for t in r.tasks() if t["status"] == "needs" and t.get("block")]
+        needs.sort(key=lambda rt: rt[1].get("since") or rt[1].get("updated") or "")
         if not needs:
-            raise Fail("nothing needs you")
-        blocks = [t["block"] for t in needs]
+            raise Fail("nothing needs you" + (" in any repository" if args.all_repos else ""))
+        blocks = [t["block"] for _, t in needs]
         here = args.from_block
-        t = needs[(blocks.index(here) + 1) % len(needs) if here in blocks else 0]
-        return t["session"], t["block"], t["id"]
+        r, t = needs[(blocks.index(here) + 1) % len(needs) if here in blocks else 0]
+        return r, t["session"], t["block"], t["id"] if r.dir == repo.dir else f"{r.root.name} {t['id']}"
+    return (repo, *pane_target(repo, args))
+
+
+def pane_target(repo, args):
+    """(session, block, name) of a task's pane, its reviewer's, the coordinator's or the board's."""
     if args.id and args.review:
         t = repo.task(args.id)
         r = t.get("review") or {}
@@ -3374,22 +3426,24 @@ def pane_coordinator(repo, block):
 
 
 def cmd_go(args):
-    repo = find_repo(args.from_block)
+    if args.all_repos and not args.next:
+        raise Fail("--all-repos goes with --next")
+    home = find_repo(args.from_block)
     try:
-        session, block, name = go_target(repo, args)
+        repo, session, block, name = go_target(home, args)
     except Fail as e:
-        if not (args.next and str(e) == "nothing needs you"
-                and any(c.get("board") for c in repo.cfg["coordinators"])):
+        if not (args.next and str(e).startswith("nothing needs you")
+                and any(c.get("board") for c in home.cfg["coordinators"])):
             raise
         # A key that does nothing looks broken: show the board, where that's plain.
-        print("bullpen: nothing needs you; showing the board", file=sys.stderr)
+        print(f"bullpen: {e}; showing the board", file=sys.stderr)
         args.next, args.board = False, True
-        session, block, name = go_target(repo, args)
+        repo, session, block, name = go_target(home, args)
     if not rex_alive(session, block):
         # after a Rex restart its ID changed (and maybe its session's)
         relink(repo, args.session or os.environ.get("REX_SESSION") or session)
-        repo = Repo(repo.root)
-        session, block, name = go_target(repo, args)
+        home = Repo(home.root)
+        repo, session, block, name = go_target(home, args)
         if not rex_alive(session, block):
             raise Fail(f"{name}'s pane is gone")
     if args.json:
@@ -4548,11 +4602,7 @@ def cmd_check(args):
     """Compare each task's status with what its agent is doing now; --fix catches up."""
     out = (lambda line: None) if args.quiet else print
     if args.all_repos:
-        repos = []
-        for cfg in (STATE / "repos").glob("*/config.json"):
-            root = read_json(cfg, {}).get("root")
-            if root and Path(root).is_dir():
-                repos.append(Repo(root))
+        repos = known_repos()
     else:
         repos = [Repo(repo_root())]
     drift = 0
@@ -5016,6 +5066,8 @@ def parser():
     p = sub.add_parser("go", help="focus a task's pane (or the coordinator's, or the board's)")
     p.add_argument("id", nargs="?", help="the task (default: the coordinator)")
     p.add_argument("--next", action="store_true", help="the next task that needs you")
+    p.add_argument("--all-repos", action="store_true",
+                   help="with --next: in any repository bullpen knows, not just this one")
     p.add_argument("--board", action="store_true", help="the task board")
     p.add_argument("--review", action="store_true", help="the task's reviewer, not its worker")
     p.add_argument("--from", dest="from_block", default=os.environ.get("REX_BLOCK"),
@@ -5178,7 +5230,10 @@ def parser():
 
     p = sub.add_parser("ls", help="list tasks")
     p.add_argument("--all", action="store_true", help="closed tasks too (done and dropped)")
-    p.add_argument("--json", action="store_true", help="the task records as JSON, with their raw status")
+    p.add_argument("--all-repos", action="store_true",
+                   help="every repository bullpen knows, by repository (those with nothing open left out)")
+    p.add_argument("--json", action="store_true", help="the task records as JSON, with their raw status "
+                   "(with --all-repos: a list of {repo, tasks})")
     p.set_defaults(fn=cmd_ls)
 
     p = sub.add_parser("show", help="one task")
@@ -5228,6 +5283,9 @@ def parser():
     p.add_argument("--board-others", choices=["on", "off"],
                    help="with several coordinators: this coordinator's board shows the other ones' tasks too "
                         "(default off; the board's o key)")
+    p.add_argument("--board-repos", choices=["on", "off"],
+                   help="the board's top line counts the tasks that need you or are ready in other "
+                        "repositories (default on)")
     p.add_argument("--coordinator", metavar="ID",
                    help="the coordinator --board-others is for (default: the one whose pane or board runs it)")
     p.add_argument("--auto-accept", choices=["on", "off"],

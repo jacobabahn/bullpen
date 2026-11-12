@@ -114,7 +114,8 @@ change ("3 files, +120 −14"), worked out once when its worker runs `ready`. A
 task that needs you gets an amber bar; its age turns red after 5 minutes. A
 working task's mark spins, and one in review turns; one whose agent has shown no
 progress for a while (below) stops turning and gets the amber bar too. The top
-line counts the tasks in each state. `l` switches to a compact layout, one line
+line counts the tasks in each state, and names other repositories with tasks that
+need you or are ready (see [Several repositories](#several-repositories)). `l` switches to a compact layout, one line
 per task with the selected task's detail at the bottom (what its agent is doing
 first).
 
@@ -167,6 +168,7 @@ bullpen model BP-2 sonnet   # the worker model it starts and resumes with (--cle
 bullpen review-mode BP-2 full  # its first review: full, light or auto (by the size of the change)
 bullpen start BP-1    # worktree + branch + a Rex pane running the worker
 bullpen ls            # open tasks, in the board's words (--json: the raw status)
+bullpen ls --all-repos  # the same for every repository bullpen knows, by repository
 bullpen peek BP-1     # the end of the worker's screen
 bullpen prompt BP-1   # the prompt its worker (or reviewer) is at, and its screen, as JSON
 bullpen answer BP-1 2 # press option 2 of that prompt (or y, n), as you would in its pane
@@ -174,6 +176,7 @@ bullpen reply BP-1 "Postgres"   # answer the coordinator's `ask`: it goes to the
 bullpen diff BP-1     # its changes against its base, in a pager (--stat: just the files)
 bullpen check         # tasks whose status is out of step with their agent; --fix catches up
 bullpen go BP-1       # focus its pane (`go` alone: the coordinator; --next: next needing you)
+bullpen go --next --all-repos   # the next task needing you in any repository
 bullpen tell BP-1 "Also cover the logout path"
 bullpen resume BP-1   # restart a stopped worker, continuing its conversation
 bullpen ask BP-1 "..."   # (coordinator) BP-1 needs you: the question shows on the board
@@ -261,6 +264,28 @@ from elsewhere to the first one.
 A config from before this, with one coordinator, loads as coordinator `c1`, and
 its tasks (which name no coordinator) are news for every coordinator until one
 adopts them.
+
+### Several repositories
+
+Each repository has its own coordinator, board and tasks, but bullpen knows them
+all: their state is under `~/.local/state/bullpen/repos/`. A repository whose
+checkout is gone is left out of what follows.
+
+- `bullpen ls --all-repos` lists the open tasks of every repository, under each
+  one's name and path, leaving out those with nothing open. It works from any
+  folder. `--all` adds the closed tasks; `--json` prints a list of
+  `{"repo": ..., "tasks": [...]}`.
+- `bullpen go --next --all-repos` goes to the next task that needs you in any
+  repository, the one waiting longest first, as `go --next` does in one. In the
+  repository it runs for, it skips what that board hides, as `go --next` does.
+- The board's top line, after the repository's name, names the other
+  repositories with something for you: `shop: 1 needs you, 2 ready` (needs you:
+  needs or stopped; ready: ready to accept, or finished), shortened to
+  `shop ●1 ✔2` when the words don't fit, and left out when even that has no room.
+  It is amber while one of them needs you. The board looks at the other
+  repositories every 10 seconds, and reads a repository's tasks again only when
+  its tasks folder changed. `bullpen config --board-repos off` turns it off
+  (`--global` for every board).
 
 ## How it behaves
 
@@ -753,7 +778,9 @@ too, and `off` none (`needs`, when a task needs you, by default; see
 --board-bottom-gap 0` lets the board use its bottom row (1 empty row by default, for
 Rex's capsules). `bullpen config --board-others on --coordinator c1` makes c1's
 board show the other coordinators' tasks too (see [Several
-coordinators](#several-coordinators); the board's `o`). `bullpen config --prefix XY --base develop` changes the task prefix (default `BP`)
+coordinators](#several-coordinators); the board's `o`). `bullpen config --board-repos off`
+takes the other repositories off the board's top line (on by default; see [Several
+repositories](#several-repositories)). `bullpen config --prefix XY --base develop` changes the task prefix (default `BP`)
 and the base branch (default: origin's default branch). The worker and coordinator
 commands are in that folder's `config.json` (`worker`, `coordinator_cmd`). `"rebase_others": false`
 there stops `accept` rebasing the other open tasks (see [After accept](#after-accept)).
