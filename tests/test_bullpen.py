@@ -4324,6 +4324,14 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(lines["coordinators"][0], "ok")
         self.assertNotIn("board", self.bp("up").stdout)  # nothing to restart now
 
+    def test_a_board_runs_bullpen_board_and_up_leaves_it_be(self):
+        self.healthy()
+        split = next(a for a in self.rex_calls() if a[0] == "split")
+        self.assertIn(f"BULLPEN_BOARD={self.env['BULLPEN_BOARD']}", split)  # Rex panes don't inherit it
+        (self.fake / "prog_blk2").write_text(self.env["BULLPEN_BOARD"])  # what that board then runs
+        self.assertNotIn("board", self.bp("up").stdout)
+        self.assertTrue((self.fake / "alive" / "blk2").exists())
+
     def test_doctor_says_to_reload_when_only_some_keys_are_loaded(self):
         self.healthy()
         (self.fake / "actions.json").write_text(json.dumps({"actions": [

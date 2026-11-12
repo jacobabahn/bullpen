@@ -620,8 +620,9 @@ def known_repos():
 # ---------- Rex ----------
 
 def with_state(argv):
-    """Panes Rex starts don't inherit our environment: carry bullpen's own settings."""
-    env = [f"{k}={os.environ[k]}" for k in ("BULLPEN_STATE", "BULLPEN_GH", "BULLPEN_REX")
+    """Panes Rex starts don't inherit our environment: carry bullpen's own settings
+    (BULLPEN_BOARD too, so a board runs the program doctor and `up` expect of it)."""
+    env = [f"{k}={os.environ[k]}" for k in ("BULLPEN_STATE", "BULLPEN_GH", "BULLPEN_REX", "BULLPEN_BOARD")
            if os.environ.get(k)]
     return ["env", *env, *argv] if env else argv
 
