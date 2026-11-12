@@ -22,7 +22,7 @@ _Avoid_: window, block (Rex's API word for it).
 
 **Task status**: where a task is: `todo`, `working`, `review`, `ready`, `finished`, `triage`, `needs`, `stopped`, `done`, `dropped`. It changes only through `set_status`. The board and `ls` show it in words: queued (`todo`), working, in review, ready to accept, finished, coordinator on it (`triage`), needs you (`needs`, `stopped`), closed (`done`, `dropped`).
 
-**Stop**: why a task waits on someone, recorded as `{"by": "worker" | "reviewer", "kind": ...}`: at a prompt, failed, ended its turn without `ready`, exited, its pane gone after a Rex restart, a message that didn't reach the worker, or not continued after the usage limit. Only a task in `triage`, `needs` or `stopped` has one. The task's `why` says the same thing in words, for people and the board; code never goes by its wording.
+**Stop**: why a task waits on someone, recorded as `{"by": "worker" | "reviewer", "kind": ...}`: at a prompt, failed, ended its turn without `ready`, exited, its pane gone after a Rex restart, a message that didn't reach the worker, not continued after the usage limit, or its worktree's setup failed (so no worker started). Only a task in `triage`, `needs` or `stopped` has one. The task's `why` says the same thing in words, for people and the board; code never goes by its wording.
 _Avoid_: reason (for the recorded stop), needs (for any stop).
 
 **Triage**: a stop the task's coordinator can see to; "coordinator on it" on the board. It becomes **needs** if no coordinator is running, or once `triage_minutes` pass (escalation).
