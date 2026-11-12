@@ -1120,12 +1120,20 @@ mod tests {
         let exe = d.0.join("bullpen");
         let log = d.0.join("log");
         program(&exe, &format!(
-            "#!/bin/sh\necho \"$*\" >> {log}\ncase \"$*\" in\n\
+            "#!/bin/sh\n[ \"$1\" = --ready ] && exit 0\necho \"$*\" >> {log}\ncase \"$*\" in\n\
              *--show*) echo '{{\"id\": \"'$2'\", \"state\": \"{state}\", \"why\": null, \"steps\": []}}' ;;\n\
              *--new*) echo \"writing a tour of $2: it opens when it's done\" ;;\n\
              *) echo \"opened $2's tour\" ;;\nesac\n",
             log = log.display()
         ));
+        // A program just written can't run while another test's fork still holds it
+        // open for writing (ETXTBSY): wait until it runs.
+        for _ in 0..200 {
+            match Command::new(&exe).arg("--ready").stdout(Stdio::null()).status() {
+                Err(e) if e.raw_os_error() == Some(26) => std::thread::sleep(Duration::from_millis(10)),
+                _ => break,
+            }
+        }
         exe
     }
 

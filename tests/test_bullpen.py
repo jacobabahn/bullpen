@@ -4938,6 +4938,8 @@ class TourTest(unittest.TestCase):
         self.ready(tid)
         self.assertNotIn("opened", self.show(tid)["tour"])
         self.assertTrue(self.show(tid)["tour"]["stale"])  # the board says it's not toured
+        self.stepper_on_a_terminal(tid, ["q"])  # the old tour, opened anyway (the board's o)
+        self.assertNotIn("opened", self.show(tid)["tour"])  # is no tour of this code
 
     def test_tour_model_is_a_layered_setting(self):
         self.assertEqual(json.loads(self.bp("config", "--json").stdout)["tour_model"], "sonnet")

@@ -643,6 +643,9 @@ mod tests {
         // a tour of code the worker has changed since is no tour of this code
         let old = Task { tour: Some(model::TourRun { stale: Some(true), ..run("written", "abc", None).unwrap() }), ..ready("BP-6") };
         assert_eq!(model::stat_line(&old), "Not toured yet");
+        // even once its old tour is opened anyway
+        let opened = Task { tour: Some(model::TourRun { stale: Some(true), ..run("written", "abc", Some("abc")).unwrap() }), ..ready("BP-6") };
+        assert_eq!(model::stat_line(&opened), "Not toured yet");
         let mut a = app(tasks, 0, Layout::Grouped);
         let s = screen(&mut a, 60, 24);
         // a spinner turns in place of BP-4's mark

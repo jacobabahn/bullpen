@@ -332,7 +332,9 @@ impl Task {
 
     /// Has the person opened the tour of its code as it is?
     pub fn toured(&self) -> bool {
-        self.tour.as_ref().is_some_and(|r| r.state == "written" && r.opened.is_some() && r.opened == r.commit)
+        self.tour.as_ref().is_some_and(|r| {
+            r.state == "written" && r.stale != Some(true) && r.opened.is_some() && r.opened == r.commit
+        })
     }
 
     /// When it entered its current status.

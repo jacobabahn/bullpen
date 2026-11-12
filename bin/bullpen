@@ -3521,8 +3521,8 @@ def view_tour(repo, t, back=False):
     if not sys.stdin.isatty():
         raise Fail("the tour needs a terminal (the board's g opens it in a pane)")
     run_ = t.get("tour") or {}
-    if run_.get("state") == "written":
-        run_["opened"] = tour["commit"]  # the board marks it toured
+    if run_.get("state") == "written" and not run_.get("stale") and not tour_stale(repo, t, tour):
+        run_["opened"] = tour["commit"]  # the board marks it toured (not for the old code's tour)
         write_json(repo.task_path(t["id"]), t)
     place = read_comments(repo, t).get("at") or {}
     at = place.get("step", 1) - 1 if place.get("commit") == tour["commit"] else 0
