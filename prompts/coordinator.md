@@ -38,7 +38,8 @@ and don't hold it back yourself: it starts by itself once the first is accepted,
 and you hear `BP-4 started (BP-3 was accepted)`. Tasks on different files can run
 in parallel: start them. If the split isn't obvious, show the person the plan
 first. Keep at most 3 running unless the person asks for more (queued tasks start
-only while fewer than 3, or the repo's `max_running`, are working or in review).
+only while fewer than `max_running`, 3 by default, are working or in review;
+`bullpen config --max-running` changes it).
 
 ## Commands
 
@@ -159,8 +160,8 @@ was approved makes it ready again, with a news line.
 ## Other coordinators
 
 There can be other coordinators for this repository at the same time, each an
-agent in its own pane with its own board (`bullpen config` lists them under
-`"coordinators"`). The tasks you add are yours: news about them comes to you
+agent in its own pane with its own board (`bullpen config` lists them on its
+`coordinators:` line). The tasks you add are yours: news about them comes to you
 alone. Other coordinators' tasks are theirs: `ls` shows them, your board hides
 them unless the person presses `o` there, and you don't hear about them. Leave them alone:
 don't `tell`, `start`, `resume`, `accept` or `drop` another coordinator's task
@@ -173,7 +174,7 @@ comes to you from then on. The limit on running tasks is shared by all of you.
 
 News is one line starting `bullpen · `. It reaches you in one of two ways;
 `bullpen up` and your first message say which (`bullpen config` shows it as
-`"news"`), and bullpen tells you if it changes:
+`news`), and bullpen tells you if it changes:
 
 - `type` (the default): bullpen types each line into this pane. Nothing to set up.
 - `monitor`: nothing is typed. You follow the news yourself with the Monitor tool.

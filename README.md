@@ -56,6 +56,8 @@ non-zero when anything fails. It checks:
 - the watcher is running, from the current `watch.lua` and `bin/bullpen` (the hashes
   in `watcher.json`)
 - the state folder is writable, and this repo's `config.json` parses
+- the global `config.json` (see [Settings](#settings)), if there is one, parses
+  and sets nothing only a repository can have
 - the setup and teardown hooks, if there are any: `.bullpen/setup.sh` as committed
   on the base (its `#!` interpreter exists, and an `sh` or `bash` script parses), or
   the `config --setup` command (it parses, and its program is found). A
@@ -272,8 +274,8 @@ on BP-9 while BP-9 waits on BP-8).
 
 When a task is accepted, bullpen starts each queued task whose dependencies are
 now all accepted, in ID order, as long as fewer than `max_running` tasks are
-working or in review (3 by default; set `"max_running"` in the repo's
-`config.json`). When an accept or a drop frees a slot, the next queued task starts
+working or in review (3 by default; `bullpen config --max-running 5` changes
+it). When an accept or a drop frees a slot, the next queued task starts
 too. Only tasks with dependencies are queued like this: a plain todo task waits
 for the coordinator (or you) to start it. Each start is one news line, `BP-9
 started (BP-8 was accepted)`. While the usage limit is reached nothing starts;
@@ -320,8 +322,8 @@ reads the brief and the diff, runs the tests, changes nothing, and ends with
 `bullpen verdict BP-3 approve` or `changes`. Changes go back to the worker,
 which fixes them and runs `ready` again, for up to 2 rounds. The task is ready
 to accept once review approves, or after the last round with the open findings
-listed. `bullpen config --review off` skips review; `review_rounds` and
-`reviewer` in the repo's `config.json` set the rounds and the reviewer's command.
+listed. `bullpen config --review off` skips review; `bullpen config --review-rounds 3`
+sets the rounds, and `reviewer` in the repo's `config.json` the reviewer's command.
 
 Review costs only what it has to:
 
@@ -662,6 +664,7 @@ task ready, with its worktree and branch as they were.
 ## Where things live
 
 - Tasks, briefs, settings and your own rules: `~/.local/state/bullpen/repos/<repo>/` (`BULLPEN_STATE` moves it).
+- Settings for every repository: `~/.config/bullpen/config.json` (`XDG_CONFIG_HOME` moves it). See [Settings](#settings).
   Setup and teardown logs are in `briefs/` there, as `<ID>.setup.log` and `<ID>.teardown.log`.
 - Worktrees: `<repo>-bullpen/<ID>` next to the repository.
 - News: `news.log` beside the tasks (each line names the coordinators it is for,
@@ -671,6 +674,35 @@ task ready, with its worktree and branch as they were.
 - Notifications: `notify.log` beside the tasks. See [Notifications](#notifications).
 - What each worker and reviewer is doing, for the board: `~/.local/state/bullpen/doing/<pane>.json`,
   written by the watcher (at most every 3 seconds a pane, no news) and removed with the pane.
+
+## Settings
+
+`bullpen config` lists each setting with its value and where that comes from:
+`repo` (this repository's `config.json`), `global` (the one for every repository,
+`~/.config/bullpen/config.json`, or `$XDG_CONFIG_HOME/bullpen/config.json`) or
+`default` (bullpen's own). A repository's own value wins over the global one, and
+the global one over the default. `bullpen config --json` prints the same as JSON,
+with each setting's source under `"sources"`.
+
+Every flag below changes this repository's value. With `--global` it changes the
+global one instead, so every repository that doesn't set its own gets it:
+
+```sh
+bullpen config --global --model opus --merge squash --max-running 4
+bullpen config --unset merge             # this repo goes back to the global merge
+bullpen config --global --unset merge    # and the global one back to the default
+```
+
+`--unset` takes the setting's name as `config.json` has it (`worker_model`,
+`review_rounds`). `--global` works outside a repository too. The prefix, the base
+branch, the news mode and the coordinators belong to one repository, so `--global`
+refuses `--prefix`, `--base`, `--news` and `--board-others`. The commands
+(`worker`, `reviewer`, `coordinator_cmd`) and `rebase_others` have no flags: set them
+in either `config.json` by hand.
+
+A repository's `config.json` holds only what it sets itself. One from before the
+global file held every setting: the first time bullpen reads it, it drops the
+values that are just the default, so the global ones apply there.
 
 `bullpen config --auto-accept on` accepts approved tasks by themselves (off by
 default; see [Auto-accept](#auto-accept)). `bullpen config --news monitor` changes how news reaches the coordinator (`type`
@@ -696,7 +728,8 @@ and light reviews too); `--worker-model`, `--reviewer-model` and
 does (an alias like `opus`, or a full model ID), and `default` lets Claude Code pick
 again. Bullpen adds `--model` when it starts an agent, in place of any `--model` in its
 command; it leaves other agents' commands alone. (To use a `--model` written in the
-command instead, set `worker_model` or `reviewer_model` back to `null` in `config.json`.) `bullpen config` shows the models in
+command instead, set `worker_model` or `reviewer_model` back to `null` in `config.json`,
+or `bullpen config --unset worker_model` when it was only set for this repository.) `bullpen config` shows the models in
 use, and `bullpen show BP-3` the one a worker was started with.
 
 A task can have a worker model of its own, over the config's: `bullpen add "..."
