@@ -3845,6 +3845,20 @@ class BullpenTest(unittest.TestCase):
         cmd = self.api("session.new_layer")[-1]["layout"]["block"]["options"]["command"]
         self.assertNotIn("--continue", cmd)
 
+    def test_start_after_bullpen_died_in_setup_sets_it_up_again(self):
+        # the first setup kills bullpen itself (its parent), as Ctrl-C would
+        self.bp("config", "--setup", "if [ -e ../died ]; then echo ok; else touch ../died; kill -9 $PPID; fi")
+        self.bp("up")
+        tid = self.bp("add", "Fix the thing", "--brief", "Make it work.").stdout.strip()
+        self.assertNotEqual(self.bp("start", tid, ok=False).returncode, 0)
+        t = self.show(tid)
+        self.assertEqual(t["status"], "todo")
+        self.assertTrue(t["worktree"] and t["needs_setup"])  # it knows its worktree
+        self.bp("start", tid)
+        t = self.show(tid)
+        self.assertEqual(t["status"], "working")
+        self.assertNotIn("needs_setup", t)
+
     def test_resume_after_a_failed_setup_sets_it_up_and_starts_afresh(self):
         self.bp("config", "--setup", "exit 1")
         self.bp("up")

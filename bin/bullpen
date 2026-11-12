@@ -1627,6 +1627,7 @@ def start_task(repo, t, session, model=None):
         wt.parent.mkdir(parents=True, exist_ok=True)
         git(repo.root, "worktree", "add", "-q", "--no-track", "-b", t["branch"], str(wt), start_point)
         t["worktree"] = str(wt)
+        repo.save_task(t)  # setup can take minutes: if bullpen dies in it, a retry knows the worktree
     if t.get("needs_setup") and not set_up(repo, t):
         return False
     brief = (repo.dir / "briefs" / f"{t['id']}.md").read_text()
