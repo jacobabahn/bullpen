@@ -72,7 +72,8 @@ fn span(text: impl Into<String>, style: Style) -> Span<'static> {
 enum Row<'a> {
     Head(String),
     Title(&'a Task),
-    Detail(&'a Task, String),
+    /// a line under a task; loud when it says what the task needs from you
+    Detail(&'a Task, String, bool),
     Gap,
 }
 
@@ -122,7 +123,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let full = f.area();
     let buf = f.buffer_mut();
 
-    if matches!(app.mode, Mode::Overlay { .. } | Mode::Answer { .. } | Mode::Help { .. }) {
+    if matches!(app.mode, Mode::Overlay { .. } | Mode::Answer { .. } | Mode::Help { .. } | Mode::Tell { reply: true, .. }) {
         // the title, a blank line, at least one line and the foot
         let h = full.height as usize;
         app.height = (h - bottom_gap(app, h, 4)) as u16;
@@ -145,6 +146,14 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         draw_answer(buf, full, app.height as usize, title, prompt.as_ref());
         return;
     }
+    if let Mode::Tell { id, text, reply: true } = &app.mode {
+        let t = app.tasks.iter().find(|t| t.id == *id);
+        let title = t.map_or(id.clone(), |t| format!("{}  {}", t.id, t.title));
+        let question = t.and_then(|t| t.why.clone()).filter(|q| !q.is_empty()).unwrap_or("Waiting for you.".into());
+        let (x, y) = draw_ask(buf, full, app.height as usize, &title, &question, text);
+        f.set_cursor_position(Position::new(full.x + x as u16, full.y + y as u16));
+        return;
+    }
 
     let area = full;
     let (w, h) = (area.width as usize, area.height as usize);
@@ -161,8 +170,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let is_cur = |t: &Task| Some(&t.id) == cur_id.as_ref();
     // IDs share a column as wide as the longest, so titles and details line up
     let idw = groups.iter().flat_map(|(_, ts)| ts).map(|t| width(&t.id)).max().unwrap_or(0);
-    // under the title, to the right edge
-    let detail_w = w.saturating_sub(5 + idw + 2);
+    // from under the ID to the right edge
+    let detail_w = w.saturating_sub(5);
 
     // header: the repository, and what you act on
     let name = fit(&app.repo_name, w.saturating_sub(2).min(24));
@@ -215,31 +224,43 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             if layout == Layout::Grouped {
                 // a working or in-review task: what its agent is doing now, on one line
                 let doing = model::doing_now(t, now);
-                // what a task needs from you, GitHub said, or the usage limit gets two lines; anything else one
-                let lines = if t.flagged() || t.is_limited() || t.status == "finished" || !model::pr_phrase(t).is_empty() { 2 } else { 1 };
-                let detail = if doing.is_empty() { model::wrap(&model::detail_with_auto(t, &app.cfg, now), detail_w, lines) } else { vec![doing] };
-                for d in detail {
+                // what a task needs from you, GitHub said, or the usage limit gets two lines;
+                // anything else one; the selected task all it has to say, up to SELECTED_LINES
+                let lines = if is_cur(t) {
+                    SELECTED_LINES
+                } else if !doing.is_empty() {
+                    1
+                } else if t.flagged() || t.is_limited() || t.status == "finished" || !model::pr_phrase(t).is_empty() {
+                    2
+                } else {
+                    1
+                };
+                let text = if doing.is_empty() { model::detail_with_auto(t, &app.cfg, now) } else { doing };
+                for d in model::wrap(&text, detail_w, lines) {
                     if !d.is_empty() {
-                        rows.push(Row::Detail(t, d));
+                        rows.push(Row::Detail(t, d, t.needs_you()));
                     }
                 }
                 let stat = model::stat_line(t);
                 if !stat.is_empty() {
-                    rows.push(Row::Detail(t, stat));
+                    rows.push(Row::Detail(t, stat, false));
                 }
             }
         }
     }
 
-    // keep the selected task in view, starting at a heading or a task
+    // keep the selected task in view with its details, starting at a heading or a task
     let avail = h.saturating_sub(3 + footer).max(1); // one line spare for the scroll mark
     let sel_row = rows.iter().position(|r| matches!(r, Row::Title(t) if is_cur(t)));
     let mut top = app.top;
     if let Some(i) = sel_row {
+        let details = rows[i + 1..].iter().take_while(|r| matches!(r, Row::Detail(..))).count();
+        // the row after its last detail too, so the next row shows there's more
+        let end = i + details + 1;
         if i < top {
             top = i - usize::from(i > 0 && matches!(rows[i - 1], Row::Head(_)));
-        } else if i + 1 >= top + avail {
-            top = (i + 2 - avail).min(i); // with room for one row, the task's own
+        } else if end >= top + avail {
+            top = (end + 1).saturating_sub(avail).min(i); // with room for one row, the task's own
         }
     }
     top = top.min(rows.len().saturating_sub(avail));
@@ -260,7 +281,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     for (j, row) in rows.iter().skip(top).take(avail).enumerate() {
         let y = 2 + j;
-        if let Row::Title(t) | Row::Detail(t, _) = row {
+        if let Row::Title(t) | Row::Detail(t, ..) = row {
             if t.flagged() {
                 let c = if t.status == "stopped" { Color::Red } else { AMBER };
                 put(buf, area, y, 0, span("▌", Style::new().fg(c)));
@@ -285,8 +306,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 put(buf, area, y, 1, mark);
                 put(buf, area, y, 3, title_line(app, t, is_cur(t), w, idw, now));
             }
-            Row::Detail(_, text) => {
-                put(buf, area, y, 3 + idw + 2, span(fit(text, detail_w), dim()));
+            Row::Detail(_, text, loud) => {
+                put(buf, area, y, 3, span(fit(text, detail_w), if *loud { Style::new() } else { dim() }));
             }
             Row::Gap => {}
         }
@@ -330,21 +351,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         span("", dim())
     };
     put(buf, area, h.saturating_sub(2), 1, line);
-    if let Mode::Tell { id, text, reply } = &app.mode {
-        let label = if *reply { format!("Answer {id}:") } else { format!("Tell {id}:") };
-        let x = width(&label) + 2;
-        // show the end of what's typed when it's longer than the line
-        let room = w.saturating_sub(x + 2);
-        let shown: String = {
-            let mut s: Vec<char> = text.chars().collect();
-            while width(&s.iter().collect::<String>()) > room && !s.is_empty() {
-                s.remove(0);
-            }
-            s.into_iter().collect()
-        };
-        put(buf, area, last, 1, span(label, bold()));
-        put(buf, area, last, x, shown.clone());
-        f.set_cursor_position(Position::new(area.x + (x + width(&shown)) as u16, area.y + last as u16));
+    if let Mode::Tell { id, text, .. } = &app.mode {
+        let x = input_line(buf, area, last, &format!("Tell {id}:"), text);
+        f.set_cursor_position(Position::new(area.x + x as u16, area.y + last as u16));
     } else if let Mode::Stale { .. } = &app.mode {
         put(buf, area, last, 1, span(fit("n new tour   o the old one   esc cancels", w.saturating_sub(2)), bold()));
     } else if let Some((action, _)) = &app.pending {
@@ -358,6 +367,41 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     } else {
         put(buf, area, last, 1, key_row(model::task_keys(cur), w));
     }
+}
+
+/// How many lines of detail the selected task gets.
+const SELECTED_LINES: usize = 6;
+
+/// A label, then what's typed, at row y: the end of it when it's longer than the
+/// line. Returns the cursor's column.
+fn input_line(buf: &mut Buffer, area: Rect, y: usize, label: &str, text: &str) -> usize {
+    let w = area.width as usize;
+    let x = width(label) + 2;
+    let room = w.saturating_sub(x + 2);
+    let mut s: Vec<char> = text.chars().collect();
+    while width(&s.iter().collect::<String>()) > room && !s.is_empty() {
+        s.remove(0);
+    }
+    let shown: String = s.into_iter().collect();
+    put(buf, area, y, 1, span(label.to_string(), bold()));
+    put(buf, area, y, x, shown.clone());
+    x + width(&shown)
+}
+
+/// `i` on a coordinator's question: the task, the whole question wrapped, then the
+/// line the answer is typed on. Returns the cursor's column and row.
+fn draw_ask(buf: &mut Buffer, area: Rect, h: usize, title: &str, question: &str, text: &str) -> (usize, usize) {
+    let w = area.width as usize;
+    put(buf, area, 0, 1, span(fit(title, w.saturating_sub(2)), bold()));
+    // the title, a gap, the question, a gap, the answer and the foot
+    let room = h.saturating_sub(5).max(1);
+    for (j, line) in model::wrap(question, w.saturating_sub(2), room).into_iter().enumerate() {
+        put(buf, area, 2 + j, 1, span(line, Style::new()));
+    }
+    let y = h.saturating_sub(2);
+    let x = input_line(buf, area, y, "Answer:", text);
+    put(buf, area, h.saturating_sub(1), 1, span(fit("⏎ sends · esc returns", w.saturating_sub(2)), dim()));
+    (x, y)
 }
 
 /// The key line: the task's keys, then `?` at the right edge. `?` is never dropped:
@@ -647,11 +691,11 @@ mod tests {
         assert_eq!(s[2..12], [
             " In review  1",
             " ◜ BP-2  Task BP-2                     now",
-            "         Reading the diff",
+            "   Reading the diff",
             "",
             " Working  2",
             " ⠋ BP-1  Task BP-1                     now",
-            "         Running the board's tests with c…",
+            "   Running the board's tests with cargo …",
             " ⠋ BP-3  Task BP-3                     now",
             "",
             "",
@@ -732,8 +776,6 @@ mod tests {
         a.mode = Mode::Answer { id: "BP-1".into(), title: "BP-1  Fix it".into(), prompt: Some(model::Prompt { question: None, options: vec![], ..p }) };
         let s = screen(&mut a, 40, 12);
         assert_eq!(s[9..11], [" No prompt to answer on its screen now.", " live · ⏎ opens its pane · esc returns"].map(String::from), "{s:#?}");
-        a.mode = Mode::Tell { id: "BP-1".into(), text: "Postgres".into(), reply: true };
-        assert_eq!(row(&screen(&mut a, 40, 12), 1), " Answer BP-1: Postgres");
     }
 
     #[test]
@@ -762,22 +804,128 @@ mod tests {
         assert_eq!(s[2..18], [
             " Ready to accept  5",
             " ✔ BP-1  Task BP-1",
-            "         Done.",
-            "         3 files, +12 −1 · Not toured yet",
+            "   Done.",
+            "   3 files, +12 −1 · Not toured yet",
             " ✔ BP-2  Task BP-2",
-            "         Done.",
-            "         Toured",
+            "   Done.",
+            "   Toured",
             " ✔ BP-3  Task BP-3",
-            "         Done.",
-            "         Tour written, not opened yet",
+            "   Done.",
+            "   Tour written, not opened yet",
             "BP-4  Task BP-4",
-            "         Done.",
-            "         Writing its tour…",
+            "   Done.",
+            "   Writing its tour…",
             " ✔ BP-5  Task BP-5",
-            "         tour failed: its tour doesn't parse",
+            "   tour failed: its tour doesn't parse",
             "",
         ].map(String::from), "{s:#?}");
         assert!(row(&s, 0).starts_with(" a accept  g tour"), "{s:#?}");
+    }
+
+    const QUESTION: &str = "Pick: candidate 4 (one rule for who sees to a task), 3 (reviews that ask before they block), or both. 4 changes how triage works for every coordinator; 3 only touches the reviewer's prompt and is easy to undo.";
+
+    fn asking(id: &str) -> Task {
+        Task { status: "needs".into(), ask: Some(true), why: Some(QUESTION.into()), title: "Architecture round 2: review".into(), ..ready(id) }
+    }
+
+    #[test]
+    fn i_on_a_question_shows_all_of_it_above_the_answer() {
+        let mut a = app(vec![asking("BP-31")], 1, Layout::Grouped);
+        a.mode = Mode::Tell { id: "BP-31".into(), text: "Postgres".into(), reply: true };
+        let mut term = Terminal::new(TestBackend::new(42, 16)).unwrap();
+        term.draw(|f| draw(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let s: Vec<String> = (0..16).map(|y| (0..42).map(|x| buf[(x, y)].symbol()).collect::<String>().trim_end().to_string()).collect();
+        assert_eq!(s, [
+            " BP-31  Architecture round 2: review",
+            "",
+            " Pick: candidate 4 (one rule for who sees",
+            " to a task), 3 (reviews that ask before",
+            " they block), or both. 4 changes how",
+            " triage works for every coordinator; 3",
+            " only touches the reviewer's prompt and",
+            " is easy to undo.",
+            "",
+            "",
+            "",
+            "",
+            "",
+            " Answer: Postgres",
+            " ⏎ sends · esc returns",
+            "",
+        ].map(String::from), "{s:#?}");
+        // the question at normal weight, the cursor after what's typed
+        assert!(!buf[(1, 2)].modifier.contains(Modifier::DIM));
+        assert_eq!(term.get_cursor_position().unwrap(), Position::new(17, 13));
+
+        // too short for all of it: cut with " …", the answer line kept
+        let s = screen(&mut a, 42, 8);
+        assert_eq!(s[2..], [
+            " Pick: candidate 4 (one rule for who sees",
+            " to a task), 3 (reviews that ask before …",
+            "",
+            " Answer: Postgres",
+            " ⏎ sends · esc returns",
+            "",
+        ].map(String::from), "{s:#?}");
+
+        // a tell is still the one line at the bottom of the board
+        a.mode = Mode::Tell { id: "BP-31".into(), text: "hi".into(), reply: false };
+        assert_eq!(row(&screen(&mut a, 42, 16), 1), " Tell BP-31: hi");
+    }
+
+    #[test]
+    fn the_selected_task_says_all_it_has_to_say_from_under_its_id() {
+        let stopped = Task { status: "stopped".into(), ..ready("BP-2") };
+        let mut a = app(vec![asking("BP-1"), stopped, asking("BP-3"), ready("BP-4")], 0, Layout::Grouped);
+        a.sel = Some("BP-1".into());
+        let mut term = Terminal::new(TestBackend::new(42, 24)).unwrap();
+        term.draw(|f| draw(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let s: Vec<String> = (0..24).map(|y| (0..42).map(|x| buf[(x, y)].symbol()).collect::<String>().trim_end().to_string()).collect();
+        // six lines under the ID for the selected task (cut after that), two for the others
+        assert_eq!(s[3..16], [
+            "▌● BP-1  Architecture round 2: review",
+            "▌  Pick: candidate 4 (one rule for who",
+            "▌  sees to a task), 3 (reviews that ask",
+            "▌  before they block), or both. 4",
+            "▌  changes how triage works for every",
+            "▌  coordinator; 3 only touches the",
+            "▌  reviewer's prompt and is easy to …",
+            "▌■ BP-2  Task BP-2",
+            "▌  Its agent exited. r resumes it.",
+            "▌● BP-3  Architecture round 2: review",
+            "▌  Pick: candidate 4 (one rule for who",
+            "▌  sees to a task), 3 (reviews that ask…",
+            "",
+        ].map(String::from), "{s:#?}");
+        // what needs you is at normal weight; a ready task's detail stays dim
+        assert!(!buf[(3, 4)].modifier.contains(Modifier::DIM));
+        assert!(!buf[(3, 11)].modifier.contains(Modifier::DIM)); // stopped
+        assert!(!buf[(3, 13)].modifier.contains(Modifier::DIM));
+        let done = s.iter().position(|r| r == "   Done.").unwrap();
+        assert!(buf[(3, done as u16)].modifier.contains(Modifier::DIM));
+
+        // selecting another task gives it the room, and BP-1 goes back to two lines
+        a.sel = Some("BP-3".into());
+        let s = screen(&mut a, 42, 24);
+        assert_eq!(s[4..7], [
+            "▌  Pick: candidate 4 (one rule for who",
+            "▌  sees to a task), 3 (reviews that ask…",
+            "▌■ BP-2  Task BP-2",
+        ].map(String::from), "{s:#?}");
+        assert_eq!(s[8], "▌● BP-3  Architecture round 2: review", "{s:#?}");
+        assert_eq!(s[14], "▌  reviewer's prompt and is easy to …", "{s:#?}");
+    }
+
+    #[test]
+    fn a_selected_task_low_on_the_board_scrolls_its_details_into_view() {
+        let mut a = app((1..=7).map(|i| asking(&format!("BP-{i}"))).collect(), 0, Layout::Grouped);
+        a.sel = Some("BP-7".into());
+        let s = screen(&mut a, 42, 16);
+        let i = s.iter().position(|r| r.contains("BP-7")).unwrap();
+        assert_eq!(s[i + 6], "▌  reviewer's prompt and is easy to …", "{s:#?}");
+        assert!(s[1].ends_with('↑'), "{s:#?}");
     }
 
     #[test]
@@ -817,7 +965,7 @@ mod tests {
         assert!(top < 999 && top > 0);
         assert!(s[1].ends_with("↑"), "{s:#?}");
         assert_eq!(row(&s, 2), "   ▌     needs you; red: stopped", "{s:#?}");
-        for line in ["   ●     needs you", "   ✔     ready to accept", "   ◜ ◐   in review (it turns)", "   ✓     accepted"] {
+        for line in ["   ●     needs you", "   ✔     ready to accept", "   ◜ ◐   in review (it turns)", "   ·     accepted"] {
             assert!(s.contains(&line.to_string()), "{line}: {s:#?}");
         }
 

@@ -109,9 +109,11 @@ pane beside the coordinator and updates as soon as a task changes.
 It groups tasks by what you do next: needs you, coordinator on it (dimmed: see
 [Triage](#triage)), ready to accept, finished (nothing to merge, see
 [Finish](#finish-with-nothing-to-merge)), in review, working, queued; `f` adds
-the closed ones (accepted, closed, dropped). Each task shows how long it has been there and, on a second
-line, what it needs or where it stands ("Asks: python3 or python?", "PR #4,
-approved by light review.", "Follow-up review on round 2 of 2."). A working
+the closed ones (accepted, closed, dropped). Each task shows how long it has been there and, on the
+lines under it (from under its ID), what it needs or where it stands ("Asks: python3 or python?", "PR #4,
+approved by light review.", "Follow-up review on round 2 of 2."): one or two lines,
+cut to fit, and for the selected task all of it, up to six lines. What a task that
+needs you or stopped says is at normal weight; the rest is dimmed. A working
 task shows there, dimmed, what its worker is doing now, and a task in review what
 its reviewer is doing: the text of the agent's `working: ...` status, cut to fit
 and updated as it changes. With no such text, or text from before the task's
@@ -249,8 +251,9 @@ A task that needs you for a question gets `i answer` on its key line:
   another command asking). A menu's "Type something." isn't offered: `⏎` opens the
   pane for that. `esc` goes back. The task works again once its agent does, as when
   you answer in the pane.
-- **The coordinator asked** (`bullpen ask`): `i` opens a line, "Answer BP-3:". What
-  you type goes to the task's coordinator, not its worker: typed into its pane as
+- **The coordinator asked** (`bullpen ask`): `i` shows the task and the whole
+  question, wrapped to the pane, with a line under it, "Answer:" (`⏎` sends, `esc`
+  goes back). What you type goes to the task's coordinator, not its worker: typed into its pane as
   `BP-3: <your answer>`, or, with `config --news monitor`, as a news line it reads.
   A task asked about while it was working, in review or ready goes back to that.
   One that was stopped leaves needs as `bullpen ok` would (working, or in review),
