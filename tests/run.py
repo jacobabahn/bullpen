@@ -83,7 +83,10 @@ def main():
     ap.add_argument("only", nargs="*", help="run only tests whose ID has one of these words")
     ap.add_argument("-j", "--jobs", type=int, default=os.cpu_count() or 1)
     args = ap.parse_args()
-    suite = unittest.defaultTestLoader.discover(str(HERE), top_level_dir=str(HERE))
+    loader = unittest.TestLoader()
+    suite = loader.discover(str(HERE), top_level_dir=str(HERE))
+    if loader.errors:  # a module that doesn't import: say why, run nothing
+        sys.exit("\n".join(loader.errors))
     names = [n for n in ids(suite) if not args.only or any(w in n for w in args.only)]
     if not names:
         sys.exit(f"no tests match {' '.join(args.only)}")
