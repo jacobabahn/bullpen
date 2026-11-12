@@ -53,6 +53,23 @@ pub struct Review {
     /// "full", "light" or "followup"
     #[serde(default, deserialize_with = "lenient")]
     pub kind: Option<String>,
+    /// the reviewer's pane
+    #[serde(default, deserialize_with = "lenient")]
+    pub block: Option<String>,
+}
+
+/// What an agent last said it's doing: the watcher writes it to
+/// <state>/doing/<block>.json from the pane's "working: ..." status.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Doing {
+    /// the pane's state when it was written: only "working" has news
+    #[serde(default)]
+    pub state: String,
+    #[serde(default)]
+    pub text: String,
+    /// when it was written, in seconds since 1970
+    #[serde(default)]
+    pub at: i64,
 }
 
 impl Review {
@@ -127,6 +144,9 @@ pub struct Task {
     /// those not done yet, worked out from the other tasks: "BP-8", "BP-9 (dropped)"
     #[serde(skip)]
     pub waits: Vec<String>,
+    /// what the agent it waits on (worker, or reviewer in review) last said it's doing
+    #[serde(skip)]
+    pub doing: Option<Doing>,
 }
 
 impl Task {
@@ -181,6 +201,15 @@ impl Task {
     /// Is the worker fixing failed checks or comments from its PR?
     pub fn sent_back_by_github(&self) -> bool {
         self.gh.as_ref().and_then(|g| g.sent) == Some(true)
+    }
+
+    /// The pane of the agent it waits on now: the reviewer's in review, else the worker's.
+    pub fn agent_block(&self) -> Option<&str> {
+        match self.status.as_str() {
+            "review" => self.review.as_ref().and_then(|r| r.block.as_deref()),
+            "working" => self.block.as_deref(),
+            _ => None,
+        }
     }
 
     /// When it entered its current status.
@@ -295,7 +324,46 @@ pub fn load_tasks(dir: &Path) -> Vec<Task> {
         .collect();
     out.sort_by_key(Task::num);
     link_waits(&mut out);
+    // the repo's folder is <state>/repos/<repo>: doing/ is beside repos/
+    if let Some(state) = dir.parent().and_then(Path::parent) {
+        link_doing(&mut out, &state.join("doing"));
+    }
     out
+}
+
+/// A pane's name as a file name, as bullpen and the watcher write it.
+fn safe(name: &str) -> String {
+    name.chars().map(|c| if c.is_ascii_alphanumeric() || "._-".contains(c) { c } else { '_' }).collect()
+}
+
+/// Fill in what the agent each working or in-review task waits on last said.
+pub fn link_doing(tasks: &mut [Task], dir: &Path) {
+    for t in tasks.iter_mut() {
+        t.doing = t
+            .agent_block()
+            .and_then(|b| std::fs::read_to_string(dir.join(format!("{}.json", safe(b)))).ok())
+            .and_then(|s| serde_json::from_str(&s).ok());
+    }
+}
+
+/// How old a note of what an agent is doing can be and still show.
+pub const DOING_FOR: i64 = 30 * 60;
+
+/// What the agent the task waits on is doing now, on one line: "" when it hasn't
+/// said, has stopped working, said it before the task's current status (with a
+/// little slack: the first words come before bullpen records the status), said it
+/// over DOING_FOR ago, or has gone quiet or hit the usage limit.
+pub fn doing_now(t: &Task, at: DateTime<FixedOffset>) -> String {
+    let Some(d) = t.doing.as_ref().filter(|d| d.state == "working") else { return String::new() };
+    if t.is_stuck() || t.is_limited() || t.note.as_deref().is_some_and(|n| !n.is_empty()) {
+        return String::new();
+    }
+    let since = t.stamp().and_then(parse).map_or(i64::MIN, |s| s.timestamp() - 30);
+    let now = at.timestamp();
+    if d.at < since || now - d.at > DOING_FOR {
+        return String::new();
+    }
+    d.text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Fill in what each task waits on: the tasks in its `after` that aren't done.
@@ -933,7 +1001,7 @@ pub(crate) mod tests {
             worker_model: None,
             bottom_gap: 1,
         };
-        let approved = Some(Review { round: Some(1), verdict: Some("approved".into()), kind: None });
+        let approved = Some(Review { round: Some(1), verdict: Some("approved".into()), kind: None, block: None });
         let t = Task { pr: Some("https://github.com/me/repo/pull/4".into()), review: approved, ..task("BP-1", "ready") };
         assert_eq!(detail_with_auto(&t, &cfg(true), now()), "PR #4, approved by review.");
         let held = Task { auto_accept: Some(false), ..t.clone() };
@@ -971,22 +1039,22 @@ pub(crate) mod tests {
         assert_eq!(task_detail(&t, 2, now()), "Asks: python3 or python?");
         let t = Task { why: ended, ..task("BP-1", "needs") };
         assert!(task_detail(&t, 2, now()).contains("probably with a question"));
-        let t = Task { review: Some(Review { round: Some(2), verdict: None, kind: None }), ..task("BP-1", "review") };
+        let t = Task { review: Some(Review { round: Some(2), verdict: None, kind: None, block: None }), ..task("BP-1", "review") };
         assert_eq!(task_detail(&t, 2, now()), "Reviewer on round 2 of 2.");
         let t = Task {
             pr: Some("https://x/pull/4".into()),
-            review: Some(Review { round: None, verdict: Some("approved".into()), kind: None }),
+            review: Some(Review { round: None, verdict: Some("approved".into()), kind: None, block: None }),
             ..task("BP-1", "ready")
         };
         assert_eq!(task_detail(&t, 2, now()), "PR #4, approved by review.");
-        let t = Task { review: Some(Review { round: Some(1), verdict: Some("changes".into()), kind: None }), ..task("BP-1", "working") };
+        let t = Task { review: Some(Review { round: Some(1), verdict: Some("changes".into()), kind: None, block: None }), ..task("BP-1", "working") };
         assert_eq!(task_detail(&t, 2, now()), "Fixing what review round 1 found.");
     }
 
     #[test]
     fn detail_says_which_kind_of_review() {
         let kind = |k: &str, verdict: Option<&str>| Review {
-            round: Some(1), verdict: verdict.map(Into::into), kind: Some(k.into()),
+            round: Some(1), verdict: verdict.map(Into::into), kind: Some(k.into()), block: None,
         };
         let t = Task { review: Some(kind("light", None)), ..task("BP-1", "review") };
         assert_eq!(task_detail(&t, 2, now()), "Light review on round 1 of 2.");
@@ -1019,7 +1087,7 @@ pub(crate) mod tests {
             local: Some(true),
             branch: Some("bullpen/bp-2-x".into()),
             base: Some("main".into()),
-            review: Some(Review { round: None, verdict: Some("approved".into()), kind: None }),
+            review: Some(Review { round: None, verdict: Some("approved".into()), kind: None, block: None }),
             ..task("BP-2", "ready")
         };
         assert_eq!(task_detail(&t, 2, now()), "Local branch bullpen/bp-2-x, approved by review.");
@@ -1132,7 +1200,7 @@ pub(crate) mod tests {
     }
 
     fn changes(round: u32) -> Option<Review> {
-        Some(Review { round: Some(round), verdict: Some("changes".into()), kind: None })
+        Some(Review { round: Some(round), verdict: Some("changes".into()), kind: None, block: None })
     }
 
     #[test]
@@ -1157,6 +1225,55 @@ pub(crate) mod tests {
         (now() - chrono::Duration::minutes(m)).to_rfc3339()
     }
 
+    fn doing(state: &str, text: &str, secs_ago: i64) -> Option<Doing> {
+        Some(Doing { state: state.into(), text: text.into(), at: now().timestamp() - secs_ago })
+    }
+
+    #[test]
+    fn a_working_task_says_what_its_agent_is_doing() {
+        let t = Task { since: Some(minutes_ago(10)), doing: doing("working", "Running  the\n tests", 5), ..task("BP-1", "working") };
+        assert_eq!(doing_now(&t, now()), "Running the tests");
+        // said just before bullpen noted the status: still news
+        let t = Task { since: Some(minutes_ago(0)), doing: doing("working", "Reading", 10), ..task("BP-1", "working") };
+        assert_eq!(doing_now(&t, now()), "Reading");
+        let fallback = |t: Task| assert_eq!(doing_now(&t, now()), "", "{t:?}");
+        let base = Task { since: Some(minutes_ago(10)), ..task("BP-1", "working") };
+        fallback(Task { doing: None, ..base.clone() });
+        fallback(Task { doing: doing("working", "  ", 5), ..base.clone() });
+        fallback(Task { doing: doing("idle", "Reading", 5), ..base.clone() });
+        fallback(Task { doing: doing("working", "Reading", 11 * 60), ..base.clone() }); // before its status
+        fallback(Task { since: Some(minutes_ago(60)), doing: doing("working", "Reading", 31 * 60), ..base.clone() });
+        fallback(Task { stuck: Some(Stuck { who: "worker".into(), since: minutes_ago(25) }), doing: doing("working", "Reading", 5), ..base.clone() });
+        fallback(Task { note: Some("Paused.".into()), doing: doing("working", "Reading", 5), ..base });
+    }
+
+    #[test]
+    fn the_board_reads_the_doing_of_the_agent_a_task_waits_on() {
+        let state = std::env::temp_dir().join(format!("bullpen-doing-{}", std::process::id()));
+        let (dir, doing) = (state.join("repos").join("r"), state.join("doing"));
+        std::fs::create_dir_all(dir.join("tasks")).unwrap();
+        std::fs::create_dir_all(&doing).unwrap();
+        let review = r#"{"round": 1, "block": "block:rev"}"#;
+        for (id, status) in [("BP-1", "working"), ("BP-2", "review"), ("BP-3", "ready")] {
+            let n = &id[3..];
+            let t = format!(r#"{{"id": "{id}", "status": "{status}", "block": "block:w{n}", "review": {review}}}"#);
+            std::fs::write(dir.join("tasks").join(format!("{id}.json")), t).unwrap();
+        }
+        let say = |b: &str, text: &str| {
+            std::fs::write(doing.join(format!("{b}.json")), format!(r#"{{"state": "working", "text": "{text}", "at": 1}}"#)).unwrap()
+        };
+        say("block_w1", "Worker one");
+        say("block_w2", "Worker two");
+        say("block_rev", "Reviewing");
+        say("block_w3", "Worker three");
+        let tasks = load_tasks(&dir);
+        let text = |i: usize| tasks[i].doing.as_ref().map(|d| d.text.clone());
+        assert_eq!(text(0).as_deref(), Some("Worker one"));
+        assert_eq!(text(1).as_deref(), Some("Reviewing")); // in review: its reviewer's
+        assert_eq!(text(2), None); // ready: nobody's working on it
+        std::fs::remove_dir_all(&state).unwrap();
+    }
+
     #[test]
     fn a_stuck_task_says_so() {
         let stuck = |who: &str, m| Some(Stuck { who: who.into(), since: minutes_ago(m) });
@@ -1165,7 +1282,7 @@ pub(crate) mod tests {
         assert_eq!(task_detail(&t, 2, now()), "No progress for 25 min. p shows its screen.");
         let noted = Task { note: Some("Hung on npm install".into()), ..t.clone() };
         assert_eq!(task_detail(&noted, 2, now()), "Hung on npm install");
-        let review = Some(Review { round: Some(1), verdict: None, kind: None });
+        let review = Some(Review { round: Some(1), verdict: None, kind: None, block: None });
         let t = Task { review: review.clone(), stuck: stuck("reviewer", 190), ..task("BP-1", "review") };
         assert_eq!(task_detail(&t, 2, now()), "Reviewer has shown no progress for 3 h. ⏎ opens it.");
         // a worker's quiet spell says nothing about a task that has moved on

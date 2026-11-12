@@ -202,9 +202,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         for t in ts {
             rows.push(Row::Title(t));
             if layout == Layout::Grouped {
+                // a working or in-review task: what its agent is doing now, on one line
+                let doing = model::doing_now(t, now);
                 // what a task needs from you, GitHub said, or the usage limit gets two lines; anything else one
                 let lines = if t.flagged() || t.is_limited() || t.status == "finished" || !model::pr_phrase(t).is_empty() { 2 } else { 1 };
-                for d in model::wrap(&model::detail_with_auto(t, &app.cfg, now), detail_w, lines) {
+                let detail = if doing.is_empty() { model::wrap(&model::detail_with_auto(t, &app.cfg, now), detail_w, lines) } else { vec![doing] };
+                for d in detail {
                     if !d.is_empty() {
                         rows.push(Row::Detail(t, d));
                     }
@@ -288,7 +291,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         put(buf, area, yb, 1, span("─".repeat(w.saturating_sub(3)), dim()));
         put(buf, area, yb + 1, 1, span(fit(&format!("{}  {}", cur.id, cur.title), w.saturating_sub(2)), bold()));
         let stat = model::task_stat(cur);
-        let mut lines = model::wrap(&model::detail_with_auto(cur, &app.cfg, now), w.saturating_sub(2), if stat.is_empty() { 3 } else { 2 });
+        // what its agent is doing now first, then the rest of what there is to say
+        let doing = model::doing_now(cur, now);
+        let room = 3 - usize::from(!stat.is_empty()) - usize::from(!doing.is_empty());
+        let mut lines = model::wrap(&model::detail_with_auto(cur, &app.cfg, now), w.saturating_sub(2), room);
+        if !doing.is_empty() {
+            lines.insert(0, doing);
+        }
         if !stat.is_empty() {
             lines.push(stat.into());
         }
@@ -445,6 +454,51 @@ mod tests {
         assert!(!s[0].contains("o shows") && s[0].ends_with("✔ 3"), "{s:#?}");
         assert!(s.iter().any(|r| r.contains("BP-2  c2 · Task BP-2")), "{s:#?}");
         assert!(s.iter().any(|r| r.contains("BP-1  Task BP-1")), "{s:#?}");
+    }
+
+    fn busy(id: &str, status: &str, text: &str) -> Task {
+        let at = model::now().timestamp() - 5;
+        let doing = Some(model::Doing { state: "working".into(), text: text.into(), at });
+        let review = Some(model::Review { round: Some(1), ..Default::default() });
+        Task { since: Some(model::now().to_rfc3339()), doing, review, status: status.into(), ..ready(id) }
+    }
+
+    #[test]
+    fn a_working_task_shows_what_its_agent_is_doing() {
+        let tasks = vec![
+            busy("BP-1", "working", "Running the board's tests with cargo test in board/"),
+            busy("BP-2", "review", "Reading the diff"),
+            Task { doing: None, ..busy("BP-3", "working", "") },
+        ];
+        let mut a = app(tasks.clone(), 0, Layout::Grouped);
+        let s = screen(&mut a, 44, 16);
+        assert_eq!(s[2..12], [
+            " In review  1",
+            " ◜ BP-2  Task BP-2                     now",
+            "         Reading the diff",
+            "",
+            " Working  2",
+            " ⠋ BP-1  Task BP-1                     now",
+            "         Running the board's tests with c…",
+            " ⠋ BP-3  Task BP-3                     now",
+            "",
+            "",
+        ].map(String::from), "{s:#?}");
+
+        // compact: in the detail at the bottom, above the rest
+        let mut a = app(tasks, 0, Layout::Compact);
+        a.sel = Some("BP-1".into());
+        let s = screen(&mut a, 44, 16);
+        assert_eq!(s[10..13], [
+            " BP-1  Task BP-1",
+            " Running the board's tests with cargo test…",
+            "",
+        ].map(String::from), "{s:#?}");
+        a.sel = Some("BP-2".into());
+        let s = screen(&mut a, 44, 16);
+        assert_eq!(s[11..13], [" Reading the diff", " Reviewer on round 1 of 2."].map(String::from), "{s:#?}");
+        a.sel = Some("BP-3".into());
+        assert!(!screen(&mut a, 44, 16).iter().any(|r| r.contains("Running")));
     }
 
     #[test]

@@ -6,6 +6,10 @@
 -- only when their state changes, so a worker's stream of "working: ..."
 -- updates costs one call, not hundreds. A pane that says it's working but sends
 -- no event for the repo's `stuck_after` minutes is reported once (stuck.lua).
+--
+-- What a worker or reviewer says it's doing (the text of "working: ...") goes to
+-- <state>/doing/<block>.json for the board, at most every `doing` seconds a pane
+-- (default 3): a file write, no bullpen call and no news.
 
 local bin = rex.args.bin
 local state_dir = rex.args.state
@@ -51,6 +55,68 @@ local function compacting(block)
   return e ~= nil and e:match('"compacting":%s*true') ~= nil
 end
 
+-- The pane's role in its entry: a task ID, "<ID> review", "coordinator" or "board".
+local function role(block)
+  local e = entry(block)
+  return e and e:match('"role":%s*"([^"]*)"') or ""
+end
+
+local function json_string(s)
+  return '"' .. s:gsub('[%c"\\]', function(c)
+    if c == '"' or c == "\\" then return "\\" .. c end
+    return string.format("\\u%04x", c:byte())
+  end) .. '"'
+end
+
+-- block -> { state = ..., text = ..., written = time of the last write, due = a write is waiting }
+local doing = {}
+local doing_every = tonumber(rex.args.doing or "") or 3 -- seconds
+
+local function doing_path(block)
+  return state_dir .. "/doing/" .. safe(block) .. ".json"
+end
+
+local function write_doing(block)
+  local d = doing[block]
+  if not d then return end
+  d.due, d.written = false, os.time()
+  local path = doing_path(block)
+  local f = io.open(path .. ".tmp", "w")
+  if not f then return end -- no doing/ folder yet: bullpen makes it when it starts a pane
+  f:write(string.format('{"state": %s, "text": %s, "at": %d}\n', json_string(d.state), json_string(d.text), d.written))
+  f:close()
+  os.rename(path .. ".tmp", path)
+end
+
+-- Keep the pane's latest text where the board reads it. A change of state is written
+-- at once; new text while working at most every doing_every seconds, the latest last.
+local function note_doing(block, state, text)
+  local d = doing[block]
+  if d and d.state == state and d.text == text then return end
+  if not d then
+    local r = role(block)
+    if r == "" or r == "coordinator" or r == "board" then return end
+    d = { written = os.time() - doing_every }
+    doing[block] = d
+  end
+  local now_too = d.state ~= state
+  d.state, d.text = state, text
+  local wait = d.written + doing_every - os.time()
+  if now_too or wait <= 0 then
+    write_doing(block)
+  elseif not d.due then
+    d.due = true
+    rex.after(wait, function()
+      if doing[block] == d and d.due then write_doing(block) end
+    end)
+  end
+end
+
+local function forget_doing(block)
+  if doing[block] then os.remove(doing_path(block)) end
+  doing[block] = nil
+end
+
 local function call(...)
   local r, err = rex.exec({ "env", "BULLPEN_STATE=" .. state_dir, bin, ... })
   if not r then
@@ -67,6 +133,7 @@ rex.on("terminal.program_status_changed", function(ctx, ev)
   local r = ev.record or {}
   local state = r.state or ""
   local prev = last[block]
+  note_doing(block, state, r.msg or "")
   -- every event counts as a sign of life, the ones dropped below too
   local woke = quiet.event(block, state == "working", os.time())
   -- working -> working with a new message is noise; a new blocked reason is not.
@@ -91,6 +158,7 @@ local function gone(ctx, ev)
   local block = ev.block_id or ctx.block_id
   last[block or ""] = nil
   quiet.forget(block or "")
+  forget_doing(block or "")
   if tracked(block) then call("_gone", block) end
 end
 

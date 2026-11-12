@@ -70,13 +70,18 @@ It groups tasks by what you do next: needs you, coordinator on it (dimmed: see
 [Finish](#finish-with-nothing-to-merge)), in review, working, queued; `f` adds
 the closed ones (accepted, closed, dropped). Each task shows how long it has been there and, on a second
 line, what it needs or where it stands ("Asks: python3 or python?", "PR #4,
-approved by light review.", "Follow-up review on round 2 of 2."). A task in review or ready also shows the size of its
+approved by light review.", "Follow-up review on round 2 of 2."). A working
+task shows there, dimmed, what its worker is doing now, and a task in review what
+its reviewer is doing: the text of the agent's `working: ...` status, cut to fit
+and updated as it changes. With no such text, or text from before the task's
+current status or over 30 minutes old, it shows the usual line. A task in review or ready also shows the size of its
 change ("3 files, +120 −14"), worked out once when its worker runs `ready`. A
 task that needs you gets an amber bar; its age turns red after 5 minutes. A
 working task's mark spins, and one in review turns; one whose agent has shown no
 progress for a while (below) stops turning and gets the amber bar too. The top
 line counts the tasks in each state. `l` switches to a compact layout, one line
-per task with the selected task's detail at the bottom.
+per task with the selected task's detail at the bottom (what its agent is doing
+first).
 
 The board leaves its bottom row empty: Rex draws minimized panes (the workers'
 and reviewers' capsules) over the bottom right of the window, which would cover
@@ -608,6 +613,8 @@ task ready, with its worktree and branch as they were.
   has read) and `outbox-<id>.txt` (typed news waiting for an empty input). See
   [News](#news).
 - Notifications: `notify.log` beside the tasks. See [Notifications](#notifications).
+- What each worker and reviewer is doing, for the board: `~/.local/state/bullpen/doing/<pane>.json`,
+  written by the watcher (at most every 3 seconds a pane, no news) and removed with the pane.
 
 `bullpen config --auto-accept on` accepts approved tasks by themselves (off by
 default; see [Auto-accept](#auto-accept)). `bullpen config --news monitor` changes how news reaches the coordinator (`type`

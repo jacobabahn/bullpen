@@ -438,6 +438,8 @@ def worker_idle(t):
     return not (at_prompt(t) or (t.get("stop") or {}).get("kind") in ("failed", "limit"))
 
 def index_block(block, repo, role):
+    # the watcher writes what the pane's agent is doing into doing/, for the board
+    (STATE / "doing").mkdir(parents=True, exist_ok=True)
     # stuck_after is a copy of the repo's setting, where the watcher can read it
     write_json(STATE / "blocks" / f"{safe(block)}.json",
                {"repo": str(repo.root), "role": role, "stuck_after": repo.cfg["stuck_after"]})
@@ -464,6 +466,7 @@ def mark_compacting(block, on):
 def unindex_block(block):
     if block:
         (STATE / "blocks" / f"{safe(block)}.json").unlink(missing_ok=True)
+        (STATE / "doing" / f"{safe(block)}.json").unlink(missing_ok=True)
 
 
 def lookup_block(block):

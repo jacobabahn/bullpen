@@ -4698,6 +4698,61 @@ return table.concat(calls, "|")
             "check --fix --quiet --all-repos",
         ])
 
+    def test_the_watcher_keeps_what_a_worker_is_doing_for_the_board(self):
+        state = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, state, ignore_errors=True)
+        (state / "blocks").mkdir()
+        (state / "doing").mkdir()
+        for block, role in (("blk1", "BP-1"), ("rev1", "BP-1 review"), ("co", "coordinator")):
+            (state / "blocks" / f"{block}.json").write_text(json.dumps({"repo": "/r", "role": role}))
+        # rex.after waits for run_due(); each step returns what the doing files say
+        script = WATCH_LUA.split("print = function() end")[0].replace(
+            "after = function(seconds, fn) fn() end",
+            "after = function(seconds, fn) later[#later + 1] = { at = clock + seconds, fn = fn } end",
+        ).replace("local args = rex.args", "local args = rex.args\nlater = {}") + """
+print = function() end
+dofile(args.watch)
+local function status(block, state, msg, second)
+  clock = second
+  handlers["terminal.program_status_changed"]({ block_id = block }, { id = "", record = { state = state, msg = msg } })
+end
+local function run_due(second)
+  clock = second
+  local due = later
+  later = {}
+  for _, l in ipairs(due) do if l.at <= clock then l.fn() else later[#later + 1] = l end end
+end
+local seen = {}
+local function look()
+  local out = {}
+  for _, b in ipairs({ "blk1", "rev1", "co" }) do
+    local f = io.open(args.state .. "/doing/" .. b .. ".json")
+    if f then out[#out + 1] = b .. "=" .. f:read("*a"):gsub("\\n$", "") f:close() end
+  end
+  seen[#seen + 1] = table.concat(out, " ")
+end
+status("blk1", "working", 'Reading "a.py"', 100) look()
+status("blk1", "working", "Editing", 101) look()           -- too soon: waits
+status("blk1", "working", "Testing", 102) look()           -- still waiting, latest wins
+run_due(103) look()
+status("blk1", "blocked", "Allow?", 103) look()            -- a new state is written at once
+status("rev1", "working", "Reviewing", 104)
+status("co", "working", "Thinking", 104) look()            -- not a task's pane
+handlers["block_closed"]({}, { block_id = "blk1" }) look()
+return table.concat(seen, "|")
+"""
+        seen = self.lua(script, watch=ROOT / "lua" / "watch.lua", state=state).split("|")
+        line = lambda st, text, at: json.dumps({"state": st, "text": text, "at": at})
+        self.assertEqual(seen, [
+            f"blk1={line('working', 'Reading \"a.py\"', 100)}",
+            f"blk1={line('working', 'Reading \"a.py\"', 100)}",
+            f"blk1={line('working', 'Reading \"a.py\"', 100)}",
+            f"blk1={line('working', 'Testing', 103)}",
+            f"blk1={line('blocked', 'Allow?', 103)}",
+            f"blk1={line('blocked', 'Allow?', 103)} rev1={line('working', 'Reviewing', 104)}",
+            f"rev1={line('working', 'Reviewing', 104)}",
+        ])
+
 
 if __name__ == "__main__":
     unittest.main()
