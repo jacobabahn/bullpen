@@ -3718,12 +3718,14 @@ def auto_accept(repo, t):
         if state == "failing":
             news(repo, t, "ready", f"{t['id']} is ready ({pr_short(t['pr'])}), approved by review, "
                  f"but not auto-accepted: its PR's checks are failing: {t['title']}")
+            start_queued(repo, t, "ready")  # its worker is done: its slot is free
             return
         if state == "running":
             t["auto_wait"] = True
             write_json(repo.task_path(t["id"]), t)  # not save_task: the status didn't change
             news(repo, t, "ready", f"{t['id']} is ready ({pr_short(t['pr'])}), approved by review; "
                  f"it auto-accepts once its PR's checks pass: {t['title']}")
+            start_queued(repo, t, "ready")
             return
     run_auto_accept(repo, t)
 
@@ -3750,6 +3752,7 @@ def run_auto_accept(repo, t):
         write_json(repo.task_path(t["id"]), t)
         news(repo, t, "ready", f"{t['id']} is ready ({where(t)}), approved by review, but the "
              f"auto-accept was refused: {e}. Send it back to rebase: {t['title']}")
+        start_queued(repo, t, "ready")
 
 
 def cmd_note(args):
@@ -5468,6 +5471,7 @@ def ready_again(repo, t):
     repo.save_task(t)
     news(repo, t, "ready", f"{t['id']} is ready again: its worker's turn left the code as approved "
          f"({kept}), so the approval carried over. `bullpen peek {t['id']}` if it said something: {t['title']}")
+    start_queued(repo, t, "ready")  # it worked again, and took a slot: now it's free
     return True
 
 

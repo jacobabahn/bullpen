@@ -3781,6 +3781,41 @@ class BullpenTest(unittest.TestCase):
         r = self.show("BP-2")["review"]
         self.assertEqual((r["round"], r["kind"], r["verdict"]), (2, "followup", None))
 
+    def test_an_approval_carried_over_frees_a_slot_while_auto_accept_waits(self):
+        self.bp("config", "--auto-accept", "on")
+        self.bp("config", "--max-running", "1")
+        tid = self.start_task()
+        self.bp("_event", self.block(tid), "working", "", "Fixing")
+        self.github(statusCheckRollup=self.RUNNING)
+        self.commit_and_ready(tid)
+        self.verdict(tid, "approve")
+        self.bp("_event", self.block(tid), "idle", "", "")
+        self.bp("tell", tid, "Run ready again.")
+        self.assertEqual(self.show(tid)["status"], "working")
+        dep = self.done_dependency()  # BP-2
+        self.bp("add", "Next", "--brief", "x", "--after", dep)  # BP-3: BP-1 takes the one slot
+        self.assertEqual(self.show("BP-3")["status"], "todo")
+        self.ready(tid)  # the approval carries over; auto-accept waits on the running checks
+        for _ in range(100):
+            if self.show("BP-3")["status"] == "working":
+                break
+            time.sleep(0.1)
+        self.assertEqual((self.show(tid)["status"], self.show(tid).get("auto_wait")), ("ready", True))
+        self.assertEqual(self.show("BP-3")["status"], "working")
+        self.assertIn("bullpen · BP-3 started (BP-1 is ready, freeing a slot)", self.news_lines())
+
+    def test_ready_again_frees_its_slot(self):
+        self.bp("config", "--max-running", "1")
+        tid = self.approved_task()
+        blk = self.block(tid)
+        self.bp("_event", blk, "idle", "", "")
+        self.bp("_event", blk, "working", "", "Answering a question")  # BP-1 takes the one slot
+        dep = self.done_dependency()  # BP-2
+        self.bp("add", "Next", "--brief", "x", "--after", dep)  # BP-3
+        self.bp("_event", blk, "idle", "", "")  # ready again, its code as approved
+        self.assertEqual((self.show(tid)["status"], self.show("BP-3")["status"]), ("ready", "working"))
+        self.assertIn("bullpen · BP-3 started (BP-1 is ready, freeing a slot)", self.news())
+
     def test_an_approval_carried_over_auto_accepts(self):
         self.bp("config", "--auto-accept", "on")
         tid = self.start_task()
