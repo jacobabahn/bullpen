@@ -119,6 +119,16 @@ need you or are ready (see [Several repositories](#several-repositories)). `l` s
 per task with the selected task's detail at the bottom (what its agent is doing
 first).
 
+`bullpen ls`, `bullpen show` and the picker (`cmd+;` `j`) say a task the way the
+board does: its mark (● needs you, ■ stopped, ◎ coordinator on it, ✔ ready, ◆
+finished, ◐ in review, ○ working, ◌ queued, ✓ accepted or closed, – dropped), its
+ID, title and age, then the board's line for it, needs-you first as on the board.
+Piped, `ls` prints each task whole on one line; on a terminal it is in colour and
+fits the width, and when one line per task doesn't fit, it takes the board's two
+rows: title and age, then the line under it. `--json` keeps the raw status.
+`show` starts with that line and ends with `next:`, what you can do now
+(`next: bullpen reply BP-3 <answer>, or i on the board`).
+
 The board leaves its bottom row empty: Rex draws minimized panes (the workers'
 and reviewers' capsules) over the bottom right of the window, which would cover
 the end of the key line. `bullpen config --board-bottom-gap 0` takes the row
@@ -152,9 +162,9 @@ four actions, also in the command palette under Bullpen, and binds:
 - `cmd+;` then `b`: the board.
 - `cmd+;` then `c`: the coordinator.
 - `cmd+;` then `j`: jump to any open task. A picker opens in the middle of the
-  window, listing every open task (ID, status and title, and the repository's
-  name when there is more than one) of every repository bullpen knows, this
-  one's first. Type part of it: each word you type must be in the line, its
+  window, listing every open task (the repository's name when there is more
+  than one, then its mark in the board's colour, ID and title) of every
+  repository bullpen knows, this one's first, each in the board's order. Type part of it: each word you type must be in the line, its
   letters in order but not necessarily together (`lgn` finds "login"), and the
   closest matches come first. `↑` `↓` (or `ctrl+p` `ctrl+n`) move, `⏎` goes to
   that task as `bullpen go` does, and `esc` closes the picker. A task without a
@@ -177,7 +187,7 @@ bullpen after BP-2 --none   # change (or clear) what a task waits on
 bullpen model BP-2 sonnet   # the worker model it starts and resumes with (--clear: the config's)
 bullpen review-mode BP-2 full  # its first review: full, light or auto (by the size of the change)
 bullpen start BP-1    # worktree + branch + a Rex pane running the worker
-bullpen ls            # open tasks, in the board's words (--json: the raw status)
+bullpen ls            # open tasks as the board says them, in its order (--json: the raw status)
 bullpen ls --all-repos  # the same for every repository bullpen knows, by repository
 bullpen peek BP-1     # the end of the worker's screen
 bullpen prompt BP-1   # the prompt its worker (or reviewer) is at, and its screen, as JSON

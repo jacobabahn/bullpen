@@ -897,7 +897,7 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.news(), ["bullpen · BP-1 has shown no progress for 20 min: `bullpen peek BP-1`"])
         t = self.show(tid)
         self.assertEqual((t["status"], t["stuck"]["who"]), ("working", "worker"))  # still working
-        self.assertIn("no progress for 20 min", self.bp("ls").stdout)
+        self.assertIn("No progress for 20 min. p shows its screen.", self.bp("ls").stdout)
         self.assertIn("no progress for 20 min", self.bp("show", tid).stdout)
         self.bp("_event", worker, "working", "", "Running the tests")  # a sign of life
         self.assertNotIn("stuck", self.show(tid))
@@ -1656,9 +1656,9 @@ class BullpenTest(unittest.TestCase):
         shutil.rmtree(gone)  # its checkout is gone: left out
         out = self.bp("ls", "--all-repos", cwd=self.tmp).stdout  # works outside a repository
         self.assertEqual([l.split()[:2] for l in out.splitlines() if l], [
-            ["proj", f"({self.repo})"], ["BP-1", "queued"],
-            ["shop", f"({shop})"], ["BP-1", "queued"], ["BP-2", "queued"]])
-        self.assertIn("  BP-2    queued (todo) Ship it", out)
+            ["proj", f"({self.repo})"], ["◌", "BP-1"],
+            ["shop", f"({shop})"], ["◌", "BP-1"], ["◌", "BP-2"]])
+        self.assertIn("  ◌ BP-2  Ship it  now  Not started. s starts it.", out)
         self.assertNotIn("Done already", out)
         with_closed = self.bp("ls", "--all-repos", "--all").stdout
         self.assertIn("Done already", with_closed)
@@ -1707,16 +1707,16 @@ class BullpenTest(unittest.TestCase):
         self.bp("add", "Sell it", "--brief", "x", cwd=shop)
         pick = lambda q, cwd=None: self.bp("pick", "--filter", q, "--from", "nowhere", cwd=cwd).stdout.splitlines()
         self.assertEqual(pick(""), [  # this repository's first, with each one's name
-            "proj  BP-1  queued (todo)  Fix the login redirect",
-            "proj  BP-2  queued (todo)  Cover logout",
-            "shop  BP-1  queued (todo)  Sell it"])
-        self.assertEqual([l.split()[:2] for l in pick("", cwd=shop)][0], ["shop", "BP-1"])  # from shop: shop's first
+            "proj  ◌ BP-1  Fix the login redirect",  # the board's mark, not its words
+            "proj  ◌ BP-2  Cover logout",
+            "shop  ◌ BP-1  Sell it"])
+        self.assertEqual([l.split()[:3] for l in pick("", cwd=shop)][0], ["shop", "◌", "BP-1"])  # from shop: shop's first
         self.assertEqual(pick("lgn"), [pick("")[0]])  # letters in order, not together
         self.assertEqual(pick("shop bp1"), [pick("")[2]])  # every word must match
         self.assertEqual(pick("p-2"), [pick("")[1]])
         self.assertEqual(pick("zzz"), [])
         shutil.rmtree(shop)  # a repository whose checkout is gone is left out, and with one repo, no names
-        self.assertEqual(pick("")[0], "BP-1  queued (todo)  Fix the login redirect")
+        self.assertEqual(pick("")[0], "◌ BP-1  Fix the login redirect")
 
     def test_go_repo_goes_to_a_task_of_another_repo(self):
         here = self.start_task("Here")
@@ -1952,7 +1952,7 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(t["status"], "working")
         self.assertFalse((self.fake / "alive" / reviewer).exists())  # its review is moot
         self.assertEqual(t["review"]["round"], 0)  # and doesn't use up a round
-        self.assertIn("checks failing", self.bp("show", tid).stdout)
+        self.assertIn("Fixing what GitHub said. Checks failing.", self.bp("show", tid).stdout)
         self.assertEqual((self.sent_back_by(tid), self.show(tid)["gh"]["checks"]), ("github", "failing"))
         # the worker runs ready again without fixing them: same commit, same failure
         self.bp("ready", tid, "--summary", "Did it.", cwd=t["worktree"])
@@ -2386,10 +2386,10 @@ class BullpenTest(unittest.TestCase):
     def test_ls_and_show_say_what_a_todo_task_waits_on(self):
         self.start_task("First")
         self.bp("add", "Second", "--brief", "x", "--after", "BP-1")
-        self.assertIn("(Waits on BP-1)", self.bp("ls").stdout)
+        self.assertIn("Second  now  Waits on BP-1.", self.bp("ls").stdout)
         self.assertIn("waits: Waits on BP-1", self.bp("show", "BP-2").stdout)
         self.bp("drop", "BP-1", "--force")
-        self.assertIn("(Waits on BP-1 (dropped))", self.bp("ls").stdout)
+        self.assertIn("Waits on BP-1 (dropped).", self.bp("ls").stdout)
 
     def test_accept_starts_queued_tasks_in_id_order_within_max_running(self):
         tid = self.ready_with_a_commit()
@@ -2723,7 +2723,7 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.models(self.api("session.new_layer")[0]["layout"]["block"]["options"]["command"]), ["opus"])
         nxt = self.bp("add", "Next", "--brief", "x", "--after", tid, "--model", "haiku").stdout.strip()
         self.assertEqual(self.show(nxt)["worker_model"], "haiku")
-        self.assertIn("[model haiku]", self.bp("ls").stdout)
+        self.assertIn("Model: haiku.", self.bp("ls").stdout)
         self.assertIn("    model: haiku (its own, over the config's opus)", self.bp("show", nxt).stdout)
         self.merge_on_github(tid)
         self.bp("accept", tid)
@@ -2742,7 +2742,7 @@ class BullpenTest(unittest.TestCase):
         self.assertIn(f"{tid} uses the config's worker model (opus)", out)
         self.assertIn("takes effect at its next start or resume", out)
         self.assertNotIn("worker_model", self.show(tid))
-        self.assertNotIn("[model", self.bp("ls").stdout)
+        self.assertNotIn("Model:", self.bp("ls").stdout)
         self.assertEqual(len(self.api("session.new_layer")), 1)  # nothing restarted
         self.bp("model", tid, "haiku")
         self.assertIn("running sonnet until its next start or resume", self.bp("show", tid).stdout)
@@ -3881,7 +3881,7 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.show(tid)["status"], "finished")
         self.assertEqual(len(self.typed()), before)
         self.assertEqual(self.check(), [])
-        self.assertIn("finished Fix the thing  (nothing to merge: Recorded the demo video)", self.bp("ls").stdout)
+        self.assertIn("Finished, nothing to merge: Recorded the demo video. a closes it.", self.bp("ls").stdout)
 
     def test_finish_needs_a_summary(self):
         tid = self.start_task()
@@ -4117,16 +4117,23 @@ class BullpenTest(unittest.TestCase):
         self.bp("_limit")
         self.bp("_prs")
 
-    def test_ls_uses_the_boards_words(self):
-        tid = self.start_task()
+    def test_ls_and_show_say_a_task_as_the_board_does(self):
+        self.bp("up")
         self.bp("add", "Later", "--brief", "Then this.")
-        out = self.bp("ls").stdout
-        self.assertRegex(out, rf"(?m)^{tid} +working +Fix the thing")
-        self.assertRegex(out, r"(?m)^BP-2 +queued \(todo\) +Later")
+        tid = self.start_task()  # BP-2
         self.bp("_event", self.block(tid), "blocked", "permission", "Allow rm?")
-        self.assertRegex(self.bp("ls").stdout, rf"(?m)^{tid} +needs you +Fix the thing")
-        self.assertEqual(self.show(tid)["status"], "needs")
+        out = self.bp("ls").stdout.splitlines()  # piped: whole lines, no colour
+        self.assertRegex(out[0], rf"^● {tid}  Fix the thing  now  .*Allow rm\?")  # needs you first
+        self.assertEqual(out[1], "◌ BP-1  Later  now  Not started. s starts it.")
+        self.assertNotIn("\x1b", "".join(out))
+        self.assertEqual([t["id"] for t in json.loads(self.bp("ls", "--json").stdout)], ["BP-1", tid])
         self.assertEqual({t["status"] for t in json.loads(self.bp("ls", "--json").stdout)}, {"needs", "todo"})
+        show = self.bp("show", tid).stdout.splitlines()
+        self.assertEqual(show[0], out[0])
+        self.assertNotIn("status:", "".join(show))
+        self.assertTrue(show[-1].startswith(f"     next: `bullpen answer {tid} <option>`"), show[-1])
+        self.assertEqual(self.bp("show", "BP-1").stdout.splitlines()[-1],
+                         "     next: `bullpen start BP-1` (s on the board), or `bullpen drop BP-1` (d)")
 
     # ---------- notifications for the person ----------
 
@@ -5202,7 +5209,7 @@ class LocalModeTest(unittest.TestCase):
         self.assertFalse((self.tmp / "state" / "prs").exists())
         self.assertEqual(self.typed()[-1], ("blk1", "bullpen · BP-1 is ready (1 commit, local branch): Fix the thing"))
         ls = self.bp("ls").stdout
-        self.assertIn("local branch bullpen/bp-1-fix-the-thing", ls)
+        self.assertIn("Local branch bullpen/bp-1-fix-the-thing.", ls)
         self.assertNotIn("None", ls)
         show = self.bp("show", tid).stdout
         self.assertIn("local branch", show)
@@ -5816,6 +5823,92 @@ class HelpersTest(unittest.TestCase):
     def setUpClass(cls):
         cls.bp = cls.cli()
 
+    # ---- one task line ----
+
+    def repo(self, *tasks, **cfg):
+        class R:
+            pass
+        r = R()
+        r.cfg, r.tasks = {"review_rounds": 2, **cfg}, lambda: list(tasks)
+        return r
+
+    def ago(self, minutes):
+        import datetime as dt
+        return (dt.datetime.now().astimezone() - dt.timedelta(minutes=minutes)).isoformat()
+
+    def test_board_order_puts_what_you_do_next_first(self):
+        ts = [{"id": f"BP-{i}", "status": s} for i, s in
+              enumerate(["todo", "working", "ready", "stopped", "needs", "triage", "done", "review", "finished"], 1)]
+        self.assertEqual([t["id"] for t in self.bp.board_order(ts)],
+                         ["BP-4", "BP-5", "BP-6", "BP-3", "BP-9", "BP-8", "BP-2", "BP-1", "BP-7"])
+
+    def test_the_boards_sentence(self):
+        d = lambda t, *more, **cfg: self.bp.board_detail(self.repo(t, *more, **cfg), t)
+        self.assertEqual(d({"id": "BP-1", "status": "stopped"}), "Its agent exited. r resumes it.")
+        self.assertEqual(d({"id": "BP-1", "status": "finished", "summary": "# Recorded the demo\n\nmore"}),
+                         "Finished, nothing to merge: Recorded the demo. a closes it.")
+        self.assertEqual(d({"id": "BP-1", "status": "ready", "pr": "https://github.com/a/b/pull/41",
+                            "review": {"verdict": "approved", "kind": "full"}, "gh": {"checks": "passing"}}),
+                         "PR #41, approved by full review. Checks passing.")
+        self.assertEqual(d({"id": "BP-1", "status": "review", "review": {"kind": "followup", "round": 2}}),
+                         "Follow-up review on round 2 of 2.")
+        self.assertEqual(d({"id": "BP-2", "status": "todo", "after": ["BP-1"]}, {"id": "BP-1", "status": "ready"}),
+                         "Waits on BP-1.")
+        self.assertEqual(d({"id": "BP-1", "status": "triage", "why": "Ended its turn without saying ready"}),
+                         "Ended its turn without ready.")
+        self.assertEqual(d({"id": "BP-1", "status": "todo", "worker_model": "opus"}, worker_model="sonnet"),
+                         "Not started. s starts it. Model: opus.")
+        self.assertEqual(d({"id": "BP-1", "status": "needs", "why": "Asks: x?", "note": "Looking"}), "Looking")
+
+    def test_a_task_line_fits_the_width_and_keeps_its_age(self):
+        t = {"id": "BP-3", "status": "needs", "title": "Fix the login redirect after sign-in",
+             "why": "Asks: python3 or python? The Makefile uses both.", "since": self.ago(12)}
+        r = self.bp.task_line(self.repo(t), t)
+        self.assertEqual(r, "● BP-3  Fix the login redirect after sign-in  12m  Asks: python3 or python? The Makefile uses both.")
+        cut = self.bp.task_line(self.repo(t), t, width=42)
+        self.assertEqual(cut, "● BP-3  Fix the login redirect after…  12m")  # no room for the sentence
+        self.assertEqual(self.bp.task_line(self.repo(t), t, width=70),
+                         "● BP-3  Fix the login redirect after sign-in  12m  Asks: python3 or p…")  # 70 wide
+        colour = self.bp.task_line(self.repo(t), t, color=True)
+        self.assertTrue(colour.startswith("\x1b[1;33m●\x1b[0m "))  # the mark amber, as on the board
+        self.assertIn("\x1b[1;31m12m", colour)  # needs you for over 5 minutes: the age turns red
+
+    def test_a_narrow_terminal_gets_the_boards_rows(self):
+        a = {"id": "BP-3", "status": "needs", "title": "Fix the login redirect after sign-in",
+             "why": "Asks: python3 or python? The Makefile uses both and the CI image only has python3.",
+             "since": self.ago(12)}
+        b = {"id": "BP-16", "status": "todo", "title": "Emails: digest", "since": self.ago(1)}
+        r = self.repo(a, b)
+        self.assertEqual(list(self.bp.ls_lines(r, [b, a], 42)), [
+            "● BP-3   Fix the login redirect aft…  12m",
+            "         Asks: python3 or python? The",
+            "         Makefile uses both and the CI …",
+            "◌ BP-16  Emails: digest                1m",
+            "         Not started. s starts it."])
+        self.assertTrue(all(len(l) <= 41 for l in self.bp.ls_lines(r, [b, a], 42)))
+        self.assertEqual(len(list(self.bp.ls_lines(r, [b, a], 200))), 2)  # wide: one line each
+        self.assertEqual(len(list(self.bp.ls_lines(r, [b, a]))), 2)  # piped: whole
+        c = {"id": "BP-5", "status": "todo", "title": "Later", "note": "One two three four five six seven eight"}
+        self.assertEqual(len(self.bp.task_rows(self.repo(c), c, width=20)), 2)  # the board's one line
+        self.assertEqual(len(self.bp.task_rows(self.repo(c), c, width=20, lines=99)), 5)  # show's: all of it
+
+    def test_next_says_what_you_can_do_now(self):
+        n = lambda **t: self.bp.next_steps(self.repo(), {"id": "BP-4", **t})
+        self.assertEqual(n(status="needs", stop={"kind": "prompt"}),
+                         "`bullpen answer BP-4 <option>` (`bullpen peek BP-4` shows the prompt), or i on the board")
+        self.assertEqual(n(status="needs", ask=True), "`bullpen reply BP-4 <answer>`, or i on the board")
+        self.assertIn("`bullpen accept BP-4`", n(status="ready"))
+        self.assertIn("`bullpen close BP-4`", n(status="finished"))
+        self.assertIn("`bullpen resume BP-4`", n(status="stopped"))
+        self.assertEqual(n(status="done"), "nothing: it's closed")
+
+    def test_the_picker_shows_marks_in_colour(self):
+        p = self.bp.Picker(["● BP-1  Fix login", "◌ BP-2  Cover logout"], ["1;33", "2"])
+        out = p.screen(80, 5)
+        self.assertEqual(out[2], "\x1b[7m> \x1b[1;33m●\x1b[22;39m BP-1  Fix login\x1b[0m")  # still reversed after
+        self.assertEqual(out[3], "  \x1b[2m◌\x1b[22;39m BP-2  Cover logout")
+        self.assertEqual(p.lines, ["● BP-1  Fix login", "◌ BP-2  Cover logout"])  # what's searched has no colour
+
     # ---- pick ----
 
     def test_fuzzy_matches_each_word_in_order_ignoring_case(self):
@@ -5870,7 +5963,7 @@ class HelpersTest(unittest.TestCase):
         out = p.screen(13, 5)  # the query, a hint and three tasks
         self.assertEqual(out[0], "jump to> ")
         self.assertIn("10/10", out[1])
-        self.assertEqual(out[2:], ["  BP-5  queue", "  BP-6  queue", "\x1b[7m> BP-7  queue\x1b[0m"])
+        self.assertEqual(out[2:], ["  BP-5  queu…", "  BP-6  queu…", "\x1b[7m> BP-7  queu…\x1b[0m"])
         self.assertIn("no open tasks in any repository", self.bp.Picker([]).screen(80, 5)[1])
 
     def stepper(self, comments=()):

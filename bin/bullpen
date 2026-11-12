@@ -23,9 +23,11 @@ import signal
 import subprocess
 import sys
 import tempfile
+import textwrap
 import termios
 import time
 import tty
+import unicodedata
 from pathlib import Path
 
 HOME = Path(__file__).resolve().parent.parent
@@ -4083,6 +4085,255 @@ def cmd_drop(args):
     start_queued(repo, t, "dropped")
 
 
+# ---------- one task line, as the board says it ----------
+#
+# `ls`, the picker and `show` say a task the way the board does (board/src/model.rs):
+# its mark, ID, title, age and the board's sentence for it, in the board's order.
+# Change one, change the other.
+
+MARKS = {"needs": "●", "stopped": "■", "triage": "◎", "ready": "✔", "finished": "◆", "done": "✓",
+         "review": "◐", "working": "○", "todo": "◌", "dropped": "–"}
+# the board's groups, in order: what you do next first
+BOARD_ORDER = {"needs": 0, "stopped": 0, "triage": 1, "ready": 2, "finished": 3, "review": 4,
+               "working": 5, "todo": 6, "done": 7, "dropped": 7}
+MARK_COLORS = {"needs": "1;33", "stopped": "1;31", "ready": "1;32", "finished": "1;32", "review": "1;34"}
+MARK_SET = set(MARKS.values())
+STALE = 300  # seconds a task can need you before its age turns red, as on the board
+
+
+def task_num(t):
+    return int(t["id"].rsplit("-", 1)[1])
+
+
+def board_order(tasks):
+    """Tasks as the board lists them: by group (needs you first), then by number."""
+    return sorted(tasks, key=lambda t: (BOARD_ORDER.get(t["status"], 8), task_num(t)))
+
+
+def mark_color(t):
+    """The SGR colour of a task's mark: a quiet agent's in the colour of one that needs you."""
+    return MARK_COLORS["needs"] if is_stuck(t) else MARK_COLORS.get(t["status"], "2")
+
+
+def stamp(t):
+    """When it entered its current status."""
+    return t.get("since") or t.get("updated")
+
+
+def ago(t, at=None):
+    """ "3m", "2h", "1d", "now", or "" with no time."""
+    if not stamp(t):
+        return ""
+    s = max(int(seconds_since(stamp(t), at)), 0)
+    for unit, n in (("d", 86400), ("h", 3600), ("m", 60)):
+        if s >= n:
+            return f"{s // n}{unit}"
+    return "now"
+
+
+def stale(t, at=None):
+    return t["status"] == "needs" and bool(stamp(t)) and seconds_since(stamp(t), at) >= STALE
+
+
+DOING_FOR = 30 * 60  # how old a note of what an agent is doing can be and still show
+
+
+def doing_now(t, at=None):
+    """What the agent the task waits on last said it's doing, on one line, as the board
+    shows it in place of its sentence: "" when it hasn't said, isn't working, said it
+    before the task's status (less 30 s), over DOING_FOR ago, or is quiet or limited."""
+    block = (t.get("review") or {}).get("block") if t["status"] == "review" else \
+        t.get("block") if t["status"] == "working" else None
+    if not block or is_stuck(t) or is_limited(t) or t.get("note"):
+        return ""
+    d = read_json(STATE / "doing" / f"{safe(block)}.json", {})
+    if not isinstance(d, dict) or d.get("state") != "working" or not isinstance(d.get("at"), (int, float)):
+        return ""
+    at = at or dt.datetime.now().astimezone()
+    since = dt.datetime.fromisoformat(stamp(t)).timestamp() - 30 if stamp(t) else float("-inf")
+    if d["at"] < since or at.timestamp() - d["at"] > DOING_FOR:
+        return ""
+    return " ".join(str(d.get("text") or "").split())
+
+
+BOARD_KINDS = {"full": "full review", "light": "light review", "followup": "follow-up review",
+               "tour": "review of your comments"}
+
+
+def first_sentence(summary):
+    """ "Recorded the demo." from "# Recorded the demo", or "" when there's none."""
+    for line in (summary or "").splitlines():
+        line = line.strip().lstrip("#").strip()
+        if line:
+            return line if line.endswith((".", "!", "?")) else line + "."
+    return ""
+
+
+def limit_detail(lim, at=None):
+    reviewer = lim.get("who") == "reviewer"
+    who = "Reviewer stopped at the usage limit" if reviewer else "Usage limit"
+    if lim.get("resets"):
+        return f"{who}, resets {clock(dt.datetime.fromisoformat(lim['resets']), at)}. Continues by itself then."
+    return f"{who}, reset time unknown. {'⏎ opens it.' if reviewer else 't tells it to continue.'}"
+
+
+def status_detail(repo, t, every, at=None):
+    """The board's sentence for where the task stands."""
+    r = t.get("review") or {}
+    rnd, why, st = r.get("round") or 1, t.get("why") or "", t["status"]
+    pr = pr_short(t.get("pr")) or (f"Local branch {t.get('branch') or ''}" if t.get("local") else "")
+    if t.get("note"):
+        return t["note"]
+    if is_stuck(t):
+        quiet = stuck_phrase(t, at)
+        if t["stuck"]["who"] == "reviewer":
+            return f"Reviewer has shown {quiet}. ⏎ opens it."
+        return f"{quiet[0].upper()}{quiet[1:]}. p shows its screen."
+    if is_limited(t):
+        return limit_detail(t["limit"], at)
+    if st in ("needs", "triage") and why == "Ended its turn without saying ready":
+        return "Stopped mid-task, probably with a question. p shows its screen." if st == "needs" \
+            else "Ended its turn without ready."
+    if st in ("needs", "triage"):
+        return why or ("Waiting for you." if st == "needs" else "Waiting for its coordinator.")
+    if st == "stopped":
+        return "Its agent exited. r resumes it."
+    if st == "review":
+        kind = BOARD_KINDS.get(r.get("kind"), "review" if r.get("kind") else "reviewer")
+        return f"{kind[0].upper()}{kind[1:]} on round {rnd} of {repo.cfg.get('review_rounds', 2)}."
+    if st == "ready" and why.startswith("Nothing to merge"):
+        return "Done, with nothing to merge."
+    if st == "finished":
+        line = first_sentence(t.get("summary"))
+        return f"Finished, nothing to merge: {line} a closes it." if line else "Finished, nothing to merge. a closes it."
+    if st == "ready":
+        text = {"approved": f"{pr}, approved by {BOARD_KINDS.get(r.get('kind'), 'review')}.",
+                "changes": f"{pr}. Review still asks for changes."}.get(r.get("verdict")) or (f"{pr}." if pr else "Done.")
+        return text + (f" Rebased onto {t['rebased']}." if t.get("rebased") else "")
+    if st == "working" and sent_back_by_github(t):
+        return "Fixing what GitHub said."
+    if st == "working" and r.get("verdict") == "changes":
+        return f"Fixing what review round {rnd} found."
+    if st == "todo":
+        waits = waits_phrase(repo, t, every)
+        return f"{waits}." if waits else "Not started. s starts it."
+    if st == "done" and t.get("local") and not t.get("pr"):
+        return f"Accepted. Merged into {t['base']}." if t.get("merged") and t.get("base") else "Accepted."
+    if st == "done" and t.get("closed"):
+        return "Closed, nothing to merge."
+    if st == "done":
+        return f"Accepted. {pr} merged." if pr else "Accepted."
+    return "Dropped." if st == "dropped" else ""
+
+
+def auto_detail(repo, t):
+    """What auto-accept does with it, when that isn't what the config says for all."""
+    on = bool(repo.cfg.get("auto_accept"))
+    if t["status"] in CLOSED:
+        return ""
+    if t.get("auto_wait") and t["status"] == "ready":
+        return "Auto-accepts once its checks pass."
+    if on and t.get("auto_accept") is False:
+        return "Kept for you: no auto-accept."
+    if not on and t.get("auto_accept") is True:
+        return "Auto-accepts once approved."
+    return ""
+
+
+def board_detail(repo, t, every=None, at=None):
+    """The board's sentence for a task: what its agent is doing now, else where it
+    stands, what GitHub said, what auto-accept does with it and its own model."""
+    doing = doing_now(t, at)
+    if doing:
+        return doing
+    every = every if every is not None else {o["id"]: o for o in repo.tasks()}
+    text = status_detail(repo, t, every, at)
+    gh = "" if t["status"] in CLOSED or t.get("note") else pr_phrase(t)
+    if gh:
+        text = f"{text} {gh[0].upper()}{gh[1:]}.".strip()
+    model = own_model(repo, t) if t["status"] not in CLOSED else None
+    return " ".join(p for p in (text, auto_detail(repo, t), f"Model: {model}." if model else "") if p)
+
+
+def text_width(text):
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 0 if unicodedata.combining(c) else 1
+               for c in text)
+
+
+def fit(text, w):
+    """Cut text to w columns, with an ellipsis when it doesn't fit."""
+    if text_width(text) <= w:
+        return text
+    out, used = "", 0
+    for c in text:
+        cw = text_width(c)
+        if used + cw > w - 1:
+            break
+        out, used = out + c, used + cw
+    return out + "…" if w > 0 else ""
+
+
+def sgr(code, text, color):
+    return f"\x1b[{code}m{text}\x1b[0m" if color and text else text
+
+
+def task_line(repo, t, every=None, idw=0, width=None, color=False, age=True, detail=True, at=None):
+    """One task as the board says it: mark, ID, title, age, then the board's sentence.
+    Cut to width columns when given (the title keeps room for the age); in colour with
+    color, as on the board: the mark in its status's colour, the rest dim."""
+    mark, tid = MARKS.get(t["status"], " "), f"{t['id']:<{idw}}"
+    when = ago(t, at) if age else ""
+    text = board_detail(repo, t, every, at) if detail else ""
+    head = 2 + len(tid) + 2
+    title = t["title"] if width is None else fit(t["title"], max(width - head - (len(when) + 2 if when else 0), 1))
+    if width is not None:
+        room = width - head - text_width(title) - (len(when) + 2 if when else 0) - 2
+        text = fit(text, room) if room >= 4 else ""
+    title_dim = t["status"] in CLOSED or t["status"] == "triage"
+    parts = [sgr(mark_color(t), mark, color) + " " + sgr("2", tid, color) + "  " + sgr("2" if title_dim else "0", title, color)]
+    if when:
+        parts.append(sgr("1;31" if stale(t, at) else "2", when, color))
+    if text:
+        parts.append(sgr("2", text, color))
+    return "  ".join(parts)
+
+
+def wrap(text, w, lines):
+    """text in at most `lines` lines of w columns, the last ending in " …" when cut."""
+    out = textwrap.wrap(text, max(w, 1), break_on_hyphens=False) or [""]
+    if len(out) > lines:
+        out = out[:lines]
+        out[-1] = fit(out[-1] + " …", w)
+    return out
+
+
+def task_rows(repo, t, every=None, idw=0, width=80, color=False, at=None, lines=None):
+    """The board's rows for a task, for a terminal too narrow for task_line: mark, ID,
+    title and the age at the right edge, then the board's sentence under the title in
+    `lines` lines (by default the board's: two for one that needs you, else one)."""
+    mark, tid, when = MARKS.get(t["status"], " "), f"{t['id']:<{idw}}", ago(t, at)
+    w = width - 1  # never into the last column
+    head = 2 + len(tid) + 2
+    title = fit(t["title"], max(w - head - len(when) - 2, 1))
+    pad = " " * max(w - head - text_width(title) - len(when), 2) if when else ""
+    title_dim = t["status"] in CLOSED or t["status"] == "triage"
+    rows = [sgr(mark_color(t), mark, color) + " " + sgr("2", tid, color) + "  " + sgr("2" if title_dim else "0", title, color)
+            + pad + sgr("1;31" if stale(t, at) else "2", when, color)]
+    text = board_detail(repo, t, every, at)
+    n = lines or (2 if t["status"] in ("needs", "stopped", "finished") or is_stuck(t) or is_limited(t) or pr_phrase(t) else 1)
+    rows += [" " * head + sgr("2", line, color) for line in wrap(text, w - head, n) if line]
+    return rows
+
+
+def term_width():
+    """The terminal's width when stdout is one, else None: piped output is whole."""
+    return shutil.get_terminal_size().columns if sys.stdout.isatty() else None
+
+
+def colored():
+    return sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+
+
 # The board's group for each status, so `ls` uses the same words.
 BOARD_WORDS = {"needs": "needs you", "stopped": "needs you", "triage": "coordinator on it",
                "ready": "ready to accept", "finished": "finished", "review": "in review",
@@ -4106,7 +4357,7 @@ def cmd_ls(args):
         return
     if not tasks:
         print("no open tasks" + ("" if args.all else " (--all shows finished ones)"))
-    for line in ls_lines(repo, tasks):
+    for line in ls_lines(repo, tasks, term_width(), colored()):
         print(line)
 
 
@@ -4115,15 +4366,15 @@ def listed(repo, args):
     return [t for t in repo.tasks() if args.all or t["status"] not in CLOSED]
 
 
-def ls_lines(repo, tasks):
+def ls_lines(repo, tasks, width=None, color=False):
+    """`ls`'s lines, in the board's order: one task_line each, whole when piped (width
+    None). On a terminal too narrow for every line, the board's two rows each."""
     every = {t["id"]: t for t in repo.tasks()}
-    width = max((len(status_words(t["status"])) for t in tasks), default=0)
-    for t in tasks:
-        done = t["status"] == "finished" and "nothing to merge: " + ((t.get("summary") or "").splitlines() or [""])[0]
-        extra = done or waits_phrase(repo, t, every) or stuck_phrase(t) or t.get("why") or t.get("pr") or (f"local branch {t['branch']}" if t.get("local") else "")
-        model = own_model(repo, t)
-        yield (f"{t['id']:<7} {status_words(t['status']):<{width}} {t['title']}" + (f"  ({extra})" if extra else "")
-               + (f"  [model {model}]" if model else ""))
+    idw = max((len(t["id"]) for t in tasks), default=0)
+    tasks = board_order(tasks)
+    if width is None or all(text_width(task_line(repo, t, every, idw)) < width for t in tasks):
+        return [task_line(repo, t, every, idw, color=color) for t in tasks]
+    return [row for t in tasks for row in task_rows(repo, t, every, idw, width, color)]
 
 
 def ls_repos(args):
@@ -4135,11 +4386,12 @@ def ls_repos(args):
         return
     if not groups:
         print("no open tasks in any repository" + ("" if args.all else " (--all shows finished ones)"))
+    width = term_width()
     for i, (r, ts) in enumerate(groups):
         if i:
             print()
         print(f"{r.root.name}  ({r.root})")
-        for line in ls_lines(r, ts):
+        for line in ls_lines(r, ts, width and width - 2, colored()):
             print("  " + line)
 
 
@@ -4159,12 +4411,18 @@ def cmd_show(args):
     if args.json:
         print(json.dumps(t, indent=2))
         return
-    for k in ("id", "title", "status", "why", "note", "base", "branch", "worktree", "block", "model", "pr",
-              "diffstat", "summary"):
+    detail, width = board_detail(repo, t), term_width()
+    if width is None or text_width(task_line(repo, t)) < width:
+        print(task_line(repo, t, color=colored()))
+    else:
+        print("\n".join(task_rows(repo, t, width=width, color=colored(), lines=99)))
+    for k in ("why", "base", "branch", "worktree", "block", "model", "pr", "diffstat", "summary"):
         if k == "model" and own_model(repo, t):
             print(f"{k:>9}: {model_line(repo, t)}")
+        elif k == "why" and t.get(k) and t[k] in detail:
+            continue  # the first line says it
         elif t.get(k):
-            print(f"{k:>9}: {t[k]}")
+            print(f"{k:>9}: " + "\n".join((" " * 11 if l else "") + l for l in str(t[k]).strip().splitlines()).lstrip())
         elif k == "pr" and t.get("local"):
             print(f"{k:>9}: none; local branch, merged into {t['base']} by accept")
     if t.get("after"):
@@ -4177,7 +4435,7 @@ def cmd_show(args):
         print(f"     auto: {'accepts by itself once approved' if t['auto_accept'] else 'kept for you (--no-auto-accept)'}")
     if waits_phrase(repo, t):
         print(f"    waits: {waits_phrase(repo, t)}")
-    if pr_phrase(t):
+    if pr_phrase(t) and pr_phrase(t).lower() not in detail.lower():
         print(f"   github: {pr_phrase(t)}")
     if is_stuck(t):
         print(f"    quiet: its {t['stuck']['who']} has shown {stuck_phrase(t)}")
@@ -4197,6 +4455,38 @@ def cmd_show(args):
             failed = " (failed: the worker didn't start)" if name == "setup" and t.get("needs_setup") else ""
             print(f"{name:>9}: {log}{failed}")
     print(f"    brief: {repo.dir / 'briefs' / (t['id'] + '.md')}")
+    nxt = next_steps(repo, t)
+    print("     next: " + ("\n" + " " * 11).join(wrap(nxt, width - 12, 99) if width else [nxt]))
+
+
+def next_steps(repo, t):
+    """What you can do with the task now: the commands, with the board's keys."""
+    tid, st = t["id"], t["status"]
+    if st == "needs" and t.get("ask"):
+        return f"`bullpen reply {tid} <answer>`, or i on the board"
+    if st == "needs" and (t.get("stop") or {}).get("kind") == "prompt":
+        return f"`bullpen answer {tid} <option>` (`bullpen peek {tid}` shows the prompt), or i on the board"
+    if st == "needs":
+        return f"`bullpen go {tid}` opens it (⏎ on the board), or `bullpen tell {tid} <message>` (t)"
+    if st == "stopped":
+        return f"`bullpen resume {tid}` (r on the board), or `bullpen drop {tid}` (d)"
+    if st == "triage":
+        return f"nothing: its coordinator is on it. `bullpen go {tid}` opens it (⏎ on the board)"
+    if st == "ready":
+        return f"`bullpen accept {tid}` (a on the board); `bullpen diff {tid}` shows the change (v)"
+    if st == "finished":
+        return f"`bullpen close {tid}` (a on the board), or `bullpen drop {tid}` (d)"
+    if st == "review":
+        return f"nothing until its review is done; `bullpen go {tid} --review` opens the reviewer (⏎ on the board)"
+    if st == "working" and (is_stuck(t) or (is_limited(t) and not t["limit"].get("resets"))):
+        return f"`bullpen peek {tid}` shows its screen (p on the board), `bullpen tell {tid} <message>` (t)"
+    if st == "working":
+        return f"nothing until it's ready; `bullpen tell {tid} <message>` steers it (t on the board)"
+    if st == "todo" and waits_phrase(repo, t):
+        return f"nothing: it starts by itself once what it waits on is accepted; `bullpen start {tid} --force` starts it now"
+    if st == "todo":
+        return f"`bullpen start {tid}` (s on the board), or `bullpen drop {tid}` (d)"
+    return "nothing: it's closed"
 
 
 def diff_label(t):
@@ -4616,18 +4906,18 @@ def pick_items(home=None):
     repos = known_repos()
     if home:
         repos = [home] + [r for r in repos if r.dir != home.dir]
-    return [(r, t) for r in repos for t in r.tasks() if t["status"] not in CLOSED]
+    return [(r, t) for r in repos for t in board_order(r.tasks()) if t["status"] not in CLOSED]
 
 
 def pick_lines(items):
-    """One line per task: its ID, status and title, with its repository's name first
-    when the tasks come from more than one."""
+    """One line per task: its mark, ID and title (task_line without age or sentence, so
+    a search for "12" finds BP-12, not a task 12m old), after its repository's name when
+    the tasks come from more than one."""
     many = len({r.dir for r, _ in items}) > 1
     rw = max((len(r.root.name) for r, _ in items), default=0)
     iw = max((len(t["id"]) for _, t in items), default=0)
-    sw = max((len(status_words(t["status"])) for _, t in items), default=0)
-    return [(f"{r.root.name:<{rw}}  " if many else "")
-            + f"{t['id']:<{iw}}  {status_words(t['status']):<{sw}}  {t['title']}" for r, t in items]
+    return [(f"{r.root.name:<{rw}}  " if many else "") + task_line(r, t, idw=iw, age=False, detail=False)
+            for r, t in items]
 
 
 def fuzzy_score(query, text):
@@ -4674,8 +4964,9 @@ PICK_HINT = "⏎ go · esc close · ↑↓ move"
 class Picker:
     """What the picker shows and does with each key, apart from the terminal."""
 
-    def __init__(self, lines):
-        self.lines, self.query, self.sel = lines, "", 0
+    def __init__(self, lines, colors=None):
+        """colors: each line's mark colour (an SGR code), as on the board."""
+        self.lines, self.colors, self.query, self.sel = lines, colors, "", 0
         self.shown = pick_filter("", lines)
         self.msg = "" if lines else "no open tasks in any repository"
 
@@ -4713,9 +5004,16 @@ class Picker:
         out = [f"jump to> {self.query}",
                f"\x1b[2m{self.msg or f'{len(self.shown)}/{len(self.lines)}  {PICK_HINT}'}\x1b[0m"]
         for n, i in enumerate(self.shown[first:first + rows], first):
-            line = self.lines[i][:max(width - 2, 0)]
+            line = self.paint(fit(self.lines[i], max(width - 2, 0)), i)
             out.append(f"\x1b[7m> {line}\x1b[0m" if n == self.sel else f"  {line}")
         return out
+
+    def paint(self, line, i):
+        """The line with its mark in colour; the reset keeps the selected row reversed."""
+        at = next((j for j, c in enumerate(line) if c in MARK_SET), None)
+        if not self.colors or at is None:
+            return line
+        return f"{line[:at]}\x1b[{self.colors[i]}m{line[at]}\x1b[22;39m{line[at + 1:]}"
 
 
 def split_keys(text):
@@ -4789,7 +5087,7 @@ def cmd_pick(args):
                            stdin=subprocess.DEVNULL, text=True, capture_output=True)
         return None if p.returncode == 0 else (p.stderr.strip().removeprefix("bullpen: ") or "couldn't go there")
 
-    pick_tui(Picker(lines), choose)
+    pick_tui(Picker(lines, [mark_color(t) for _, t in items]), choose)
 
 
 def pick_pane(args):

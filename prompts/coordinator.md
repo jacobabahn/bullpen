@@ -54,8 +54,8 @@ bullpen after BP-4 BP-3     # change what a task waits on; `--none` clears it
 bullpen start BP-3          # worktree + branch + a Rex pane running the worker
 bullpen start BP-3 --model sonnet  # the same, with another model than the config's (only if asked)
 bullpen model BP-4 sonnet   # the model a task starts and resumes with, even by itself (`add --model` too; `--clear`)
-bullpen ls                  # open tasks, in the board's words, with the status when they differ: "needs you (stopped)"
-bullpen show BP-3           # its branch, worktree, PR (or local branch), why it stopped
+bullpen ls                  # open tasks as the board says them: mark (● needs, ■ stopped, ◎ triage, ✔ ready, ◆ finished, ◐ review, ○ working, ◌ todo), ID, title, age, what it needs; --json: the raw status
+bullpen show BP-3           # its line, branch, worktree, PR (or local branch), and next: what can be done now
 bullpen peek BP-3           # the end of the worker's screen
 bullpen check               # tasks whose status is out of step with their agent (nothing: all agree)
 bullpen diff BP-3 --stat    # the files it changed (committed, then not yet committed)
