@@ -332,6 +332,7 @@ def set_status(t, status, why=None, stop=None):
     if status != t.get("status"):
         t.pop("ok", None)
         t.pop("ask", None)
+        t.pop("asked_from", None)
     t.update(status=status, why=why)
     if stop:
         t["stop"] = stop
@@ -375,9 +376,17 @@ def escalate(repo, t, late):
 
 def ask(t, question):
     """The task needs the person, for question. A stopped task keeps its stop: whether
-    its worker is mid-turn still goes by it."""
+    its worker is mid-turn still goes by it. One that wasn't stopped (working, in
+    review, ready...) remembers its status and why (asked_from): the answer puts them
+    back."""
+    was, why, asked_from = t["status"], t.get("why"), t.get("asked_from")
     set_status(t, "needs", question)
     t["ask"] = True
+    if was == "needs":
+        if asked_from:
+            t["asked_from"] = asked_from  # asked again: still from where it was first
+    elif was not in STOPPED:
+        t["asked_from"] = {"status": was, "why": why}
 
 
 def ok(t):
@@ -2077,10 +2086,20 @@ def cmd_answer(args):
     print(f"answered {t['id']}'s {who}: {args.key.lower()} ({label})")
 
 
+def agent_running(t):
+    """Is the pane of the agent the task is stopped on (its reviewer's, for its stop)
+    alive?"""
+    if reviewers_stop(t):
+        r = t.get("review") or {}
+        return rex_alive(r.get("session") or t.get("session"), r.get("block"))
+    return rex_alive(t.get("session"), t.get("block"))
+
+
 def cmd_reply(args):
     """The person's answer to what the coordinator asked about a task (`ask`). It goes
     to the task's coordinator as "BP-3: <answer>": typed into its pane, or as news with
-    config --news monitor. The task leaves needs as `ok` would, or goes to its
+    config --news monitor. A task asked about while it wasn't stopped goes back to the
+    status it had then. A stopped one leaves needs as `ok` would, or goes to its
     coordinator when its agent isn't running."""
     repo = Repo(repo_root())
     t = repo.task(args.id)
@@ -2093,12 +2112,10 @@ def cmd_reply(args):
         raise Fail(f"no coordinator is running to take the answer: `bullpen tell {t['id']}` "
                    f"tells its worker instead")
     question = t.get("why") or ""
-    if reviewers_stop(t):
-        r = t.get("review") or {}
-        running = rex_alive(r.get("session") or t.get("session"), r.get("block"))
-    else:
-        running = rex_alive(t.get("session"), t.get("block"))
-    if running:
+    if t.get("asked_from"):
+        was = t["asked_from"]
+        set_status(t, was["status"], was.get("why"))  # it wasn't stopped: back to what it was doing
+    elif agent_running(t):
         ok(t)
     else:
         set_status(t, "triage", clip(f"The person answered: {text}", 160))

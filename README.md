@@ -195,9 +195,10 @@ A task that needs you for a question gets `i answer` on its key line:
 - **The coordinator asked** (`bullpen ask`): `i` opens a line, "Answer BP-3:". What
   you type goes to the task's coordinator, not its worker: typed into its pane as
   `BP-3: <your answer>`, or, with `config --news monitor`, as a news line it reads.
-  The task leaves needs as `bullpen ok` would (working, or in review), and the
-  coordinator acts on the answer. With its agent's pane gone, the task goes to its
-  coordinator instead ("coordinator on it"). With no coordinator running, it's
+  A task asked about while it was working, in review or ready goes back to that.
+  One that was stopped leaves needs as `bullpen ok` would (working, or in review),
+  or, with its agent's pane gone, goes to its coordinator ("coordinator on it"). The
+  coordinator acts on the answer. With no coordinator running, it's
   refused: `t` tells the worker yourself.
 
 `bullpen prompt`, `answer` and `reply` do the same from a shell.

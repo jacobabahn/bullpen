@@ -3005,6 +3005,33 @@ class BullpenTest(unittest.TestCase):
         p = self.bp("reply", tid, "again", ok=False)
         self.assertIn("no question from its coordinator to answer", p.stderr)
 
+    def test_reply_puts_a_task_asked_about_in_review_back_in_review(self):
+        tid = self.start_task()
+        reviewer = self.commit_and_ready(tid)
+        self.bp_in("blk1", "ask", tid, "Ship it today?")
+        self.bp_in("blk1", "ask", tid, "Ship it today, or wait?")  # asked again: still from review
+        self.bp("reply", tid, "Today")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t.get("ask"), t.get("asked_from"), t.get("ok")), ("review", None, None, None))
+        self.verdict(tid, "approve")  # its reviewer, still running, gives its verdict as usual
+        self.assertEqual(self.show(tid)["status"], "ready")
+
+    def test_reply_puts_a_ready_task_back_in_the_ready_queue(self):
+        tid = self.start_task()
+        self.bp("config", "--review", "off")
+        wt = self.show(tid)["worktree"]
+        (Path(wt) / "fix.txt").write_text("fixed\n")
+        sh("git", "-C", wt, "add", ".")
+        sh("git", "-C", wt, "commit", "-qm", "Fix")
+        self.bp("ready", tid, "--summary", "Did it.", cwd=wt)
+        self.assertEqual(self.show(tid)["status"], "ready")
+        self.bp_in("blk1", "ask", tid, "Merge before the release?")
+        self.bp("reply", tid, "Yes")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"], t.get("ok")), ("ready", None, None))
+        # the answer still reaches its coordinator
+        self.assertEqual(self.typed()[-1], ("blk1", "BP-1: Yes"))
+
     def test_reply_is_news_when_the_coordinator_follows_it(self):
         tid, blk = self.asked()
         self.bp("config", "--news", "monitor")
