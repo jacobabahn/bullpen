@@ -144,6 +144,12 @@ age, then the line under it. `--json` keeps the raw status.
 `show` starts with that line and ends with `next:`, what you can do now
 (`next: bullpen reply BP-3 <answer>, or i on the board`).
 
+`bullpen --help` lists the commands in four groups: yours, the coordinator's,
+the worker's and reviewer's, and setup. `bullpen COMMAND --help` says more about
+one. A command bullpen doesn't have gets one line, with the closest one if there
+is one: ``bullpen: no command `acept`. Did you mean `accept`? `bullpen --help`
+lists them.``
+
 The board leaves its bottom row empty: Rex draws minimized panes (the workers'
 and reviewers' capsules) over the bottom right of the window, which would cover
 the end of the key line. `bullpen config --board-bottom-gap 0` takes the row

@@ -4303,11 +4303,43 @@ class BullpenTest(unittest.TestCase):
         out = self.bp("--help").stdout
         for name in ("_event", "_stuck", "_flush", "_prs", "_limit", "_gone", "_auto_accept"):
             self.assertNotIn(name, out)
-        self.assertIn("{up,go,pick,hide,", out)
-        self.assertIn("accept", out)
+        self.assertIn("\n  accept ", out)
         self.bp("_flush")  # still there for the watcher
         self.bp("_limit")
         self.bp("_prs")
+
+    def test_help_lists_the_commands_in_groups(self):
+        env = dict(self.env, COLUMNS="42")
+        out = subprocess.run([str(BULLPEN), "--help"], cwd=self.repo, env=env, text=True,
+                             capture_output=True).stdout
+        lines = out.splitlines()
+        self.assertEqual(lines[0], "usage: bullpen COMMAND [ARGS]")
+        titles = [l for l in lines if l and not l.startswith(" ") and l.endswith(":")]
+        self.assertEqual(titles, ["You:", "Coordinator:", "Worker and reviewer:", "Setup:"])
+        self.assertTrue(all(len(l) <= 42 for l in lines), out)
+        group = lambda name: next(t for t in reversed(titles) if out.index(t) < out.index(f"\n  {name} "))
+        self.assertEqual(group("accept"), "You:")
+        self.assertEqual(group("ask"), "Coordinator:")
+        self.assertEqual(group("verdict"), "Worker and reviewer:")
+        self.assertEqual(group("doctor"), "Setup:")
+        self.assertNotIn("(coordinator)", out)  # the group says it
+        self.assertIn("(reviewer)", out)  # a mixed group keeps who it's for
+
+    def test_an_unknown_command_is_one_line_with_a_close_match(self):
+        p = self.bp("acept", "BP-1", ok=False)
+        self.assertEqual(p.returncode, 2)
+        self.assertEqual(p.stdout, "")
+        self.assertEqual(p.stderr, "bullpen: no command `acept`. Did you mean `accept`? "
+                                   "`bullpen --help` lists them.\n")
+        p = self.bp("frobnicate", ok=False)
+        self.assertEqual(p.stderr, "bullpen: no command `frobnicate`. `bullpen --help` lists them.\n")
+        p = self.bp("_evnt", ok=False)  # never offers an internal command
+        self.assertEqual(p.stderr, "bullpen: no command `_evnt`. `bullpen --help` lists them.\n")
+        p = self.bp("--bogus", ok=False)
+        self.assertEqual(p.stderr, "bullpen: `--bogus` goes after a command. `bullpen --help` lists them.\n")
+        p = self.bp(ok=False)  # nothing: the help
+        self.assertEqual(p.returncode, 2)
+        self.assertTrue(p.stdout.startswith("usage: bullpen COMMAND [ARGS]\n"))
 
     def test_ls_and_show_say_a_task_as_the_board_does(self):
         self.bp("up")
@@ -6485,6 +6517,12 @@ class HelpersTest(unittest.TestCase):
         self.assertNotEqual(a["id"], b["id"])
 
     # ---------- help and ls ----------
+
+    def test_every_command_is_in_one_help_group(self):
+        sub = next(a for a in self.bp.parser()._actions if a.choices)
+        grouped = [n for _, _, names in self.bp.HELP_GROUPS for n in names]
+        self.assertEqual(len(grouped), len(set(grouped)))
+        self.assertEqual(set(grouped), {n for n in sub.choices if not n.startswith("_")})
 
     def test_every_command_and_option_has_help_but_the_internal_ones(self):
         sub = next(a for a in self.bp.parser()._actions if a.choices)

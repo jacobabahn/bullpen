@@ -6995,9 +6995,60 @@ def send_back(repo, t, lines, ask):
 
 # ---------- main ----------
 
+# `bullpen --help` lists the commands in these groups, in this order. A label in a
+# command's help that the group's title already says ("(coordinator) ") is left out.
+HELP_GROUPS = [
+    ("You", "(the person's call) ",
+     ["pick", "go", "hide", "board", "ls", "show", "diff", "tour", "tour-comment",
+      "answer", "reply", "accept", "close", "drop"]),
+    ("Coordinator", "(coordinator) ",
+     ["add", "after", "model", "review-mode", "start", "resume", "tell", "peek", "prompt",
+      "adopt", "ask", "ok", "review", "note", "check", "news", "guide"]),
+    ("Worker and reviewer", "",
+     ["ready", "finish", "verdict"]),
+    ("Setup", "",
+     ["up", "doctor", "keys", "config", "rules", "build-board"]),
+]
+USAGE = "usage: bullpen COMMAND [ARGS]\n"
+
+
+class Parser(argparse.ArgumentParser):
+    """The top-level parser: a short usage line and the commands in groups."""
+
+    def format_usage(self):
+        return USAGE
+
+    def format_help(self):
+        sub = next(a for a in self._actions if isinstance(a, argparse._SubParsersAction))
+        helps = {a.dest: a.help for a in sub._choices_actions}
+        width = max(shutil.get_terminal_size().columns - 2, 40)
+        name_w = max(len(n) for _, _, names in HELP_GROUPS for n in names) + 2
+        out = [USAGE, "\n" + textwrap.fill(self.description, width) + "\n"]
+        for title, label, names in HELP_GROUPS:
+            out.append(f"\n{title}:\n")
+            for n in names:
+                h = helps[n].removeprefix(label)
+                out.append(textwrap.fill(h, width, initial_indent=f"  {n:<{name_w}}",
+                                         subsequent_indent=" " * (name_w + 2)) + "\n")
+        out.append("\n" + textwrap.fill("`bullpen COMMAND --help` says more about one.", width) + "\n")
+        return "".join(out)
+
+
+def unknown_command(argv, choices):
+    """The one-line error for a command bullpen doesn't have, else None."""
+    if not argv or argv[0] in ("-h", "--help") or argv[0] in choices:
+        return None
+    name = argv[0]
+    if name.startswith("-"):
+        return f"bullpen: `{name}` goes after a command. `bullpen --help` lists them."
+    close = difflib.get_close_matches(name, [n for n in choices if not n.startswith("_")], n=1)
+    hint = f" Did you mean `{close[0]}`?" if close else ""
+    return f"bullpen: no command `{name}`.{hint} `bullpen --help` lists them."
+
+
 def parser():
-    ap = argparse.ArgumentParser(prog="bullpen", description=__doc__.splitlines()[0])
-    sub = ap.add_subparsers(dest="cmd", required=True)
+    ap = Parser(prog="bullpen", description=__doc__.splitlines()[0])
+    sub = ap.add_subparsers(dest="cmd", required=True, parser_class=argparse.ArgumentParser)
 
     p = sub.add_parser("up", help="start (or register) this repo's coordinator and the watcher")
     p.add_argument("--here", action="store_true", help="make the agent in this pane the coordinator")
@@ -7310,9 +7361,8 @@ def parser():
     p.add_argument("--all-repos", action="store_true", help="every repo bullpen knows (the watcher's)")
     p.set_defaults(fn=cmd_check)
 
-    # The internal commands below (the watcher's and bullpen's own) have no help, so
-    # --help leaves them out of its list; the usage line names only the others.
-    sub.metavar = "{" + ",".join(n for n in sub.choices if not n.startswith("_")) + "}"
+    # The internal commands below (the watcher's and bullpen's own) have no help and no
+    # group, so --help and the unknown-command error leave them out.
 
     p = sub.add_parser("_event")
     p.add_argument("block")
@@ -7354,7 +7404,16 @@ def parser():
 
 
 def main(argv=None):
-    args = parser().parse_args(argv)
+    argv = sys.argv[1:] if argv is None else argv
+    ap = parser()
+    if not argv:
+        print(ap.format_help(), end="")
+        return 2
+    sub = next(a for a in ap._actions if isinstance(a, argparse._SubParsersAction))
+    if err := unknown_command(argv, sub.choices):
+        print(err, file=sys.stderr)
+        return 2
+    args = ap.parse_args(argv)
     try:
         code = args.fn(args)
     except Fail as e:
