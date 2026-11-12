@@ -453,6 +453,7 @@ mod tests {
             tx,
             peeking: false,
             peek_due: Instant::now(),
+            exe: None,
         }
     }
 

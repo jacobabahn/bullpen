@@ -225,6 +225,7 @@ bullpen · BP-9 dropped
 bullpen · BP-4 started (BP-3 was accepted)
 bullpen · BP-6 started (BP-9 was dropped, freeing a slot)
 bullpen · BP-10 waits on BP-9, which was dropped, so it stays queued. Ask the person what to do: ...
+bullpen · The board wasn't rebuilt: cargo failed: error[E0425]: .... Boards keep running the old one. Log: ... Fix it, then run `bullpen build-board`.
 ```
 
 - News is what happened, not a request from the person. Act on it only as far as
@@ -294,5 +295,8 @@ bullpen · BP-10 waits on BP-9, which was dropped, so it stays queued. Ask the p
   (working), rebased (between turns), or sent back with conflicts. Nothing to do:
   the workers handle it. A task skipped for uncommitted changes, or not rebased
   because it waits on the person or on you: see to it, or mention it to them.
+- The board wasn't rebuilt (bullpen's own board, after its source changed): a
+  failed build or uncommitted changes in `board/`. Tell the person in one line;
+  the old board keeps working. A board that was rebuilt reloads by itself: no news.
 - When there's nothing to add, reply with a single short line or nothing at all.
   Several news lines at once get one reply.

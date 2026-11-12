@@ -6,6 +6,9 @@
 //! command, so the board itself never changes a task. Slow commands (accept, drop,
 //! start, resume) run in the background: the board stays usable meanwhile.
 //!
+//! When its own program is replaced (bullpen rebuilds the board when its source
+//! changes), it execs the new one in place, keeping its selection and `f`.
+//!
 //! Usage: bullpen-board --dir <repo state dir> --root <repo> --bullpen <bullpen program>
 
 mod model;
@@ -141,6 +144,30 @@ pub struct App {
     peeking: bool,
     /// when the peek reads the screen again
     peek_due: Instant,
+    /// the board's own program, as it was when it started: replaced, the board reloads
+    pub exe: Option<(PathBuf, ExeId)>,
+}
+
+/// What tells one program file from another: a rebuild renames a new file into place,
+/// so its inode (and size or mtime) changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExeId {
+    dev: u64,
+    ino: u64,
+    len: u64,
+    mtime: (i64, i64),
+}
+
+impl ExeId {
+    /// The file at path, if it's a whole program (executable, not empty).
+    pub fn of(path: &Path) -> Option<ExeId> {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let m = std::fs::metadata(path).ok()?;
+        if !m.is_file() || m.len() == 0 || m.permissions().mode() & 0o111 == 0 {
+            return None;
+        }
+        Some(ExeId { dev: m.dev(), ino: m.ino(), len: m.len(), mtime: (m.mtime(), m.mtime_nsec()) })
+    }
 }
 
 enum Msg {
@@ -176,6 +203,44 @@ fn last_line(text: &str) -> String {
 }
 
 impl App {
+    /// The program to exec in place of this one, when the board's program was replaced
+    /// and nothing would be lost: no command running, no y/n asked, nothing being typed
+    /// or answered. (An overlay just closes.)
+    pub fn replaced(&self) -> Option<PathBuf> {
+        let (path, was) = self.exe.as_ref()?;
+        let busy = !self.running.is_empty()
+            || self.pending.is_some()
+            || matches!(self.mode, Mode::Tell { .. } | Mode::Answer { .. });
+        match ExeId::of(path) {
+            Some(now) if now != *was && !busy => Some(path.clone()),
+            _ => None,
+        }
+    }
+
+    /// The arguments the new program starts with: these, plus what the board shows
+    /// that isn't saved anywhere else (the selection and `f`; `l` and `o` are settings).
+    pub fn restart_args(&self) -> Vec<String> {
+        let mut a: Vec<String> = vec![
+            "--dir".into(),
+            self.dir.display().to_string(),
+            "--root".into(),
+            self.root.display().to_string(),
+            "--bullpen".into(),
+            self.bullpen.display().to_string(),
+        ];
+        if let Some(me) = &self.me {
+            a.extend(["--coordinator".into(), me.clone()]);
+        }
+        if let Some(sel) = &self.sel {
+            a.extend(["--select".into(), sel.clone()]);
+        }
+        if self.finished {
+            a.extend(["--finished".into(), "on".into()]);
+        }
+        a.extend(["--reloaded".into(), "on".into()]);
+        a
+    }
+
     fn reload(&mut self) {
         self.cfg = Config::load(&self.dir);
         self.tasks = model::load_tasks(&self.dir);
@@ -575,21 +640,37 @@ fn status(report: &str) {
     let _ = std::io::stdout().flush();
 }
 
-fn args() -> Result<(PathBuf, PathBuf, PathBuf, Option<String>), String> {
-    let mut it = std::env::args().skip(1);
-    let (mut dir, mut root, mut bullpen, mut me) = (None, None, None, None);
+/// The command line: where to look, and (from a reload) what the board showed.
+#[derive(Debug, Default, PartialEq)]
+pub struct Args {
+    dir: PathBuf,
+    root: PathBuf,
+    bullpen: PathBuf,
+    me: Option<String>,
+    select: Option<String>,
+    finished: bool,
+    reloaded: bool,
+}
+
+fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<Args, String> {
+    let mut it = argv.into_iter();
+    let (mut dir, mut root, mut bullpen) = (None, None, None);
+    let mut out = Args::default();
     while let Some(a) = it.next() {
         let v = it.next().ok_or(format!("{a} needs a value"))?;
         match a.as_str() {
             "--dir" => dir = Some(PathBuf::from(v)),
             "--root" => root = Some(PathBuf::from(v)),
             "--bullpen" => bullpen = Some(PathBuf::from(v)),
-            "--coordinator" => me = Some(v),
+            "--coordinator" => out.me = Some(v),
+            "--select" => out.select = Some(v),
+            "--finished" => out.finished = v == "on",
+            "--reloaded" => out.reloaded = v == "on",
             _ => return Err(format!("unknown argument {a}")),
         }
     }
     match (dir, root, bullpen) {
-        (Some(d), Some(r), Some(b)) => Ok((d, r, b, me)),
+        (Some(d), Some(r), Some(b)) => Ok(Args { dir: d, root: r, bullpen: b, ..out }),
         _ => Err("usage: bullpen-board --dir <state dir> --root <repo> --bullpen <program> [--coordinator <id>] \
                   (`bullpen board` runs it)"
             .into()),
@@ -597,7 +678,7 @@ fn args() -> Result<(PathBuf, PathBuf, PathBuf, Option<String>), String> {
 }
 
 fn main() {
-    let (dir, root, bullpen, me) = match args() {
+    let Args { dir, root, bullpen, me, select, finished, reloaded } = match parse_args(std::env::args().skip(1)) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("bullpen-board: {e}");
@@ -633,6 +714,8 @@ fn main() {
     });
 
     let repo_name = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    // The program as `bullpen board` named it: a rebuild replaces that file.
+    let exe = std::env::args_os().next().map(PathBuf::from).filter(|p| p.is_absolute());
     let mut app = App {
         cfg: Config::load(&dir),
         tasks: Vec::new(),
@@ -641,9 +724,9 @@ fn main() {
         bullpen,
         me,
         repo_name,
-        sel: None,
-        finished: false,
-        msg: String::new(),
+        sel: select,
+        finished,
+        msg: if reloaded { "Reloaded: the board was rebuilt.".into() } else { String::new() },
         top: 0,
         pending: None,
         running: Vec::new(),
@@ -653,6 +736,7 @@ fn main() {
         tx,
         peeking: false,
         peek_due: Instant::now(),
+        exe: exe.and_then(|p| ExeId::of(&p).map(|id| (p, id))),
     };
 
     // Rex picks a pane's icon by the program in it and doesn't know this one. A
@@ -667,6 +751,14 @@ fn main() {
         if stale || read.elapsed() >= Duration::from_secs(1) {
             app.reload();
             (stale, read) = (false, Instant::now());
+            if let Some(exe) = app.replaced() {
+                use std::os::unix::process::CommandExt;
+                ratatui::restore();
+                let err = Command::new(&exe).args(app.restart_args()).exec(); // returns only if it failed
+                term = ratatui::init();
+                app.exe = None; // don't try again
+                app.msg = format!("Couldn't reload the rebuilt board: {err}");
+            }
         }
         app.settle();
         app.peek();
@@ -730,6 +822,7 @@ mod tests {
             tx,
             peeking: false,
             peek_due: Instant::now(),
+            exe: None,
         }
     }
 
@@ -930,5 +1023,93 @@ mod tests {
         assert_eq!(a.sel.as_deref(), Some("BP-1"));
         a.done("BP-3".into(), Job::Accept, true, String::new());
         assert_eq!(a.sel.as_deref(), Some("BP-1"));
+    }
+
+    /// A scratch folder of its own for a test, removed at the end.
+    struct Scratch(PathBuf);
+    impl Scratch {
+        fn new(name: &str) -> Scratch {
+            let d = std::env::temp_dir().join(format!("bullpen-board-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&d);
+            std::fs::create_dir_all(&d).unwrap();
+            Scratch(d)
+        }
+    }
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn program(path: &Path, text: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(path, text).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn a_board_reloads_once_its_program_is_renamed_into_place_and_its_idle() {
+        let d = Scratch::new("reexec");
+        let exe = d.0.join("bullpen-board");
+        program(&exe, "#!/bin/sh\n");
+        let mut a = app(vec![task("BP-1", "ready")]);
+        a.exe = Some((exe.clone(), ExeId::of(&exe).unwrap()));
+        assert_eq!(a.replaced(), None); // the same file
+        // a build writes a copy, then renames it over the program
+        let tmp = d.0.join(".bullpen-board.1");
+        program(&tmp, "#!/bin/sh\necho new\n");
+        std::fs::rename(&tmp, &exe).unwrap();
+        a.running.push(("BP-1".into(), Job::Accept));
+        assert_eq!(a.replaced(), None); // not while a command runs
+        a.running.clear();
+        a.mode = Mode::Tell { id: "BP-1".into(), text: "half a".into(), reply: false };
+        assert_eq!(a.replaced(), None); // nor while you type
+        a.mode = Mode::Normal;
+        a.pending = Some((Action::Accept, "BP-1".into()));
+        assert_eq!(a.replaced(), None); // nor while it asks y/n
+        a.pending = None;
+        assert_eq!(a.replaced(), Some(exe.clone()));
+    }
+
+    #[test]
+    fn a_missing_or_empty_program_isnt_reloaded() {
+        let d = Scratch::new("missing");
+        let exe = d.0.join("bullpen-board");
+        program(&exe, "#!/bin/sh\n");
+        let mut a = app(vec![]);
+        a.exe = Some((exe.clone(), ExeId::of(&exe).unwrap()));
+        std::fs::remove_file(&exe).unwrap();
+        assert_eq!(a.replaced(), None);
+        std::fs::write(&exe, "").unwrap();
+        assert_eq!(a.replaced(), None);
+        a.exe = None; // started from a relative path, or reloading failed
+        program(&exe, "#!/bin/sh\necho new\n");
+        assert_eq!(a.replaced(), None);
+    }
+
+    #[test]
+    fn a_reload_keeps_the_selection_f_and_the_coordinator() {
+        let mut a = app(vec![task("BP-1", "ready"), task("BP-2", "done")]);
+        a.me = Some("c2".into());
+        a.sel = Some("BP-2".into());
+        press(&mut a, 'f');
+        let args = parse_args(a.restart_args()).unwrap();
+        assert_eq!(
+            args,
+            Args {
+                dir: a.dir.clone(),
+                root: a.root.clone(),
+                bullpen: a.bullpen.clone(),
+                me: Some("c2".into()),
+                select: Some("BP-2".into()),
+                finished: true,
+                reloaded: true,
+            }
+        );
+        a.finished = false;
+        a.me = None;
+        a.sel = None;
+        let args = parse_args(a.restart_args()).unwrap();
+        assert_eq!((args.me, args.select, args.finished), (None, None, false));
     }
 }

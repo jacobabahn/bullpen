@@ -36,8 +36,9 @@ pane), and `a` accepts (merges) a ready one, or closes a finished one. The words
 ```
 
 Needs Rex (a server from preview.13 on, for minimized floating panes), git, `gh`
-(signed in), Claude Code and, to build the task board, Rust's `cargo`. Run
-`./install.sh` again after pulling changes to the board.
+(signed in), Claude Code and, to build the task board, Rust's `cargo`. After a
+change to the board's source, bullpen rebuilds it by itself (see
+[Board rebuilds](#board-rebuilds)); `bullpen build-board` builds it now.
 
 ### Doctor
 
@@ -50,7 +51,10 @@ non-zero when anything fails. It checks:
   [local mode](#local-mode)
 - the programs in the coordinator, worker and reviewer commands (Claude Code's
   `claude`, unless you changed them) are on PATH
-- the board is built and not older than `board/`'s sources: else run `./install.sh`
+- the board is built from `board/`'s source as it is now (`Cargo.toml`, `Cargo.lock`
+  and `src/`, by hash), or being rebuilt. Else it says why: its last build failed
+  (with the log), `board/` has uncommitted changes, or it just hasn't been rebuilt
+  yet; `bullpen build-board` fixes each
 - the keys are in your Rex config: Rex lists the `bullpen_next`, `bullpen_board`
   and `bullpen_coordinator` actions (`rex actions`)
 - the watcher is running, from the current `watch.lua` and `bin/bullpen` (the hashes
@@ -180,6 +184,7 @@ bullpen accept BP-1   # merge its PR (or local branch; rebase), close its pane, 
                       # a finished task (nothing to merge): remove its worktree, branch and pane
 bullpen close BP-1    # the same as accept, for a finished task only
 bullpen drop BP-1     # close its PR, pane and worktree without merging
+bullpen build-board   # build the board now (see Board rebuilds)
 ```
 
 ### Answering from the board
@@ -660,6 +665,37 @@ is checked out, it is fast-forwarded with `git merge --ff-only`, so uncommitted
 changes to other files survive. If anything stands in the way (a conflict, or an
 uncommitted change to a file the task touches), `accept` says why and leaves the
 task ready, with its worktree and branch as they were.
+
+### Board rebuilds
+
+Every board runs the program `bullpen build-board` (and `install.sh`) builds from
+bullpen's own checkout, the one `bin/bullpen` is in. The build records a hash of
+the board's source (`board/Cargo.toml`, `Cargo.lock`, `src/`). When the source no
+longer matches, as after accepting a task that changes `board/` or a `git pull`,
+bullpen builds it again in the background:
+
+- `bullpen up` checks, in any repository.
+- `accept` checks only in bullpen's own repository. Accepting a task elsewhere never
+  builds anything.
+- The build copies cargo's output and renames the copy into place, so a board never
+  runs a half-written file.
+- Each running board checks its program every second. Once it's replaced, the board
+  runs the new one in its own pane, keeping the selected task and `f` (`l` and `o`
+  are settings already), and says "Reloaded: the board was rebuilt." It waits while
+  a command it started is running, a y/n question is open, or you're typing or
+  answering. No pane is reopened.
+- If `board/` has uncommitted changes, there's no build, so half-finished work never
+  goes out. One news line says so.
+- If the build fails (no cargo, a compile error), the old board keeps running. One
+  news line gives the reason and the log, `board/target/bullpen-board.log`.
+  bullpen doesn't try that source again by itself; `bullpen build-board` does.
+- cargo can be a mise shim with no Rust version set for bullpen's folder. Then
+  bullpen tries rustup's `~/.cargo/bin/cargo`, and failing that says to set a
+  version. It never changes your mise config.
+
+With `BULLPEN_BOARD` set (a board program of your own), bullpen builds nothing.
+Boards started before this change don't reload themselves: close them and run
+`bullpen up` once.
 
 ## Where things live
 
