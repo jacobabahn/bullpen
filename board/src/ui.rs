@@ -111,6 +111,25 @@ fn key_line(keys: &[(&str, &str)]) -> Line<'static> {
     Line::from(spans)
 }
 
+/// A peek's foot: it's live, the keys that act from it, and esc. Keys drop from the
+/// right of the middle until it fits; esc stays.
+fn peek_foot(w: usize) -> Line<'static> {
+    let mut keys = vec![("t", "tell"), ("⏎", "open"), ("i", "answer"), ("a", "accept"), ("v", "diff")];
+    loop {
+        let mut spans = vec![span("live · ", dim())];
+        spans.extend(key_line(&keys).spans);
+        if !keys.is_empty() {
+            spans.push(span("  ", Style::new()));
+        }
+        spans.extend(key_line(&[("esc", "returns")]).spans);
+        let line = Line::from(spans);
+        if line.width() <= w.saturating_sub(2) || keys.is_empty() {
+            return line;
+        }
+        keys.pop();
+    }
+}
+
 /// The empty rows to leave at the bottom (the config's board_bottom_gap): Rex draws
 /// minimized panes' capsules over the bottom right of the window, so the board's
 /// last lines would sit under them. A board too short for its other lines and
@@ -135,8 +154,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         for (j, line) in lines.iter().take(h.saturating_sub(3)).enumerate() {
             put(buf, area, 2 + j, 1, screen_line(line));
         }
-        let foot = if peek.is_some() { "live · any key returns" } else { "any key returns" };
-        put(buf, area, h.saturating_sub(1), 1, span(foot, dim()));
+        let foot = if peek.is_some() { peek_foot(w) } else { Line::from(span("any key returns", dim())) };
+        put(buf, area, h.saturating_sub(1), 1, foot);
         return;
     }
     if let Mode::Help { top } = &mut app.mode {
@@ -357,6 +376,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if let Mode::Tell { id, text, .. } = &app.mode {
         let x = input_line(buf, area, last, &format!("Tell {id}:"), text);
         f.set_cursor_position(Position::new(area.x + x as u16, area.y + last as u16));
+    } else if let Mode::Quit = &app.mode {
+        let texts = ["y quits the board   any other key stays", "y quits   n stays"];
+        put(buf, area, last, 1, span(model::first_fit(&texts.map(String::from), w.saturating_sub(2)), bold()));
     } else if let Mode::Stale { .. } = &app.mode {
         put(buf, area, last, 1, span(fit("n new tour   o the old one   esc cancels", w.saturating_sub(2)), bold()));
     } else if let Some((action, tid)) = &app.pending {
@@ -886,6 +908,24 @@ mod tests {
         let s = screen(&mut a, 40, 12);
         assert_eq!(row(&s, 1), " any key returns");
         assert_eq!(row(&s, 0), "");
+    }
+
+    #[test]
+    fn a_peek_says_which_keys_act_from_it_and_q_asks_on_the_key_row() {
+        let mut a = app(vec![ready("BP-1")], 0, Layout::Grouped);
+        a.mode = Mode::Overlay { title: "BP-1  Fix it".into(), lines: vec!["$ cargo test".into()], peek: Some("BP-1".into()) };
+        let s = screen(&mut a, 42, 12);
+        assert_eq!(row(&s, 0), " live · t tell  ⏎ open  esc returns");
+        let s = screen(&mut a, 80, 12);
+        assert_eq!(row(&s, 0), " live · t tell  ⏎ open  i answer  a accept  v diff  esc returns");
+        let s = screen(&mut a, 24, 12);
+        assert_eq!(row(&s, 0), " live · esc returns");
+
+        a.mode = Mode::Quit;
+        let s = screen(&mut a, 42, 12);
+        assert_eq!(row(&s, 0), " y quits the board   any other key stays");
+        let s = screen(&mut a, 30, 12);
+        assert_eq!(row(&s, 0), " y quits   n stays");
     }
 
     #[test]

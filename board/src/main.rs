@@ -48,14 +48,16 @@ pub const BOARD_KEYS: &[(&str, &[(&str, &str)])] = &[
         ("o", "other coordinators' tasks too"),
         ("esc", "put a red message away"),
         ("?", "this list"),
-        ("q", "quit the board"),
+        ("q", "quit the board (y to be sure)"),
     ]),
     ("In a tour", &[
         ("n p", "next, previous step"),
         ("j k", "scroll (space b too)"),
         ("c", "comment on the step"),
         ("s", "at the end: send the comments"),
-        ("a", "at the end: accept"),
+        ("a", "accept (before the end: a twice)"),
+        ("t", "tell its worker something"),
+        ("⏎ v", "close it, open its pane or diff"),
         ("esc", "close it"),
     ]),
 ];
@@ -66,7 +68,8 @@ const PEEK_EVERY: Duration = Duration::from_secs(1);
 /// What the bottom of the board is doing besides showing keys.
 pub enum Mode {
     Normal,
-    /// a full-screen text (a peek) until any key; a peek at a task keeps updating
+    /// a full-screen text until any key; a peek at a task keeps updating until esc or
+    /// q, and t ⏎ i a d v go back to the board and act on the task
     Overlay { title: String, lines: Vec<String>, peek: Option<String> },
     /// the `?` list, scrolled to its top line; scroll keys scroll, any other key closes
     Help { top: usize },
@@ -77,6 +80,8 @@ pub enum Mode {
     Answer { id: String, title: String, prompt: Option<Prompt> },
     /// g on a task whose tour is stale: n writes a new one, o opens the old one
     Stale { id: String },
+    /// q: y quits the board, any other key stays
+    Quit,
 }
 
 /// A slow command, run in the background.
@@ -269,6 +274,16 @@ fn acts_on_task(code: KeyCode, ch: Option<char>) -> bool {
     matches!(code, KeyCode::Enter | KeyCode::Esc) || ch.is_some_and(|c| "adsrpvtigc".contains(c))
 }
 
+/// A key in a peek: None stays in it, Some(false) goes back to the board, Some(true)
+/// goes back and does what the key does there.
+fn peek_key(code: KeyCode) -> Option<bool> {
+    match code {
+        KeyCode::Esc | KeyCode::Char('q') => Some(false),
+        KeyCode::Enter | KeyCode::Char('t' | 'i' | 'a' | 'd' | 'v') => Some(true),
+        _ => None,
+    }
+}
+
 /// The last line a command said, without its "bullpen: ".
 fn last_line(text: &str) -> String {
     let last = text.trim().lines().last().unwrap_or("");
@@ -283,7 +298,7 @@ impl App {
         let (path, was) = self.exe.as_ref()?;
         let busy = !self.running.is_empty()
             || self.pending.is_some()
-            || matches!(self.mode, Mode::Tell { .. } | Mode::Answer { .. } | Mode::Stale { .. });
+            || matches!(self.mode, Mode::Tell { .. } | Mode::Answer { .. } | Mode::Stale { .. } | Mode::Quit);
         match ExeId::of(path) {
             Some(now) if now != *was && !busy => Some(path.clone()),
             _ => None,
@@ -613,8 +628,29 @@ impl App {
             return false;
         }
         match &mut self.mode {
-            Mode::Overlay { .. } => {
+            Mode::Overlay { peek: None, .. } => {
                 self.mode = Mode::Normal;
+                return true;
+            }
+            Mode::Overlay { peek: Some(id), .. } => {
+                let id = id.clone();
+                if let Some(back) = peek_key(k.code) {
+                    self.mode = Mode::Normal;
+                    if !back {
+                        return true;
+                    }
+                    // back on the board with the peeked task selected, the key acts on it
+                    self.sel = Some(id);
+                } else {
+                    return true;
+                }
+            }
+            Mode::Quit => {
+                if matches!(k.code, KeyCode::Char('y' | 'Y')) {
+                    return false;
+                }
+                self.mode = Mode::Normal;
+                self.msg = Note::info("Cancelled.");
                 return true;
             }
             Mode::Help { top } => {
@@ -687,7 +723,7 @@ impl App {
         let ids: Vec<String> = self.order().iter().map(|t| t.id.clone()).collect();
         let i = ids.iter().position(|x| Some(x) == self.sel.as_ref()).unwrap_or(0);
         match (k.code, ch) {
-            (_, Some('q')) => return false,
+            (_, Some('q')) => self.mode = Mode::Quit,
             (KeyCode::Down, _) | (_, Some('j')) => {
                 self.sel = ids.get((i + 1).min(ids.len().saturating_sub(1))).cloned();
             }
@@ -1396,6 +1432,85 @@ mod tests {
         let mut a = with_bullpen(&d, vec![], "#!/bin/sh\necho 'bullpen: config.json is read-only' >&2\nexit 1\n");
         press(&mut a, 'l');
         assert_eq!(a.msg, Note::failed("config.json is read-only"));
+    }
+
+    fn peek_at(a: &mut App, id: &str) {
+        a.sel = Some(id.into());
+        a.peeking = true; // no read in the background: it can't reach this test
+        press(a, 'p');
+        assert!(matches!(&a.mode, Mode::Overlay { peek: Some(p), .. } if p == id));
+    }
+
+    #[test]
+    fn a_peek_returns_on_esc_or_q_and_stays_on_other_keys() {
+        let mut a = app(vec![task("BP-1", "working"), task("BP-2", "ready")]);
+        for k in [KeyCode::Esc, KeyCode::Char('q')] {
+            peek_at(&mut a, "BP-1");
+            for c in "jkn?lsrpgc".chars() {
+                assert!(a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)));
+                assert!(matches!(a.mode, Mode::Overlay { .. }), "{c} left the peek");
+            }
+            assert!(a.key(KeyEvent::new(k, KeyModifiers::NONE)));
+            assert!(matches!(a.mode, Mode::Normal));
+            assert_eq!(a.sel.as_deref(), Some("BP-1"));
+            assert!(a.pending.is_none()); // q went back; it didn't ask to quit
+        }
+    }
+
+    #[test]
+    fn t_i_a_d_in_a_peek_go_back_and_act_on_the_peeked_task() {
+        let mut a = app(vec![task("BP-1", "working"), task("BP-2", "ready"), needs("BP-3", true, "worker")]);
+        peek_at(&mut a, "BP-1");
+        a.sel = Some("BP-2".into()); // the selection moved under the peek (a select from cmd+;)
+        press(&mut a, 't');
+        assert!(matches!(&a.mode, Mode::Tell { id, reply: false, .. } if id == "BP-1"));
+        a.mode = Mode::Normal;
+        peek_at(&mut a, "BP-2");
+        press(&mut a, 'a');
+        assert!(matches!(a.mode, Mode::Normal));
+        assert_eq!(a.pending, Some((Action::Accept, "BP-2".into())));
+        press(&mut a, 'n');
+        peek_at(&mut a, "BP-2");
+        press(&mut a, 'd');
+        assert_eq!(a.pending, Some((Action::Drop, "BP-2".into())));
+        press(&mut a, 'n');
+        peek_at(&mut a, "BP-3");
+        press(&mut a, 'i');
+        assert!(matches!(&a.mode, Mode::Tell { id, reply: true, .. } if id == "BP-3"));
+    }
+
+    #[test]
+    fn enter_and_v_in_a_peek_go_back_and_open_the_pane_or_diff() {
+        let d = Scratch::new("peek-acts");
+        let exe = fake_bullpen(&d, "current");
+        let mut a = app(vec![Task { block: Some("b1".into()), ..task("BP-1", "working") }]);
+        (a.bullpen, a.root) = (exe, d.0.clone());
+        peek_at(&mut a, "BP-1");
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(a.mode, Mode::Normal));
+        assert_eq!(a.msg, Note::done("Opened BP-1."));
+        peek_at(&mut a, "BP-1");
+        press(&mut a, 'v');
+        assert!(matches!(a.mode, Mode::Normal));
+        assert_eq!(a.msg, Note::done("Opened BP-1's diff."));
+        assert_eq!(calls(&d), ["go BP-1", "diff BP-1 --pane"]);
+    }
+
+    #[test]
+    fn q_asks_before_quitting_the_board_and_ctrl_c_doesnt() {
+        let mut a = app(vec![task("BP-1", "ready")]);
+        assert!(a.key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)));
+        assert!(matches!(a.mode, Mode::Quit));
+        assert!(a.key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))); // a second q doesn't quit either
+        assert!(matches!(a.mode, Mode::Normal));
+        assert_eq!(a.msg, "Cancelled.");
+        press(&mut a, 'q');
+        assert!(!a.key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)));
+        let mut a = app(vec![task("BP-1", "ready")]);
+        assert!(!a.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
+        // a board asking whether to quit isn't replaced under the question
+        press(&mut a, 'q');
+        assert!(a.replaced().is_none());
     }
 
     /// A bullpen that logs its arguments, says the tour's state is `state` to
