@@ -2936,9 +2936,17 @@ def review_event(repo, t, args):
     if state in LIMIT_STATES and (limited(t, "reviewer") or limit_hit(repo, t, "reviewer", args)):
         return
     if state == "working" and stuck and compacting(r.get("session") or t.get("session"), r["block"], msg):
-        if woke:
-            repo.save_task(t)
-        return  # compacting by itself: it stays where its coordinator or the person has it
+        # compacting by itself: it stays where its coordinator or the person has it
+        if not r.get("compacting"):
+            r["compacting"] = now()
+            mark_compacting(args.block, True)
+        repo.save_task(t)
+        return
+    if r.pop("compacting", None):
+        # the compaction is over. Its end changes nothing here: a reviewer stopped in
+        # triage or needs stays there, and one in review (`ok`) ended a real turn.
+        mark_compacting(args.block, False)
+        woke = True  # save the task
     if state == "working":
         back, was_ok = limit_over(t), t.pop("ok", None)
         if stuck or back:

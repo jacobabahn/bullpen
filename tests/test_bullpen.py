@@ -3557,8 +3557,29 @@ class BullpenTest(unittest.TestCase):
         self.assertEqual(self.show(tid)["status"], "triage")
         self.compact(reviewer)
         self.assertEqual(self.show(tid)["status"], "triage")
+        entry = self.tmp / "state" / "blocks" / f"{reviewer}.json"
+        self.assertIn('"compacting": true', entry.read_text())  # the watcher passes on its next turn
         self.agent(reviewer, "working")
         self.assertEqual(self.check(), [])
+        self.compacted(reviewer)
+        t = self.show(tid)
+        self.assertEqual(t["status"], "triage")
+        self.assertNotIn("compacting", t["review"])
+        self.assertNotIn("compacting", entry.read_text())
+
+    def test_a_reviewers_real_turn_after_compaction_still_counts(self):
+        tid = self.start_task()
+        self.commit_and_ready(tid)
+        reviewer = self.show(tid)["review"]["block"]
+        self.bp("_event", reviewer, "idle", "", "")
+        self.assertEqual(self.show(tid)["status"], "triage")
+        self.compact(reviewer)
+        (self.fake / f"screen_{reviewer}").write_text("✶ Misting… (3s · esc to interrupt)\n")
+        self.bp("_event", reviewer, "working", "", "Reading the diff")
+        t = self.show(tid)
+        self.assertEqual(t["status"], "review")
+        self.assertNotIn("compacting", t["review"])
+        self.assertNotIn("compacting", (self.tmp / "state" / "blocks" / f"{reviewer}.json").read_text())
 
     def test_the_workers_instructions_say_when_to_finish(self):
         tid = self.start_task()
