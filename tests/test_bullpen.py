@@ -6447,6 +6447,34 @@ class HelpersTest(unittest.TestCase):
         # ready and closed are told apart
         self.assertEqual((self.bp.MARKS["ready"], self.bp.MARKS["done"]), ("✔", "·"))
 
+    def test_the_readme_tables_are_the_boards(self):
+        # the README's marks and keys tables say what the board's `?` list says
+        readme = (ROOT / "README.md").read_text()
+        use = readme[readme.index("## Use"):readme.index("### Keys")]
+        rows = [r.split(" | ") for r in re.findall(r"^\| (.+) \|$", use, re.M)]
+        cells = {r[1]: r[0] for r in rows if len(r) == 2}
+        # every still mark, each in the README beside its words
+        for st, mark in self.bp.MARKS.items():
+            self.assertTrue(any(f"`{mark}`" in c for c in cells.values()), (st, mark))
+        for words in ("needs you", "ready to accept", "dropped", "in review", "working"):
+            self.assertIn(words, cells)
+        self.assertIn("`◐`", cells["in review"])
+        self.assertIn("`○`", cells["working"])
+        # the turning marks: the first frame of each animation in board/src/ui.rs
+        ui = (ROOT / "board" / "src" / "ui.rs").read_text()
+        for name, words in (("REVIEW", "in review"), ("WORKING", "working")):
+            first = re.search(name + r': &\[&str\] = &\["(.)"', ui).group(1)
+            self.assertIn(f"`{first}`", cells[words])
+        spin = re.search(r'SPINNER: &\[&str\] = &\["(.)"', ui).group(1)
+        self.assertTrue(any(c.startswith(f"`{spin}`") for c in cells.values()))
+        # every key of the board (BOARD_KEYS in board/src/main.rs, the tour's aside), in its order
+        main = (ROOT / "board" / "src" / "main.rs").read_text()
+        keys = main[main.index("pub const BOARD_KEYS"):main.index('("In a tour"')]
+        board = [k.split()[0] for k in re.findall(r'\("([^"]+)", "', keys)]
+        table = [re.match(r"`([^`]+)`", c).group(1) for c in cells.values() if re.match(r"`[^`]+`", c)]
+        listed = [k for k in table if k in board]
+        self.assertEqual(listed, board)
+
     def test_a_narrow_terminal_gets_the_boards_rows(self):
         a = {"id": "BP-3", "status": "needs", "title": "Fix the login redirect after sign-in",
              "why": "Asks: python3 or python? The Makefile uses both and the CI image only has python3.",

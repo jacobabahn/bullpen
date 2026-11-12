@@ -111,37 +111,56 @@ pane beside the coordinator and updates as soon as a task changes.
 It groups tasks by what you do next: needs you, coordinator on it (dimmed: see
 [Triage](#triage)), ready to accept, finished (nothing to merge, see
 [Finish](#finish-with-nothing-to-merge)), in review, working, queued; `f` adds
-the closed ones (accepted, closed, dropped). Each task shows how long it has been there and, on the
-lines under it (from under its ID), what it needs or where it stands ("Asks: python3 or python?", "PR #4,
-approved by light review.", "Follow-up review on round 2 of 2."): one or two lines,
-cut to fit, and for the selected task all of it, up to eight lines. What a task that
+the closed ones (accepted, closed, dropped). `l` switches to a compact layout,
+one line per task with the selected task's detail at the bottom (what its agent
+is doing first).
+
+Each task starts with its mark, the same one `?` shows under "Marks":
+
+| Mark | The task |
+| --- | --- |
+| `●` amber | needs you |
+| `■` red | stopped: its agent exited |
+| `◎` dim | the coordinator is on it |
+| `✔` green | ready to accept |
+| `◆` green | finished, nothing to merge |
+| `◜` blue, turning (`◐` still) | in review |
+| `⠋` turning (`○` still) | working |
+| `◌` dim | queued, not started |
+| `·` dim | accepted or closed |
+| `–` dim | dropped |
+| `⣾` turning, in place of the mark | a command (accept, drop, start, resume) or its tour being written |
+| `▌` at the left edge | needs you (amber), stopped (red), or no progress (amber) |
+
+A turning mark stands still, in amber, when its agent has shown no progress for
+a while (see [No progress](#no-progress)), and in its own colour at the usage
+limit. Each task shows how long it has been there; a task that needs you turns
+its age red after 5 minutes. On the lines under it (from under its ID) it shows
+what it needs or where it stands ("Asks: python3 or python?", "PR #4, approved
+by light review.", "Follow-up review on round 2 of 2."): one or two lines, cut
+to fit, and for the selected task all of it, up to eight lines. What a task that
 needs you or stopped says is at normal weight; the rest is dimmed. The selected
 task has its ID in reverse video, which shows in any theme, and a tint under its
-whole block, title and lines. A working
-task shows there, dimmed, what its worker is doing now, and a task in review what
-its reviewer is doing: the text of the agent's `working: ...` status, cut to fit
-and updated as it changes. With no such text, or text from before the task's
-current status or over 30 minutes old, it shows the usual line. A task in review or ready also shows the size of its
-change ("3 files, +120 −14"), worked out once when its worker runs `ready`. A
-task that needs you gets an amber bar; its age turns red after 5 minutes. A
-working task's mark spins, and one in review turns; one whose agent has shown no
-progress for a while (below) stops turning and gets the amber bar too. The top
-line counts only what you act on, at its right: `2 need you · 3 ready` (need
-you: needs or stopped; ready: ready to accept, or finished), in amber and green,
-shortened to `●2 ✔3` when the words don't fit. Before it come the other
+whole block, title and lines. A working task shows there, dimmed, what
+its worker is doing now, and a task in review what its reviewer is doing: the
+text of the agent's `working: ...` status, cut to fit and updated as it changes.
+With no such text, or text from before the task's current status or over 30
+minutes old, it shows the usual line. A task in review or ready also shows the
+size of its change ("3 files, +120 −14"), worked out once when its worker runs
+`ready`.
+
+The top line counts only what you act on, at its right: `2 need you · 3 ready`
+(need you: needs or stopped; ready: ready to accept, or finished), in amber and
+green, shortened to `●2 ✔3` when the words don't fit. Before it come the other
 repositories with tasks that need you or are ready (see [Several
 repositories](#several-repositories)), which get the room first. On a crowded
 line the hidden tasks' note drops its "o shows" first, then this repository's
 counts shrink to marks, then to what needs you alone; the other repositories go
-only when even their marks don't fit. A closed task's mark is a dim `·`, so it
-isn't taken for a ready task's `✔`. `l` switches to a compact layout, one line
-per task with the selected task's detail at the bottom (what its agent is doing
-first).
+only when even their marks don't fit.
 
 `bullpen ls`, `bullpen show` and the picker (`cmd+;` `j`) say a task the way the
-board does: its mark (● needs you, ■ stopped, ◎ coordinator on it, ✔ ready, ◆
-finished, ◐ in review, ○ working, ◌ queued, · accepted or closed, – dropped), its
-ID, title and age, then the board's line for it, needs-you first as on the board.
+board does: its mark (from the table above), its ID, title and age, then the
+board's line for it, needs-you first as on the board.
 Piped, `ls` prints each task whole on one line; on a terminal it is in colour and
 each line is cut to the width. When that would leave too little room for the line
 (a narrow terminal like the board's), it takes the board's two rows: title and
@@ -160,28 +179,47 @@ and reviewers' capsules) over the bottom right of the window, which would cover
 the end of the key line. `bullpen config --board-bottom-gap 0` takes the row
 back (or give more rows); a board too short to spare it drops the gap first.
 
-The keys at the bottom follow the selected task: `⏎` opens its worker (or its
-reviewer), `a` accepts a ready task or closes a finished one and `d` drops
-(each asks y/n first, the question saying which; in red, and first, what could
-go wrong: checks failing or still running, changes asked for, not reviewed, a
-worker or reviewer still running; a drop is always red), `t` tells, `p` peeks, `v`
-shows its diff, `g` opens its guided tour (see [Guided review tours](#guided-review-tours)),
-`s` starts, `r` resumes, `c` goes back to the coordinator, `n`
-selects the next task that needs you. On a task that needs you, `i` answers it
-from the board (see [Answering from the board](#answering-from-the-board)). Once an accept or close goes through, the
-next task that needs you is selected, so you can run down a queue of ready tasks
-with `a`, `y`. `?` lists every key, one short line each, and what the marks
-mean; on a narrow or short board `j` `k` `space` `b` scroll it, and any other key
-closes it. The key line always ends in `?`: when the task's keys fill it, its
-last keys give way, not `?`.
+The key line at the bottom shows the selected task's keys. The board's keys,
+in the order `?` lists them:
+
+| Key | Does |
+| --- | --- |
+| `j` `k` (`↑` `↓`) | select a task |
+| `n` | select the next task that needs you |
+| `⏎` | open its worker's pane, or its reviewer's |
+| `c` | back to the coordinator |
+| `a` | accept a ready task (merge it), or close a finished one; asks y/n first |
+| `d` | drop it; asks y/n first |
+| `i` | answer its question, on a task that needs you (see [Answering from the board](#answering-from-the-board)) |
+| `t` | tell its worker something |
+| `p` | peek at its worker's screen, in its colours, updating until you press a key |
+| `v` | view its diff |
+| `g` | its guided tour (see [Guided review tours](#guided-review-tours), with the keys inside a tour) |
+| `s` | start it |
+| `r` | resume a stopped worker |
+| `l` | switch layout: compact, one line a task, or back |
+| `f` | show the closed tasks too |
+| `o` | show other coordinators' tasks too (see [Several coordinators](#several-coordinators)) |
+| `esc` | put a red message away (see below) |
+| `?` | every key, one short line each, and the marks |
+| `q` | quit the board |
+
+The `y`/`n` question for `a` and `d` says which of the two it is, and in red,
+first, what could go wrong: checks failing or still running, changes asked for,
+not reviewed, a worker or reviewer still running; a drop is always red. Once
+an accept or close goes through, the next task that needs you is selected, so
+you can run down a queue of ready tasks with `a`, `y`. On a narrow or short
+board, `j` `k` `space` `b` scroll the `?` list and any other key closes it. The
+key line always ends in `?`: when the task's keys fill it, its last keys give
+way, not `?`. `bullpen up --no-board` leaves the board out. Accept, drop, start
+and resume run in the background, with a spinner on the task, so the board stays
+usable meanwhile.
+
 What a key did shows above the key line, wrapped over up to three rows: green
 when it worked ("Accepted BP-7."), red when a command failed, with its reason,
 and plain otherwise (`l` says "Compact layout.", `o` "Showing c2's tasks too.").
 A green or plain message goes with the next key; a red one stays while you move
 around, until the next thing you do to a task, or `esc`.
-`bullpen up --no-board` leaves the board out. Accept, drop, start and resume
-run in the background, with a spinner on the task, so the board stays usable
-meanwhile; a peek keeps the worker's colours and updates until you press a key.
 
 Accepting or dropping from the board (or a shell) is news to the coordinator:
 `BP-3 accepted (merged PR #12, rebase)`, `BP-3 dropped`. Run from the
