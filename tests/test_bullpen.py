@@ -5778,17 +5778,16 @@ class HelpersTest(unittest.TestCase):
         plain = lambda lines: [re.sub(r"\x1b\[[0-9;]*m", "", line).rstrip() for line in lines]
         out = plain(st.screen(60, 12))
         self.assertEqual(len(out), 12)
-        self.assertTrue(out[0].startswith(" BP-1  Fix it") and out[0].endswith("step 1 of 2"), out)
+        self.assertTrue(out[0].startswith(" BP-1  Fix it") and out[0].endswith("step 1 of 2 · 2 comments"), out)
         self.assertEqual(out[2:9], [" One", " a 1-2", "", " Why one.", "", " ▍ Why?", ""])
         self.assertEqual(out[9], " diff line 0 of step 1")
         self.assertIn("↓ 29 more", out[10])
         self.assertIn("c comment", out[11])
-        self.assertIn("2 comments", out[11])
         st.go(2)
         out = plain(st.screen(60, 30))
-        self.assertTrue(out[0].endswith("end"))
+        self.assertTrue(out[0].endswith("end · 2 comments"))
         self.assertIn(" Your 2 comments, not sent yet:", out)
-        self.assertIn(" s send them back · a accept · p back · esc close · 2 comments", out)
+        self.assertIn(" s send them back · a accept · p back · esc close", out)
         st.go(0)
         st.key("G")
         out = plain(st.screen(60, 12))
@@ -5799,6 +5798,20 @@ class HelpersTest(unittest.TestCase):
         out = plain(st.screen(60, 12))
         self.assertEqual(out[10], " Comment on step 1: " + "x" * 38)  # the end of what's typed
         self.assertEqual(st.cursor(60, 12), (11, 59))
+        st.key("\x1b")
+        st.diff = lambda i, w: ["\x1b[32m+" + "y" * 100 + "\x1b[0m", "宽" * 40]
+        st.cache.clear()
+        st.top = 0
+        out = plain(st.screen(20, 20))
+        self.assertIn(" +" + "y" * 17, out)  # cut before the last column
+        self.assertIn(" " + "宽" * 9, out)
+        self.assertTrue(all(len(line) <= 19 for line in out if "宽" not in line), out)
+
+    def test_clip_line_counts_columns_not_codes(self):
+        clip = self.bp.clip_line
+        self.assertEqual(clip("\x1b[1mabc\x1b[0mdef", 4), "\x1b[1mabc\x1b[0md")
+        self.assertEqual(clip("ab", 5), "ab")
+        self.assertEqual(clip("宽宽宽", 5), "宽宽")
 
     def test_split_keys_keeps_escape_sequences_whole(self):
         self.assertEqual(self.bp.split_keys("ab\x1b[Bc\x1bOA\x1b"), ["a", "b", "\x1b[B", "c", "\x1bOA", "\x1b"])

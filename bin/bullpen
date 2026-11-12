@@ -3274,6 +3274,29 @@ def wrap_text(text, width, indent=""):
     return out
 
 
+ANSI_RE = re.compile(r"\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(\x07|\x1b\\)|.)")
+
+
+def clip_line(line, width):
+    """A line cut to width columns on screen, its colour codes kept (they take none)."""
+    import unicodedata
+    out, used, i = [], 0, 0
+    while i < len(line):
+        m = ANSI_RE.match(line, i)
+        if m:
+            out.append(m.group(0))
+            i = m.end()
+            continue
+        c = line[i]
+        w = 0 if unicodedata.combining(c) else 2 if unicodedata.east_asian_width(c) in "WF" else 1
+        if used + w > width:
+            break
+        out.append(c)
+        used += w
+        i += 1
+    return "".join(out)
+
+
 def colour_diff(diff):
     """A patch's lines coloured as git would, for a terminal without delta."""
     out = []
@@ -3425,6 +3448,8 @@ class Stepper:
         """The stepper's lines: a header, the body from self.top, a message line and the keys."""
         n = len(self.steps)
         where = "end" if self.at_end() else f"step {self.at + 1} of {n}"
+        if self.comments:
+            where += f" · {plural(len(self.comments), 'comment')}"
         head = f"{self.tid}  {self.title}"
         room = max(width - len(where) - 4, 0)
         head = (head[:room - 1] + "…") if len(head) > room else head
@@ -3434,6 +3459,7 @@ class Stepper:
         self.top = min(self.top, max(len(body) - rows, 0))
         shown = body[self.top:self.top + rows]
         out += [" " + line + OFF for line in shown] + [""] * (rows - len(shown))
+        out = [clip_line(line, width - 1) for line in out]
         more = len(body) - self.top - rows
         if self.mode == "comment":
             out.append(f" {BOLD}{self.prompt()}{OFF}{self.typed(width)}")
@@ -3441,10 +3467,8 @@ class Stepper:
         else:
             down = f"  ↓ {more} more" if more > 0 else ""
             out.append(" " + (BOLD + self.msg + OFF if self.msg else DIM + down.strip() + OFF))
-            keys = END_KEYS if self.at_end() else STEP_KEYS
-            drafts = f" · {plural(len(self.comments), 'comment')}" if self.comments else ""
-            out.append(f" {DIM}{keys}{drafts}{OFF}")
-        return out
+            out.append(f" {DIM}{END_KEYS if self.at_end() else STEP_KEYS}{OFF}")
+        return [clip_line(line, width - 1) + OFF for line in out]
 
 
 def save_place(repo, t, commit, at):
