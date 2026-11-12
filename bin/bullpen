@@ -388,6 +388,25 @@ def back_to_work(t):
     set_status(t, "working")
 
 
+def hand_back(repo, t, msg):
+    """Give the task's worker msg to act on: typed into its pane, or, with its pane gone,
+    resumed in a new one with msg. Once the worker has it the task is working (saved),
+    and its next event is never taken for a repeat. Returns None, or why the message
+    didn't reach the worker: the task is left as it was, unsaved. Raises Fail when a
+    new pane can't be started."""
+    if not rex_alive(t.get("session"), t.get("block")):
+        launch(repo, t, session_for(repo) or t.get("session"), msg, resume=True)
+        return None
+    failed = type_to_worker(t, msg)
+    if failed:
+        return failed
+    if t["status"] != "working":
+        back_to_work(t)
+    t["last"] = None
+    repo.save_task(t)
+    return None
+
+
 def reviewers_stop(t):
     """Is the task's stop its reviewer's? (One that couldn't be continued after the usage
     limit is seen to as its worker's.)"""
@@ -2112,25 +2131,16 @@ def cmd_verdict(args):
                f"If you disagree with a finding, say why in your ready summary.")
         if t.get("gh"):
             t["gh"].pop("sent", None)  # it's the review it is fixing now, not GitHub
-        if rex_alive(t.get("session"), t.get("block")):
-            failed = type_to_worker(t, msg)
-            if not failed:
-                set_status(t, "working")
-                t["last"] = None
-        else:
-            try:
-                launch(repo, t, session_for(repo), msg, resume=True)
-                failed = None
-            except Fail as e:
-                failed = clip(str(e), 160)
+        try:
+            failed = hand_back(repo, t, msg)
+        except Fail as e:
+            failed = clip(str(e), 160)
         if failed:
             # nobody is on it: the coordinator passes the findings on
             stop(repo, t, "worker", "not_sent", "Review findings didn't reach its worker",
                  f"{t['id']}'s reviewer asked for changes, but the message didn't reach its worker "
                  f"({failed}). The findings are in {findings}: `bullpen tell {t['id']}` it to read them",
                  "not-sent")
-        else:
-            repo.save_task(t)
     else:
         set_status(t, "ready", f"Review still asks for changes after {rounds} rounds")
         repo.save_task(t)
@@ -2421,16 +2431,10 @@ def rebase_conflict(repo, t, accepted, ref, files):
            f"cleanly onto it: conflicts in {names}. Your branch is as it was. Now "
            f"{onto(ref)}, fix the conflicts, rerun the tests, commit, and run your ready "
            f"command again.")
-    if rex_alive(t.get("session"), t.get("block")):
-        failed = type_to_worker(t, msg)
-        if failed:  # left where it was
-            return (f"{t['id']} conflicts in {names}, but the message didn't reach its worker "
-                    f"({failed}): `bullpen tell {t['id']}` it to rebase onto {ref} and fix them")
-        back_to_work(t)
-        t["last"] = None
-        repo.save_task(t)
-    else:
-        launch(repo, t, session_for(repo) or t.get("session"), msg, resume=True)
+    failed = hand_back(repo, t, msg)
+    if failed:  # left where it was
+        return (f"{t['id']} conflicts in {names}, but the message didn't reach its worker "
+                f"({failed}): `bullpen tell {t['id']}` it to rebase onto {ref} and fix them")
     return f"{t['id']} conflicts in {names}, sent back"
 
 
@@ -3639,13 +3643,11 @@ def continue_limited(repo, t):
             r["round"] = max(0, r.get("round", 1) - 1)  # the round it didn't finish
             start_review(repo, t, task_base_ref(repo, t))
             return f"{t['id']}'s reviewer (its pane was gone: started again)"
-        if rex_alive(t.get("session"), t.get("block")):
-            rex_type(t["session"], t["block"], LIMIT_CONTINUE)
-            t["last"] = None
-            repo.save_task(t)
-            return t["id"]
-        launch(repo, t, session_for(repo) or t.get("session"), LIMIT_CONTINUE, resume=True)
-        return f"{t['id']} (its pane was gone: resumed in a new one)"
+        alive = rex_alive(t.get("session"), t.get("block"))
+        failed = hand_back(repo, t, LIMIT_CONTINUE)
+        if failed:
+            raise Fail(failed)
+        return t["id"] if alive else f"{t['id']} (its pane was gone: resumed in a new one)"
     except Fail as e:
         stop(repo, t, lim["who"], "limit", f"Couldn't be continued after the usage limit: {clip(str(e), 120)}")
         who = "its coordinator" if t["status"] == "triage" else "the person"
@@ -3838,20 +3840,18 @@ def send_back(repo, t, lines, ask):
             news(repo, t, "pr-feedback", f"{line.rstrip('.')}. Not sent to its worker, which "
                  f"is {at}: `bullpen tell {t['id']}` it when it's free")
         return
-    alive = rex_alive(t.get("session"), t.get("block"))
-    failed = alive and type_to_worker(t, clip(f"{ask} Then commit and run your ready command again.", 2000))
-    if failed:  # its reviewer, if it had one, is closed: the coordinator passes this on
-        stop(repo, t, "worker", "not_sent", why, [f"{line.rstrip('.')}. The message didn't reach its "
-             f"worker ({failed}): `bullpen tell {t['id']}` it" for line in lines], "pr-feedback")
-        return
-    t.setdefault("gh", {})["sent"] = True  # the board says so once its worker is on it
-    if alive:
-        back_to_work(t)
-        t["last"] = None
+    if rex_alive(t.get("session"), t.get("block")):
+        failed = hand_back(repo, t, clip(f"{ask} Then commit and run your ready command again.", 2000))
+        if failed:  # its reviewer, if it had one, is closed: the coordinator passes this on
+            stop(repo, t, "worker", "not_sent", why, [f"{line.rstrip('.')}. The message didn't reach its "
+                 f"worker ({failed}): `bullpen tell {t['id']}` it" for line in lines], "pr-feedback")
+            return
+        t.setdefault("gh", {})["sent"] = True  # the board says so once its worker is on it
         repo.save_task(t)
         for line in lines:
             news(repo, t, "pr-feedback", f"{line.rstrip('.')}. Sent back to its worker.")
         return
+    t.setdefault("gh", {})["sent"] = True
     stop(repo, t, "worker", "not_sent", why, [f"{line.rstrip('.')}. Its worker's pane is gone: "
          f"`bullpen resume {t['id']}` restarts it" for line in lines], "pr-feedback")
 

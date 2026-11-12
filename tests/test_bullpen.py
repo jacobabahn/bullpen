@@ -1015,6 +1015,21 @@ class BullpenTest(unittest.TestCase):
         self.bp("_limit")  # nothing left to do
         self.assertEqual(len(self.typed()), n)
 
+    def test_a_limited_worker_the_message_doesnt_reach_goes_to_its_coordinator(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        self.bp("_event", worker, "error", "", self.limit_msg())
+        self.reset_passed(tid)
+        (self.fake / f"send_fails_{worker}").write_text("")
+        self.bp("_limit")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["stop"]), ("triage", {"by": "worker", "kind": "limit"}))
+        self.assertEqual(t["why"], "Couldn't be continued after the usage limit: rex: couldn't send to the block")
+        self.assertIn("BP-1 (not continued, for its coordinator to see to: rex: couldn't send", self.news()[-1])
+        (self.fake / f"send_fails_{worker}").unlink()
+        self.bp("tell", tid, "Carry on.")
+        self.assertEqual(self.show(tid)["status"], "working")
+
     def test_one_agent_working_again_leaves_the_others_to_be_continued(self):
         tid = self.start_task()
         worker = self.block(tid)
