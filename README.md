@@ -112,7 +112,7 @@ It groups tasks by what you do next: needs you, coordinator on it (dimmed: see
 the closed ones (accepted, closed, dropped). Each task shows how long it has been there and, on the
 lines under it (from under its ID), what it needs or where it stands ("Asks: python3 or python?", "PR #4,
 approved by light review.", "Follow-up review on round 2 of 2."): one or two lines,
-cut to fit, and for the selected task all of it, up to six lines. What a task that
+cut to fit, and for the selected task all of it, up to eight lines. What a task that
 needs you or stopped says is at normal weight; the rest is dimmed. A working
 task shows there, dimmed, what its worker is doing now, and a task in review what
 its reviewer is doing: the text of the agent's `working: ...` status, cut to fit

@@ -370,7 +370,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 }
 
 /// How many lines of detail the selected task gets.
-const SELECTED_LINES: usize = 6;
+const SELECTED_LINES: usize = 8;
 
 /// A label, then what's typed, at row y: the end of it when it's longer than the
 /// line. Returns the cursor's column.
@@ -883,15 +883,16 @@ mod tests {
         term.draw(|f| draw(f, &mut a)).unwrap();
         let buf = term.backend().buffer().clone();
         let s: Vec<String> = (0..24).map(|y| (0..42).map(|x| buf[(x, y)].symbol()).collect::<String>().trim_end().to_string()).collect();
-        // six lines under the ID for the selected task (cut after that), two for the others
-        assert_eq!(s[3..16], [
+        // all of it under the ID for the selected task (up to eight lines), two for the others
+        assert_eq!(s[3..17], [
             "▌● BP-1  Architecture round 2: review",
             "▌  Pick: candidate 4 (one rule for who",
             "▌  sees to a task), 3 (reviews that ask",
             "▌  before they block), or both. 4",
             "▌  changes how triage works for every",
             "▌  coordinator; 3 only touches the",
-            "▌  reviewer's prompt and is easy to …",
+            "▌  reviewer's prompt and is easy to",
+            "▌  undo.",
             "▌■ BP-2  Task BP-2",
             "▌  Its agent exited. r resumes it.",
             "▌● BP-3  Architecture round 2: review",
@@ -901,8 +902,8 @@ mod tests {
         ].map(String::from), "{s:#?}");
         // what needs you is at normal weight; a ready task's detail stays dim
         assert!(!buf[(3, 4)].modifier.contains(Modifier::DIM));
-        assert!(!buf[(3, 11)].modifier.contains(Modifier::DIM)); // stopped
-        assert!(!buf[(3, 13)].modifier.contains(Modifier::DIM));
+        assert!(!buf[(3, 12)].modifier.contains(Modifier::DIM)); // stopped
+        assert!(!buf[(3, 14)].modifier.contains(Modifier::DIM));
         let done = s.iter().position(|r| r == "   Done.").unwrap();
         assert!(buf[(3, done as u16)].modifier.contains(Modifier::DIM));
 
@@ -915,7 +916,7 @@ mod tests {
             "▌■ BP-2  Task BP-2",
         ].map(String::from), "{s:#?}");
         assert_eq!(s[8], "▌● BP-3  Architecture round 2: review", "{s:#?}");
-        assert_eq!(s[14], "▌  reviewer's prompt and is easy to …", "{s:#?}");
+        assert_eq!(s[15], "▌  undo.", "{s:#?}");
     }
 
     #[test]
@@ -924,7 +925,7 @@ mod tests {
         a.sel = Some("BP-7".into());
         let s = screen(&mut a, 42, 16);
         let i = s.iter().position(|r| r.contains("BP-7")).unwrap();
-        assert_eq!(s[i + 6], "▌  reviewer's prompt and is easy to …", "{s:#?}");
+        assert_eq!(s[i + 7], "▌  undo.", "{s:#?}");
         assert!(s[1].ends_with('↑'), "{s:#?}");
     }
 
