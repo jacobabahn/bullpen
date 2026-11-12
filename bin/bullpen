@@ -63,6 +63,8 @@ FLOAT_BOUNDS = [0.4, 0.35, 0.58, 0.62]  # bottom right of the window: x, y, w, h
 CLOSED = ("done", "dropped")
 # A task stopped on something: "triage" waits on its coordinator, "needs" on the person.
 WAITING = ("needs", "triage")
+# A task with a stop: waiting, or "stopped" (its worker's pane is gone).
+STOPPED = (*WAITING, "stopped")
 
 
 class Fail(Exception):
@@ -189,12 +191,18 @@ class Repo:
         self.root = Path(root)
         self.dir = STATE / "repos" / safe(str(self.root).strip("/").replace("/", "-"))
         self.cfg = load_config(self.dir)
-        if not self.cfg.get("triage_migrated") and (self.dir / "config.json").exists():
-            migrate_triage(self)
+        if (self.dir / "config.json").exists() and not (self.cfg.get("triage_migrated") and
+                                                         self.cfg.get("stops_migrated")):
+            if not self.cfg.get("triage_migrated"):
+                migrate_triage(self)
+            if not self.cfg.get("stops_migrated"):
+                migrate_stops(self)
+            self.save()
 
     def save(self):
         self.cfg["root"] = str(self.root)
         self.cfg["triage_migrated"] = True  # tasks made from here on know triage
+        self.cfg["stops_migrated"] = True  # and record their stops
         write_json(self.dir / "config.json", self.cfg)
 
     def gh(self):
@@ -233,9 +241,6 @@ class Repo:
             t["note"] = None  # what it needed then, not now
             t.pop("stuck", None)
             t.pop("auto_wait", None)  # only an approval that is still current accepts it
-            for k in ("ok", "ask", "ask_of"):  # said of the old status; one set just now stays
-                if k in old:
-                    t.pop(k, None)
         if old.get("status") != t["status"] or not t.get("since"):
             # when it entered its current status; fine-grained so `go --next` can order it
             t["since"] = dt.datetime.now().astimezone().isoformat(timespec="microseconds")
@@ -264,8 +269,148 @@ def migrate_triage(repo):
         if t.get("status") == "needs" and (t.get("why") or "").startswith(TRIAGE_WHY):
             t["status"] = "triage"
             write_json(p, t)  # not save_task: when it stopped stays as it was
-    repo.save()
 
+
+# Before stops were recorded, a task's why said who stopped and how; once per repo,
+# stopped tasks get the stop their why says. Longer prefixes first.
+OLD_STOPS = (("Reviewer needs you", "reviewer", "prompt"), ("Reviewer stopped", "reviewer", "ended"),
+             ("Reviewer exited", "reviewer", "exited"), ("Needs you", "worker", "prompt"),
+             ("Failed", "worker", "failed"), ("Ended its turn", "worker", "ended"),
+             ("Agent exited", "worker", "exited"), ("Its pane was gone", "worker", "pane_gone"),
+             ("Review findings didn't reach", "worker", "not_sent"), ("PR ", "worker", "not_sent"),
+             ("Couldn't be continued", "worker", "limit"))
+
+
+def stop_from_why(why):
+    """The stop an old task's why says it had, or None."""
+    if not why:
+        return None
+    for prefix, by, kind in OLD_STOPS:
+        if why.startswith(prefix):
+            return {"by": by, "kind": kind}
+    return {"by": "worker", "kind": "other"}
+
+
+def migrate_stops(repo):
+    for p in sorted((repo.dir / "tasks").glob("*.json")):
+        t = read_json(p) or {}
+        if t.get("status") not in STOPPED or t.get("stop"):
+            continue
+        # an asked task's why is the question: ask_of kept what stopped it
+        s = stop_from_why(t.get("ask_of") if t.get("ask") else t.get("why"))
+        t.pop("ask_of", None)
+        if s:
+            t["stop"] = s
+        write_json(p, t)
+
+
+# ---------- task lifecycle ----------
+#
+# A task's status changes only through set_status. A stopped task (STOPPED) has a
+# stop, {"by": "worker" or "reviewer", "kind": ...}, saying who stopped and how:
+#   prompt     at a prompt: it needs the person
+#   failed     its turn failed
+#   ended      it ended its turn without ready (a reviewer: without a verdict)
+#   exited     its pane closed before ready (a reviewer: before a verdict)
+#   pane_gone  its pane wasn't found again after a Rex restart
+#   not_sent   review findings or PR feedback didn't reach the worker
+#   limit      it couldn't be continued after the usage limit
+#   other      a stop from before stops were recorded, of no known kind
+# why is the stop in words, for people and the board: nothing goes by its wording.
+# ask and ok are said of the status they were set in, and end with it.
+
+def set_status(t, status, why=None, stop=None):
+    """The one place a task's status changes. A new status ends ask and ok. stop: why
+    it stopped now; a task that stays stopped without a new one (an ask, an escalation)
+    keeps the one it had."""
+    if status != t.get("status"):
+        t.pop("ok", None)
+        t.pop("ask", None)
+    t.update(status=status, why=why)
+    if stop:
+        t["stop"] = stop
+    elif status not in STOPPED:
+        t.pop("stop", None)
+
+
+def stop(repo, t, by, kind, why, lines=(), event="stopped"):
+    """The task's worker or reviewer (by) stopped (kind; why in words). A prompt needs
+    the person. A worker whose pane is gone is stopped: resume restarts it. Anything
+    else waits on its coordinator, or on the person when no coordinator is running to
+    see to it. Saves the task, then sends each of lines as news, worded for whoever has
+    it now. Returns the task's new status."""
+    if kind == "prompt":
+        t.pop("ask", None)  # the prompt is what it needs the person for now
+        status, say = "needs", (lambda line: line)
+    elif by == "worker" and kind in ("exited", "pane_gone"):
+        status, say = "stopped", (lambda line: line)
+    elif coordinator_up(repo, t):
+        m = triage_minutes(repo)
+        status, say = "triage", (lambda line: f"For the coordinator: {line} (still here in {m} min, "
+                                              f"it goes to the person)")
+    else:
+        status, say = "needs", (lambda line: f"{line}. No coordinator is running to see to it, "
+                                             f"so it needs the person")
+    set_status(t, status, why, {"by": by, "kind": kind})
+    repo.save_task(t)
+    for line in [lines] if isinstance(lines, str) else lines:
+        news(repo, t, event, say(line))
+    return status
+
+
+def escalate(repo, t, late):
+    """Pass a task its coordinator didn't settle on to the person, with one news line.
+    late: (what its why gets, why it goes now), from overdue."""
+    why = (t.get("why") or "Stopped") + late[0]
+    set_status(t, "needs", why)
+    repo.save_task(t)
+    news(repo, t, "needs-you", f"{t['id']} needs the person: {why}")
+
+
+def ask(t, question):
+    """The task needs the person, for question. A stopped task keeps its stop: whether
+    its worker is mid-turn still goes by it."""
+    set_status(t, "needs", question)
+    t["ask"] = True
+
+
+def ok(t):
+    """Its coordinator saw to the task's stop: back to working, or to review for its
+    reviewer's. ok: the idle agent isn't a stop again until its next turn."""
+    set_status(t, "review" if reviewers_stop(t) else "working")
+    t["ok"] = True
+
+
+def back_to_work(t):
+    """The task's worker is at it again, and has to run ready again. Its approval stays on
+    record: that ready keeps it if the code didn't change (approval_kept)."""
+    t.pop("from_ready", None)
+    set_status(t, "working")
+
+
+def reviewers_stop(t):
+    """Is the task's stop its reviewer's? (One that couldn't be continued after the usage
+    limit is seen to as its worker's.)"""
+    s = t.get("stop") or {}
+    return s.get("by") == "reviewer" and s.get("kind") != "limit"
+
+
+def on_reviewer(t):
+    """Is the task stopped on its reviewer (a prompt, or no verdict)?"""
+    return t["status"] in WAITING and reviewers_stop(t)
+
+
+def at_prompt(t):
+    """Is the task's worker stopped at a prompt?"""
+    return t.get("stop") == {"by": "worker", "kind": "prompt"}
+
+
+def worker_idle(t):
+    """Is the worker between turns, so a message typed into it lands as a new turn?
+    Not when it's blocked on a prompt, or failed mid-turn."""
+    if t["status"] not in WAITING:
+        return True
+    return not (at_prompt(t) or (t.get("stop") or {}).get("kind") in ("failed", "limit"))
 
 def index_block(block, repo, role):
     # stuck_after is a copy of the repo's setting, where the watcher can read it
@@ -1359,7 +1504,8 @@ def launch(repo, t, session, first, resume):
     else:
         block = float_pane(repo, session, label, t["worktree"], argv, t)
     index_block(block, repo, t["id"])
-    t.update(block=block, session=session, status="working", why=None, last=None)
+    set_status(t, "working")
+    t.update(block=block, session=session, last=None)
     repo.save_task(t)
 
 
@@ -1452,7 +1598,7 @@ def relink(repo, session):
         else:
             t["block"] = None
             if t["status"] in ("working", *WAITING) and not is_limited(t):  # a limited one is resumed later
-                t.update(status="stopped", why="Its pane was gone")
+                set_status(t, "stopped", "Its pane was gone", {"by": "worker", "kind": "pane_gone"})
         repo.save_task(t)
     relink_reviewers(repo, session, view)
 
@@ -1531,13 +1677,6 @@ def cmd_tell(args):
     print(f"sent to {t['id']}")
 
 
-def back_to_work(t):
-    """The task's worker is at it again, and has to run ready again. Its approval stays on
-    record: that ready keeps it if the code didn't change (approval_kept)."""
-    t.pop("from_ready", None)
-    t.update(status="working", why=None)
-
-
 def cmd_peek(args):
     repo = Repo(repo_root())
     t = repo.task(args.id)
@@ -1588,8 +1727,8 @@ def cmd_ready(args):
     base_ref = task_base_ref(repo, t)
     ahead = int(git(wt, "rev-list", "--count", f"{base_ref}..HEAD").stdout.strip())
     if ahead == 0:
-        t.update(status="ready", why="Nothing to merge (no commits)", summary=summary.strip() or None,
-                 diffstat=None)
+        set_status(t, "ready", "Nothing to merge (no commits)")
+        t.update(summary=summary.strip() or None, diffstat=None)
         repo.save_task(t)
         news(repo, t, "ready", f"{t['id']} is ready with nothing to merge: {t['title']}")
         print("no commits: marked ready with nothing to merge")
@@ -1603,7 +1742,7 @@ def cmd_ready(args):
             print(f"local branch {t['branch']} ({commits(ahead)} ahead of {base_ref}; no remote, "
                   f"so nothing pushed). {said}")
             return
-        t["status"] = "ready"
+        set_status(t, "ready")
         repo.save_task(t)
         news(repo, t, "ready", f"{t['id']} is ready ({commits(ahead)}, local branch): {t['title']}")
         print(f"local branch {t['branch']} is ready ({commits(ahead)} ahead of {base_ref})")
@@ -1621,7 +1760,7 @@ def cmd_ready(args):
         said = review_at_ready(repo, t, base_ref)
         print(f"pushed {t['branch']}; pull request: {t['pr']}. {said}")
         return
-    t["status"] = "ready"
+    set_status(t, "ready")
     repo.save_task(t)
     news(repo, t, "ready", f"{t['id']} is ready ({commits(ahead)}, {pr_short(t['pr'])}): {t['title']}")
     print(f"pushed {t['branch']}; pull request: {t['pr']}")
@@ -1653,7 +1792,8 @@ def cmd_finish(args):
     if t.get("gh"):
         t["gh"].pop("sent", None)
     t.pop("rebased", None)
-    t.update(status="finished", why=None, summary=summary, diffstat=None)
+    set_status(t, "finished")
+    t.update(summary=summary, diffstat=None)
     repo.save_task(t)
     first = summary.splitlines()[0].strip().lstrip("#").strip()  # a Markdown title is fine
     if auto_accepts(repo, t):
@@ -1686,7 +1826,8 @@ def close_task(repo, t, auto=False, first=None):
         run([repo.gh(), "pr", "close", t["pr"]], cwd=repo.root, check=False)
         git(repo.root, "push", "-q", "origin", "--delete", t["branch"], check=False)
     remove_worktree(repo, t, force=True)
-    t.update(status="done", closed=True, block=None, worktree=None)
+    set_status(t, "done", t.get("why"))
+    t.update(closed=True, block=None, worktree=None)
     repo.save_task(t)
     if auto:
         news(repo, t, "closed", f"{t['id']} finished (nothing to merge) and was closed by auto-accept: {first}")
@@ -1709,7 +1850,7 @@ def review_at_ready(repo, t, base_ref):
     kept = approval_kept(t, base_ref)
     if kept:
         keep_approval(t, base_ref)
-        t.update(status="ready", why=None)
+        set_status(t, "ready")
         repo.save_task(t)
         if auto_accepts(repo, t):
             # not here: accepting closes the worker's pane, which this runs in
@@ -1916,7 +2057,8 @@ def start_review(repo, t, base_ref):
     else:
         block = float_pane(repo, session, review_label(t), t["worktree"], argv, t)
     index_block(block, repo, f"{t['id']} review")
-    t.update(status="review", why=None, review={
+    set_status(t, "review")
+    t.update(review={
         "round": n, "block": block, "session": session, "verdict": None, "findings": None,
         "kind": kind, "why": why, "model": model, "prev": prev,
         "commit": head(wt), "base": merge_base(wt, base_ref), "patch": patch_id(wt, base_ref)})
@@ -1957,7 +2099,7 @@ def cmd_verdict(args):
     pr = where(t)
     t.pop("auto_wait", None)  # a new verdict decides again
     if args.verdict == "approve":
-        t.update(status="ready", why=None)
+        set_status(t, "ready")
         repo.save_task(t)
         if auto_accepts(repo, t):
             auto_accept(repo, t)
@@ -1973,7 +2115,8 @@ def cmd_verdict(args):
         if rex_alive(t.get("session"), t.get("block")):
             failed = type_to_worker(t, msg)
             if not failed:
-                t.update(status="working", why=None, last=None)
+                set_status(t, "working")
+                t["last"] = None
         else:
             try:
                 launch(repo, t, session_for(repo), msg, resume=True)
@@ -1982,14 +2125,14 @@ def cmd_verdict(args):
                 failed = clip(str(e), 160)
         if failed:
             # nobody is on it: the coordinator passes the findings on
-            say = triage(repo, t, "Review findings didn't reach its worker")
-            news(repo, t, "not-sent", say(f"{t['id']}'s reviewer asked for changes, but the message didn't "
-                 f"reach its worker ({failed}). The findings are in {findings}: "
-                 f"`bullpen tell {t['id']}` it to read them"))
+            stop(repo, t, "worker", "not_sent", "Review findings didn't reach its worker",
+                 f"{t['id']}'s reviewer asked for changes, but the message didn't reach its worker "
+                 f"({failed}). The findings are in {findings}: `bullpen tell {t['id']}` it to read them",
+                 "not-sent")
         else:
             repo.save_task(t)
     else:
-        t.update(status="ready", why=f"Review still asks for changes after {rounds} rounds")
+        set_status(t, "ready", f"Review still asks for changes after {rounds} rounds")
         repo.save_task(t)
         news(repo, t, "ready", f"{t['id']} is ready ({pr}), but review still asks for changes "
              f"after {rounds} rounds: findings in {findings}: {t['title']}")
@@ -2096,7 +2239,8 @@ def cmd_accept(args):
     unindex_block(t["block"])
     close_reviewer(t)
     remove_worktree(repo, t, force=True)
-    t.update(status="done", block=None, worktree=None)
+    set_status(t, "done", t.get("why"))
+    t.update(block=None, worktree=None)
     repo.save_task(t)
     mode = repo.cfg.get("merge", "rebase")
     if t.get("pr"):
@@ -2302,7 +2446,8 @@ def cmd_drop(args):
     if t.get("pr"):
         run([repo.gh(), "pr", "close", t["pr"]], cwd=repo.root, check=False)
     remove_worktree(repo, t, force=args.force)
-    t.update(status="dropped", block=None, worktree=None)
+    set_status(t, "dropped", t.get("why"))
+    t.update(block=None, worktree=None)
     repo.save_task(t)
     print(f"{t['id']} dropped")
     tell_coordinator(repo, t, "dropped", f"{t['id']} dropped")
@@ -2717,18 +2862,6 @@ def triage_minutes(repo):
     return DEFAULT_CONFIG["triage_minutes"] if m is None else m
 
 
-def triage(repo, t, why):
-    """Leave the stopped task to its coordinator, or to the person when no coordinator
-    is running to see to it. Saves it; returns how to word its news line."""
-    up = coordinator_up(repo, t)
-    t.update(status="triage" if up else "needs", why=why)
-    repo.save_task(t)
-    if up:
-        m = triage_minutes(repo)
-        return lambda line: f"For the coordinator: {line} (still here in {m} min, it goes to the person)"
-    return lambda line: f"{line}. No coordinator is running to see to it, so it needs the person"
-
-
 def overdue(repo, t, at=None):
     """(what the reason gets, why) when a task waiting on its coordinator goes to the
     person now, else None."""
@@ -2742,14 +2875,6 @@ def overdue(repo, t, at=None):
     return None
 
 
-def escalate(repo, t, late):
-    """Pass a task its coordinator didn't settle on to the person, with one news line."""
-    why = (t.get("why") or "Stopped") + late[0]
-    t.update(status="needs", why=why)
-    repo.save_task(t)
-    news(repo, t, "needs-you", f"{t['id']} needs the person: {why}")
-
-
 def cmd_ask(args):
     """(coordinator) the task needs the person: the question shows on the board."""
     repo = Repo(repo_root())
@@ -2759,9 +2884,7 @@ def cmd_ask(args):
     question = " ".join(" ".join(args.question).split())
     if not question:
         raise Fail("give the question to ask")
-    if t["status"] in WAITING and not t.get("ask"):
-        t["ask_of"] = t.get("why")  # what stopped it: whether its worker is mid-turn goes by this
-    t.update(status="needs", why=question, ask=True)
+    ask(t, question)
     repo.save_task(t)
     tell_coordinator(repo, t, "ask", f"{t['id']} needs the person: {question}")
     print(f"{t['id']} needs the person now: {question}")
@@ -2773,19 +2896,16 @@ def cmd_ok(args):
     t = repo.task(args.id)
     if t["status"] != "triage":
         raise Fail(f"{t['id']} is {t['status']}, not waiting on its coordinator")
-    if (t.get("why") or "").startswith("Reviewer"):
+    if reviewers_stop(t):
         r = t.get("review") or {}
         if not rex_alive(r.get("session") or t.get("session"), r.get("block")):
             raise Fail(f"{t['id']}'s reviewer isn't running: `bullpen review {t['id']}` starts a "
                        f"new one, or `bullpen ask` the person")
-        status = "review"
-    else:
-        if not rex_alive(t.get("session"), t.get("block")):
-            raise Fail(f"{t['id']}'s worker isn't running: `bullpen resume {t['id']}` restarts it")
-        status = "working"
-    # ok: `check` leaves its agent idle; its next turn clears that
-    t.update(status=status, why=None, ok=True)
+    elif not rex_alive(t.get("session"), t.get("block")):
+        raise Fail(f"{t['id']}'s worker isn't running: `bullpen resume {t['id']}` restarts it")
+    ok(t)  # `check` leaves its agent idle; its next turn clears that
     repo.save_task(t)
+    status = t["status"]
     print(f"{t['id']} is {'in review' if status == 'review' else status} again (nothing typed to its agent)")
 
 
@@ -2840,7 +2960,7 @@ def cmd_event(args):
             return
     if state == "working":
         if t["status"] in (*WAITING, "stopped") or limit_over(t):
-            t.update(status="working", why=None)
+            set_status(t, "working")
         elif t["status"] == "ready" and not (t.get("last") or "").startswith("working|"):
             back_to_work(t)  # it had ended its turn: this is a new one
             approved = (t.get("review") or {}).get("verdict") == "approved"
@@ -2864,15 +2984,12 @@ def cmd_event(args):
     t["last"] = key
     if state == "blocked":
         kind = args.kind or "input"
-        t.pop("ask", None)  # the prompt is what it needs the person for now
-        t.pop("ask_of", None)
-        t.update(status="needs", why=f"Needs you ({kind})" + (f": {msg}" if msg else ""))
-        repo.save_task(t)
-        news(repo, t, "needs-you", f"{t['id']} needs the person ({kind})" + (f": {msg}" if msg else ""))
+        stop(repo, t, "worker", "prompt", f"Needs you ({kind})" + (f": {msg}" if msg else ""),
+             f"{t['id']} needs the person ({kind})" + (f": {msg}" if msg else ""), "needs-you")
     elif state == "error":
-        say = triage(repo, t, "Failed" + (f": {msg}" if msg else ""))
-        news(repo, t, "failed", say(f"{t['id']}'s turn failed" + (f": {msg}" if msg else "") +
-                                    f": read it with `bullpen peek {t['id']}`"))
+        stop(repo, t, "worker", "failed", "Failed" + (f": {msg}" if msg else ""),
+             f"{t['id']}'s turn failed" + (f": {msg}" if msg else "") +
+             f": read it with `bullpen peek {t['id']}`", "failed")
     elif state in ("done", "idle"):
         shell_min = getattr(args, "shell_min", None)  # from `check`: its shell has run this long
         if t["status"] != "working" or (shell_min is None and shell_running(screen(t.get("session"), t["block"]))):
@@ -2881,12 +2998,12 @@ def cmd_event(args):
             return
         if ready_again(repo, t):
             return
-        say = triage(repo, t, "Ended its turn without saying ready")
         if shell_min is None:
-            news(repo, t, "quiet", say(f"{t['id']} ended its turn without `ready`: read it with `bullpen peek {t['id']}`"))
+            line = f"{t['id']} ended its turn without `ready`: read it with `bullpen peek {t['id']}`"
         else:
-            news(repo, t, "quiet", say(f"{t['id']} ended its turn without `ready` {shell_min} min ago, and a "
-                 f"background shell of its own still runs (a server, a watch?): read it with `bullpen peek {t['id']}`"))
+            line = (f"{t['id']} ended its turn without `ready` {shell_min} min ago, and a background shell "
+                    f"of its own still runs (a server, a watch?): read it with `bullpen peek {t['id']}`")
+        stop(repo, t, "worker", "ended", "Ended its turn without saying ready", line, "quiet")
     else:
         repo.save_task(t)
 
@@ -2902,7 +3019,7 @@ def ready_again(repo, t):
     if not kept:
         return False
     keep_approval(t, ref)
-    t.update(status="ready", why=None)
+    set_status(t, "ready")
     repo.save_task(t)
     news(repo, t, "ready", f"{t['id']} is ready again: its worker's turn left the code as approved "
          f"({kept}), so the approval carried over. `bullpen peek {t['id']}` if it said something: {t['title']}")
@@ -2912,17 +3029,6 @@ def ready_again(repo, t):
 def worktree_clean(t):
     wt = t.get("worktree")
     return bool(wt) and Path(wt).is_dir() and not git(wt, "status", "--porcelain", check=False).stdout.strip()
-
-
-def stop_why(t):
-    """Why the task stopped: its reason, or, once the person was asked about it, the
-    reason it had then (its why is the question now)."""
-    return (t.get("ask_of") if t.get("ask") else t.get("why")) or ""
-
-
-def on_reviewer(t):
-    """Is the task stopped on its reviewer (a prompt, or no verdict)?"""
-    return t["status"] in WAITING and stop_why(t).startswith("Reviewer")
 
 
 def review_event(repo, t, args):
@@ -2950,16 +3056,13 @@ def review_event(repo, t, args):
     if state == "working":
         back, was_ok = limit_over(t), t.pop("ok", None)
         if stuck or back:
-            t.update(status="review", why=None)
+            set_status(t, "review")
         if stuck or woke or back or was_ok:
             repo.save_task(t)
     elif state == "blocked":
         kind = args.kind or "input"
-        t.pop("ask", None)
-        t.pop("ask_of", None)
-        t.update(status="needs", why=f"Reviewer needs you ({kind})" + (f": {msg}" if msg else ""))
-        repo.save_task(t)
-        news(repo, t, "needs-you", f"{t['id']}'s reviewer needs the person ({kind})" + (f": {msg}" if msg else ""))
+        stop(repo, t, "reviewer", "prompt", f"Reviewer needs you ({kind})" + (f": {msg}" if msg else ""),
+             f"{t['id']}'s reviewer needs the person ({kind})" + (f": {msg}" if msg else ""), "needs-you")
     elif state in ("done", "idle", "error") and t["status"] == "review":
         if (state != "error" and getattr(args, "shell_min", None) is None
                 and shell_running(screen(r.get("session") or t.get("session"), r["block"]))):
@@ -2967,11 +3070,11 @@ def review_event(repo, t, args):
             if woke:
                 repo.save_task(t)
             return
-        say = triage(repo, t, "Reviewer stopped without a verdict")
         shell_min = getattr(args, "shell_min", None)
         late = (f" {shell_min} min ago, and a background shell of its own still runs" if shell_min is not None else "")
-        news(repo, t, "quiet", say(f"{t['id']}'s reviewer stopped without a verdict{late}: `bullpen go {t['id']} "
-                                   f"--review` shows it, `bullpen review {t['id']}` starts a new one"))
+        stop(repo, t, "reviewer", "ended", "Reviewer stopped without a verdict",
+             f"{t['id']}'s reviewer stopped without a verdict{late}: `bullpen go {t['id']} --review` "
+             f"shows it, `bullpen review {t['id']}` starts a new one", "quiet")
     elif woke:
         repo.save_task(t)
 
@@ -3037,9 +3140,8 @@ def cmd_gone(args):
             if limited(t, "reviewer"):
                 pass  # started again when the limit resets
             elif (t["status"] == "review" or on_reviewer(t)) and not r.get("verdict"):
-                say = triage(repo, t, "Reviewer exited without a verdict")
-                news(repo, t, "stopped", say(f"{t['id']}'s reviewer exited without a verdict: "
-                                             f"`bullpen review {t['id']}` starts a new one"))
+                stop(repo, t, "reviewer", "exited", "Reviewer exited without a verdict",
+                     f"{t['id']}'s reviewer exited without a verdict: `bullpen review {t['id']}` starts a new one")
             repo.save_task(t)
         return
     t = repo.task(role)
@@ -3049,9 +3151,8 @@ def cmd_gone(args):
     if limited(t, "worker"):
         repo.save_task(t)  # resumed when the limit resets
     elif t["status"] in ("working", *WAITING):
-        t.update(status="stopped", why="Agent exited before saying ready")
-        repo.save_task(t)
-        news(repo, t, "stopped", f"{t['id']} stopped before saying ready: `bullpen resume {t['id']}` continues it")
+        stop(repo, t, "worker", "exited", "Agent exited before saying ready",
+             f"{t['id']} stopped before saying ready: `bullpen resume {t['id']}` continues it")
     else:
         repo.save_task(t)
 
@@ -3189,7 +3290,7 @@ def worker_drift(t, a, limit):
         return None  # an ask waits on the person, whatever its agent does
     if a["state"] == "working":
         return f"{tid} is marked {st} ({needs_label(t.get('why'))}) but {doing(a)}", "working"
-    if a["state"] == "blocked" and not (t.get("why") or "").startswith("Needs you"):
+    if a["state"] == "blocked" and not at_prompt(t):
         return f"{tid} is marked {st} ({needs_label(t.get('why'))}) but {doing(a)}", "blocked"
     return None
 
@@ -3463,7 +3564,8 @@ def limit_hit(repo, t, who, args):
     waits = t["status"] in (("review", *WAITING) if who == "reviewer" else ("working", *WAITING, "stopped"))
     if waits:  # else the task doesn't wait on this agent: nothing to continue later
         lim = {"who": who, "at": now(), "resets": resets, "text": text}
-        t.update(status="review" if who == "reviewer" else "working", limit=lim, why=limit_why(lim))
+        set_status(t, "review" if who == "reviewer" else "working", limit_why(lim))
+        t["limit"] = lim
         t["last"] = f"{args.state}|{(args.msg or '').strip()}" if who == "worker" else t.get("last")
         repo.save_task(t)
     if resets:
@@ -3545,7 +3647,7 @@ def continue_limited(repo, t):
         launch(repo, t, session_for(repo) or t.get("session"), LIMIT_CONTINUE, resume=True)
         return f"{t['id']} (its pane was gone: resumed in a new one)"
     except Fail as e:
-        triage(repo, t, f"Couldn't be continued after the usage limit: {clip(str(e), 120)}")
+        stop(repo, t, lim["who"], "limit", f"Couldn't be continued after the usage limit: {clip(str(e), 120)}")
         who = "its coordinator" if t["status"] == "triage" else "the person"
         return f"{t['id']} (not continued, for {who} to see to: {clip(str(e), 120)})"
 
@@ -3718,14 +3820,6 @@ def follow_pr(repo, t):
     send_back(repo, t, lines, " ".join(asks))
 
 
-def worker_idle(t):
-    """Is the worker between turns, so a message typed into it lands as a new turn?
-    Not when it's blocked on a prompt, or failed mid-turn."""
-    if t["status"] not in WAITING:
-        return True
-    return not stop_why(t).startswith(("Needs you", "Failed", "Couldn't be continued"))
-
-
 def send_back(repo, t, lines, ask):
     """PR feedback goes to the task's worker, which fixes it and runs ready again.
     An unfinished review is moot once the work changes: close it, giving its round back."""
@@ -3739,18 +3833,16 @@ def send_back(repo, t, lines, ask):
     if not worker_idle(t):
         # typing now would answer its prompt: keep the feedback for later
         write_json(repo.task_path(t["id"]), t)
-        stop = "on a prompt" if t["status"] == "needs" else "stopped mid-turn"
+        at = "on a prompt" if t["status"] == "needs" else "stopped mid-turn"
         for line in lines:
             news(repo, t, "pr-feedback", f"{line.rstrip('.')}. Not sent to its worker, which "
-                 f"is {stop}: `bullpen tell {t['id']}` it when it's free")
+                 f"is {at}: `bullpen tell {t['id']}` it when it's free")
         return
     alive = rex_alive(t.get("session"), t.get("block"))
     failed = alive and type_to_worker(t, clip(f"{ask} Then commit and run your ready command again.", 2000))
     if failed:  # its reviewer, if it had one, is closed: the coordinator passes this on
-        say = triage(repo, t, why)
-        for line in lines:
-            news(repo, t, "pr-feedback", say(f"{line.rstrip('.')}. The message didn't reach its "
-                 f"worker ({failed}): `bullpen tell {t['id']}` it"))
+        stop(repo, t, "worker", "not_sent", why, [f"{line.rstrip('.')}. The message didn't reach its "
+             f"worker ({failed}): `bullpen tell {t['id']}` it" for line in lines], "pr-feedback")
         return
     t.setdefault("gh", {})["sent"] = True  # the board says so once its worker is on it
     if alive:
@@ -3760,10 +3852,8 @@ def send_back(repo, t, lines, ask):
         for line in lines:
             news(repo, t, "pr-feedback", f"{line.rstrip('.')}. Sent back to its worker.")
         return
-    say = triage(repo, t, why)
-    for line in lines:
-        news(repo, t, "pr-feedback", say(f"{line.rstrip('.')}. Its worker's pane is gone: "
-             f"`bullpen resume {t['id']}` restarts it"))
+    stop(repo, t, "worker", "not_sent", why, [f"{line.rstrip('.')}. Its worker's pane is gone: "
+         f"`bullpen resume {t['id']}` restarts it" for line in lines], "pr-feedback")
 
 
 # ---------- main ----------

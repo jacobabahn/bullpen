@@ -1990,8 +1990,8 @@ class BullpenTest(unittest.TestCase):
         self.bp("_event", worker, "blocked", "permission", "Allow rm?")
         self.bp("ask", tid, "Should it delete the cache?")
         t = self.show(tid)
-        self.assertEqual((t["status"], t["why"], t["ask_of"]),
-                         ("needs", "Should it delete the cache?", "Needs you (permission): Allow rm?"))
+        self.assertEqual((t["status"], t["why"], t["stop"]),
+                         ("needs", "Should it delete the cache?", {"by": "worker", "kind": "prompt"}))
         typed = len([1 for b, _ in self.typed() if b == worker])
         self.github(comments=[{"id": "c1", "author": {"login": "ann"}, "body": "Cover logout too."}])
         self.bp("_prs")
@@ -3020,6 +3020,34 @@ class BullpenTest(unittest.TestCase):
         self.bp("ls")
         self.assertEqual(self.show("BP-1")["status"], "needs")
 
+    def test_old_stopped_tasks_get_their_stop_once(self):
+        tid = self.start_task()
+        d = next((self.tmp / "state").rglob("config.json")).parent
+        cfg = json.loads((d / "config.json").read_text())
+        cfg.pop("stops_migrated", None)
+        (d / "config.json").write_text(json.dumps(cfg))
+        base = json.loads((d / "tasks" / f"{tid}.json").read_text())
+        old = {"BP-1": ("triage", "Reviewer stopped without a verdict", {}),
+               "BP-2": ("needs", "Should it go?", {"ask": True, "ask_of": "Needs you (permission): Allow?"}),
+               "BP-3": ("stopped", "Agent exited before saying ready", {}),
+               "BP-4": ("triage", "PR checks failed: test", {}),
+               "BP-5": ("working", None, {})}
+        for i, (status, why, more) in old.items():
+            (d / "tasks" / f"{i}.json").write_text(json.dumps({**base, "id": i, "status": status, "why": why,
+                                                               "block": None, **more}))
+        self.bp("ls")
+        got = {i: self.show(i).get("stop") for i in old}
+        self.assertEqual(got, {"BP-1": {"by": "reviewer", "kind": "ended"},
+                               "BP-2": {"by": "worker", "kind": "prompt"},
+                               "BP-3": {"by": "worker", "kind": "exited"},
+                               "BP-4": {"by": "worker", "kind": "not_sent"}, "BP-5": None})
+        self.assertNotIn("ask_of", self.show("BP-2"))
+        # once: a stop recorded later is left as it is
+        t = json.loads((d / "tasks" / "BP-1.json").read_text())
+        (d / "tasks" / "BP-1.json").write_text(json.dumps({**t, "stop": {"by": "worker", "kind": "failed"}}))
+        self.bp("ls")
+        self.assertEqual(self.show("BP-1")["stop"], {"by": "worker", "kind": "failed"})
+
     def test_go_next_skips_triage(self):
         tid = self.start_task()
         self.bp("_event", self.block(tid), "idle", "", "")
@@ -4038,6 +4066,69 @@ class HelpersTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.bp = cls.cli()
+
+    # ---------- the task lifecycle ----------
+
+    def stopped(self, status, by, kind, **more):
+        return {"status": status, "stop": {"by": by, "kind": kind}, **more}
+
+    def test_whether_a_worker_is_between_turns_goes_by_its_stop(self):
+        idle = self.bp.worker_idle
+        self.assertTrue(idle({"status": "working"}))
+        self.assertTrue(idle(self.stopped("triage", "worker", "ended")))
+        self.assertTrue(idle(self.stopped("triage", "worker", "not_sent")))
+        self.assertTrue(idle(self.stopped("triage", "reviewer", "ended")))
+        self.assertTrue(idle(self.stopped("needs", "reviewer", "prompt")))
+        self.assertFalse(idle(self.stopped("needs", "worker", "prompt")))
+        self.assertFalse(idle(self.stopped("triage", "worker", "failed")))
+        self.assertFalse(idle(self.stopped("triage", "reviewer", "limit")))
+        # the person asked about it: the question is its why, the stop still counts
+        self.assertFalse(idle(self.stopped("needs", "worker", "prompt", why="Delete it?", ask=True)))
+        self.assertTrue(idle({"status": "needs", "why": "Delete it?", "ask": True}))
+        self.assertTrue(idle(self.stopped("stopped", "worker", "exited")))
+
+    def test_a_task_is_on_its_reviewer_by_its_stop(self):
+        on = self.bp.on_reviewer
+        self.assertTrue(on(self.stopped("needs", "reviewer", "prompt")))
+        self.assertTrue(on(self.stopped("triage", "reviewer", "exited")))
+        self.assertTrue(on(self.stopped("needs", "reviewer", "ended", why="Delete it?", ask=True)))
+        self.assertFalse(on(self.stopped("triage", "reviewer", "limit")))  # seen to as its worker's
+        self.assertFalse(on(self.stopped("triage", "worker", "ended")))
+        self.assertFalse(on({"status": "review"}))
+        t = self.stopped("needs", "reviewer", "ended", review={"block": "blk2", "session": "s"}, block="blk1")
+        self.assertEqual(self.bp.waited_on(t), ("reviewer", "s", "blk2"))
+        t["stop"] = {"by": "worker", "kind": "failed"}
+        self.assertEqual(self.bp.waited_on(t), ("worker", None, "blk1"))
+
+    def test_a_new_status_ends_ask_ok_and_the_stop(self):
+        t = self.stopped("triage", "worker", "ended", why="Ended its turn without saying ready", ok=True)
+        self.bp.ask(t, "Delete it?")
+        self.assertEqual((t["status"], t["why"], t["ask"], t["stop"]),
+                         ("needs", "Delete it?", True, {"by": "worker", "kind": "ended"}))
+        self.assertNotIn("ok", t)
+        self.bp.ask(t, "Or keep it?")  # asked again: still asked
+        self.assertTrue(t["ask"])
+        self.bp.set_status(t, "working")
+        self.assertEqual((t["status"], t["why"]), ("working", None))
+        self.assertFalse({"ask", "ok", "stop"} & set(t))
+        t = self.stopped("triage", "reviewer", "ended")
+        self.bp.ok(t)
+        self.assertEqual((t["status"], t["ok"]), ("review", True))
+        self.assertNotIn("stop", t)
+        t = self.stopped("triage", "worker", "failed")
+        self.bp.ok(t)
+        self.assertEqual(t["status"], "working")
+
+    def test_old_whys_say_the_stop(self):
+        f = self.bp.stop_from_why
+        self.assertEqual(f("Needs you (permission): Allow?"), {"by": "worker", "kind": "prompt"})
+        self.assertEqual(f("Reviewer needs you (input)"), {"by": "reviewer", "kind": "prompt"})
+        self.assertEqual(f("Failed (coordinator didn't resolve it)"), {"by": "worker", "kind": "failed"})
+        self.assertEqual(f("Reviewer exited without a verdict"), {"by": "reviewer", "kind": "exited"})
+        self.assertEqual(f("Its pane was gone"), {"by": "worker", "kind": "pane_gone"})
+        self.assertEqual(f("Couldn't be continued after the usage limit: x"), {"by": "worker", "kind": "limit"})
+        self.assertEqual(f("Something else"), {"by": "worker", "kind": "other"})
+        self.assertIsNone(f(None))
 
     def test_a_local_task_is_on_a_local_branch(self):
         self.assertEqual(self.bp.where({"status": "ready", "pr": None, "local": True}), "local branch")
