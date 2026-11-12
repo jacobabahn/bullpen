@@ -347,9 +347,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         put(buf, area, last, 1, span(label, bold()));
         put(buf, area, last, x, shown.clone());
         f.set_cursor_position(Position::new(area.x + (x + width(&shown)) as u16, area.y + last as u16));
-    } else if let Mode::Stale { id } = &app.mode {
-        let ask = format!("{id}'s tour is stale: the code changed since. n new tour  o old one  esc cancels");
-        put(buf, area, last, 1, span(fit(&ask, w.saturating_sub(2)), bold()));
+    } else if let Mode::Stale { .. } = &app.mode {
+        put(buf, area, last, 1, span(fit("n new tour   o the old one   esc cancels", w.saturating_sub(2)), bold()));
     } else if let Some((action, _)) = &app.pending {
         let verb = match action {
             Action::Accept => "accept",
@@ -632,7 +631,7 @@ mod tests {
     #[test]
     fn a_ready_task_says_whether_its_toured_and_a_tour_being_written_spins() {
         let run = |state: &str, commit: &str, opened: Option<&str>| {
-            Some(model::TourRun { state: state.into(), commit: Some(commit.into()), opened: opened.map(String::from) })
+            Some(model::TourRun { state: state.into(), commit: Some(commit.into()), opened: opened.map(String::from), ..Default::default() })
         };
         let tasks = vec![
             Task { diffstat: Some("3 files, +12 −1".into()), ..ready("BP-1") },
@@ -641,6 +640,9 @@ mod tests {
             Task { tour: run("writing", "", None), ..ready("BP-4") },
             Task { tour: run("failed", "", None), note: Some("tour failed: its tour doesn't parse".into()), ..ready("BP-5") },
         ];
+        // a tour of code the worker has changed since is no tour of this code
+        let old = Task { tour: Some(model::TourRun { stale: Some(true), ..run("written", "abc", None).unwrap() }), ..ready("BP-6") };
+        assert_eq!(model::stat_line(&old), "Not toured yet");
         let mut a = app(tasks, 0, Layout::Grouped);
         let s = screen(&mut a, 60, 24);
         // a spinner turns in place of BP-4's mark
@@ -671,8 +673,10 @@ mod tests {
     fn a_stale_tour_asks_on_the_last_row() {
         let mut a = app(vec![ready("BP-1")], 1, Layout::Grouped);
         a.mode = Mode::Stale { id: "BP-1".into() };
-        let s = screen(&mut a, 90, 10);
-        assert_eq!(row(&s, 1), " BP-1's tour is stale: the code changed since. n new tour  o old one  esc cancels");
+        a.msg = "BP-1's tour is stale: the code changed since it was written.".into();
+        let s = screen(&mut a, 70, 10);
+        assert_eq!(row(&s, 2), " BP-1's tour is stale: the code changed since it was written.");
+        assert_eq!(row(&s, 1), " n new tour   o the old one   esc cancels");
     }
 
     #[test]

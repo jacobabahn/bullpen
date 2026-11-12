@@ -2265,8 +2265,11 @@ def cmd_ready(args):
     if t.get("gh"):
         t["gh"].pop("sent", None)  # whatever GitHub sent it back for is answered now
     t.pop("rebased", None)  # what the board says of a rebase after an accept
-    if t.get("tour"):
-        t["tour"].pop("opened", None)  # new code: not toured yet, as the board says
+    if (t.get("tour") or {}).get("state") == "written":
+        tour = read_json(tour_path(repo, t))
+        if tour and tour_stale(repo, t, tour):  # new code: not toured yet, as the board says
+            t["tour"].pop("opened", None)
+            t["tour"]["stale"] = True
     t.pop("from_ready", None)
     local = not repo.has_origin()
     if not repo.cfg.get("review", True):

@@ -4937,6 +4937,7 @@ class TourTest(unittest.TestCase):
         self.commit_file(tid, "fix1.txt", "fixed better\n")
         self.ready(tid)
         self.assertNotIn("opened", self.show(tid)["tour"])
+        self.assertTrue(self.show(tid)["tour"]["stale"])  # the board says it's not toured
 
     def test_tour_model_is_a_layered_setting(self):
         self.assertEqual(json.loads(self.bp("config", "--json").stdout)["tour_model"], "sonnet")

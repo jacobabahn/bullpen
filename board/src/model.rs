@@ -72,6 +72,9 @@ pub struct TourRun {
     /// the commit of the tour the person last opened: it's toured when that's this one
     #[serde(default, deserialize_with = "lenient")]
     pub opened: Option<String>,
+    /// the worker's ready since changed the code: it's of the old code
+    #[serde(default, deserialize_with = "lenient")]
+    pub stale: Option<bool>,
 }
 
 /// What `bullpen tour --show --json` says of a task's tour.
@@ -879,7 +882,7 @@ pub fn tour_phrase(t: &Task) -> &'static str {
     }
     match t.tour.as_ref().map(|r| r.state.as_str()) {
         _ if t.toured() => "Toured.",
-        Some("written") => "Tour written, not opened yet.",
+        Some("written") if t.tour.as_ref().and_then(|r| r.stale) != Some(true) => "Tour written, not opened yet.",
         Some("failed") => "",
         _ => "Not toured yet.",
     }

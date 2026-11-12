@@ -432,7 +432,7 @@ In the tour:
   unsent: `a` again accepts anyway), `esc` closes.
 
 The line with the size of a ready task's change says "Toured" once you've opened
-its tour (until the worker's next `ready`), else "Not toured yet" or "Tour written,
+its tour (until a `ready` changes the code), else "Not toured yet" or "Tour written,
 not opened yet": a nudge only, accepting never needs a tour. A failed tour shows as
 "tour failed: <why>" on the task.
 

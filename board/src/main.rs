@@ -479,6 +479,7 @@ impl App {
             }
             if TourShow::parse(&out).is_some_and(|s| s.state == "stale") {
                 self.mode = Mode::Stale { id: t.id.clone() };
+                self.msg = format!("{}'s tour is stale: the code changed since it was written.", t.id);
                 return;
             }
         }
@@ -1173,6 +1174,7 @@ mod tests {
         a.settle();
         press(&mut a, 'g');
         assert!(matches!(&a.mode, Mode::Stale { id } if id == "BP-1"));
+        assert_eq!(a.msg, "BP-1's tour is stale: the code changed since it was written.");
         press(&mut a, 'n');
         assert!(matches!(a.mode, Mode::Normal));
         assert_eq!(calls(&d).last().unwrap(), "tour BP-1 --pane --new");
