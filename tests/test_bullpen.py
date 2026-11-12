@@ -1664,7 +1664,8 @@ class BullpenTest(unittest.TestCase):
     def test_a_short_guide_change_is_told_once_with_its_diff(self):
         self.bp("up")
         now = self.guide()
-        old = now.replace("Several news lines at once get one reply.", "Reply to each news line.")
+        old = now.replace("Several news lines at once get one reply.", "Reply to each news line.\nAnd mean it.")
+        old = old.replace("## News\n", "## News\nOld words.\nMore old words.\n")
         self.assertNotEqual(old, now)
         self.give_old_guide("blk1", old)
         self.bp("up")
@@ -1690,7 +1691,7 @@ class BullpenTest(unittest.TestCase):
         self.bp("up")
         now = self.guide()
         old = now.replace("## Review\n", "## Review\n" + "An old rule.\n" * 50)
-        old = old.replace("Several news lines at once get one reply.", "Reply to each news line.")
+        old = old.replace("Several news lines at once get one reply.", "Reply to each news line.\nAnd mean it.")
         self.give_old_guide("blk1", old)
         self.bp("up")
         [msg] = self.guide_news()

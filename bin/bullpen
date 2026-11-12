@@ -1375,7 +1375,9 @@ def guide_sections(old, new):
             continue
         hs = [heading(b, j) for j in range(j1, max(j2, j1 + 1))] if b else []
         hs += [heading(a, i) for i in range(i1, i2) if a[i].startswith("#")]  # removed sections
-        out += [h for h in hs if h not in out]
+        for h in hs:
+            if h not in out:
+                out.append(h)
     return out
 
 
