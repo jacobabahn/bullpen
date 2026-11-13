@@ -4,7 +4,7 @@
 
 use crate::agents::{is_limited, pane};
 use crate::args::{pos, usage_error, Arg, Args, Nargs};
-use crate::limit::{limit_active, LIMIT_CONTINUE, LIMIT_GRACE};
+use crate::limit::{limit_active, limit_file, LIMIT_CONTINUE, LIMIT_GRACE};
 use crate::modes::task_base_ref;
 use crate::news::{news, say, Opts};
 use crate::review::start_review;
@@ -14,7 +14,6 @@ use crate::start::launch::hand_back;
 use crate::start::peek::py_int;
 use crate::stops::stop;
 use bullpen_core::json::{obj, s, Obj};
-use bullpen_core::paths::state;
 use bullpen_core::repo::{known_repos, lookup_block};
 use bullpen_core::task::clip;
 use bullpen_core::text::split;
@@ -30,7 +29,11 @@ pub fn cmd_stuck(argv: &[String]) -> Res<i32> {
     let a = Args::parse("_stuck", argv, STUCK);
     let given = a.arg("minutes").unwrap_or("");
     let Some(minutes) = py_int(given) else {
-        usage_error("_stuck", STUCK, &format!("argument minutes: invalid int value: '{given}'"));
+        usage_error(
+            "_stuck",
+            STUCK,
+            &format!("argument minutes: invalid int value: '{given}'"),
+        );
     };
     let block = a.arg("block").unwrap_or("");
     let Some((repo, role)) = lookup_block(Some(block))? else {
@@ -39,7 +42,11 @@ pub fn cmd_stuck(argv: &[String]) -> Res<i32> {
     if role == "coordinator" || role == "board" || !bullpen_core::json::truthy(repo.cfg.get("stuck_after")) {
         return Ok(0);
     }
-    let who = if role.ends_with(" review") { "reviewer" } else { "worker" };
+    let who = if role.ends_with(" review") {
+        "reviewer"
+    } else {
+        "worker"
+    };
     let mut t = repo.task(split(&role).first().copied().unwrap_or(""))?;
     let waits = if who == "reviewer" { "review" } else { "working" };
     if pane(&t, who).1 != block || bullpen_core::json::truthy(t.get("stuck")) || s(&t, "status") != waits {
@@ -62,7 +69,7 @@ pub fn cmd_stuck(argv: &[String]) -> Res<i32> {
 /// `_limit` (the watcher): once the limit has reset, continue the agents that stopped at it.
 pub fn cmd_limit(argv: &[String]) -> Res<i32> {
     Args::parse("_limit", argv, &[]);
-    let file = state().join("limit.json");
+    let file = limit_file();
     if !file.exists() {
         return Ok(0);
     }
@@ -84,7 +91,16 @@ pub fn cmd_limit(argv: &[String]) -> Res<i32> {
         if let Some((first, _)) = done.first() {
             let said: Vec<&str> = done.iter().map(|(_, said)| said.as_str()).collect();
             let line = format!("the usage limit has reset: continued {}", said.join(", "));
-            news(&repo, first, "limit-reset", &line, Opts { everyone: true, ..Default::default() })?;
+            news(
+                &repo,
+                first,
+                "limit-reset",
+                &line,
+                Opts {
+                    everyone: true,
+                    ..Default::default()
+                },
+            )?;
         }
     }
     if !waiting && limit_active(None)?.is_none() {
@@ -113,7 +129,11 @@ fn continue_limited(repo: &Repo, t: &mut Obj) -> Res<String> {
             let e = clip(&e.to_string(), 120);
             let why = format!("Couldn't be continued after the usage limit: {e}");
             stop(repo, t, &who, "limit", &why, &[], "stopped")?;
-            let whom = if s(t, "status") == "triage" { "its coordinator" } else { "the person" };
+            let whom = if s(t, "status") == "triage" {
+                "its coordinator"
+            } else {
+                "the person"
+            };
             Ok(format!("{id} (not continued, for {whom} to see to: {e})"))
         }
     }
@@ -127,7 +147,11 @@ fn try_continue(repo: &Repo, t: &mut Obj, who: &str, id: &str) -> Res<String> {
             save(repo, t)?;
             return Ok(format!("{id}'s reviewer"));
         }
-        if let Some(r) = t.get_mut("review").and_then(Value::as_object_mut).filter(|r| !r.is_empty()) {
+        if let Some(r) = t
+            .get_mut("review")
+            .and_then(Value::as_object_mut)
+            .filter(|r| !r.is_empty())
+        {
             let round = r.get("round").and_then(Value::as_i64).unwrap_or(1);
             r.insert("round".into(), json!((round - 1).max(0))); // the round it didn't finish
         }
@@ -139,5 +163,9 @@ fn try_continue(repo: &Repo, t: &mut Obj, who: &str, id: &str) -> Res<String> {
     if let Some(failed) = hand_back(repo, t, LIMIT_CONTINUE)? {
         return fail(failed);
     }
-    Ok(if was_alive { id.into() } else { format!("{id} (its pane was gone: resumed in a new one)") })
+    Ok(if was_alive {
+        id.into()
+    } else {
+        format!("{id} (its pane was gone: resumed in a new one)")
+    })
 }

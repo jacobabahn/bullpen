@@ -47,7 +47,13 @@ const GONE: &[Arg] = &[pos("block", Nargs::One, "")];
 pub fn cmd_event(argv: &[String]) -> Res<i32> {
     let a = Args::parse("_event", argv, EVENT);
     let arg = |name| a.arg(name).unwrap_or("").to_string();
-    let ev = Event { block: arg("block"), state: arg("state"), kind: arg("kind"), msg: arg("msg"), shell_min: None };
+    let ev = Event {
+        block: arg("block"),
+        state: arg("state"),
+        kind: arg("kind"),
+        msg: arg("msg"),
+        shell_min: None,
+    };
     event(&ev)?;
     Ok(0)
 }
@@ -109,8 +115,17 @@ pub fn event(ev: &Event) -> Res<()> {
             if approved {
                 t.insert("from_ready".into(), json!(true)); // an end of turn that changed no code makes it ready again
             }
-            let holds = if approved { "; its approval holds if the code doesn't change" } else { "" };
-            say(&repo, &t, "working", &format!("{id} is working again (was ready): it must run `ready` again{holds}"))?;
+            let holds = if approved {
+                "; its approval holds if the code doesn't change"
+            } else {
+                ""
+            };
+            say(
+                &repo,
+                &t,
+                "working",
+                &format!("{id} is working again (was ready): it must run `ready` again{holds}"),
+            )?;
         } else if status == "finished" && !after_working {
             back_to_work(&mut t);
             say(
@@ -131,17 +146,39 @@ pub fn event(ev: &Event) -> Res<()> {
         return Ok(());
     }
     t.insert("last".into(), json!(key));
-    let saying = |msg: &str| if msg.is_empty() { String::new() } else { format!(": {msg}") };
+    let saying = |msg: &str| {
+        if msg.is_empty() {
+            String::new()
+        } else {
+            format!(": {msg}")
+        }
+    };
     match state {
         "blocked" => {
             let kind = if ev.kind.is_empty() { "input" } else { &ev.kind };
             let msg = prompt_msg(kind, msg);
             let why = format!("Needs you ({kind}){}", saying(&msg));
-            stop(&repo, &mut t, "worker", "prompt", &why, &[prompt_news(&id, kind, &msg)], "needs-you")?;
+            stop(
+                &repo,
+                &mut t,
+                "worker",
+                "prompt",
+                &why,
+                &[prompt_news(&id, kind, &msg)],
+                "needs-you",
+            )?;
         }
         "error" => {
             let line = format!("{id}'s turn failed{}: read it with `bullpen peek {id}`", saying(msg));
-            stop(&repo, &mut t, "worker", "failed", &format!("Failed{}", saying(msg)), &[line], "failed")?;
+            stop(
+                &repo,
+                &mut t,
+                "worker",
+                "failed",
+                &format!("Failed{}", saying(msg)),
+                &[line],
+                "failed",
+            )?;
         }
         "done" | "idle" => {
             let shell_min = ev.shell_min; // from `check`: its shell has run this long
@@ -161,7 +198,15 @@ pub fn event(ev: &Event) -> Res<()> {
                      (a server, a watch?): read it with `bullpen peek {id}`"
                 ),
             };
-            stop(&repo, &mut t, "worker", "ended", "Ended its turn without saying ready", &[line], "quiet")?;
+            stop(
+                &repo,
+                &mut t,
+                "worker",
+                "ended",
+                "Ended its turn without saying ready",
+                &[line],
+                "quiet",
+            )?;
         }
         _ => save(&repo, &mut t)?,
     }
@@ -182,8 +227,16 @@ pub fn prompt_msg(kind: &str, msg: &str) -> String {
 /// The news that a task's agent is at a prompt, which needs the person: "BP-3 is at a
 /// permission prompt: Allow rm?", "BP-3's reviewer is at a prompt (question): ...".
 pub fn prompt_news(who: &str, kind: &str, msg: &str) -> String {
-    let at = if kind == "permission" { "a permission prompt".to_string() } else { format!("a prompt ({kind})") };
-    let tail = if msg.is_empty() { String::new() } else { format!(": {msg}") };
+    let at = if kind == "permission" {
+        "a permission prompt".to_string()
+    } else {
+        format!("a prompt ({kind})")
+    };
+    let tail = if msg.is_empty() {
+        String::new()
+    } else {
+        format!(": {msg}")
+    };
     format!("{who} is at {at}{tail}")
 }
 
@@ -202,7 +255,13 @@ fn ready_again(repo: &Repo, t: &mut Obj) -> Res<bool> {
     set_status(t, "ready", None, None);
     save(repo, t)?;
     let then = format!(". `bullpen peek {}` if it said something", s(t, "id"));
-    ready_news(repo, t, &[format!("its worker's turn left the code as approved: {kept}")], &then, true)?;
+    ready_news(
+        repo,
+        t,
+        &[format!("its worker's turn left the code as approved: {kept}")],
+        &then,
+        true,
+    )?;
     Ok(true)
 }
 
@@ -265,9 +324,21 @@ fn review_event(repo: &Repo, t: &mut Obj, ev: &Event) -> Res<()> {
         "blocked" => {
             let kind = if ev.kind.is_empty() { "input" } else { &ev.kind };
             let msg = prompt_msg(kind, msg);
-            let tail = if msg.is_empty() { String::new() } else { format!(": {msg}") };
+            let tail = if msg.is_empty() {
+                String::new()
+            } else {
+                format!(": {msg}")
+            };
             let line = prompt_news(&format!("{id}'s reviewer"), kind, &msg);
-            stop(repo, t, "reviewer", "prompt", &format!("Reviewer needs you ({kind}){tail}"), &[line], "needs-you")?;
+            stop(
+                repo,
+                t,
+                "reviewer",
+                "prompt",
+                &format!("Reviewer needs you ({kind}){tail}"),
+                &[line],
+                "needs-you",
+            )?;
         }
         "done" | "idle" | "error" if status == "review" => {
             if state != "error" && ev.shell_min.is_none() && shell_running(&screen(&session, &block)?) {
@@ -285,7 +356,15 @@ fn review_event(repo: &Repo, t: &mut Obj, ev: &Event) -> Res<()> {
                 "{id}'s reviewer stopped without a verdict{late}: `bullpen go {id} --review` shows it, \
                  `bullpen review {id}` starts a new one"
             );
-            stop(repo, t, "reviewer", "ended", "Reviewer stopped without a verdict", &[line], "quiet")?;
+            stop(
+                repo,
+                t,
+                "reviewer",
+                "ended",
+                "Reviewer stopped without a verdict",
+                &[line],
+                "quiet",
+            )?;
         }
         _ if woke => save(repo, t)?,
         _ => {}
@@ -336,7 +415,15 @@ pub fn gone(block: &str) -> Res<()> {
         } else if whose_turn(&t) == Some("reviewer") && !verdict {
             let id = s(&t, "id").to_string();
             let line = format!("{id}'s reviewer exited without a verdict: `bullpen review {id}` starts a new one");
-            stop(&repo, &mut t, "reviewer", "exited", "Reviewer exited without a verdict", &[line], "stopped")?;
+            stop(
+                &repo,
+                &mut t,
+                "reviewer",
+                "exited",
+                "Reviewer exited without a verdict",
+                &[line],
+                "stopped",
+            )?;
         }
         return save(&repo, &mut t);
     }
@@ -351,7 +438,15 @@ pub fn gone(block: &str) -> Res<()> {
     } else if status == "working" || is_waiting(&status) {
         let id = s(&t, "id").to_string();
         let line = format!("{id} stopped before saying ready: `bullpen resume {id}` continues it");
-        stop(&repo, &mut t, "worker", "exited", "Agent exited before saying ready", &[line], "stopped")?;
+        stop(
+            &repo,
+            &mut t,
+            "worker",
+            "exited",
+            "Agent exited before saying ready",
+            &[line],
+            "stopped",
+        )?;
     } else {
         save(&repo, &mut t)?;
     }

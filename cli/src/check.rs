@@ -27,7 +27,10 @@ const SETTLE: f64 = 60.0;
 
 const CHECK: &[Arg] = &[
     pos("ID", Nargs::Any, "only these tasks"),
-    flag("--fix", "apply the updates the missed events would have made (news included)"),
+    flag(
+        "--fix",
+        "apply the updates the missed events would have made (news included)",
+    ),
     flag("--quiet", "print nothing"),
     flag("--all-repos", "every repo bullpen knows (the watcher's)"),
 ];
@@ -50,7 +53,12 @@ fn text_of(r: &Obj, key: &str) -> String {
 /// The agent's state by its status record, else its screen. None: unsure, or it just changed.
 fn agent_state(session: &str, block: &str) -> Res<Option<Agent>> {
     if !alive(session, block)? {
-        return Ok(Some(Agent { state: "gone", kind: String::new(), msg: String::new(), age: None }));
+        return Ok(Some(Agent {
+            state: "gone",
+            kind: String::new(),
+            msg: String::new(),
+            age: None,
+        }));
     }
     let mut a = match program_status(session, block)?.filter(|r| !r.is_empty()) {
         Some(r) => {
@@ -67,10 +75,20 @@ fn agent_state(session: &str, block: &str) -> Res<Option<Agent>> {
                 // is new every few seconds, as its message changes.
                 return Ok(None);
             }
-            Agent { state, kind: text_of(&r, "kind"), msg: text_of(&r, "msg"), age }
+            Agent {
+                state,
+                kind: text_of(&r, "kind"),
+                msg: text_of(&r, "msg"),
+                age,
+            }
         }
         None => match screen_state(&screen(session, block)?) {
-            Some(state) => Agent { state, kind: String::new(), msg: String::new(), age: None },
+            Some(state) => Agent {
+                state,
+                kind: String::new(),
+                msg: String::new(),
+                age: None,
+            },
             None => return Ok(None),
         },
     };
@@ -84,7 +102,10 @@ fn agent_state(session: &str, block: &str) -> Res<Option<Agent>> {
 pub fn needs_label(why: Option<&Value>) -> String {
     let why = why.filter(|v| truthy(Some(v))).map_or(String::new(), py_str);
     let rest = why.strip_prefix("Reviewer ").unwrap_or(&why);
-    if let Some(inside) = rest.strip_prefix("Needs you (").or_else(|| rest.strip_prefix("needs you (")) {
+    if let Some(inside) = rest
+        .strip_prefix("Needs you (")
+        .or_else(|| rest.strip_prefix("needs you ("))
+    {
         if let Some(end) = inside.find(')') {
             return inside[..end].to_string();
         }
@@ -99,7 +120,10 @@ pub fn needs_label(why: Option<&Value>) -> String {
 fn doing(a: &Agent, who: &str) -> String {
     match a.state {
         "idle" => format!("its {who} is idle at its prompt"),
-        "blocked" => format!("its {who} is waiting on you ({})", if a.kind.is_empty() { "input" } else { &a.kind }),
+        "blocked" => format!(
+            "its {who} is waiting on you ({})",
+            if a.kind.is_empty() { "input" } else { &a.kind }
+        ),
         "error" => format!("its {who}'s turn failed"),
         _ => format!("its {who} is working again"),
     }
@@ -133,13 +157,20 @@ pub fn worker_drift(t: &Obj, a: &Agent, limit: f64) -> Option<(String, &'static 
             return None; // its coordinator said it's fine (`bullpen ok`)
         }
         let tail = if a.state == "idle" { ": `bullpen peek` it" } else { "" };
-        return Some((format!("{tid} is marked working but {}{tail}", doing(a, "agent")), a.state));
+        return Some((
+            format!("{tid} is marked working but {}{tail}", doing(a, "agent")),
+            a.state,
+        ));
     }
     if !is_waiting(st) || truthy(t.get("ask")) {
         return None; // an ask waits on the person, whatever its agent does
     }
     if a.state == "working" || (a.state == "blocked" && !at_prompt(t)) {
-        let line = format!("{tid} is marked {st} ({}) but {}", needs_label(t.get("why")), doing(a, "agent"));
+        let line = format!(
+            "{tid} is marked {st} ({}) but {}",
+            needs_label(t.get("why")),
+            doing(a, "agent")
+        );
         return Some((line, a.state));
     }
     None
@@ -156,7 +187,11 @@ pub fn reviewer_drift(t: &Obj, a: &Agent, limit: f64) -> Option<(String, &'stati
         return Some((idle, "shell")); // its shell has run too long to count as busy
     }
     if a.state == "gone" {
-        let is = if st == "review" { "in review".to_string() } else { format!("marked {st}") };
+        let is = if st == "review" {
+            "in review".to_string()
+        } else {
+            format!("marked {st}")
+        };
         return Some((format!("{tid} is {is} but its reviewer's pane is gone"), "gone"));
     }
     if st == "review" && matches!(a.state, "idle" | "error") && !truthy(t.get("ok")) {
@@ -166,7 +201,11 @@ pub fn reviewer_drift(t: &Obj, a: &Agent, limit: f64) -> Option<(String, &'stati
         return Some((format!("{tid} is in review but {}", doing(a, "reviewer")), "blocked"));
     }
     if is_waiting(st) && a.state == "working" {
-        let line = format!("{tid} is marked {st} ({}) but {}", needs_label(t.get("why")), doing(a, "reviewer"));
+        let line = format!(
+            "{tid} is marked {st} ({}) but {}",
+            needs_label(t.get("why")),
+            doing(a, "reviewer")
+        );
         return Some((line, "working"));
     }
     None
@@ -208,7 +247,11 @@ fn fix_drift(repo: &Repo, t: &Obj, who: &str, block: &str, fix: &str, a: &Agent)
         t.insert("last".into(), Value::Null); // the event did come: don't take it for a repeat
         json::write_obj(&repo.task_path(s(&t, "id")), &t)?;
     }
-    let (state, shell_min) = if fix == "shell" { ("idle", shell_minutes(a, 0.0)) } else { (fix, None) };
+    let (state, shell_min) = if fix == "shell" {
+        ("idle", shell_minutes(a, 0.0))
+    } else {
+        (fix, None)
+    };
     event(&Event {
         block: block.into(),
         state: state.into(),
@@ -237,13 +280,21 @@ fn check_repo(repo: &Repo, ids: &[String], fix: bool, quiet: bool) -> Res<usize>
                 escalate(repo, &mut t, &late)?;
                 t = repo.task(s(&t, "id"))?;
             }
-            out(format!("{} waits on its coordinator, but {}: it needs the person{fixed}", s(&t, "id"), late.1));
+            out(format!(
+                "{} waits on its coordinator, but {}: it needs the person{fixed}",
+                s(&t, "id"),
+                late.1
+            ));
         }
         if stamp(&t).map_or(0.0, |st| seconds_since(st, None)) < SETTLE {
             continue; // bullpen just changed it (start, tell, ready): its agent has yet to say
         }
-        let Some((who, session, block)) = waited_on(&t) else { continue };
-        let Some(a) = agent_state(&session, &block)? else { continue };
+        let Some((who, session, block)) = waited_on(&t) else {
+            continue;
+        };
+        let Some(a) = agent_state(&session, &block)? else {
+            continue;
+        };
         if a.state == "working" && compacting(&session, &block, &a.msg)? {
             continue; // compacting by itself: no turn, so no drift
         }
@@ -251,9 +302,16 @@ fn check_repo(repo: &Repo, ids: &[String], fix: bool, quiet: bool) -> Res<usize>
         // off only the "no progress" news: this check still runs, on the default.
         let limit = match repo.cfg.get("stuck_after").filter(|v| truthy(Some(v))) {
             Some(v) => v.as_f64().unwrap_or(0.0),
-            None => bullpen_core::settings::defaults().get("stuck_after").and_then(Value::as_f64).unwrap_or(20.0),
+            None => bullpen_core::settings::defaults()
+                .get("stuck_after")
+                .and_then(Value::as_f64)
+                .unwrap_or(20.0),
         };
-        let found = if who == "worker" { worker_drift(&t, &a, limit) } else { reviewer_drift(&t, &a, limit) };
+        let found = if who == "worker" {
+            worker_drift(&t, &a, limit)
+        } else {
+            reviewer_drift(&t, &a, limit)
+        };
         if let Some((line, what)) = found {
             drift += 1;
             if fix {
@@ -275,7 +333,11 @@ fn check_repo(repo: &Repo, ids: &[String], fix: bool, quiet: bool) -> Res<usize>
 pub fn cmd_check(argv: &[String]) -> Res<i32> {
     let a = Args::parse("check", argv, CHECK);
     let fix = a.flag("--fix");
-    let repos = if a.flag("--all-repos") { known_repos()? } else { vec![Repo::new(repo_root()?)?] };
+    let repos = if a.flag("--all-repos") {
+        known_repos()?
+    } else {
+        vec![Repo::new(repo_root()?)?]
+    };
     let mut drift = 0;
     for repo in &repos {
         let mut ids: Vec<String> = Vec::new();

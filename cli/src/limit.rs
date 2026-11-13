@@ -26,15 +26,12 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 
 /// How a turn ends that may be at the limit; a blocked agent waits on the person.
-#[allow(dead_code)] // the watcher's events call it (T10)
 pub const LIMIT_STATES: [&str; 3] = ["error", "idle", "done"];
 /// Seconds after the reset before continuing: Claude Code may do it itself.
-#[allow(dead_code)] // the watcher's events call it (T10)
 pub const LIMIT_GRACE: f64 = 120.0;
 /// Seconds a limit with no known reset time holds `start` back.
 pub const LIMIT_FORGET: f64 = 5.0 * 3600.0;
 /// What a limited agent is told once the limit has reset.
-#[allow(dead_code)] // the watcher's events call it (T10)
 pub const LIMIT_CONTINUE: &str = "The usage limit has reset. Carry on where you stopped.";
 const DAYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const MONTHS: [&str; 12] = [
@@ -74,7 +71,6 @@ pub fn limit_phrase(resets: Option<&Value>, at: Option<Stamp>) -> String {
 }
 
 /// Is this agent of the task (its "worker" or its "reviewer") stopped at the limit?
-#[allow(dead_code)] // the watcher's events call it (T10)
 pub fn limited(t: &Obj, who: &str) -> bool {
     is_limited(t) && s(obj(t, "limit"), "who") == who
 }
@@ -124,7 +120,6 @@ pub fn limit_text(session: &str, block: &str, state: &str, msg: &str, seen: Opti
 
 /// Did this event (its block, state and msg) say the agent stopped at the usage limit?
 /// Then note it on the task and for `start`, with one line of news, and return true.
-#[allow(dead_code)] // the watcher's events call it (T10)
 pub fn limit_hit(repo: &Repo, t: &mut Obj, who: &str, block: &str, state: &str, msg: &str) -> Res<bool> {
     let (session, _) = pane(t, who);
     let msg = strip(msg);
@@ -203,7 +198,6 @@ pub fn limit_hit(repo: &Repo, t: &mut Obj, who: &str, block: &str, state: &str, 
 /// The agent the task waits on is working again: forget its limit, and let `start`
 /// through. True if it was limited. limit.json stays, as a limit that has reset: other
 /// tasks may still wait to be continued (`_limit` removes it).
-#[allow(dead_code)] // the watcher's events call it (T10)
 pub fn limit_over(t: &mut Obj) -> Res<bool> {
     if !is_limited(t) {
         return Ok(false);

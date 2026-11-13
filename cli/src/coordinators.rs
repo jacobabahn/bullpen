@@ -105,7 +105,11 @@ pub fn coordinator_gone(repo: &Repo, c: &Obj) {
         "_coordinator_gone".into(),
         cid.into(),
         "--wait".into(),
-        if wait.is_empty() { GONE_WAIT.into() } else { wait.clone() },
+        if wait.is_empty() {
+            GONE_WAIT.into()
+        } else {
+            wait.clone()
+        },
     ];
     let log = repo.dir.join("jobs.log");
     let job = Job {
@@ -131,7 +135,11 @@ pub fn cmd_coordinator_gone(argv: &[String]) -> Res<i32> {
         None => 5.0,
         Some(w) => match bullpen_core::text::strip(w).parse::<f64>() {
             Ok(n) => n,
-            Err(_) => crate::args::usage_error("_coordinator_gone", GONE, &format!("argument --wait: invalid float value: '{w}'")),
+            Err(_) => crate::args::usage_error(
+                "_coordinator_gone",
+                GONE,
+                &format!("argument --wait: invalid float value: '{w}'"),
+            ),
         },
     };
     if wait > 0.0 {
@@ -149,7 +157,10 @@ pub fn cmd_coordinator_gone(argv: &[String]) -> Res<i32> {
     };
     let taken: Vec<&str> = coordinators(&repo).into_iter().map(|o| s(o, "block")).collect();
     let label = crate::rex::coordinator_label(&repo);
-    if crate::rex::find_panes(Some(&view), &label).iter().any(|h| !taken.contains(&h.block.as_str())) {
+    if crate::rex::find_panes(Some(&view), &label)
+        .iter()
+        .any(|h| !taken.contains(&h.block.as_str()))
+    {
         return Ok(0); // a restart brought it back under a new ID
     }
     drop_coordinator(&mut repo, &c)?;

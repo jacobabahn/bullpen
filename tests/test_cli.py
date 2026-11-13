@@ -277,7 +277,8 @@ class EntryTest(BullpenTest):
                                            "up", "build", "_build_board", "doctor", "_flush", "start", "resume",
                                            "tell", "_queue", "rules", "pick", "config", "ready", "review",
                                            "verdict", "close", "drop", "finish", "_push", "answer", "reply",
-                                           "prompt"],
+                                           "prompt", "check", "_event", "_stuck", "_limit", "_gone",
+                                           "_coordinator_gone"],
                                           "rust")})
 
     def test_help_and_an_unknown_command_come_from_rust(self):
