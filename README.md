@@ -105,3 +105,4 @@ Reference:
 - [Tests](docs/tests.md): running them
 - [GLOSSARY.md](GLOSSARY.md): the words bullpen uses
 - [docs/prd/](docs/prd/): design notes
+- [The Mojo experiment](docs/experiments/mojo.md): a partial port to Mojo and its benchmark (code on the `mojo` branch)
