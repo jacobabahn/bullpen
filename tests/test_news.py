@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from support import setUpModule, tearDownModule, BULLPEN, RUN, BullpenTest  # a temp folder for each module
+from support import setUpModule, tearDownModule, BULLPEN, BullpenTest  # a temp folder for each module
 
 
 class NewsTest(BullpenTest):
@@ -335,7 +335,7 @@ class NewsTest(BullpenTest):
         tid = self.start_task()
         self.restart_rex(new_session=True)
         env = {k: v for k, v in self.env.items() if k != "REX_SESSION"}  # as a key binding runs it
-        p = subprocess.run([str(RUN), "go", tid, "--session", "session:2", "--from", "x"],
+        p = subprocess.run([str(BULLPEN), "go", tid, "--session", "session:2", "--from", "x"],
                            cwd=self.tmp, env=env, text=True, capture_output=True)
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(self.block(tid), "blk7")

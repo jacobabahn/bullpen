@@ -10,7 +10,7 @@ import time
 import unittest
 from pathlib import Path
 
-from support import setUpModule, tearDownModule, RUN, sh, BullpenTest  # a temp folder for each module
+from support import setUpModule, tearDownModule, BULLPEN, sh, BullpenTest  # a temp folder for each module
 
 
 FAKE_TOUR = textwrap.dedent("""\
@@ -382,7 +382,7 @@ class TourTest(unittest.TestCase):
         after each (the first: before any key) and how it exited."""
         import pty
         master, slave = pty.openpty()
-        p = subprocess.Popen([str(RUN), "tour", tid, *how], cwd=self.repo, env=self.env,
+        p = subprocess.Popen([str(BULLPEN), "tour", tid, *how], cwd=self.repo, env=self.env,
                              stdin=slave, stdout=slave, stderr=slave)
         os.close(slave)
         screens = []

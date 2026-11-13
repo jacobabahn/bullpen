@@ -1,29 +1,16 @@
-"""bin/bullpen's functions, called directly."""
+"""bullpen's functions, called directly from the package's modules."""
 
+import argparse
 import datetime as dt
 import re
 import textwrap
 import unittest
 
-from support import setUpModule, tearDownModule, ROOT, BULLPEN  # a temp folder for each module
+from support import setUpModule, tearDownModule, ROOT  # a temp folder for each module
+from bullpen import cli, core, doctor, line_edit, pick, stepper
 
 
 class HelpersTest(unittest.TestCase):
-    @classmethod
-    def cli(cls):
-        """bin/bullpen as a module, to call its functions directly."""
-        import importlib.util
-        from importlib.machinery import SourceFileLoader
-        loader = SourceFileLoader("bullpen_cli", str(BULLPEN))
-        spec = importlib.util.spec_from_loader("bullpen_cli", loader)
-        mod = importlib.util.module_from_spec(spec)
-        loader.exec_module(mod)
-        return mod
-
-    @classmethod
-    def setUpClass(cls):
-        cls.bp = cls.cli()
-
     # ---- one task line ----
 
     def repo(self, *tasks, **cfg):
@@ -40,11 +27,11 @@ class HelpersTest(unittest.TestCase):
     def test_board_order_puts_what_you_do_next_first(self):
         ts = [{"id": f"BP-{i}", "status": s} for i, s in
               enumerate(["todo", "working", "ready", "stopped", "needs", "triage", "done", "review", "finished"], 1)]
-        self.assertEqual([t["id"] for t in self.bp.board_order(ts)],
+        self.assertEqual([t["id"] for t in core.board_order(ts)],
                          ["BP-4", "BP-5", "BP-6", "BP-3", "BP-9", "BP-8", "BP-2", "BP-1", "BP-7"])
 
     def test_the_boards_sentence(self):
-        d = lambda t, *more, **cfg: self.bp.board_detail(self.repo(t, *more, **cfg), t)
+        d = lambda t, *more, **cfg: core.board_detail(self.repo(t, *more, **cfg), t)
         self.assertEqual(d({"id": "BP-1", "status": "stopped"}), "Its agent exited. r resumes it.")
         self.assertEqual(d({"id": "BP-1", "status": "finished", "summary": "# Recorded the demo\n\nmore"}),
                          "Finished, nothing to merge: Recorded the demo. a closes it.")
@@ -64,13 +51,13 @@ class HelpersTest(unittest.TestCase):
     def test_a_task_line_fits_the_width_and_keeps_its_age(self):
         t = {"id": "BP-3", "status": "needs", "title": "Fix the login redirect after sign-in",
              "why": "Asks: python3 or python? The Makefile uses both.", "since": self.ago(12)}
-        r = self.bp.task_line(self.repo(t), t)
+        r = core.task_line(self.repo(t), t)
         self.assertEqual(r, "● BP-3  Fix the login redirect after sign-in  12m  Asks: python3 or python? The Makefile uses both.")
-        cut = self.bp.task_line(self.repo(t), t, width=42)
+        cut = core.task_line(self.repo(t), t, width=42)
         self.assertEqual(cut, "● BP-3  Fix the login redirect after…  12m")  # no room for the sentence
-        self.assertEqual(self.bp.task_line(self.repo(t), t, width=70),
+        self.assertEqual(core.task_line(self.repo(t), t, width=70),
                          "● BP-3  Fix the login redirect after sign-in  12m  Asks: python3 or p…")  # 70 wide
-        colour = self.bp.task_line(self.repo(t), t, color=True)
+        colour = core.task_line(self.repo(t), t, color=True)
         self.assertTrue(colour.startswith("\x1b[1;33m●\x1b[0m "))  # the mark amber, as on the board
         self.assertIn("\x1b[1;31m12m", colour)  # needs you for over 5 minutes: the age turns red
 
@@ -80,9 +67,9 @@ class HelpersTest(unittest.TestCase):
         body = src[src.index("pub fn mark(status: &str)"):]
         body = body[:body.index("\n}\n")]
         board = dict(re.findall(r'"(\w+)" => "(.)"', body))
-        self.assertEqual(self.bp.MARKS, board)
+        self.assertEqual(core.MARKS, board)
         # ready and closed are told apart
-        self.assertEqual((self.bp.MARKS["ready"], self.bp.MARKS["done"]), ("✔", "·"))
+        self.assertEqual((core.MARKS["ready"], core.MARKS["done"]), ("✔", "·"))
 
     def test_the_docs_tables_are_the_boards(self):
         # docs/board.md's marks and keys tables say what the board's `?` list says
@@ -90,7 +77,7 @@ class HelpersTest(unittest.TestCase):
         rows = [r.split(" | ") for r in re.findall(r"^\| (.+) \|$", use, re.M)]
         cells = {r[1]: r[0] for r in rows if len(r) == 2}
         # every still mark, each in docs/board.md beside its words
-        for st, mark in self.bp.MARKS.items():
+        for st, mark in core.MARKS.items():
             self.assertTrue(any(f"`{mark}`" in c for c in cells.values()), (st, mark))
         for words in ("needs you", "ready to accept", "dropped", "in review", "working"):
             self.assertIn(words, cells)
@@ -117,25 +104,25 @@ class HelpersTest(unittest.TestCase):
              "since": self.ago(12)}
         b = {"id": "BP-16", "status": "todo", "title": "Emails: digest", "since": self.ago(1)}
         r = self.repo(a, b)
-        self.assertEqual(list(self.bp.ls_lines(r, [b, a], 42)), [
+        self.assertEqual(list(core.ls_lines(r, [b, a], 42)), [
             "● BP-3   Fix the login redirect aft…  12m",
             "         Asks: python3 or python? The",
             "         Makefile uses both and the CI …",
             "◌ BP-16  Emails: digest                1m",
             "         Not started. s starts it."])
-        self.assertTrue(all(len(l) <= 41 for l in self.bp.ls_lines(r, [b, a], 42)))
-        self.assertEqual(len(list(self.bp.ls_lines(r, [b, a], 200))), 2)  # wide: one line each
-        self.assertEqual(len(list(self.bp.ls_lines(r, [b, a]))), 2)  # piped: whole
-        wide = list(self.bp.ls_lines(r, [b, a], 80))  # room for the sentence: one cut line each, not rows
+        self.assertTrue(all(len(l) <= 41 for l in core.ls_lines(r, [b, a], 42)))
+        self.assertEqual(len(list(core.ls_lines(r, [b, a], 200))), 2)  # wide: one line each
+        self.assertEqual(len(list(core.ls_lines(r, [b, a]))), 2)  # piped: whole
+        wide = list(core.ls_lines(r, [b, a], 80))  # room for the sentence: one cut line each, not rows
         self.assertEqual(wide, ["● BP-3   Fix the login redirect after sign-in  12m  Asks: python3 or python? T…",
                                 "◌ BP-16  Emails: digest  1m  Not started. s starts it."])
         self.assertTrue(all(len(l) <= 79 for l in wide))
         c = {"id": "BP-5", "status": "todo", "title": "Later", "note": "One two three four five six seven eight"}
-        self.assertEqual(len(self.bp.task_rows(self.repo(c), c, width=20)), 2)  # the board's one line
-        self.assertEqual(len(self.bp.task_rows(self.repo(c), c, width=20, lines=99)), 5)  # show's: all of it
+        self.assertEqual(len(core.task_rows(self.repo(c), c, width=20)), 2)  # the board's one line
+        self.assertEqual(len(core.task_rows(self.repo(c), c, width=20, lines=99)), 5)  # show's: all of it
 
     def test_next_says_what_you_can_do_now(self):
-        n = lambda **t: self.bp.next_steps(self.repo(), {"id": "BP-4", **t})
+        n = lambda **t: core.next_steps(self.repo(), {"id": "BP-4", **t})
         self.assertEqual(n(status="needs", stop={"kind": "prompt"}),
                          "`bullpen answer BP-4 <option>` (`bullpen peek BP-4` shows the prompt), or i on the board")
         self.assertEqual(n(status="needs", ask=True), "`bullpen reply BP-4 <answer>`, or i on the board")
@@ -145,7 +132,7 @@ class HelpersTest(unittest.TestCase):
         self.assertEqual(n(status="done"), "nothing: it's closed")
 
     def test_the_picker_shows_marks_in_colour(self):
-        p = self.bp.Picker(["● BP-1  Fix login", "◌ BP-2  Cover logout"], ["1;33", "2"])
+        p = pick.Picker(["● BP-1  Fix login", "◌ BP-2  Cover logout"], ["1;33", "2"])
         out = p.screen(80, 5)
         self.assertEqual(out[2], "\x1b[7m> \x1b[1;33m●\x1b[22;39m BP-1  Fix login\x1b[0m")  # still reversed after
         self.assertEqual(out[3], "  \x1b[2m◌\x1b[22;39m BP-2  Cover logout")
@@ -154,7 +141,7 @@ class HelpersTest(unittest.TestCase):
     # ---- pick ----
 
     def test_fuzzy_matches_each_word_in_order_ignoring_case(self):
-        f = self.bp.fuzzy_score
+        f = pick.fuzzy_score
         self.assertIsNotNone(f("lgn", "Fix the LOGIN redirect"))
         self.assertIsNone(f("ngl", "Fix the login redirect"))  # out of order
         self.assertIsNotNone(f("redirect fix", "Fix the login redirect"))  # words in any order
@@ -164,7 +151,7 @@ class HelpersTest(unittest.TestCase):
         self.assertEqual(f("", "anything"), 0)
 
     def test_fuzzy_ranks_letters_together_and_word_starts_first(self):
-        pf = self.bp.pick_filter
+        pf = pick.pick_filter
         self.assertEqual(pf("log", ["lxoxg", "a login"]), [1, 0])  # together
         self.assertEqual(pf("log", ["l o g", "a login"]), [1])  # not across words
         self.assertEqual(pf("re", ["more", "redirect"]), [1, 0])  # the start of a word
@@ -173,7 +160,7 @@ class HelpersTest(unittest.TestCase):
         self.assertEqual(pf("x", ["a", "b"]), [])
 
     def test_picker_keys(self):
-        p = self.bp.Picker(["BP-1  working  Fix login", "BP-2  queued  Cover logout", "BP-3  ready  Docs"])
+        p = pick.Picker(["BP-1  working  Fix login", "BP-2  queued  Cover logout", "BP-3  ready  Docs"])
         self.assertEqual(p.shown, [0, 1, 2])
         for k in "lo":
             p.key(k)
@@ -202,17 +189,17 @@ class HelpersTest(unittest.TestCase):
         self.assertEqual(p.query, "")
 
     def test_picker_screen_keeps_the_selected_task_in_view(self):
-        p = self.bp.Picker([f"BP-{n}  queued  Task number {n}" for n in range(1, 11)])
+        p = pick.Picker([f"BP-{n}  queued  Task number {n}" for n in range(1, 11)])
         for _ in range(6):
             p.key("\x0e")  # ctrl+n
         out = p.screen(13, 5)  # the query, a hint and three tasks
         self.assertEqual(out[0], "jump to> ")
         self.assertIn("10/10", out[1])
         self.assertEqual(out[2:], ["  BP-5  queu…", "  BP-6  queu…", "\x1b[7m> BP-7  queu…\x1b[0m"])
-        self.assertIn("no open tasks in any repository", self.bp.Picker([]).screen(80, 5)[1])
+        self.assertIn("no open tasks in any repository", pick.Picker([]).screen(80, 5)[1])
 
     def test_picker_says_a_failure_in_the_normal_weight_after_the_count(self):
-        p = self.bp.Picker(["◌ BP-1  Fix login", "◌ BP-2  Cover logout"])
+        p = pick.Picker(["◌ BP-1  Fix login", "◌ BP-2  Cover logout"])
         self.assertEqual(p.screen(42, 5)[1], "\x1b[2m2/2  ⏎ go · esc close · ↑↓ move\x1b[0m")
         p.msg = "no board: run `bullpen up`"
         self.assertEqual(p.screen(42, 5)[1], "\x1b[2m2/2\x1b[0m  no board: run `bullpen up`")
@@ -221,7 +208,7 @@ class HelpersTest(unittest.TestCase):
     def stepper(self, comments=()):
         tour = {"commit": "c1", "steps": [{"title": "One", "note": "Why one.", "hunks": [{"file": "a", "lines": [1, 2]}]},
                                           {"title": "Two", "note": "", "hunks": [{"file": "b"}]}]}
-        return self.bp.Stepper("BP-1", "Fix it", tour, list(comments), 0,
+        return stepper.Stepper("BP-1", "Fix it", tour, list(comments), 0,
                                lambda i, w: [f"diff line {n} of step {i + 1}" for n in range(30)])
 
     def test_stepper_keys(self):
@@ -350,13 +337,13 @@ class HelpersTest(unittest.TestCase):
         self.assertTrue(all(len(line) <= 19 for line in out if "宽" not in line), out)
 
     def test_clip_line_counts_columns_not_codes(self):
-        clip = self.bp.clip_line
+        clip = stepper.clip_line
         self.assertEqual(clip("\x1b[1mabc\x1b[0mdef", 4), "\x1b[1mabc\x1b[0md")
         self.assertEqual(clip("ab", 5), "ab")
         self.assertEqual(clip("宽宽宽", 5), "宽宽")
 
     def test_line_edit_moves_and_cuts_at_the_cursor(self):
-        e = self.bp.LineEdit()
+        e = line_edit.LineEdit()
         shown = lambda: e.text[:e.at] + "|" + e.text[e.at:]
         for k in ["u", "s", "e", " ", "p", "g", "\x1b[D", "\x1b[D", "X"]:
             self.assertTrue(e.key(k), k)
@@ -374,11 +361,11 @@ class HelpersTest(unittest.TestCase):
         self.assertEqual(len(e.text), 3000)
 
     def test_line_edit_takes_a_paste_on_one_line_or_with_its_lines(self):
-        e = self.bp.LineEdit("[]")
+        e = line_edit.LineEdit("[]")
         e.key("\x1b[D")
         e.key("\x1b[200~one\r\ntwo\nthree\tfour\x07\x1b[201~")
         self.assertEqual((e.text, e.at), ("[one two three four]", 19))
-        e = self.bp.LineEdit(lines=True)
+        e = line_edit.LineEdit(lines=True)
         e.key("\x1b[200~one\r\ntwo\x1b[201~")
         self.assertEqual(e.text, "one\ntwo")
         e.key("\n")  # ctrl+j: a new line
@@ -395,7 +382,7 @@ class HelpersTest(unittest.TestCase):
         self.assertEqual(e.text, "ne\ntwo\nx\n")
 
     def test_line_edit_views_keep_the_cursor_in_sight(self):
-        e = self.bp.LineEdit("abcdefghij")
+        e = line_edit.LineEdit("abcdefghij")
         self.assertEqual(e.view(5), ("ghij", 4))
         for _ in range(3):
             e.key("\x1b[D")
@@ -405,7 +392,7 @@ class HelpersTest(unittest.TestCase):
         self.assertEqual(e.view(5), ("fghij", 0))
         e.key("\x01")
         self.assertEqual(e.view(5), ("abcde", 0))
-        e = self.bp.LineEdit("abcdefgh\nij", lines=True)
+        e = line_edit.LineEdit("abcdefgh\nij", lines=True)
         self.assertEqual(e.rows(5, 9), (["abcd", "efgh", "ij"], (2, 2)))
         self.assertEqual(e.rows(5, 2), (["efgh", "ij"], (1, 2)))  # the rows around the cursor
         e.key("\x1b[A")
@@ -434,7 +421,7 @@ class HelpersTest(unittest.TestCase):
         self.assertEqual(st.key("\r"), ("tell", "two"))
 
     def test_the_picker_edits_its_query_at_the_cursor(self):
-        p = self.bp.Picker(["BP-1  working  Fix login", "BP-2  queued  Cover logout"])
+        p = pick.Picker(["BP-1  working  Fix login", "BP-2  queued  Cover logout"])
         for k in "lgn":
             p.key(k)
         p.key("\x1b[D")
@@ -448,22 +435,22 @@ class HelpersTest(unittest.TestCase):
         self.assertEqual(p.screen(42, 5)[0], "jump to> lgon")
 
     def test_split_keys_keeps_a_paste_and_alt_keys_whole(self):
-        self.assertEqual(self.bp.split_keys("a\x1b[200~x\ny\x1b[201~\x1bb\x1b\r\x1b\x1b"),
+        self.assertEqual(line_edit.split_keys("a\x1b[200~x\ny\x1b[201~\x1bb\x1b\r\x1b\x1b"),
                          ["a", "\x1b[200~x\ny\x1b[201~", "\x1bb", "\x1b\r", "\x1b", "\x1b"])
 
     def test_split_keys_keeps_escape_sequences_whole(self):
-        self.assertEqual(self.bp.split_keys("ab\x1b[Bc\x1bOA\x1b"), ["a", "b", "\x1b[B", "c", "\x1bOA", "\x1b"])
+        self.assertEqual(line_edit.split_keys("ab\x1b[Bc\x1bOA\x1b"), ["a", "b", "\x1b[B", "c", "\x1bOA", "\x1b"])
 
     def test_rex_versions_compare_previews_before_releases(self):
-        key = self.bp.rex_version_key
-        self.assertLess(key("0.1.0-preview.12"), self.bp.REX_MIN)
-        self.assertEqual(key("0.1.0-preview.13"), self.bp.REX_MIN)
+        key = doctor.rex_version_key
+        self.assertLess(key("0.1.0-preview.12"), doctor.REX_MIN)
+        self.assertEqual(key("0.1.0-preview.13"), doctor.REX_MIN)
         self.assertGreater(key("0.1.0"), key("0.1.0-preview.99"))
-        self.assertGreater(key("v0.2.0-preview.1"), self.bp.REX_MIN)
+        self.assertGreater(key("v0.2.0-preview.1"), doctor.REX_MIN)
         self.assertIsNone(key("dev"))
 
     def test_a_shebangs_program_skips_envs_options(self):
-        prog = self.bp.shebang_program
+        prog = doctor.shebang_program
         self.assertEqual(prog(["/bin/bash", "-e"]), "/bin/bash")
         self.assertEqual(prog(["/usr/bin/env", "bash"]), "bash")
         self.assertEqual(prog(["/usr/bin/env", "-S", "bash", "-e"]), "bash")
@@ -506,54 +493,55 @@ class HelpersTest(unittest.TestCase):
         """)
 
     def test_a_choice_menu_is_read_without_type_something(self):
-        p = self.bp.read_prompt(self.CHOICE)
+        p = core.read_prompt(self.CHOICE)
         self.assertEqual(p["question"], "Do you prefer tea or coffee?")
         self.assertEqual(p["options"], [["1", "Tea"], ["2", "Coffee"], ["4", "Chat about this"]])
 
     def test_the_boxed_layout_is_read_too(self):
-        p = self.bp.read_prompt(self.BOXED)
+        p = core.read_prompt(self.BOXED)
         self.assertEqual((p["question"], p["options"]),
                          ("Do you want to proceed?", [["1", "Yes"], ["2", "No, and tell Claude what to do"]]))
 
     def test_a_yes_no_question_is_answered_by_y_or_n(self):
-        p = self.bp.read_prompt("Some output\nOverwrite it? [y/N]\n\n")
+        p = core.read_prompt("Some output\nOverwrite it? [y/N]\n\n")
         self.assertEqual((p["question"], p["options"]), ("Overwrite it? [y/N]", [["y", "Yes"], ["n", "No"]]))
 
     def test_what_the_agent_wrote_is_no_prompt(self):
         listed = "● Two ways:\n  1. Patch it\n  2. Rewrite it\n\n────\n❯ \n────\n  ⏸ manual mode on\n"
-        self.assertIsNone(self.bp.read_prompt(listed))  # its input box is under it
-        self.assertIsNone(self.bp.read_prompt("● Two ways:\n  1. Patch it\n  2. Rewrite it\n"))  # no ❯ on one
-        self.assertIsNone(self.bp.read_prompt("Do you want to proceed?\n❯ 1. Yes\n  2. No\n" + "more\n" * 4))
-        self.assertIsNone(self.bp.read_prompt("❯ 2. Yes\n  3. No\n"))  # not counted from 1
-        self.assertIsNone(self.bp.read_prompt(""))
+        self.assertIsNone(core.read_prompt(listed))  # its input box is under it
+        self.assertIsNone(core.read_prompt("● Two ways:\n  1. Patch it\n  2. Rewrite it\n"))  # no ❯ on one
+        self.assertIsNone(core.read_prompt("Do you want to proceed?\n❯ 1. Yes\n  2. No\n" + "more\n" * 4))
+        self.assertIsNone(core.read_prompt("❯ 2. Yes\n  3. No\n"))  # not counted from 1
+        self.assertIsNone(core.read_prompt(""))
 
     def test_a_prompt_id_tells_one_command_from_another(self):
-        a = self.bp.read_prompt(self.BOXED)
-        self.assertEqual(a["id"], self.bp.read_prompt("old output\n" * 20 + self.BOXED)["id"])
-        b = self.bp.read_prompt(self.BOXED.replace("npm test", "rm -rf /"))
+        a = core.read_prompt(self.BOXED)
+        self.assertEqual(a["id"], core.read_prompt("old output\n" * 20 + self.BOXED)["id"])
+        b = core.read_prompt(self.BOXED.replace("npm test", "rm -rf /"))
         self.assertNotEqual(a["id"], b["id"])
 
     # ---------- help and ls ----------
 
     def test_every_command_is_in_one_help_group(self):
-        sub = next(a for a in self.bp.parser()._actions if a.choices)
-        grouped = [n for _, _, names in self.bp.HELP_GROUPS for n in names]
-        self.assertEqual(len(grouped), len(set(grouped)))
-        self.assertEqual(set(grouped), {n for n in sub.choices if not n.startswith("_")})
+        sub = next(a for a in cli.parser()._actions if a.choices)
+        titles = [title for title, _ in cli.GROUPS]
+        grouped = {n for n, p in sub.choices.items() if p.group}
+        self.assertTrue(all(p.group in titles for p in sub.choices.values() if p.group))
+        self.assertEqual(grouped, {n for n in sub.choices if not n.startswith("_")})
 
     def test_every_command_and_option_has_help_but_the_internal_ones(self):
-        sub = next(a for a in self.bp.parser()._actions if a.choices)
+        sub = next(a for a in cli.parser()._actions if a.choices)
         listed = {a.dest for a in sub._choices_actions}
         for name, p in sub.choices.items():
             self.assertEqual(name in listed, not name.startswith("_"), name)
             if name.startswith("_"):
                 continue
             for a in p._actions:
-                if a.dest != "help" and a.help != self.bp.argparse.SUPPRESS:
+                if a.dest != "help" and a.help != argparse.SUPPRESS:
                     self.assertTrue(a.help, f"{name} {a.option_strings or a.dest}")
 
     def test_status_words_are_the_boards(self):
-        w = self.bp.status_words
+        w = core.status_words
         self.assertEqual(w("needs"), "needs you")
         self.assertEqual(w("stopped"), "needs you (stopped)")
         self.assertEqual(w("triage"), "coordinator on it (triage)")
@@ -561,7 +549,7 @@ class HelpersTest(unittest.TestCase):
         self.assertEqual(w("ready"), "ready to accept")
         self.assertEqual(w("todo"), "queued (todo)")
         self.assertEqual(w("dropped"), "closed (dropped)")
-        self.assertEqual(set(self.bp.BOARD_WORDS), {"todo", "working", "review", "ready", "finished",
+        self.assertEqual(set(core.BOARD_WORDS), {"todo", "working", "review", "ready", "finished",
                                                    "triage", "needs", "stopped", "done", "dropped"})
 
     # ---------- the task lifecycle ----------
@@ -570,7 +558,7 @@ class HelpersTest(unittest.TestCase):
         return {"status": status, "stop": {"by": by, "kind": kind}, **more}
 
     def test_whether_a_worker_is_between_turns_goes_by_its_stop(self):
-        idle = self.bp.worker_idle
+        idle = core.worker_idle
         self.assertTrue(idle({"status": "working"}))
         self.assertTrue(idle(self.stopped("triage", "worker", "ended")))
         self.assertTrue(idle(self.stopped("triage", "worker", "not_sent")))
@@ -585,7 +573,7 @@ class HelpersTest(unittest.TestCase):
         self.assertTrue(idle(self.stopped("stopped", "worker", "exited")))
 
     def test_what_a_status_change_tells_the_person(self):
-        n = self.bp.notice
+        n = core.notice
         t = lambda status, **more: {"id": "BP-3", "title": "Fix it", "status": status, **more}
         self.assertEqual(n(t("needs", why="Needs you (permission): Allow rm?"), t("working")),
                          ("needs", "BP-3 needs you (permission): Allow rm?"))
@@ -608,7 +596,7 @@ class HelpersTest(unittest.TestCase):
         self.assertIsNone(n(t("working"), {}))
 
     def test_a_task_is_on_its_reviewer_by_its_stop(self):
-        on = self.bp.on_reviewer
+        on = core.on_reviewer
         self.assertTrue(on(self.stopped("needs", "reviewer", "prompt")))
         self.assertTrue(on(self.stopped("triage", "reviewer", "exited")))
         self.assertTrue(on(self.stopped("needs", "reviewer", "ended", why="Delete it?", ask=True)))
@@ -616,31 +604,31 @@ class HelpersTest(unittest.TestCase):
         self.assertFalse(on(self.stopped("triage", "worker", "ended")))
         self.assertFalse(on({"status": "review"}))
         t = self.stopped("needs", "reviewer", "ended", review={"block": "blk2", "session": "s"}, block="blk1")
-        self.assertEqual(self.bp.waited_on(t), ("reviewer", "s", "blk2"))
+        self.assertEqual(core.waited_on(t), ("reviewer", "s", "blk2"))
         t["stop"] = {"by": "worker", "kind": "failed"}
-        self.assertEqual(self.bp.waited_on(t), ("worker", None, "blk1"))
+        self.assertEqual(core.waited_on(t), ("worker", None, "blk1"))
 
     def test_a_new_status_ends_ask_ok_and_the_stop(self):
         t = self.stopped("triage", "worker", "ended", why="Ended its turn without saying ready", ok=True)
-        self.bp.ask(t, "Delete it?")
+        core.ask(t, "Delete it?")
         self.assertEqual((t["status"], t["why"], t["ask"], t["stop"]),
                          ("needs", "Delete it?", True, {"by": "worker", "kind": "ended"}))
         self.assertNotIn("ok", t)
-        self.bp.ask(t, "Or keep it?")  # asked again: still asked
+        core.ask(t, "Or keep it?")  # asked again: still asked
         self.assertTrue(t["ask"])
-        self.bp.set_status(t, "working")
+        core.set_status(t, "working")
         self.assertEqual((t["status"], t["why"]), ("working", None))
         self.assertFalse({"ask", "ok", "stop"} & set(t))
         t = self.stopped("triage", "reviewer", "ended")
-        self.bp.ok(t)
+        core.ok(t)
         self.assertEqual((t["status"], t["ok"]), ("review", True))
         self.assertNotIn("stop", t)
         t = self.stopped("triage", "worker", "failed")
-        self.bp.ok(t)
+        core.ok(t)
         self.assertEqual(t["status"], "working")
 
     def test_old_whys_say_the_stop(self):
-        f = self.bp.stop_from_why
+        f = core.stop_from_why
         self.assertEqual(f("Needs you (permission): Allow?"), {"by": "worker", "kind": "prompt"})
         self.assertEqual(f("Reviewer needs you (input)"), {"by": "reviewer", "kind": "prompt"})
         self.assertEqual(f("Failed (coordinator didn't resolve it)"), {"by": "worker", "kind": "failed"})
@@ -651,32 +639,32 @@ class HelpersTest(unittest.TestCase):
         self.assertIsNone(f(None))
 
     def test_news_doesnt_say_local_branch_in_local_mode(self):
-        self.assertEqual(self.bp.where({"status": "ready", "pr": None, "local": True}), "")
+        self.assertEqual(core.where({"status": "ready", "pr": None, "local": True}), "")
 
     def test_a_working_task_only_shows_what_github_sent_it_back_for(self):
         gh = {"state": "open", "checks": "passing", "new": 0}
-        self.assertEqual(self.bp.pr_phrase({"status": "working", "gh": gh}), "")
-        self.assertEqual(self.bp.pr_phrase({"status": "working", "gh": {**gh, "sent": True}}), "checks passing")
-        self.assertEqual(self.bp.pr_phrase({"status": "ready", "gh": gh}), "checks passing")
+        self.assertEqual(core.pr_phrase({"status": "working", "gh": gh}), "")
+        self.assertEqual(core.pr_phrase({"status": "working", "gh": {**gh, "sent": True}}), "checks passing")
+        self.assertEqual(core.pr_phrase({"status": "ready", "gh": gh}), "checks passing")
 
     def test_only_the_agent_a_task_waits_on_is_stuck_or_limited(self):
         import datetime as dt
         ago = (dt.datetime.now().astimezone() - dt.timedelta(minutes=25)).isoformat()
         t = {"status": "working", "stuck": {"who": "worker", "since": ago}}
-        self.assertTrue(self.bp.is_stuck(t))
-        self.assertEqual(self.bp.stuck_phrase(t), "no progress for 25 min")
-        self.assertFalse(self.bp.is_stuck({**t, "status": "review"}))
-        self.assertFalse(self.bp.is_stuck({"status": "working"}))
+        self.assertTrue(core.is_stuck(t))
+        self.assertEqual(core.stuck_phrase(t), "no progress for 25 min")
+        self.assertFalse(core.is_stuck({**t, "status": "review"}))
+        self.assertFalse(core.is_stuck({"status": "working"}))
         at = dt.datetime(2026, 11, 11, 13, 0).astimezone()
         lim = {"who": "worker", "resets": at.replace(hour=15).isoformat(), "text": "x"}
-        self.assertTrue(self.bp.is_limited({"status": "working", "limit": lim}))
-        self.assertFalse(self.bp.is_limited({"status": "ready", "limit": lim}))
-        self.assertEqual(self.bp.limit_why(lim, at), "Usage limit, resets 3:00 PM")
+        self.assertTrue(core.is_limited({"status": "working", "limit": lim}))
+        self.assertFalse(core.is_limited({"status": "ready", "limit": lim}))
+        self.assertEqual(core.limit_why(lim, at), "Usage limit, resets 3:00 PM")
 
     def test_reset_times_are_read(self):
         import datetime as dt
         at = dt.datetime(2026, 11, 11, 13, 0).astimezone()  # a Wednesday, 1 PM
-        when = lambda text: self.bp.limit_reset(text, at)
+        when = lambda text: core.limit_reset(text, at)
         day = lambda d, h, m=0: dt.datetime(2026, 11, d, h, m).astimezone()
         self.assertEqual(when("You've hit your 5-hour limit · resets 3pm"), day(11, 15))
         self.assertEqual(when("You've hit your session limit · resets 3:45pm"), day(11, 15, 45))
@@ -694,6 +682,6 @@ class HelpersTest(unittest.TestCase):
         for text in ("Usage limit reached", "spend limit reached · resets Aug 8", "resets in 8 minutes",
                      "resets 3", "resets 13pm", "resets 3pm (Nowhere/Land)"):
             self.assertIsNone(when(text), text)
-        self.assertEqual(self.bp.clock(day(11, 15), at), "3:00 PM")
-        self.assertEqual(self.bp.clock(day(16, 0), at), "Mon 12:00 AM")
-        self.assertEqual(self.bp.clock(day(30, 9, 5), at), "Nov 30 9:05 AM")
+        self.assertEqual(core.clock(day(11, 15), at), "3:00 PM")
+        self.assertEqual(core.clock(day(16, 0), at), "Mon 12:00 AM")
+        self.assertEqual(core.clock(day(30, 9, 5), at), "Nov 30 9:05 AM")

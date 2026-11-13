@@ -439,7 +439,7 @@ pub fn global_config_path() -> Option<PathBuf> {
 }
 
 /// Settings only a repository can have: the global config.json's are ignored.
-/// A copy of bin/bullpen's REPO_ONLY: a test there holds it to its table of settings.
+/// A copy of bullpen/core.py's REPO_ONLY: a test in tests/test_config.py holds it to its table.
 const REPO_ONLY: [&str; 7] = ["prefix", "next", "base", "push_remote", "news", "coordinators", "next_coordinator"];
 
 /// The repo's settings over the global ones, as bullpen layers them.
@@ -459,7 +459,7 @@ impl Config {
         Config::from_value(&layered(global, read_object(&dir.join("config.json"))))
     }
 
-    /// The defaults here are copies of bin/bullpen's: a test there holds them to its table.
+    /// The defaults here are copies of bullpen/core.py's: a test in tests/test_config.py holds them to its table.
     pub fn from_value(v: &serde_json::Value) -> Config {
         Config {
             layout: if v["board_layout"].as_str().unwrap_or("grouped") == "compact" {

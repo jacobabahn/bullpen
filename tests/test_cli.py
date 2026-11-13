@@ -1,9 +1,12 @@
-"""Help, ls and doctor."""
+"""Help, ls and doctor, and the code's layout."""
 
 import json
+import os
 import subprocess
+import tempfile
+import unittest
 
-from support import setUpModule, tearDownModule, ROOT, BULLPEN, RUN, sh, BullpenTest  # a temp folder for each module
+from support import setUpModule, tearDownModule, ROOT, BULLPEN, sh, BullpenTest  # a temp folder for each module
 
 
 class CliTest(BullpenTest):
@@ -18,7 +21,7 @@ class CliTest(BullpenTest):
 
     def test_help_lists_the_commands_in_groups(self):
         env = dict(self.env, COLUMNS="42")
-        out = subprocess.run([str(RUN), "--help"], cwd=self.repo, env=env, text=True,
+        out = subprocess.run([str(BULLPEN), "--help"], cwd=self.repo, env=env, text=True,
                              capture_output=True).stdout
         lines = out.splitlines()
         self.assertEqual(lines[0], "usage: bullpen COMMAND [ARGS]")
@@ -243,3 +246,24 @@ class CliTest(BullpenTest):
         self.assertIn("doesn't parse", lines["config"][1])
         for name in ("setup", "teardown", "coordinators"):
             self.assertEqual(lines[name], ("--", "can't tell: config.json doesn't parse"))
+
+
+class CodeTest(unittest.TestCase):
+    """bin/bullpen and the bullpen package (docs/code.md)."""
+
+    def test_bin_bullpen_finds_the_package_through_a_link(self):
+        with tempfile.TemporaryDirectory() as d:
+            link = os.path.join(d, "bullpen")
+            os.symlink(BULLPEN, link)  # what install.sh makes
+            p = subprocess.run([link, "--help"], cwd=d, text=True, capture_output=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("usage: bullpen COMMAND", p.stdout)
+
+    def test_the_entry_script_only_runs_the_package(self):
+        # Python compiles the script it runs on every call, but caches a package's bytecode
+        self.assertLess(len(BULLPEN.read_text().splitlines()), 20)
+
+    def test_each_module_stays_under_a_thousand_lines(self):
+        long = {f.name: n for f in sorted((ROOT / "bullpen").glob("*.py"))
+                if (n := len(f.read_text().splitlines())) >= 1000}
+        self.assertLessEqual(set(long), {"core.py"})  # until stage 2 (BP-79) splits it

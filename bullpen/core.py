@@ -1,15 +1,9 @@
-#!/usr/bin/env python3
-"""bullpen: a coordinator and its worker agents, each in its own Rex pane.
-
-Tasks live outside the repo, in $BULLPEN_STATE (default ~/.local/state/bullpen).
-Each started task gets a git worktree, a branch and a Rex pane running a
-worker agent. A Lua watcher (lua/watch.lua, run with `rex do --all`) turns the
-workers' program status into news lines for the coordinator: typed into its pane,
-or logged for it to follow with `bullpen news --follow`.
+"""The core of bullpen: repo, config and tasks, the task lifecycle, Rex, news, review,
+accept and the watcher's events. Stage 2 of the split (BP-79) breaks it up; until then
+the feature modules beside it import what they need from here.
 """
 
 import argparse
-import codecs
 import contextlib
 import datetime as dt
 import difflib
@@ -18,7 +12,6 @@ import hashlib
 import json
 import os
 import re
-import select
 import shlex
 import shutil
 import signal
@@ -26,18 +19,18 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-import termios
 import time
-import tty
 import unicodedata
 from pathlib import Path
 
-HOME = Path(__file__).resolve().parent.parent
+
+HOME = Path(__file__).resolve().parent.parent  # bullpen's checkout: bullpen/ sits beside bin/
 PROMPTS = HOME / "prompts"
 WATCH_LUA = HOME / "lua" / "watch.lua"
 STATE = Path(os.environ.get("BULLPEN_STATE") or Path.home() / ".local/state/bullpen")
 REX = os.environ.get("BULLPEN_REX", "rex")
-SELF = str(Path(__file__).resolve())
+# The entry script: what Lua, the key bindings and bullpen's own background jobs run.
+SELF = str(HOME / "bin" / "bullpen")
 
 
 class Setting:
@@ -256,6 +249,35 @@ def model_phrase(cmd, model):
     if not is_claude(cmd):
         return f"not set by bullpen: the command is {cmd[0] if cmd else 'empty'}, not claude"
     return model_in(with_model(cmd, model)) or "default (Claude Code picks)"
+
+
+def task_base_ref(repo, t):
+    """What the task's branch is compared with: origin's copy of its base branch when
+    there is one, else the local base branch (local mode)."""
+    if repo.has_origin() and git(t["worktree"], "rev-parse", "-q", "--verify", f"origin/{t['base']}",
+                                 check=False).returncode == 0:
+        return f"origin/{t['base']}"
+    return t["base"]
+
+
+def seconds_since(stamp, at=None):
+    at = at or dt.datetime.now().astimezone()
+    return (at - dt.datetime.fromisoformat(stamp)).total_seconds()
+
+
+def clip(text, n=300):
+    text = " ".join((text or "").split())
+    return text if len(text) <= n else text[: n - 1] + "…"
+
+
+def command(sub, name, fn, group=None, **kw):
+    """Add a command to bullpen's parser: the function that runs it, and its group in
+    `bullpen --help` (a title in cli.GROUPS; none for an internal command, which --help
+    and the unknown-command error leave out)."""
+    p = sub.add_parser(name, **kw)
+    p.set_defaults(fn=fn)
+    p.group = group
+    return p
 
 
 # ---------- repo, config, tasks ----------
@@ -1662,6 +1684,9 @@ def session_for(repo, args=None):
 # ---------- commands ----------
 
 def cmd_up(args):
+    from .board_build import rebuild_board_if_stale  # the leaves import core: not at the top
+    from .doctor import up_hint
+    from .push_remote import catch_up_push
     repo = Repo(repo_root())
     session = session_for(repo, args)
     if not session:
@@ -1807,10 +1832,18 @@ def file_hash(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def code_hash():
+    """A hash of bullpen's Python code: the entry script and the package's modules."""
+    h = hashlib.sha256(Path(SELF).read_bytes())
+    for f in sorted(Path(__file__).parent.glob("*.py")):
+        h.update(f.name.encode() + b"\0" + f.read_bytes())
+    return h.hexdigest()
+
+
 def watcher_stamp():
-    """What a watcher runs: a hash of watch.lua and of this script. A watcher started
+    """What a watcher runs: a hash of watch.lua and of bullpen's code. A watcher started
     from other contents is stale."""
-    return {name: file_hash(path) for name, path in (("watch", WATCH_LUA), ("bullpen", SELF))}
+    return {"watch": file_hash(WATCH_LUA), "bullpen": code_hash()}
 
 
 def ensure_watcher(session, said=None):
@@ -2722,6 +2755,7 @@ def ready(repo, t, args):
         t["gh"].pop("sent", None)  # whatever GitHub sent it back for is answered now
     t.pop("rebased", None)  # what the board says of a rebase after an accept
     if (t.get("tour") or {}).get("state") == "written":
+        from .tours import tour_path, tour_stale  # tours imports core: not at the top
         tour = read_json(tour_path(repo, t))
         if tour and tour_stale(repo, t, tour):  # new code: not toured yet, as the board says
             t["tour"].pop("opened", None)
@@ -3064,15 +3098,6 @@ def conflict_text(path):
     return clipped_diff(f.read_text(), f"cat {f}")
 
 
-def task_base_ref(repo, t):
-    """What the task's branch is compared with: origin's copy of its base branch when
-    there is one, else the local base branch (local mode)."""
-    if repo.has_origin() and git(t["worktree"], "rev-parse", "-q", "--verify", f"origin/{t['base']}",
-                                 check=False).returncode == 0:
-        return f"origin/{t['base']}"
-    return t["base"]
-
-
 def shortstat(wt, base_ref):
     """The branch's change against its base in a few words: "3 files, +120 −14"."""
     out = git(wt, "diff", "--shortstat", f"{base_ref}...HEAD").stdout
@@ -3234,1244 +3259,6 @@ def cmd_verdict(args):
     rex_close(*reviewer)  # last: this closes the pane we may be running in
 
 
-# ---------- guided review tours ----------
-#
-# On request (`bullpen tour BP-3`, the board's g), a cheap headless agent writes a
-# tour of a ready or in-review task's change: its steps in reading order, each a
-# title, a note and the hunks it covers (file and line ranges). The agent only reads:
-# it prints the tour as JSON and bullpen writes the file (briefs/<ID>.tour.json),
-# adding a last step, "Other changes", for any hunk no step covers. Code is always
-# shown from git, never from the agent's text. A tour is tied to the commit it was
-# written on: it stays current while the patch is the same (as approvals do), and is
-# stale otherwise. The person's comments on its steps are drafts
-# (briefs/<ID>.tour-comments.json) until `tour --send` sends them to the worker as a
-# findings-style file; its next ready gets a review of them that doesn't count toward
-# review_rounds. t["tour"] says whether a tour is being written ("writing", with the
-# pid writing it), was written, or failed (with why).
-
-TOUR_TOOLS = ["Read", "Grep", "Glob", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
-              "Bash(git status:*)", "Bash(git blame:*)", "Bash(git ls-files:*)"]
-TOUR_TIMEOUT = 20 * 60  # seconds before a tour agent counts as failed
-MAX_TOUR_DIFF_LINES = 3000  # longer, and the agent reads the diff with git itself
-TOUR_ATTEMPTS = 2  # an answer that isn't a tour is asked for once more
-# the answer's shape, for claude's structured output (--json-schema); tour_steps checks the rest
-TOUR_SCHEMA = {"type": "object", "required": ["steps"], "properties": {"steps": {
-    "type": "array", "minItems": 1, "items": {
-        "type": "object", "required": ["title", "note", "hunks"], "properties": {
-            "title": {"type": "string"}, "note": {"type": "string"}, "hunks": {
-                "type": "array", "items": {
-                    "type": "object", "required": ["file"], "properties": {
-                        "file": {"type": "string"},
-                        "lines": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2}}}}}}}}}
-OTHER_CHANGES = "Other changes"
-
-
-def tour_path(repo, t):
-    return repo.dir / "briefs" / f"{t['id']}.tour.json"
-
-
-def tour_log(repo, t):
-    return repo.dir / "briefs" / f"{t['id']}.tour.log"
-
-
-def comments_path(repo, t):
-    return repo.dir / "briefs" / f"{t['id']}.tour-comments.json"
-
-
-HUNK_RE = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
-
-
-def git_path(line, prefix):
-    """The path in a `--- a/x` or `+++ b/x` line, or None for /dev/null."""
-    p = line[4:].rstrip("\t")
-    return p[len(prefix):] if p.startswith(prefix) else None
-
-
-def diff_files(wt, base, commit):
-    """The diff from base to commit as a list of files, each {"file", "head": its header
-    lines, "hunks": [{"old": (start, count), "new": (start, count), "text"}], "deleted"}.
-    A binary file has a header and no hunks."""
-    text = git(wt, "-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff",
-               "--src-prefix=a/", "--dst-prefix=b/", base, commit).stdout
-    files = []
-    for line in text.split("\n"):
-        if line.startswith("diff --git "):
-            s = line[len("diff --git a/"):]
-            half = (len(s) - 3) // 2
-            files.append({"file": s[:half] if s[half:half + 3] == " b/" else s, "head": [line],
-                          "hunks": [], "deleted": False})
-            continue
-        if not files:
-            continue
-        f = files[-1]
-        m = HUNK_RE.match(line)
-        if m:
-            o, oc, n, nc = m.groups()
-            f["hunks"].append({"old": (int(o), int(1 if oc is None else oc)),
-                               "new": (int(n), int(1 if nc is None else nc)), "text": [line]})
-        elif f["hunks"]:
-            f["hunks"][-1]["text"].append(line)
-        else:
-            f["head"].append(line)
-            if line.startswith("+++ "):
-                f["file"] = git_path(line, "b/") or f["file"]
-            elif line.startswith("rename to "):
-                f["file"] = line[len("rename to "):]
-            elif line.startswith("deleted file"):
-                f["deleted"] = True
-    for f in files:
-        for h in f["hunks"]:
-            while h["text"] and h["text"][-1] == "":
-                h["text"].pop()  # the diff's last newline
-            h["text"] = "\n".join(h["text"])
-    return files
-
-
-def span(start_count):
-    start, count = start_count
-    start = max(start, 1)
-    return start, start + max(count, 1) - 1
-
-
-def lines_of(f, h):
-    """The lines a hunk covers, as the tour names them: in the new file, or in the old
-    one for a deleted file."""
-    return list(span(h["old"] if f["deleted"] else h["new"]))
-
-
-def covers(ref, f, h):
-    """Does a tour's hunk reference {"file", "lines"} cover hunk h of file f?"""
-    if ref["file"] != f["file"]:
-        return False
-    if not ref.get("lines"):
-        return True  # the whole file
-    a, b = ref["lines"]
-    sides = [h["new"]] if not f["deleted"] else []
-    if f["deleted"] or h["new"][1] == 0:
-        sides.append(h["old"])  # lines it only removes are named by their old numbers
-    return any(a <= hi and lo <= b for lo, hi in map(span, sides))
-
-
-def ref_lines(v):
-    """A hunk reference's lines, as [start, end]: from [a, b], [a], a or "a-b". None for
-    the whole file. Raises ValueError for anything else."""
-    if v is None:
-        return None
-    if isinstance(v, str):
-        v = [int(x) for x in v.split("-", 1)]
-    if isinstance(v, int) and not isinstance(v, bool):
-        v = [v]
-    if not isinstance(v, list) or not 1 <= len(v) <= 2 or not all(type(x) is int for x in v):
-        raise ValueError(f"lines must be [start, end], not {json.dumps(v)}")
-    a, b = v[0], v[-1]
-    return [min(a, b), max(a, b)]
-
-
-def json_objects(text):
-    """Every JSON object in text, in order, outermost ones only: an agent may wrap its
-    answer in a code fence or a sentence, or follow it with a corrected one."""
-    dec, out, i = json.JSONDecoder(), [], text.find("{")
-    while i >= 0:
-        try:
-            obj, end = dec.raw_decode(text, i)
-        except ValueError:
-            i = text.find("{", i + 1)
-            continue
-        out.append(obj)
-        i = text.find("{", end)
-    return out
-
-
-def parse_tour(answer, files):
-    """The checked steps of an agent's answer (claude's structured output, or text):
-    the text as JSON, else the last JSON object in it that is a tour. Raises ValueError
-    for an answer with no tour. Returns (steps, references dropped, a note on any text
-    around the tour, else None)."""
-    if isinstance(answer, dict):
-        return (*tour_format(answer, files), None)
-    text = answer.strip()
-    try:
-        data = json.loads(text)
-    except ValueError:
-        pass
-    else:
-        return (*tour_format(data, files), None)
-    objs = json_objects(text)
-    if not objs:
-        raise ValueError("its tour doesn't parse (no JSON object in its output)")
-    first = None
-    for obj in reversed(objs):
-        try:
-            steps, dropped = tour_format(obj, files)
-        except ValueError as e:
-            first = first or e
-            continue
-        return steps, dropped, (f"its answer had text around the tour ({len(objs)} JSON objects): "
-                                "the last one that is a tour was used")
-    raise first
-
-
-def tour_format(data, files):
-    """tour_steps, with its error saying the tour isn't in the format."""
-    try:
-        return tour_steps(data, files)
-    except ValueError as e:
-        raise ValueError(f"its tour isn't in the format: {e}")
-
-
-def tour_steps(data, files):
-    """The steps of an agent's tour, checked, with only the hunk references that match
-    the diff, then "Other changes" for each hunk no step covers. Raises ValueError for
-    a tour that isn't the format. Returns (steps, references dropped)."""
-    steps = data.get("steps") if isinstance(data, dict) else None
-    if not isinstance(steps, list) or not steps:
-        raise ValueError("it has no list of steps")
-    out, dropped, covered = [], [], set()
-    for i, s in enumerate(steps, 1):
-        if not isinstance(s, dict) or not isinstance(s.get("title"), str) or not s["title"].strip():
-            raise ValueError(f"step {i} has no title")
-        if not isinstance(s.get("note", ""), str) or not isinstance(s.get("hunks", []), list):
-            raise ValueError(f"step {i}'s note must be text and its hunks a list")
-        refs = []
-        for r in s.get("hunks", []):
-            if not isinstance(r, dict) or not isinstance(r.get("file"), str):
-                raise ValueError(f"step {i} has a hunk with no file")
-            try:
-                ref = {"file": r["file"], "lines": ref_lines(r.get("lines"))}
-            except ValueError as e:
-                raise ValueError(f"step {i}: {e}")
-            hit = {(fi, hi) for fi, f in enumerate(files) for hi, h in enumerate(f["hunks"] or [None])
-                   if (covers(ref, f, h) if h else ref["file"] == f["file"])}
-            if not hit:
-                dropped.append(f"step {i}: {r['file']} {ref['lines'] or ''}".rstrip())
-                continue
-            covered |= hit
-            refs.append(ref if ref["lines"] else {"file": ref["file"]})
-        out.append({"title": " ".join(s["title"].split()), "note": s.get("note", "").strip(), "hunks": refs})
-    rest = []
-    for fi, f in enumerate(files):
-        if not f["hunks"]:
-            if (fi, 0) not in covered:
-                rest.append({"file": f["file"]})
-            continue
-        rest += [{"file": f["file"], "lines": lines_of(f, h)} for hi, h in enumerate(f["hunks"])
-                 if (fi, hi) not in covered]
-    if rest:
-        out.append({"title": OTHER_CHANGES, "note": "The changes no step above covers.", "hunks": rest})
-    return out, dropped
-
-
-def tour_inputs(repo, t, base_ref, files):
-    """What the tour agent is given (PRD 7): the brief, the worker's summary, the review
-    findings, the diff (or how to get it) and its hunks."""
-    briefs = repo.dir / "briefs"
-    brief = briefs / f"{t['id']}.md"
-    findings = sorted(briefs.glob(f"{t['id']}.review-*.findings.md"),
-                      key=lambda p: int(re.search(r"review-(\d+)", p.name).group(1)))
-    found = "\n\n".join(f"### {p.name}\n\n{p.read_text().strip()}" for p in findings) or "(none)"
-    wt = t["worktree"]
-    diff = git(wt, "diff", "--no-color", f"{base_ref}...HEAD").stdout.rstrip("\n")
-    if len(diff.split("\n")) > MAX_TOUR_DIFF_LINES:
-        diff = f"({len(diff.splitlines())} lines, too long to include: run the command)"
-    hunks = "\n".join(f"- {f['file']}" + (" (binary)" if not f["hunks"] else
-                                          ": " + ", ".join("{}-{}".format(*lines_of(f, h)) for h in f["hunks"]))
-                      for f in files)
-    return dict(id=t["id"], title=t["title"], worktree=wt, base_ref=base_ref,
-                brief=brief.read_text().strip() if brief.exists() else "(none)",
-                summary=t.get("summary") or "(none)", findings=found, diff=diff, hunks=hunks)
-
-
-def tour_command(repo):
-    """The tour agent's argv: headless, on tour_model, with read-only tools."""
-    cmd = with_model(repo.cfg["tour"], repo.cfg["tour_model"])
-    if not is_claude(cmd):
-        return resolve(cmd)
-    return resolve(cmd) + ["-p", "--output-format", "json", "--no-session-persistence",
-                           "--permission-mode", "dontAsk", "--tools", "Read,Grep,Glob,Bash",
-                           "--allowedTools", *TOUR_TOOLS,
-                           "--json-schema", json.dumps(TOUR_SCHEMA, separators=(",", ":"))]
-
-
-def tour_answer(out):
-    """A tour agent's answer: claude's structured output (a dict) when it has one, else
-    its text. Raises ValueError for an agent error."""
-    try:
-        r = json.loads(out)
-    except ValueError:
-        r = None
-    if isinstance(r, dict) and r.get("type") == "result" and isinstance(r.get("structured_output"), dict):
-        agent_result(out)  # an error is still an error
-        return r["structured_output"]
-    return agent_result(out)
-
-
-def agent_result(out):
-    """The text of a headless claude's answer: its --output-format json result, or the
-    output as it is from another agent. Raises ValueError for an agent error."""
-    try:
-        r = json.loads(out)
-    except ValueError:
-        return out
-    if isinstance(r, dict) and r.get("type") == "result":
-        if r.get("is_error"):
-            raise ValueError(f"the agent failed: {clip(str(r.get('result') or r.get('subtype')), 160)}")
-        return r.get("result") or ""
-    return out
-
-
-def write_tour(repo, tid):
-    """Run the tour agent on the task's code now and write its tour. Returns the tour
-    file, or raises Fail with why it failed (the task records that)."""
-    t = repo.task(tid)
-    wt = t.get("worktree")
-    log = tour_log(repo, t)
-    try:
-        if not wt or not Path(wt).is_dir():
-            raise ValueError("the task has no worktree")
-        base_ref = task_base_ref(repo, t)
-        commit, base = head(wt), merge_base(wt, base_ref)
-        files = diff_files(wt, base, commit)
-        if not files:
-            raise ValueError(f"it has no changes against {base_ref}")
-        prompt = (PROMPTS / "tour.md").read_text().format(**tour_inputs(repo, t, base_ref, files))
-        argv = tour_command(repo)
-        for attempt in range(1, TOUR_ATTEMPTS + 1):
-            answer = tour_answer(run_tour_agent(argv, prompt, wt, log, attempt))
-            try:
-                steps, dropped, extra = parse_tour(answer, files)
-                break
-            except ValueError as e:
-                if attempt == TOUR_ATTEMPTS:
-                    raise
-                with log.open("a") as f:
-                    f.write(f"{now()} attempt {attempt}: {e}; asking again\n\n")
-        with log.open("a") as f:
-            if extra:
-                f.write(extra + "\n")
-            if dropped:
-                f.write("hunks that match nothing in the diff, left out: " + "; ".join(dropped) + "\n")
-    except ValueError as e:
-        tour_failed(repo, tid, str(e))
-        raise Fail(f"{tid}'s tour failed: {e} (log: {log})")
-    path = tour_path(repo, t)
-    write_json(path, {"task": t["id"], "commit": commit, "base": base, "base_ref": base_ref,
-                      "patch": patch_id(wt, base_ref), "written": now(),
-                      "model": model_in(tour_command(repo)), "steps": steps})
-    t = repo.task(tid)  # read again: it may have changed while the agent ran
-    opener = (t.get("tour") or {}).get("open")
-    t["tour"] = {"state": "written", "at": now(), "commit": commit}
-    if (t.get("note") or "").startswith("tour failed"):
-        t["note"] = None
-    write_json(repo.task_path(tid), t)  # not save_task: the status didn't change
-    if opener:
-        open_when_written(repo, t, opener)
-    return path
-
-
-def run_tour_agent(argv, prompt, wt, log, attempt):
-    """Run the tour agent once, its output in the log (a new log on the first attempt).
-    Returns its stdout, or raises ValueError if it didn't finish."""
-    with log.open("w" if attempt == 1 else "a") as f:
-        f.write(f"{now()} attempt {attempt}: {shlex.join(argv)}\n(the prompt on stdin: {len(prompt)} characters)\n\n")
-    try:
-        p = subprocess.run(argv, cwd=wt, input=prompt, text=True, capture_output=True,
-                           timeout=TOUR_TIMEOUT)
-    except FileNotFoundError:
-        raise ValueError(f"{argv[0]} isn't installed")
-    except subprocess.TimeoutExpired:
-        raise ValueError(f"the agent took over {TOUR_TIMEOUT // 60} minutes")
-    with log.open("a") as f:
-        f.write(f"exit {p.returncode}\n--- stdout\n{p.stdout}\n--- stderr\n{p.stderr}\n")
-    if p.returncode != 0:
-        last = (p.stderr or p.stdout).strip().splitlines()
-        raise ValueError(f"the agent exited with {p.returncode}: {clip(last[-1] if last else 'no output', 120)}")
-    return p.stdout
-
-
-def tour_failed(repo, tid, why):
-    """The tour wasn't written: a line on the board and in the log. No news, no triage."""
-    t = repo.task(tid)
-    t["tour"] = {"state": "failed", "at": now(), "why": why}
-    t["note"] = f"tour failed: {why}"
-    write_json(repo.task_path(tid), t)
-    with tour_log(repo, t).open("a") as f:
-        f.write(f"{now()} failed: {why}\n")
-
-
-def pid_alive(pid):
-    try:
-        os.kill(pid, 0)
-    except (OSError, TypeError):
-        return False
-    return True
-
-
-def tour_state(repo, t):
-    """(state, tour, why): "writing", "failed" (why), "current", "stale" (why) or "none".
-    A tour being written whose writer is gone has failed."""
-    run_ = t.get("tour") or {}
-    if run_.get("state") == "writing":
-        if pid_alive(run_.get("pid")):
-            return "writing", None, None
-        tour_failed(repo, t["id"], "its writer stopped before the tour was written")
-        t.update(repo.task(t["id"]))
-        run_ = t["tour"]
-    if run_.get("state") == "failed":
-        return "failed", read_json(tour_path(repo, t)), run_.get("why")
-    tour = read_json(tour_path(repo, t))
-    if not tour:
-        return "none", None, None
-    stale = tour_stale(repo, t, tour)
-    return ("stale", tour, stale) if stale else ("current", tour, None)
-
-
-def tour_stale(repo, t, tour):
-    """Why the tour no longer shows the task's code, or None while it does: the same
-    commit, or the same patch (after a clean rebase, as approvals carry over)."""
-    wt = t.get("worktree")
-    if not wt or not Path(wt).is_dir():
-        return None  # nothing to compare with: the tour is all there is
-    if head(wt) == tour["commit"] or patch_id(wt, task_base_ref(repo, t)) == tour.get("patch"):
-        return None
-    return f"the code changed since the tour was written (on {tour['commit'][:12]})"
-
-
-def has_commit(wt, c):
-    return bool(c) and git(wt, "cat-file", "-e", f"{c}^{{commit}}", check=False).returncode == 0
-
-
-def tour_diff(repo, t, tour):
-    """The diff the tour was written on, as diff_files: from its own commits, else (they're
-    gone after a rebase) from the task's code now."""
-    wt = t["worktree"]
-    if has_commit(wt, tour["commit"]) and has_commit(wt, tour.get("base")):
-        return diff_files(wt, tour["base"], tour["commit"])
-    base_ref = task_base_ref(repo, t)
-    return diff_files(wt, merge_base(wt, base_ref), head(wt))
-
-
-def step_diff(files, step):
-    """A step's hunks from git, as a patch: each file the step names, in the step's order,
-    with its header and the hunks the step covers."""
-    out = []
-    names = list(dict.fromkeys(r["file"] for r in step["hunks"]))
-    for name in names:
-        for f in files:
-            if f["file"] != name:
-                continue
-            refs = [r for r in step["hunks"] if r["file"] == name]
-            hunks = [h["text"] for h in f["hunks"] if any(covers(r, f, h) for r in refs)]
-            if hunks or not f["hunks"]:
-                out.append("\n".join(f["head"] + hunks))
-    return "\n".join(out) + ("\n" if out else "")
-
-
-def step_files(step):
-    """ "bin/bullpen 120-140, README.md": a step's files and lines, for people."""
-    return ", ".join(r["file"] + (" {}-{}".format(*r["lines"]) if r.get("lines") else "")
-                     for r in step["hunks"]) or "(no code)"
-
-
-def tour_status(t):
-    if t["status"] not in ("ready", "review"):
-        raise Fail(f"{is_status(t)}: a tour is only for a task that is "
-                   f"ready or in review, whose code isn't changing")
-
-
-def start_tour(repo, t, wait, opener=None):
-    """Write a tour of the task: now (wait), or by a process of its own in the background.
-    t["tour"] says it's being written, with that process's pid, so the board can show it.
-    With opener ({"session", "from"}), the stepper opens there once it's written."""
-    if not t.get("worktree") or not Path(t["worktree"]).is_dir():
-        raise Fail(f"{t['id']} has no worktree, so there's nothing to tour")
-    t["tour"] = {"state": "writing", "at": now(), "pid": os.getpid(), **({"open": opener} if opener else {})}
-    if (t.get("note") or "").startswith("tour failed"):
-        t["note"] = None
-    write_json(repo.task_path(t["id"]), t)
-    if wait:
-        return write_tour(repo, t["id"])
-    p = subprocess.Popen([SELF, "_tour", t["id"]], cwd=repo.root, start_new_session=True,
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    t["tour"]["pid"] = p.pid
-    write_json(repo.task_path(t["id"]), t)
-    return None
-
-
-def cmd_tour(args):
-    """A tour of a task's change: print the current one's path, or start writing one."""
-    repo = Repo(repo_root())
-    t = repo.task(args.id)
-    if args.send:
-        return send_comments(repo, t)
-    if args.show or args.step is not None:
-        return show_tour(repo, t, args)
-    if args.view:
-        return view_tour(repo, t, args.back)
-    tour_status(t)
-    state, tour, why = tour_state(repo, t)
-    path = tour_path(repo, t)
-    if args.pane:
-        return tour_pane(repo, t, state, args)
-    # On a terminal, a written tour opens in the stepper; else (an agent, --path) its path.
-    here = not args.path and sys.stdin.isatty() and sys.stdout.isatty()
-    shown = "opens it" if here else "prints its path"
-
-    def written():
-        return view_tour(repo, repo.task(t["id"])) if here else print(path)
-
-    if state == "writing" and not args.wait:
-        print(f"{t['id']}'s tour is being written: `bullpen tour {t['id']}` {shown} once it's done")
-        return
-    if state == "writing":
-        while tour_state(repo, t)[0] == "writing":
-            time.sleep(1)
-            t = repo.task(t["id"])
-        state, tour, why = tour_state(repo, t)
-        if state == "failed":
-            raise Fail(f"{t['id']}'s tour failed: {why} (log: {tour_log(repo, t)})")
-        return written()
-    if state == "current" and not args.new:
-        return written()
-    if state == "stale" and not args.new:
-        print(f"{t['id']}'s tour is stale: {why}. `bullpen tour {t['id']} --new` writes a new "
-              f"one; this is the old one:", file=sys.stderr)
-        return written()
-    out = start_tour(repo, t, args.wait)
-    if out:
-        return written()
-    print(f"writing a tour of {t['id']} in the background ({repo.cfg.get('tour_model') or 'default model'}); "
-          f"`bullpen tour {t['id']}` {shown} once it's done")
-
-
-def cmd_tour_bg(args):
-    """(bullpen) write a task's tour, away from whoever asked for it."""
-    repo = Repo(repo_root())
-    t = repo.task(args.id)
-    t.setdefault("tour", {})["pid"] = os.getpid()  # this process writes it, whoever started it
-    write_json(repo.task_path(t["id"]), t)
-    try:
-        write_tour(repo, args.id)
-    except Fail:
-        return 1  # recorded on the task
-    except Exception as e:  # anything else is a failure too, never a tour left "writing"
-        tour_failed(repo, args.id, clip(f"{type(e).__name__}: {e}", 160))
-        return 1
-
-
-def show_tour(repo, t, args):
-    """The tour as it is, for the board: its state and steps (--json), or one step's
-    hunks from git (--step N), as a patch for delta or a pager."""
-    state, tour, why = tour_state(repo, t)
-    if args.step is None:
-        drafts = read_comments(repo, t)["comments"]
-        out = {"id": t["id"], "state": state, "why": why, "path": str(tour_path(repo, t)) if tour else None,
-               "commit": tour and tour["commit"], "written": tour and tour.get("written"),
-               "comments": len(drafts),
-               "steps": [{"n": i, "title": s["title"], "note": s["note"], "hunks": s["hunks"],
-                          "files": step_files(s), "comments": sum(c["step"] == i for c in drafts)}
-                         for i, s in enumerate(tour["steps"], 1)] if tour else []}
-        if args.json:
-            print(json.dumps(out, indent=2))
-            return
-        print(f"{t['id']}'s tour: {state}" + (f" ({why})" if why else ""))
-        for s in out["steps"]:
-            print(f"{s['n']:>3}. {s['title']}  [{s['files']}]" +
-                  (f"  ({s['comments']} comment{'s' if s['comments'] != 1 else ''})" if s["comments"] else ""))
-        return
-    if not tour:
-        raise Fail(f"{t['id']} has no tour: `bullpen tour {t['id']}` writes one")
-    if not 1 <= args.step <= len(tour["steps"]):
-        raise Fail(f"{t['id']}'s tour has steps 1 to {len(tour['steps'])}")
-    step = tour["steps"][args.step - 1]
-    diff = step_diff(tour_diff(repo, t, tour), step) if t.get("worktree") and Path(t["worktree"]).is_dir() else ""
-    if args.json:
-        print(json.dumps({"n": args.step, "of": len(tour["steps"]), "title": step["title"],
-                          "note": step["note"], "hunks": step["hunks"], "files": step_files(step),
-                          "diff": diff}, indent=2))
-        return
-    sys.stdout.write(diff)
-
-
-# ---------- the stepper: reading a tour on the board ----------
-#
-# The board's g runs `tour <ID> --pane`: with a current tour (or a stale one, once the
-# person chose it), it opens the stepper in a large floating pane in the middle of the
-# window, the way the jump picker opens; with none, it starts the agent and the stepper
-# opens once the tour is written. The stepper (`tour <ID> --view`) shows one step at a
-# time: its title and note, the person's comments on it, then its hunks from git (in
-# delta when installed). After the last step comes a summary of the comments, from
-# which they're sent back or the task accepted. Where the person was is kept with the
-# drafts, so opening the tour again resumes there.
-
-TOUR_BOUNDS = [0.05, 0.04, 0.9, 0.9]  # most of the window: x, y, w, h
-
-
-def tour_label(t):
-    return f"bullpen: {t['id']} tour"
-
-
-def tour_pane(repo, t, state, args):
-    """The board's g: open the stepper on a current tour (or a stale one: the board asked
-    first), or start writing a tour that opens when it's written."""
-    session = args.session or os.environ.get("REX_SESSION") or t.get("session")
-    opener = {"session": session, "from": args.from_block}
-    if state == "writing":
-        t["tour"]["open"] = opener
-        write_json(repo.task_path(t["id"]), t)
-        print(f"{t['id']}'s tour is being written: it opens when it's done")
-        return
-    if state in ("none", "failed") or args.new:
-        start_tour(repo, t, False, opener)
-        print(f"writing a tour of {t['id']}: it opens when it's done")
-        return
-    open_stepper(repo, t, session, args.from_block)
-    print(f"opened {t['id']}'s tour" + (" (stale: the code changed since it was written)" if state == "stale" else ""))
-
-
-def open_stepper(repo, t, session, from_block=None):
-    """The stepper in a floating pane over the window of from_block (else of the task's
-    board or coordinator), focused. One per task: an old one closes."""
-    view = rex_view(session)
-    for _, _, b in find_panes(view, tour_label(t)):
-        rex_close(session, b)
-    argv = [SELF, "tour", t["id"], "--view", "--back"]
-    spec = {"bounds": TOUR_BOUNDS, "layout": {"block": {
-        "flavor": TERMINAL, "label": tour_label(t),
-        "options": {"command": with_state(argv), "cwd": str(repo.root)}}}}
-    home = home_of(repo, t)
-    anchor = from_block or (home.get("board") or {}).get("block") or home.get("block")
-    where = find_pane(view, block=anchor) if anchor else None
-    if where:
-        spec["window_id"] = where[0]
-    r = rex_api(session, "session.new_layer", spec)
-    set_layer(session, r["layer_id"], "normal", focus=True)
-
-
-def open_when_written(repo, t, opener):
-    """The tour the person asked for on the board is written: open it where they asked."""
-    try:
-        open_stepper(repo, t, opener.get("session"), opener.get("from"))
-    except Exception as e:  # the tour is written all the same: g opens it
-        with tour_log(repo, t).open("a") as f:
-            f.write(f"{now()} couldn't open the tour: {e}\n")
-
-
-PASTE_START, PASTE_END = "\x1b[200~", "\x1b[201~"
-
-
-def char_width(c):
-    """The columns a character takes on screen."""
-    return 0 if unicodedata.combining(c) else 2 if unicodedata.east_asian_width(c) in "WF" else 1
-
-
-class LineEdit:
-    """What's typed in the picker and in the tour stepper's comment and tell boxes, and
-    the cursor in it (a character index). The board's tell and answer line
-    (board/src/edit.rs) takes the same keys. On one line, a pasted line break is a space;
-    with lines, a paste keeps its breaks and ctrl+j or alt+⏎ starts a new line."""
-
-    LEFT, RIGHT = ("\x1b[D", "\x1bOD", "\x02"), ("\x1b[C", "\x1bOC", "\x06")  # ←, ctrl+b; →, ctrl+f
-    WORD_LEFT = ("\x1bb", "\x1b[1;3D", "\x1b[1;5D")  # alt+b, alt+←, ctrl+←
-    WORD_RIGHT = ("\x1bf", "\x1b[1;3C", "\x1b[1;5C")
-    HOME = ("\x1b[H", "\x1bOH", "\x1b[1~", "\x1b[7~", "\x01")  # Home, ctrl+a
-    END = ("\x1b[F", "\x1bOF", "\x1b[4~", "\x1b[8~", "\x05")  # End, ctrl+e
-    UP, DOWN = ("\x1b[A", "\x1bOA"), ("\x1b[B", "\x1bOB")  # with lines
-    NEW_LINE = ("\n", "\x1b\r")  # ctrl+j, alt+⏎ (with lines)
-
-    def __init__(self, text="", lines=False):
-        self.lines, self.text, self.at, self.left, self.top = lines, "", 0, 0, 0
-        self.paste(text)
-
-    def key(self, k):
-        """Apply one editing key; False when it isn't one (⏎, esc), for the caller."""
-        t, at = self.text, self.at
-        if k.startswith(PASTE_START):
-            self.paste(k[len(PASTE_START):].removesuffix(PASTE_END))
-        elif k in self.LEFT:
-            self.at = max(at - 1, 0)
-        elif k in self.RIGHT:
-            self.at = min(at + 1, len(t))
-        elif k in self.WORD_LEFT:
-            self.at = self.word_start()
-        elif k in self.WORD_RIGHT:
-            self.at = self.word_end()
-        elif k in self.HOME:
-            self.at = self.line_start()
-        elif k in self.END:
-            self.at = self.line_end()
-        elif k in ("\x7f", "\x08"):
-            self.cut(max(at - 1, 0), at)
-        elif k == "\x1b[3~":  # delete
-            self.cut(at, min(at + 1, len(t)))
-        elif k in ("\x17", "\x1b\x7f", "\x1b\x08"):  # ctrl+w, alt+backspace
-            self.cut(self.word_start(), at)
-        elif k == "\x1bd":  # alt+d
-            self.cut(at, self.word_end())
-        elif k == "\x15":  # ctrl+u: to the start of the line
-            self.cut(self.line_start(), at)
-        elif k == "\x0b":  # ctrl+k: to its end
-            self.cut(at, self.line_end())
-        elif self.lines and k in self.NEW_LINE:
-            self.insert("\n")
-        elif self.lines and k in self.UP + self.DOWN:
-            self.move_line(-1 if k in self.UP else 1)
-        elif k.isprintable() and not k.startswith("\x1b"):
-            self.insert(k)
-        else:
-            return False
-        return True
-
-    def paste(self, text):
-        """Pasted text at the cursor: a tab is a space, a line break is one unless this
-        has lines, and other control characters go."""
-        text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", " ")
-        if not self.lines:
-            text = text.replace("\n", " ")
-        self.insert("".join(c for c in text if c == "\n" or c.isprintable()))
-
-    def insert(self, text):
-        self.text = self.text[:self.at] + text + self.text[self.at:]
-        self.at += len(text)
-
-    def cut(self, a, b):
-        self.text, self.at = self.text[:a] + self.text[b:], a
-
-    def word_start(self):
-        """Where the word before the cursor starts (the spaces after it go with it)."""
-        return len(re.sub(r"\S*\s*$", "", self.text[:self.at]))
-
-    def word_end(self):
-        return self.at + re.match(r"\s*\S*", self.text[self.at:]).end()
-
-    def line_start(self):
-        return self.text.rfind("\n", 0, self.at) + 1
-
-    def line_end(self):
-        n = self.text.find("\n", self.at)
-        return len(self.text) if n < 0 else n
-
-    def move_line(self, by):
-        """Up or down a line, to the same column or the line's end."""
-        start, col = self.line_start(), self.at - self.line_start()
-        if by < 0 and start:
-            prev = self.text.rfind("\n", 0, start - 1) + 1
-            self.at = min(prev + col, start - 1)
-        elif by > 0 and self.line_end() < len(self.text):
-            nxt = self.line_end() + 1
-            end = self.text.find("\n", nxt)
-            self.at = min(nxt + col, len(self.text) if end < 0 else end)
-
-    def view(self, room):
-        """On one line: what's shown in room columns, and the cursor's column in it. The
-        shown part moves only when the cursor would leave it, as a shell's line does."""
-        w = lambda a, b: sum(char_width(c) for c in self.text[a:b])
-        room = max(room, 1)  # the cursor takes a column of its own at the end
-        self.left = min(self.left, self.at)
-        while self.left < self.at and w(self.left, self.at) >= room:
-            self.left += 1
-        to = self.left
-        while to < len(self.text) and w(self.left, to + 1) <= room:
-            to += 1
-        return self.text[self.left:to], w(self.left, self.at)
-
-    def rows(self, width, most):
-        """With lines: the text wrapped to width, at most `most` rows of it around the
-        cursor, and the cursor's (row, column) in them."""
-        width, out, cur, i = max(width, 2), [], (0, 0), 0
-        for line in self.text.split("\n"):
-            row, used = "", 0
-            for c in line:
-                if used + char_width(c) > width - 1:  # a column for the cursor at the end
-                    out.append(row)
-                    row, used = "", 0
-                if i == self.at:
-                    cur = (len(out), used)
-                row, used, i = row + c, used + char_width(c), i + 1
-            if i == self.at:
-                cur = (len(out), used)
-            out.append(row)
-            i += 1  # the line break
-        most = max(most, 1)
-        self.top = min(max(self.top, cur[0] - most + 1), cur[0])
-        return out[self.top:self.top + most], (cur[0] - self.top, cur[1])
-
-
-STEP_NEXT = ("n", "l", "\x1b[C", "\x1bOC")  # n, l, →
-STEP_BACK = ("p", "h", "\x1b[D", "\x1bOD")  # p, h, ←
-LINE_DOWN = ("j", "\x1b[B", "\x1bOB", "\x0e")  # j, ↓, ctrl+n
-LINE_UP = ("k", "\x1b[A", "\x1bOA", "\x10")  # k, ↑, ctrl+p
-PAGE_DOWN = (" ", "f", "\x1b[6~", "\x04", "\x06")  # space, f, page down, ctrl+d, ctrl+f
-PAGE_UP = ("b", "\x1b[5~", "\x15", "\x02")  # b, page up, ctrl+u, ctrl+b
-# the keys at the foot, longest first: the first that fits is shown
-STEP_KEYS = ("n next · p back · j k scroll · c comment · t tell · v diff · ⏎ open · a accept · esc close",
-             "n next · p back · c comment · t tell · v diff · ⏎ open · a accept · esc close",
-             "n next · p back · c comment · t tell · esc close",
-             "n p · c comment · t tell · esc close")
-COMMENT_KEYS = ("⏎ saves · ctrl+j new line · esc cancels · mention a line to point at it",
-                "⏎ saves · ctrl+j new line · esc cancels",
-                "⏎ save · ctrl+j line · esc cancel")
-END_KEYS = ("s send them back · a accept · p back · t tell · v diff · ⏎ open · esc close",
-            "s send · a accept · p back · t tell · esc close",
-            "s send · a accept · p back · esc close")
-BOLD, DIM, OFF = "\x1b[1m", "\x1b[2m", "\x1b[0m"
-
-
-def plural(n, word):
-    return f"{n} {word}{'s' if n != 1 else ''}"
-
-
-def wrap_text(text, width, indent=""):
-    """Text wrapped to width, its own lines and blank lines kept."""
-    import textwrap
-    out = []
-    for line in (text or "").split("\n"):
-        lead = re.match(r"\s*([-*] |\d+\. )?", line).group(0)
-        out += textwrap.wrap(line, max(width, 10), initial_indent=indent, subsequent_indent=indent + " " * len(lead),
-                             drop_whitespace=True) or [""]
-    return out
-
-
-ANSI_RE = re.compile(r"\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(\x07|\x1b\\)|.)")
-
-
-def clip_line(line, width):
-    """A line cut to width columns on screen, its colour codes kept (they take none)."""
-    import unicodedata
-    out, used, i = [], 0, 0
-    while i < len(line):
-        m = ANSI_RE.match(line, i)
-        if m:
-            out.append(m.group(0))
-            i = m.end()
-            continue
-        c = line[i]
-        w = 0 if unicodedata.combining(c) else 2 if unicodedata.east_asian_width(c) in "WF" else 1
-        if used + w > width:
-            break
-        out.append(c)
-        used += w
-        i += 1
-    return "".join(out)
-
-
-def colour_diff(diff):
-    """A patch's lines coloured as git would, for a terminal without delta."""
-    out = []
-    for line in diff.rstrip("\n").split("\n"):
-        line = line.expandtabs(4)
-        if line.startswith(("diff --git", "index ", "--- ", "+++ ", "new file", "deleted file", "rename ", "similarity")):
-            out.append(BOLD + line + OFF)
-        elif line.startswith("@@"):
-            out.append("\x1b[36m" + line + OFF)
-        elif line.startswith("+"):
-            out.append("\x1b[32m" + line + OFF)
-        elif line.startswith("-"):
-            out.append("\x1b[31m" + line + OFF)
-        else:
-            out.append(line)
-    return out
-
-
-def diff_lines(diff, width, delta):
-    """A step's patch as the lines shown: through delta when installed, else coloured."""
-    if not diff.strip():
-        return [DIM + "(no code in this step)" + OFF]
-    if delta:
-        p = subprocess.run([delta, "--paging=never", f"--width={width}"], input=diff, text=True,
-                           capture_output=True)
-        if p.returncode == 0 and p.stdout.strip():
-            return p.stdout.rstrip("\n").split("\n")
-    return colour_diff(diff)
-
-
-class Stepper:
-    """What the stepper shows and does with each key, apart from the terminal and the
-    task. at is the step shown (0-based); at == len(steps) is the summary at the end.
-    diff(i, width) gives step i's hunks as lines."""
-
-    def __init__(self, tid, title, tour, comments, at, diff):
-        self.tid, self.title, self.steps, self.commit = tid, title, tour["steps"], tour["commit"]
-        self.comments, self.diff = comments, diff
-        self.at = min(max(at, 0), len(self.steps))
-        self.top, self.mode, self.edit, self.msg, self.sure = 0, "read", LineEdit(), "", False
-        self.cache = {}
-
-    def at_end(self):
-        return self.at == len(self.steps)
-
-    def go(self, i):
-        i = min(max(i, 0), len(self.steps))
-        if i != self.at:
-            self.at, self.top = i, 0
-
-    def key(self, k, rows=20):
-        """Apply one key. Returns what the stepper can't do itself: "close", "send",
-        "accept", "open" or "diff" (close, then open the task's pane or diff, as the
-        board's ⏎ and v do), ("comment", text) to save or ("tell", text) to send; else None."""
-        if self.mode in ("comment", "tell"):
-            return self.comment_key(k)
-        sure, self.sure, self.msg = self.sure, False, ""
-        if k in ("\x1b", "q", "\x03", "\x07"):
-            return "close"
-        if k in ("\r", "\n"):
-            return "open"
-        if k == "v":
-            return "diff"
-        if k == "t":
-            self.mode, self.edit = "tell", LineEdit()
-            return None
-        if k == "a":
-            return self.accept_key(sure)
-        if self.at_end():
-            if k == "s":
-                if self.comments:
-                    return "send"
-                self.msg = "No comments to send: p goes back to the steps."
-                return None
-        elif k == "c":
-            self.mode, self.edit = "comment", LineEdit(lines=True)
-            return None
-        if k in STEP_NEXT:
-            self.go(self.at + 1)
-        elif k in STEP_BACK:
-            self.go(self.at - 1)
-        elif k in LINE_DOWN:
-            self.top += 1
-        elif k in LINE_UP:
-            self.top = max(self.top - 1, 0)
-        elif k in PAGE_DOWN:
-            self.top += max(rows - 2, 1)
-        elif k in PAGE_UP:
-            self.top = max(self.top - max(rows - 2, 1), 0)
-        elif k == "g":
-            self.top = 0
-        elif k == "G":
-            self.top = 10 ** 9  # clamped when drawn
-        return None
-
-    def accept_key(self, sure):
-        """a: at the end, accept (a second a when comments aren't sent); before the
-        end, a second a accepts all the same."""
-        unsent = f"{plural(len(self.comments), 'comment')} not sent: " if self.comments else ""
-        if sure or (self.at_end() and not unsent):
-            return "accept"
-        self.sure = True
-        if self.at_end():
-            self.msg = f"{unsent}a again accepts anyway, s sends them back instead."
-        else:
-            self.msg = f"{unsent}a again accepts {self.tid} before the end."
-        return None
-
-    def comment_key(self, k):
-        """A key while a comment (lines), or a line to tell the worker, is typed."""
-        if self.edit.key(k):
-            return None
-        if k in ("\r", "\n"):
-            mode, text, self.mode = self.mode, self.typed_text(), "read"
-            return (mode, text) if text else None
-        if k in ("\x1b", "\x03", "\x07"):
-            self.mode, self.msg = "read", "Comment not saved." if self.mode == "comment" else "Not sent."
-        return None
-
-    def typed_text(self):
-        """What's typed, to save or send: a tell on one line, a comment's lines without
-        the spaces at their ends or blank lines around them."""
-        if self.mode == "tell":
-            return " ".join(self.edit.text.split())
-        return "\n".join(line.rstrip() for line in self.edit.text.split("\n")).strip("\n")
-
-    def on_step(self, i):
-        """The drafts on step i of this tour."""
-        return [c for c in self.comments if c["step"] == i + 1 and c.get("commit") == self.commit]
-
-    def body(self, width):
-        """The lines under the header: the step's title, files, note, comments and
-        hunks; or, at the end, the comments to send."""
-        w = max(width - 2, 10)
-        if self.at_end():
-            out = [BOLD + "End of the tour" + OFF, ""]
-            if not self.comments:
-                return out + ["No comments. a accepts the task, esc closes, p goes back."]
-            out.append(f"Your {plural(len(self.comments), 'comment')}, not sent yet:")
-            for n, c in enumerate(self.comments, 1):
-                out += ["", f"{n:>2}. {BOLD}step {c['step']}, {c['title']}{OFF}"]
-                out += wrap_text(c["text"], w - 4, "    ")
-            return out + ["", "s sends them back to the worker, who fixes them and runs ready again."]
-        s = self.steps[self.at]
-        out = [BOLD + s["title"] + OFF, DIM + step_files(s) + OFF, ""]
-        if s.get("note"):
-            out += wrap_text(s["note"], w) + [""]
-        for c in self.on_step(self.at):
-            out += ["\x1b[33m" + line + OFF for line in wrap_text(c["text"], w - 2, "▍ ")] + [""]
-        if (self.at, width) not in self.cache:
-            self.cache[(self.at, width)] = self.diff(self.at, width)
-        return out + self.cache[(self.at, width)]
-
-    def prompt(self):
-        return f"Comment on step {self.at + 1}: " if self.mode == "comment" else f"Tell {self.tid}: "
-
-    def box(self, width, height):
-        """The rows of the box something is typed in, and the cursor's (row, column) in
-        them from 0. A tell is one line after its prompt; a comment is its prompt, then its
-        lines, up to half the body's rows."""
-        if self.mode == "tell":
-            shown, col = self.edit.view(width - len(self.prompt()) - 3)
-            return [f" {BOLD}{self.prompt()}{OFF}{shown}"], (0, 1 + len(self.prompt()) + col)
-        lines, (row, col) = self.edit.rows(width - 2, max((height - 5) // 2, 1))
-        return [f" {BOLD}{self.prompt().rstrip()}{OFF}"] + [" " + line for line in lines], (row + 1, 1 + col)
-
-    def cursor(self, width, height):
-        """(row, column) of the cursor, from 1, while a comment is typed."""
-        rows, (row, col) = self.box(width, height)
-        return height - len(rows) + row, col + 1
-
-    def screen(self, width, height):
-        """The stepper's lines: a header, the body from self.top, a message line and the keys."""
-        n = len(self.steps)
-        where = "end" if self.at_end() else f"step {self.at + 1} of {n}"
-        if self.comments:
-            where += f" · {plural(len(self.comments), 'comment')}"
-        head = f"{self.tid}  {self.title}"
-        room = max(width - len(where) - 4, 0)
-        head = (head[:room - 1] + "…") if len(head) > room else head
-        out = [BOLD + " " + head + " " * max(width - 2 - len(head) - len(where), 1) + where + OFF, ""]
-        typing = self.box(width, height)[0] if self.mode in ("comment", "tell") else [""]
-        rows = max(height - 3 - len(typing), 1)
-        body = self.body(width)
-        self.top = min(self.top, max(len(body) - rows, 0))
-        shown = body[self.top:self.top + rows]
-        out += [" " + line + OFF for line in shown] + [""] * (rows - len(shown))
-        out = [clip_line(line, width - 1) for line in out]
-        more = len(body) - self.top - rows
-        if self.mode in ("comment", "tell"):
-            out += typing
-            keys = COMMENT_KEYS if self.mode == "comment" else ("⏎ sends it now · esc cancels",)
-            out.append(f" {DIM}{next((k for k in keys if len(k) <= width - 2), keys[-1])}{OFF}")
-        else:
-            down = f"  ↓ {more} more" if more > 0 else ""
-            out.append(" " + (BOLD + self.msg + OFF if self.msg else DIM + down.strip() + OFF))
-            keys = END_KEYS if self.at_end() else STEP_KEYS
-            out.append(f" {DIM}{next((k for k in keys if len(k) <= width - 2), keys[-1])}{OFF}")
-        return [clip_line(line, width - 1) + OFF for line in out]
-
-
-def save_place(repo, t, commit, at):
-    """Where the person is in the tour, kept with the drafts: opening it again resumes there."""
-    c = read_comments(repo, t)
-    c["at"] = {"commit": commit, "step": at + 1}
-    write_json(comments_path(repo, t), c)
-
-
-def stepper_tui(st, act, moved):
-    """Run the stepper on the terminal until act() says it's done (True). act(action)
-    does what the stepper can't: save a comment, send, accept, close. moved(at) is
-    told of each step the person goes to."""
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
-    decoder = codecs.getincrementaldecoder("utf-8")("replace")
-    tty.setraw(fd)
-    sys.stdout.write("\x1b[?1049h\x1b[?7l" + PASTE_ON)  # its own screen; long lines are cut, not wrapped
-    try:
-        while True:
-            size = shutil.get_terminal_size()
-            lines = st.screen(size.columns, size.lines)
-            cursor = ("\x1b[?25h\x1b[{};{}H".format(*st.cursor(size.columns, len(lines)))
-                      if st.mode in ("comment", "tell") else "\x1b[?25l")
-            sys.stdout.write("\x1b[H\x1b[2J" + "\r\n".join(lines) + cursor)
-            sys.stdout.flush()
-            if not select.select([fd], [], [], 0.5)[0]:
-                continue  # redraw: the pane may have changed size
-            for k in read_keys(fd, decoder):
-                at = st.at
-                a = st.key(k, size.lines - 4)
-                if a and act(a):
-                    return
-                if st.at != at:
-                    moved(st.at)
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
-        sys.stdout.write(PASTE_OFF + "\x1b[?7h\x1b[?25h\x1b[?1049l")
-        sys.stdout.flush()
-
-
-def view_tour(repo, t, back=False):
-    """Step through the task's tour on this terminal: the board's g opens it in a pane."""
-    tour = read_json(tour_path(repo, t))
-    if not tour:
-        raise Fail(f"{t['id']} has no tour: `bullpen tour {t['id']}` writes one")
-    if not sys.stdin.isatty():
-        raise Fail("the tour needs a terminal (the board's g opens it in a pane)")
-    run_ = t.get("tour") or {}
-    if run_.get("state") == "written" and not run_.get("stale") and not tour_stale(repo, t, tour):
-        run_["opened"] = tour["commit"]  # the board marks it toured (not for the old code's tour)
-        write_json(repo.task_path(t["id"]), t)
-    place = read_comments(repo, t).get("at") or {}
-    at = place.get("step", 1) - 1 if place.get("commit") == tour["commit"] else 0
-    wt = t.get("worktree")
-    files = tour_diff(repo, t, tour) if wt and Path(wt).is_dir() else []
-    delta = shutil.which("delta")
-    st = Stepper(t["id"], t["title"], tour, read_comments(repo, t)["comments"], at,
-                 lambda i, w: diff_lines(step_diff(files, tour["steps"][i]), w, delta))
-
-    def bp(*args):
-        """Run bullpen: whether it worked, and its last line."""
-        p = subprocess.run([SELF, *args], cwd=repo.root, stdin=subprocess.DEVNULL, text=True, capture_output=True)
-        last = ((p.stderr or p.stdout) if p.returncode else p.stdout).strip().splitlines() or [""]
-        return p.returncode == 0, last[-1].removeprefix("bullpen: ")
-
-    left = {"for": None}  # the pane or diff the stepper closed for: the board isn't focused after
-
-    def act(a):
-        if a == "close":
-            return True
-        if a in ("open", "diff"):
-            # as the board's ⏎ and v: the worker's pane (the reviewer's while in review), or the diff
-            args = (["diff", t["id"], "--pane"] if a == "diff"
-                    else ["go", t["id"], "--review"] if repo.task(t["id"])["status"] == "review" else ["go", t["id"]])
-            ok, said = bp(*args)
-            if ok:
-                left["for"] = a
-                return True
-            st.msg = said or f"couldn't open {t['id']}"
-            return False
-        if isinstance(a, tuple) and a[0] == "tell":
-            ok, said = bp("tell", t["id"], a[1])
-            st.msg = f"Sent to {t['id']}." if ok else said
-            return False
-        if isinstance(a, tuple):
-            n = add_comment(repo, repo.task(t["id"]), st.at + 1, a[1])
-            st.comments = read_comments(repo, t)["comments"]
-            st.msg = f"Saved comment {n} on step {st.at + 1}."
-            return False
-        if a == "send":
-            import contextlib
-            import io
-            try:
-                with contextlib.redirect_stdout(io.StringIO()):
-                    send_comments(repo, repo.task(t["id"]))
-            except Fail as e:
-                st.msg = str(e)
-                return False
-            return True
-        if a == "accept":
-            st.msg = f"Accepting {t['id']}…"
-            size = shutil.get_terminal_size()
-            sys.stdout.write("\x1b[H\x1b[2J" + "\r\n".join(st.screen(size.columns, size.lines)))
-            sys.stdout.flush()
-            ok, said = bp("accept", t["id"])
-            if ok:
-                return True
-            st.msg = said or "accept failed"
-        return False
-
-    stepper_tui(st, act, lambda at: save_place(repo, t, tour["commit"], at))
-    if back and not left["for"]:
-        b = home_of(repo, t).get("board") or {}
-        if rex_alive(b.get("session"), b.get("block")):
-            rex_focus(b.get("session"), b["block"])
-
-
-# ---------- the person's comments on a tour ----------
-
-def read_comments(repo, t):
-    return read_json(comments_path(repo, t)) or {"next": 1, "comments": []}
-
-
-def cmd_tour_comment(args):
-    """Draft comments on a tour's steps: add one, list them, or remove one."""
-    repo = Repo(repo_root())
-    t = repo.task(args.id)
-    c = read_comments(repo, t)
-    if args.remove is not None:
-        left = [x for x in c["comments"] if x["id"] != args.remove]
-        if len(left) == len(c["comments"]):
-            raise Fail(f"{t['id']} has no draft comment {args.remove}")
-        c["comments"] = left
-        write_json(comments_path(repo, t), c)
-        print(f"removed comment {args.remove} from {t['id']}")
-        return
-    if args.step is None:
-        if args.json:
-            print(json.dumps(c["comments"], indent=2))
-            return
-        for x in c["comments"]:
-            print(f"{x['id']:>3}. step {x['step']} ({x['title']}): {x['text']}")
-        if not c["comments"]:
-            print(f"{t['id']} has no draft comments")
-        return
-    text = " ".join(args.text or []).strip()
-    if not text:
-        raise Fail("say what the comment is")
-    print(add_comment(repo, t, args.step, text))
-
-
-def add_comment(repo, t, step, text):
-    """Add a draft comment on step N of the task's tour; returns its number."""
-    tour = read_json(tour_path(repo, t))
-    if not tour:
-        raise Fail(f"{t['id']} has no tour to comment on: `bullpen tour {t['id']}` writes one")
-    if not 1 <= step <= len(tour["steps"]):
-        raise Fail(f"{t['id']}'s tour has steps 1 to {len(tour['steps'])}")
-    c = read_comments(repo, t)
-    s = tour["steps"][step - 1]
-    # the step as it was: a new tour may number its steps differently
-    c["comments"].append({"id": c["next"], "step": step, "title": s["title"], "hunks": s["hunks"],
-                          "commit": tour["commit"], "text": text, "at": now()})
-    c["next"] += 1
-    write_json(comments_path(repo, t), c)
-    return c["next"] - 1
-
-
-def comments_text(t, comments, k):
-    """The findings-style file of the person's comments: each one with its step, files and lines."""
-    parts = [f"# The person's comments on {t['id']}, after a guided tour of the change\n\n"
-             f"Each comment is on one step of the tour: the step's title, the files and lines it covers "
-             f"(in the code the tour was written on), then the comment. A line the person points at "
-             f"is in the comment's text."]
-    for i, c in enumerate(comments, 1):
-        parts.append(f"## Comment {i}: step {c['step']}, {c['title']}\n\n"
-                     f"Files: {step_files(c)} (commit {c['commit'][:12]})\n\n{c['text']}")
-    return "\n\n".join(parts) + "\n"
-
-
-def send_comments(repo, t):
-    """Send the person's draft comments to the worker, as a findings-style file: the task
-    goes back to working, and its next ready gets a review of them."""
-    tour_status(t)
-    drafts = read_comments(repo, t)["comments"]
-    if not drafts:
-        raise Fail(f"{t['id']} has no draft comments to send: `bullpen tour-comment {t['id']} STEP TEXT` adds one")
-    k = (t.get("tours_sent") or 0) + 1
-    path = repo.dir / "briefs" / f"{t['id']}.tour-{k}.comments.md"
-    path.write_text(comments_text(t, drafts, k))
-    wt = t["worktree"]
-    base_ref = task_base_ref(repo, t)
-    n = len(drafts)
-    said = f"{n} comment{'s' if n != 1 else ''}"
-    t["tours_sent"] = k
-    t["tour_sent"] = {"n": k, "file": str(path), "count": n, "at": now(),
-                      "commit": head(wt), "base": merge_base(wt, base_ref)}
-    if t["status"] == "review":
-        close_reviewer(t)  # it reviews code the person has just sent back
-    msg = (f"The person went through your change with a guided tour and sent back {said}. Read {path}, "
-           f"address each comment, commit, and run your ready command again. If you disagree with a "
-           f"comment, say why in your ready summary.")
-    try:
-        failed = hand_back(repo, t, msg)
-    except Fail as e:
-        failed = clip(str(e), 160)
-    comments_path(repo, t).unlink(missing_ok=True)  # sent: in the file now, no longer drafts
-    if failed:
-        stop(repo, t, "worker", "not_sent", "The person's tour comments didn't reach its worker",
-             f"{t['id']} was sent back by the person after the tour ({said}), but the message didn't "
-             f"reach its worker ({failed}). The comments are in {path}: `bullpen tell {t['id']}` it "
-             f"to read them", "not-sent")
-        print(f"{said} written to {path}, but they didn't reach {t['id']}'s worker: its coordinator is told")
-        return
-    tell_coordinator(repo, t, "tour-sent", f"{t['id']} sent back by the person after the tour: {said}")
-    print(f"sent {said} to {t['id']}'s worker ({path})")
-
-
 # ---------- auto-accept ----------
 #
 # With `config --auto-accept on`, an approve verdict runs the normal accept itself:
@@ -4555,6 +3342,8 @@ def remove_worktree(repo, t, force=False):
 
 
 def cmd_accept(args):
+    from .board_build import rebuild_board_if_stale  # the leaves import core: not at the top
+    from .push_remote import push_base
     repo = getattr(args, "repo", None) or Repo(repo_root())
     t = repo.task(args.id)
     merged_outside = (t.get("gh") or {}).get("state") == "merged"
@@ -4788,137 +3577,7 @@ def rebase_other(repo, t, accepted, touched=None):
     return rebased
 
 
-# ---------- the push remote: a backup of the base branch, in local mode ----------
-#
-# config --push-remote names a remote (not origin: with origin, bullpen is in PR mode
-# and the setting does nothing). After accept merges into the local base branch, the
-# base branch alone is pushed there, in the background, never forced. Pushes take a
-# lock and push the branch as it is then, so two accepts in a row can't race: the
-# later push carries both. A failed push leaves the accept standing, with one news line.
-
-
-PUSH_NEWS = {"id": "push"}  # the news log's task column when no task is behind a push
-
-
-def push_remote(repo):
-    """The remote accept pushes the base branch to, or None (unset, or PR mode)."""
-    name = repo.cfg.get("push_remote")
-    return name if name and not repo.has_origin() else None
-
-
-def push_env(repo):
-    """git that never waits for a password or a key's passphrase: it fails instead."""
-    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
-    if not env.get("GIT_SSH_COMMAND") and git(repo.root, "config", "core.sshCommand", check=False).returncode != 0:
-        env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
-    return env
-
-
-def quiet_git(repo, *args, timeout=60):
-    """git on the network, away from any terminal (no prompt can reach the person)."""
-    try:
-        return subprocess.run(["git", "-C", str(repo.root), *args], env=push_env(repo), text=True,
-                              stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout,
-                              start_new_session=True)
-    except subprocess.TimeoutExpired:
-        return subprocess.CompletedProcess(args, 1, "", f"no answer from the remote in {timeout}s")
-
-
-def push_base(repo, base, t=None):
-    """After a local merge: push base to the push remote in the background. Says what it
-    started, or None when there's no push remote."""
-    remote = push_remote(repo)
-    if not remote:
-        return None
-    argv = [SELF, "_push", base] + (["--task", t["id"]] if t else [])
-    p = subprocess.Popen(argv, cwd=repo.root, start_new_session=True,
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if os.environ.get("BULLPEN_PUSH_WAIT"):  # the tests: wait for it, to look at what it did
-        p.wait()
-    return f"pushing {base} to {remote} in the background"
-
-
-def push_reason(out, remote, base):
-    """Why git push (or ls-remote) failed, in a few words."""
-    text = " ".join(out.split())
-    if "[rejected]" in out or "non-fast-forward" in out or "fetch first" in out:
-        return (f"rejected, {remote} has commits {base} doesn't (bullpen never force-pushes: "
-                f"`git pull {remote} {base}` by hand, then `git push {remote} {base}`)")
-    lines = [l.strip() for l in out.splitlines() if l.strip() and not l.strip().startswith("hint:")]
-    fatal = [l for l in lines if l.startswith(("fatal:", "error:", "remote:", "ERROR"))]
-    return clip((fatal or lines or [text or "git push failed"])[0], 200)
-
-
-def cmd_push_bg(args):
-    """(bullpen) push the base branch to the push remote, one push at a time."""
-    repo = Repo(repo_root())
-    remote = push_remote(repo)
-    if not remote:
-        return
-    repo.dir.mkdir(parents=True, exist_ok=True)
-    with open(repo.dir / "push.lock", "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)  # an earlier push finishes first
-        # The branch as it is now: a later accept's commits go too, never an older tip.
-        p = quiet_git(repo, "push", "-q", remote, f"refs/heads/{args.base}:refs/heads/{args.base}")
-    if p.returncode == 0:
-        return
-    try:
-        t = repo.task(args.task) if args.task else PUSH_NEWS
-    except Fail:
-        t = PUSH_NEWS
-    after = "" if t is PUSH_NEWS else f"After {t['id']}, "
-    news(repo, t, "push", f"{after}{args.base} wasn't pushed to {remote}: "
-                          f"{push_reason(p.stderr or p.stdout, remote, args.base)}. "
-                          + ("" if t is PUSH_NEWS else "The accept still counts; ")
-                          + f"`bullpen doctor` says how far behind {remote} is.",
-         everyone=t is PUSH_NEWS)
-    return 1
-
-
-def catch_up_push(repo):
-    """`up`: push the base branch when it has commits the push remote didn't get (after
-    an offline spell, say), as far as this checkout last saw it. Says what it started."""
-    remote = push_remote(repo)
-    if not remote or git(repo.root, "remote", "get-url", remote, check=False).returncode != 0:
-        return None
-    base = repo.base()
-    if git(repo.root, "rev-parse", "-q", "--verify", f"refs/heads/{base}", check=False).returncode != 0:
-        return None
-    seen = f"refs/remotes/{remote}/{base}"
-    if git(repo.root, "rev-parse", "-q", "--verify", seen, check=False).returncode == 0:
-        if int(git(repo.root, "rev-list", "--count", f"{seen}..refs/heads/{base}").stdout.strip()) == 0:
-            return None
-    return push_base(repo, base)
-
-
-def check_push(repo, why_not=None):
-    """The push remote: there, reachable without a prompt, and how far behind the base."""
-    if not repo:
-        return "skip", f"can't tell: {why_not or 'not in a git repository'}"
-    name = repo.cfg.get("push_remote")
-    if not name:
-        return "skip", "none (`bullpen config --push-remote <remote>` backs up the base branch after each accept)"
-    if repo.has_origin():
-        return "skip", f"{name} is set, but this repo has an origin remote (PR mode), so nothing is pushed to it"
-    if git(repo.root, "remote", "get-url", name, check=False).returncode != 0:
-        return "fail", (f"there's no remote {name}: `git remote add {name} <url>`, "
-                        f"or `bullpen config --push-remote \"\"`")
-    base = repo.base()
-    p = quiet_git(repo, "ls-remote", "--heads", name, f"refs/heads/{base}", timeout=20)
-    if p.returncode != 0:
-        return "fail", f"can't reach {name} without a prompt: {push_reason(p.stderr or p.stdout, name, base)}"
-    theirs = (p.stdout.split() or [None])[0]
-    if not theirs:
-        return "fail", f"{name} has no {base} yet: `git push {name} {base}`"
-    if git(repo.root, "cat-file", "-e", f"{theirs}^{{commit}}", check=False).returncode != 0 or \
-            git(repo.root, "merge-base", "--is-ancestor", theirs, f"refs/heads/{base}", check=False).returncode != 0:
-        return "fail", (f"{name}'s {base} has commits this one doesn't, so pushes are rejected: "
-                        f"`git pull {name} {base}`, then `git push {name} {base}`")
-    n = int(git(repo.root, "rev-list", "--count", f"{theirs}..refs/heads/{base}").stdout.strip())
-    if n:
-        return "fail", f"{name} is {commits(n)} behind {base}: `git push {name} {base}`"
-    return "ok", f"{name} has {base} as it is here"
-
+# ---------- rebasing the others after an accept ----------
 
 def rebase_need(wt, ref, touched):
     """Whether a working task's work meets the accepted change (the files in touched;
@@ -5052,6 +3711,8 @@ def rebase_conflict(repo, t, accepted, ref, files, shown=""):
                 f"({failed}): `bullpen tell {t['id']}` it to rebase onto {ref} and fix them")
     return f"{t['id']} conflicts in {names}, sent back"
 
+
+# ---------- drop ----------
 
 def cmd_drop(args):
     repo = Repo(repo_root())
@@ -5792,7 +4453,7 @@ def cmd_guide(args):
     print(guide_text())
 
 
-# ---------- getting around: go, board, keys ----------
+# ---------- getting around: go, board ----------
 
 def go_target(repo, args):
     """(repo, session, block, name) of the pane `go` should focus."""
@@ -6022,262 +4683,6 @@ def show_pane(repo, session, block):
     rex_focus(session, block)
 
 
-# ---------- pick: jump to any open task by typing part of it ----------
-
-PICK_LABEL = "bullpen: jump"
-PICK_BOUNDS = [0.15, 0.12, 0.7, 0.6]  # the middle of the window: x, y, w, h
-
-
-# what the picker lists first: what needs you, then what's ready, then the board's order
-PICK_FIRST = {"needs": 0, "stopped": 0, "ready": 1, "finished": 1}
-
-
-def pick_items(home=None):
-    """(repo, task) of every open task bullpen knows: home's first, then the other
-    repositories', each with what needs you first, then what's ready, then the rest in
-    the board's order."""
-    repos = known_repos()
-    if home:
-        repos = [home] + [r for r in repos if r.dir != home.dir]
-    first = lambda t: PICK_FIRST.get(t["status"], 2)
-    return [(r, t) for r in repos for t in sorted(board_order(r.tasks()), key=first)
-            if t["status"] not in CLOSED]
-
-
-def pick_lines(items):
-    """One line per task: its mark, ID and title (task_line without age or sentence, so
-    a search for "12" finds BP-12, not a task 12m old), after its repository's name when
-    the tasks come from more than one."""
-    many = len({r.dir for r, _ in items}) > 1
-    rw = max((len(r.root.name) for r, _ in items), default=0)
-    iw = max((len(t["id"]) for _, t in items), default=0)
-    return [(f"{r.root.name:<{rw}}  " if many else "") + task_line(r, t, idw=iw, age=False, detail=False)
-            for r, t in items]
-
-
-def fuzzy_score(query, text):
-    """How well text matches query, or None when it doesn't. Each word of the query must
-    be in one word of text, its letters in order but not necessarily together (case
-    ignored): "lgn" finds "login", but "digest" doesn't find "Migrate sessions table".
-    Letters together, and at the start of a word, score higher."""
-    words, total = text.lower().split(), 0
-    for word in query.lower().split():
-        scores = [s for low in words for start, c in enumerate(low) if c == word[0]
-                  for s in [word_score(word, low, start)] if s is not None]
-        if not scores:
-            return None
-        total += max(scores)
-    return total
-
-
-def word_score(word, low, start):
-    """The score of word's letters found in low from start on, each as early as it can be."""
-    score, prev, i = 0, None, start
-    for c in word:
-        i = low.find(c, i)
-        if i < 0:
-            return None
-        if prev is not None:
-            score += 3 if i == prev + 1 else -min(i - prev - 1, 5)
-        if i == 0 or not low[i - 1].isalnum():
-            score += 2
-        score += 1
-        prev, i = i, i + 1
-    return score
-
-
-def pick_filter(query, lines):
-    """The indexes of the lines matching query, best first; ties keep their order."""
-    scored = [(s, i) for i, line in enumerate(lines) for s in [fuzzy_score(query, line)] if s is not None]
-    return [i for _, i in sorted(scored, key=lambda si: (-si[0], si[1]))]
-
-
-PICK_UP = ("\x1b[A", "\x1bOA", "\x10", "\x0b")  # ↑, ctrl+p, ctrl+k
-PICK_DOWN = ("\x1b[B", "\x1bOB", "\x0e")  # ↓, ctrl+n
-PICK_PROMPT = "jump to> "
-PICK_HINT = "⏎ go · esc close · ↑↓ move"
-
-
-class Picker:
-    """What the picker shows and does with each key, apart from the terminal."""
-
-    def __init__(self, lines, colors=None):
-        """colors: each line's mark colour (an SGR code), as on the board."""
-        self.lines, self.colors, self.edit, self.sel = lines, colors, LineEdit(), 0
-        self.shown = pick_filter("", lines)
-        self.msg = "" if lines else "no open tasks in any repository"
-
-    def key(self, k):
-        """Apply one key: "choose" or "cancel" when it ends the picker, else None."""
-        if k in ("\r", "\n"):
-            return "choose" if self.shown else None
-        if k in ("\x1b", "\x03", "\x07") or (k == "\x04" and not self.query):
-            return "cancel"
-        if k in PICK_UP:
-            self.sel = max(self.sel - 1, 0)
-        elif k in PICK_DOWN:
-            self.sel = min(self.sel + 1, max(len(self.shown) - 1, 0))
-        else:
-            query = self.query
-            if self.edit.key(k) and self.query != query:
-                self.search()
-        return None
-
-    @property
-    def query(self):
-        return self.edit.text
-
-    def search(self):
-        self.sel, self.msg = 0, ""
-        self.shown = pick_filter(self.query, self.lines)
-
-    def chosen(self):
-        return self.shown[self.sel] if self.shown else None
-
-    def typed(self, width):
-        """The query as shown after the prompt, and the cursor's column on screen, from 1."""
-        shown, col = self.edit.view(width - len(PICK_PROMPT) - 1)
-        return shown, len(PICK_PROMPT) + col + 1
-
-    def screen(self, width, height):
-        """The picker's lines: the query, a hint, then the matching tasks around the selected one."""
-        rows = max(height - 2, 1)
-        first = max(0, self.sel - rows + 1)
-        count = f"{len(self.shown)}/{len(self.lines)}"
-        # a failure in the normal weight, after the count; else the keys, dim
-        hint = (f"\x1b[2m{count}\x1b[0m  {fit(self.msg, max(width - len(count) - 2, 0))}" if self.msg
-                else f"\x1b[2m{fit(f'{count}  {PICK_HINT}', width)}\x1b[0m")
-        out = [f"{PICK_PROMPT}{self.typed(width)[0]}", hint]
-        for n, i in enumerate(self.shown[first:first + rows], first):
-            line = self.paint(fit(self.lines[i], max(width - 2, 0)), i)
-            out.append(f"\x1b[7m> {line}\x1b[0m" if n == self.sel else f"  {line}")
-        return out
-
-    def paint(self, line, i):
-        """The line with its mark in colour; the reset keeps the selected row reversed."""
-        at = next((j for j, c in enumerate(line) if c in MARK_SET), None)
-        if not self.colors or at is None:
-            return line
-        return f"{line[:at]}\x1b[{self.colors[i]}m{line[at]}\x1b[22;39m{line[at + 1:]}"
-
-
-def split_keys(text):
-    """The keys in what the terminal sent: an escape sequence (an arrow), an alt+key, or
-    a whole paste is one key."""
-    out, i = [], 0
-    while i < len(text):
-        m = re.match(r"\x1b\[200~.*?\x1b\[201~|\x1b(\[[0-?]*[ -/]*[@-~]|O.|[^\x1b\[O])", text[i:], re.S)
-        n = m.end() if m else 1
-        out.append(text[i:i + n])
-        i += n
-    return out
-
-
-def read_keys(fd, decoder):
-    data = os.read(fd, 1024)
-    if not data:
-        return ["\x03"]  # the terminal went away
-    if data == b"\x1b" and select.select([fd], [], [], 0.03)[0]:
-        data += os.read(fd, 1024)  # the rest of an arrow, not esc
-    text = decoder.decode(data)
-    # a paste is one key however many reads it takes (unended after a second: its keys)
-    while PASTE_START in text and PASTE_END not in text[text.rindex(PASTE_START):]:
-        more = os.read(fd, 65536) if select.select([fd], [], [], 1)[0] else b""
-        if not more:
-            break
-        text += decoder.decode(more)
-    return split_keys(text)
-
-
-# bracketed paste on and off: a paste arrives marked, so its line breaks don't press ⏎
-PASTE_ON, PASTE_OFF = "\x1b[?2004h", "\x1b[?2004l"
-
-
-def pick_tui(p, choose):
-    """Run the picker on the terminal until a task is chosen (True) or it's closed (False).
-    choose(index) goes to that task and returns None, or why it couldn't."""
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
-    decoder = codecs.getincrementaldecoder("utf-8")("replace")
-    tty.setraw(fd)
-    sys.stdout.write(PASTE_ON)
-    try:
-        while True:
-            size = shutil.get_terminal_size()
-            lines = p.screen(size.columns, size.lines)
-            sys.stdout.write("\x1b[H\x1b[2J" + "\r\n".join(lines) + f"\x1b[1;{p.typed(size.columns)[1]}H")
-            sys.stdout.flush()
-            for k in read_keys(fd, decoder):
-                act = p.key(k)
-                if act == "cancel":
-                    return False
-                if act == "choose":
-                    p.msg = choose(p.chosen()) or ""
-                    if not p.msg:
-                        return True
-                    break
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
-        sys.stdout.write(PASTE_OFF + "\x1b[H\x1b[2J")
-        sys.stdout.flush()
-
-
-def cmd_pick(args):
-    if args.pane:
-        return pick_pane(args)
-    try:
-        home = find_repo(args.from_block)
-    except Fail:
-        home = None
-    items = pick_items(home)
-    lines = pick_lines(items)
-    if args.filter is not None:
-        for i in pick_filter(args.filter, lines):
-            print(lines[i])
-        return
-    if not sys.stdin.isatty():
-        raise Fail("pick needs a terminal (--filter prints the matching tasks instead)")
-
-    def choose(i):
-        """Go to the task's pane; with none (queued, stopped, a pane that's gone), to
-        its board with the task selected; failing both, why it couldn't go there."""
-        r, t = items[i]
-        go = lambda *more: subprocess.run(
-            [SELF, "go", t["id"], "--repo", str(r.root), *more,
-             *(["--session", args.session] if args.session else [])],
-            stdin=subprocess.DEVNULL, text=True, capture_output=True)
-        p = go()
-        if p.returncode and go("--board").returncode == 0:
-            return None
-        return None if p.returncode == 0 else (p.stderr.strip().removeprefix("bullpen: ") or "couldn't go there")
-
-    pick_tui(Picker(lines, [mark_color(t) for _, t in items]), choose)
-
-
-def pick_pane(args):
-    """Open the picker in a floating pane in the middle of the window of the pane you're
-    in; it closes itself when you choose or press esc. One picker at a time."""
-    session = args.session or os.environ.get("REX_SESSION")
-    view = rex_view(session)
-    for _, _, b in find_panes(view, PICK_LABEL):
-        rex_close(session, b)
-    argv = [SELF, "pick", *(["--from", args.from_block] if args.from_block else []),
-            *(["--session", session] if session else [])]
-    spec = {"bounds": PICK_BOUNDS, "layout": {"block": {
-        "flavor": TERMINAL, "label": PICK_LABEL,
-        "options": {"command": with_state(argv), "cwd": str(Path.home())}}}}
-    where = find_pane(view, block=args.from_block) if args.from_block else None
-    if where:
-        spec["window_id"] = where[0]
-    r = rex_api(session, "session.new_layer", spec)
-    set_layer(session, r["layer_id"], "normal", focus=True)
-
-
-def seconds_since(stamp, at=None):
-    at = at or dt.datetime.now().astimezone()
-    return (at - dt.datetime.fromisoformat(stamp)).total_seconds()
-
-
 BOARD_SRC = HOME / "board"
 TARGET = BOARD_SRC / "target"
 # What boards run: a copy of cargo's output, renamed into place once it's whole, so a
@@ -6309,581 +4714,6 @@ def cmd_board(args):
         raise Fail(f"the board isn't built: run {HOME / 'install.sh'} (needs cargo)")
     mine = ["--coordinator", args.coordinator] if args.coordinator else []
     os.execv(exe, [exe, "--dir", str(repo.dir), "--root", str(repo.root), "--bullpen", SELF, *mine])
-
-
-# ---------- rebuilding the board when its source changes ----------
-#
-# bullpen's own checkout (HOME) builds the board. Its source has a hash; the build
-# records the hash it was built from (BOARD_STAMP). `up`, and an accept in HOME's own
-# repo, start a build in the background when the source no longer matches. A running
-# board sees its program replaced and execs the new one. A build that fails, or one
-# skipped because board/ has uncommitted changes, is one news line per source hash, and
-# the old board keeps running.
-
-def board_sources():
-    d = BOARD_SRC
-    return [d / "Cargo.toml", d / "Cargo.lock", *(p for p in (d / "src").rglob("*") if p.is_file())]
-
-
-def board_source_hash():
-    """A hash of the board's source: Cargo.toml, Cargo.lock and src/, by path."""
-    parts = {str(p.relative_to(BOARD_SRC)): file_hash(p) for p in board_sources() if p.is_file()}
-    return hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()
-
-
-def board_dirty():
-    """Does HOME have uncommitted changes to the board's source (new files too)?"""
-    p = git(HOME, "status", "--porcelain", "--", "board/Cargo.toml", "board/Cargo.lock", "board/src",
-            check=False)
-    return p.returncode == 0 and bool(p.stdout.strip())
-
-
-def lock_board(wait):
-    """The build lock's open file, locked, or None when another build holds it (wait=False)."""
-    TARGET.mkdir(parents=True, exist_ok=True)
-    f = BOARD_LOCK.open("a")
-    try:
-        fcntl.flock(f, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
-    except BlockingIOError:
-        f.close()
-        return None
-    return f
-
-
-def board_building():
-    if not BOARD_LOCK.exists():
-        return False
-    f = lock_board(wait=False)
-    if f is None:
-        return True
-    f.close()
-    return False
-
-
-def set_board_stamp(**kw):
-    st = read_json(BOARD_STAMP, {})
-    st.update(kw)
-    write_json(BOARD_STAMP, {k: v for k, v in st.items() if v})
-
-
-BOARD_NEWS = {"id": "board"}  # the news log's task column for these lines
-
-
-def rebuild_board_if_stale(repo):
-    """`up`, and an accept in HOME's own repo: when the board's source isn't what it
-    was built from, build it in the background. Says what it started; never fails."""
-    try:
-        if os.environ.get("BULLPEN_BOARD") or not (BOARD_SRC / "Cargo.toml").exists():
-            return None  # a board of the person's own choosing, or no source to build
-        src, st = board_source_hash(), read_json(BOARD_STAMP, {})
-        if src in (st.get("source"), st.get("failed")):
-            return None  # current, or its build failed already: doctor says so
-        if board_dirty():
-            if st.get("skipped") != src:
-                set_board_stamp(skipped=src)
-                news(repo, BOARD_NEWS, "board", (
-                    f"The board wasn't rebuilt: {BOARD_SRC} has uncommitted changes, and a build would take "
-                    f"them in. Boards keep running the old one. Commit or drop them, then run `bullpen up` "
-                    f"(or `bullpen build-board` to build them as they are)."), everyone=True)
-            return None
-        lock = lock_board(wait=False)
-        if lock is None:
-            return None  # a build is running: it checks the source again when it's done
-        with lock:
-            subprocess.Popen([SELF, "_build_board", "--lock-fd", str(lock.fileno())], cwd=repo.root,
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             start_new_session=True, pass_fds=(lock.fileno(),))
-        return "rebuilding the board in the background (its source changed); running boards reload when it's done"
-    except (Fail, OSError) as e:
-        print(f"bullpen: couldn't check the board: {e}", file=sys.stderr)
-        return None
-
-
-MISE_NO_VERSION = "No version is set for shim"
-
-
-def cargo_command():
-    """[cargo] to build with, or (None, why not)."""
-    cargo = shutil.which("cargo")
-    if not cargo:
-        rustup = Path.home() / ".cargo" / "bin" / "cargo"
-        if os.access(rustup, os.X_OK):
-            return [str(rustup)], None
-        return None, "cargo isn't on PATH (install Rust: https://rustup.rs)"
-    return [cargo], None
-
-
-def run_cargo(cargo, log):
-    """Build the board with cargo, its output appended to log: (ok, why not)."""
-    argv = [*cargo, "build", "--release", "--manifest-path", str(BOARD_SRC / "Cargo.toml")]
-    p = subprocess.run(argv, cwd=BOARD_SRC, stdin=subprocess.DEVNULL, text=True, capture_output=True)
-    log.write(f"$ {' '.join(argv)}\n{p.stdout}{p.stderr}")
-    log.flush()
-    if p.returncode == 0:
-        return True, None
-    out = p.stdout + p.stderr
-    if MISE_NO_VERSION in out:
-        rustup = Path.home() / ".cargo" / "bin" / "cargo"
-        if os.access(rustup, os.X_OK) and rustup.resolve() != Path(cargo[0]).resolve():
-            log.write(f"{cargo[0]} is a mise shim with no version set here: trying {rustup}\n")
-            return run_cargo([str(rustup)], log)
-        return False, (f"{cargo[0]} is a mise shim with no Rust version set for {BOARD_SRC}: set one "
-                       f"(for example `mise use -g rust`, or a mise.toml in {HOME}), or install rustup's cargo")
-    lines = [l for l in out.splitlines() if l.strip()]
-    err = next((l for l in lines if l.startswith("error")), lines[-1] if lines else f"exit {p.returncode}")
-    return False, f"cargo failed: {err.strip()}"
-
-
-def build_board(background):
-    """Build the board and put it in place: (ok, what happened). In the background, it
-    first checks that the source still needs it."""
-    src = board_source_hash()
-    st = read_json(BOARD_STAMP, {})
-    if background and src in (st.get("source"), st.get("failed")):
-        return True, None
-    with BOARD_LOG.open("w") as log:
-        log.write(f"{now()} building the board from {BOARD_SRC}\n")
-        cargo, why = cargo_command()
-        ok = False
-        if cargo:
-            ok, why = run_cargo(cargo, log)
-        if ok and not os.access(CARGO_BOARD, os.X_OK):
-            ok, why = False, f"cargo made no {CARGO_BOARD}"
-        if not ok:
-            log.write(f"failed: {why}\n")
-            set_board_stamp(failed=src)
-            return False, why
-        # A copy, renamed into place: a running board never sees a half-written file.
-        tmp = TARGET / f".bullpen-board.{os.getpid()}"
-        shutil.copy2(CARGO_BOARD, tmp)
-        os.replace(tmp, BOARD)
-        write_json(BOARD_STAMP, {"source": src})
-        log.write(f"built {BOARD}\n")
-    return True, f"built the board: {BOARD}"
-
-
-def cmd_build_board(args):
-    """Build the board now, whatever board/ holds (install.sh runs this)."""
-    lock = lock_board(wait=False)
-    if lock is None:
-        print("another build of the board is running: waiting for it")
-        lock = lock_board(wait=True)
-    with lock:
-        ok, said = build_board(background=False)
-    if not ok:
-        raise Fail(f"the board wasn't built: {said} (log: {BOARD_LOG})")
-    print(said)
-
-
-def cmd_build_board_bg(args):
-    """`up` or accept started this, holding the build lock for it (--lock-fd), which
-    it keeps until it's done, news included."""
-    with open(args.lock_fd, "a", closefd=True):
-        try:
-            ok, said = build_board(background=True)
-        except Exception as e:  # noqa: BLE001 - say it once, whatever it was
-            ok, said = False, f"{type(e).__name__}: {e}"
-            set_board_stamp(failed=board_source_hash())
-        if ok:
-            return 0
-        try:
-            repo = Repo(repo_root())
-        except (Fail, ValueError):
-            return 1
-        news(repo, BOARD_NEWS, "board", f"The board wasn't rebuilt: {said}. Boards keep running the old one. "
-             f"Log: {BOARD_LOG}. Fix it, then run `bullpen build-board`.", everyone=True)
-        return 1
-
-
-def keys_line():
-    opts = f'bin = "{SELF}"'
-    if os.environ.get("BULLPEN_STATE"):
-        opts += f', state = "{STATE}"'
-    return f'dofile("{KEYS_LUA}").setup{{ {opts} }}'
-
-
-def rex_config_path():
-    """The init.lua Rex reads: REX_CONFIG, else rex/init.lua in the config directory."""
-    if os.environ.get("REX_CONFIG"):
-        return Path(os.environ["REX_CONFIG"]).expanduser()
-    base = os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
-    return Path(base) / "rex" / "init.lua"
-
-
-KEYS_IN_CONFIG = re.compile(r"""dofile\s*\(\s*["']([^"']*keys\.lua)["']\s*\)\s*\.\s*setup""")
-
-
-def cmd_keys(args):
-    if args.install:
-        return install_keys()
-    print(f"-- Add to your Rex config (rex config shows where), then run `rex config reload`\n"
-          f"-- (`bullpen keys --install` does both):\n"
-          f"{keys_line()}\n"
-          f"-- Defaults: cmd+;>n next task needing you, cmd+;>b board, cmd+;>c coordinator,\n"
-          f"-- cmd+;>j jump to any open task (type part of it, in any repository),\n"
-          f"-- and ctrl+escape puts the worker pane you're in back into its capsule.\n"
-          f'-- Change them with prefix = "...", or keys = {{ next = ..., board = ..., coordinator = ..., jump = ..., hide = ... }}.')
-
-
-def install_keys():
-    """Add bullpen's line to the end of the Rex config if it isn't there, then reload.
-    It only ever appends: what's above it (a hook that must run first, say) stays put."""
-    path = rex_config_path()
-    try:
-        text = path.read_text()
-    except FileNotFoundError:
-        text = ""
-    found = [m.group(1) for m in KEYS_IN_CONFIG.finditer(text)]
-    if any(Path(f).expanduser().resolve() == KEYS_LUA.resolve() for f in found):
-        print(f"already in {path}")
-    elif found:
-        raise Fail(f"{path} already loads another keys.lua ({found[0]}): change that line to\n{keys_line()}")
-    else:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        gap = "" if not text else "\n" if text.endswith("\n") else "\n\n"  # a blank line after what's there
-        with open(path, "a") as f:
-            f.write(f"{gap}-- bullpen's keys (`bullpen keys` says what they are)\n{keys_line()}\n")
-        print(f"added to the end of {path}")
-    if not shutil.which(REX):
-        raise Fail("rex isn't on PATH: run `rex config reload` once it is")
-    p = run([REX, "config", "reload"], check=False)
-    if p.returncode != 0:
-        raise Fail(f"`rex config reload` failed: {(p.stderr or p.stdout).strip() or 'it said nothing'}")
-    print("Rex config reloaded: the cmd+; keys work now")
-
-
-# ---------- doctor: is everything bullpen needs in place? ----------
-#
-# Each check returns (state, what it found): "ok", "fail" (with the fix in the text)
-# or "skip" (it doesn't apply, or can't be told). `doctor` runs them all; `up` runs
-# the cheap ones (no network, nothing `up` itself just fixed) and only counts problems.
-
-REX_MIN = (0, 1, 0, 13)  # preview.13: minimized floating panes
-KEY_ACTIONS = ("bullpen_next", "bullpen_board", "bullpen_coordinator", "bullpen_jump")
-
-
-def rex_version_key(text):
-    """(major, minor, patch, preview) from "0.1.0-preview.13"; a release sorts after its
-    previews. None if it isn't a version."""
-    m = re.match(r"v?(\d+)\.(\d+)\.(\d+)(?:-preview\.(\d+))?$", (text or "").strip())
-    if not m:
-        return None
-    pre = m.group(4)
-    return (*map(int, m.group(1, 2, 3)), int(pre) if pre else float("inf"))
-
-
-def check_rex():
-    exe = shutil.which(REX)
-    if not exe:
-        return "fail", f"{REX} isn't on PATH: install Rex (https://www.superlogical.com/rex)"
-    p = run([REX, "server", "status", "--json"], check=False)
-    if p.returncode != 0:
-        return "fail", f"{exe}, but its server doesn't answer: start Rex, or run `rex server start`"
-    try:
-        version = json.loads(p.stdout).get("rex_version")
-    except (ValueError, AttributeError):
-        version = None
-    key = rex_version_key(version)
-    if key is None:
-        return "skip", f"{exe}; can't tell the server's version ({version or 'none given'})"
-    if key < REX_MIN:
-        return "fail", (f"the server is {version}; bullpen needs 0.1.0-preview.13 or later "
-                        f"(minimized floating panes): update Rex and restart its server")
-    return "ok", f"server {version}, {exe}"
-
-
-def check_gh(repo):
-    if not repo or not repo.has_origin():
-        return "skip", "local mode (no origin remote): gh isn't needed"
-    gh = repo.gh()
-    exe = shutil.which(gh)
-    if not exe:
-        return "fail", f"{gh} isn't on PATH, and this repo has a remote: install gh (https://cli.github.com)"
-    p = run([exe, "auth", "status"], check=False)
-    if p.returncode != 0:
-        return "fail", f"{exe} isn't signed in: run `gh auth login`"
-    return "ok", f"signed in, {exe}"
-
-
-def check_agents(cfg):
-    """The programs the coordinator, workers and reviewers run (claude, unless changed)."""
-    progs = {}
-    for key in ("coordinator_cmd", "worker", "reviewer"):
-        if cfg.get(key):
-            progs.setdefault(cfg[key][0], []).append(key)
-    missing = [(p, keys) for p, keys in progs.items() if not shutil.which(p)]
-    if missing:
-        return "fail", "; ".join(
-            (f"{p} isn't on PATH: install Claude Code (https://claude.com/claude-code)" if Path(p).name == "claude"
-             else f"{p} isn't on PATH") + f" (config.json's {', '.join(keys)})" for p, keys in missing)
-    return "ok", ", ".join(shutil.which(p) for p in progs)
-
-
-def check_board():
-    """Built from the board's source as it is now (see board_source_hash)."""
-    if os.environ.get("BULLPEN_BOARD"):
-        exe = Path(os.environ["BULLPEN_BOARD"])
-        if os.access(exe, os.X_OK):
-            return "ok", f"{exe} (BULLPEN_BOARD)"
-        return "fail", f"BULLPEN_BOARD is {exe}, which isn't an executable file"
-    build = f"run `{SELF} build-board`"
-    cargo = "" if shutil.which("cargo") else " (it needs cargo: https://rustup.rs)"
-    if board_building():
-        return "ok", f"being rebuilt now (log: {BOARD_LOG}); running boards reload when it's done"
-    if not os.access(BOARD, os.X_OK):
-        return "fail", f"not built: {build}{cargo}"
-    src, st = board_source_hash(), read_json(BOARD_STAMP, {})
-    if st.get("source") == src:
-        return "ok", f"{BOARD}, built from board/ as it is"
-    if st.get("failed") == src:
-        return "fail", f"older than board/: its build failed (log: {BOARD_LOG}). Fix that, then {build}{cargo}"
-    if board_dirty():
-        return "fail", (f"older than board/, which has uncommitted changes, so bullpen won't build it by "
-                        f"itself: commit them, or {build} to build them as they are")
-    return "fail", f"older than board/: `bullpen up` rebuilds it in the background, or {build}{cargo}"
-
-
-def check_keys():
-    """Rex lists the actions its config defines: bullpen's keys define four."""
-    if not shutil.which(REX):
-        return "skip", "can't tell without rex"
-    p = run([REX, "actions", "--json"], check=False)
-    try:
-        actions = json.loads(p.stdout)["actions"] if p.returncode == 0 else None
-    except (ValueError, KeyError, TypeError):
-        actions = None
-    if actions is None:
-        return "skip", "can't tell: `rex actions --json` didn't list the actions"
-    have = {a.get("name"): a for a in actions}
-    missing = [a for a in KEY_ACTIONS if a not in have]
-    if missing and len(missing) < len(KEY_ACTIONS):
-        # the line is in the config, but Rex loaded keys.lua before it had these
-        return "fail", (f"{', '.join(missing)} missing: Rex loaded an older keys.lua. "
-                        f"Run `rex config reload`")
-    if missing:
-        return "fail", "not in your Rex config: run `bullpen keys --install`"
-    src = (have[KEY_ACTIONS[0]].get("source") or "").rsplit(":", 1)[0]
-    return "ok", f"set up, from {src}" if src else "set up"
-
-
-def check_watcher():
-    w = read_json(STATE / "watcher.json", {})
-    if not w.get("block"):
-        return "fail", "never started: run `bullpen up`"
-    if not rex_alive(w.get("session"), w["block"]):
-        return "fail", f"not running (its pane {w['block']} is gone): run `bullpen up`"
-    if w.get("stamp") != watcher_stamp():
-        return "fail", (f"running ({w['block']}), but from an older watch.lua or bullpen: "
-                        f"run `bullpen up` to restart it")
-    return "ok", f"running and current, {w['block']}"
-
-
-def check_state():
-    try:
-        STATE.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(dir=STATE, prefix=".doctor-"):
-            pass
-    except OSError as e:
-        return "fail", f"can't write to {STATE}: {e.strerror or e}. Fix its permissions, or set BULLPEN_STATE"
-    return "ok", f"{STATE} is writable"
-
-
-def check_config(d):
-    path = d / "config.json"
-    if not path.exists():
-        return "skip", "none yet: `bullpen up` here makes one"
-    try:
-        json.loads(path.read_text())
-    except ValueError as e:
-        return "fail", f"{path} doesn't parse ({e}): fix it, or move it away and run `bullpen up`"
-    return "ok", f"{path} parses"
-
-
-def check_global():
-    """The global config.json, if there is one, parses and holds no repository's own keys."""
-    path = global_config_path()
-    if not path.exists():
-        return "skip", f"none ({path}; `bullpen config --global` makes one)"
-    try:
-        g = read_global_file()
-    except Fail as e:
-        return "fail", str(e)
-    bad = [k for k in g if k in REPO_ONLY or k in INTERNAL]
-    if bad:
-        return "fail", (f"{path} sets {', '.join(bad)}, which only a repository can have: "
-                        "remove it from the file (each repo's `bullpen config` sets it)")
-    return "ok", f"{path} parses"
-
-
-def global_parses():
-    try:
-        read_global_file()
-        return True
-    except Fail:
-        return False
-
-
-def shell_word_found(word, cwd):
-    """Is word something sh can run here: a program on PATH, a path, or a builtin?"""
-    return run(["sh", "-c", 'command -v "$1" >/dev/null', "sh", word], cwd=cwd, check=False).returncode == 0
-
-
-def shebang_program(argv):
-    """The program a #! line runs: its first word, or for env, the first word after
-    env's options (-S splits its string) and NAME=value settings."""
-    if Path(argv[0]).name != "env":
-        return argv[0]
-    words, skip = argv[1:], False
-    for w in words:
-        if skip:
-            skip = False
-        elif w in ("-u", "-C", "--unset", "--chdir"):
-            skip = True  # their argument follows
-        elif w.startswith("-S") and len(w) > 2:
-            return w[2:]  # -Sbash
-        elif not w.startswith("-") and "=" not in w:
-            return w
-    return None
-
-
-def check_hook(repo, name, why_not=None):
-    """The setup (or teardown) a new task would get: config.json's command, else
-    .bullpen/<name>.sh as committed on the base. It must parse and find what it runs."""
-    if not repo:
-        return "skip", f"can't tell: {why_not or 'not in a git repository'}"
-    cmd = repo.cfg.get(name)
-    path = f".bullpen/{name}.sh"
-    if cmd:
-        source = f"config.json's {name}"
-        if run(["sh", "-n", "-c", cmd], check=False).returncode != 0:
-            return "fail", f"{source} isn't valid sh: fix it with `bullpen config --{name} \"<cmd>\"`"
-        try:
-            word = shlex.split(cmd)[0]
-        except (ValueError, IndexError):
-            word = None
-        if word and "=" not in word and not shell_word_found(word, repo.root):
-            return "fail", f"{source} runs {word}, which isn't on PATH: install it, or fix the command"
-        return "ok", f"{source}: {cmd}"
-    base = repo.base()
-    ref = f"origin/{base}" if repo.has_origin() and git(
-        repo.root, "rev-parse", "-q", "--verify", f"origin/{base}", check=False).returncode == 0 else base
-    p = git(repo.root, "show", f"{ref}:{path}", check=False)
-    text = p.stdout if p.returncode == 0 and p.stdout.strip() else None
-    if text is None:
-        if (repo.root / path).exists():
-            return "fail", f"{path} isn't committed on {ref}, so it won't run: commit it (and push it)"
-        return "skip", f"none ({path} or `bullpen config --{name}`)"
-    first = text.splitlines()[0]
-    if first.startswith("#!"):
-        argv = first[2:].split()
-        if not argv:
-            return "fail", f"{path} on {ref} has an empty #! line: name its interpreter, or remove the line"
-        prog = shebang_program(argv)
-        if not prog:
-            return "fail", f"{path} on {ref} has a #! line that names no program: fix it"
-        if not (os.access(prog, os.X_OK) if "/" in prog else shutil.which(prog)):
-            return "fail", f"{path} on {ref} runs under {prog}, which isn't here: install it, or fix its #! line"
-        shell = Path(prog).name
-    else:
-        shell = "sh"
-    if shell in ("sh", "bash", "dash", "zsh") and run([shell, "-n"], input=text, check=False).returncode != 0:
-        return "fail", f"{path} on {ref} isn't valid {shell}: `{shell} -n {path}` says where"
-    return "ok", f"{path} on {ref}" + ("" if first.startswith("#!") else ", run under sh")
-
-
-def check_coordinators(repo, why_not=None):
-    """The coordinators config.json lists still have their panes (and boards)."""
-    if not repo and why_not:
-        return "skip", f"can't tell: {why_not}"
-    if not repo or not repo.cfg["coordinators"]:
-        return "skip", "none yet: run `bullpen up`"
-    gone, old, ok_ = [], [], []
-    for c in repo.cfg["coordinators"]:
-        if not alive(c):
-            gone.append(f"{c['id']}'s pane ({c.get('block')}) is gone")
-            continue
-        b = c.get("board") or {}
-        if b.get("block") and not rex_alive(b.get("session"), b["block"]):
-            gone.append(f"{c['id']}'s board ({b['block']}) is gone")
-        elif b.get("block") and old_board(b):
-            old.append(f"{c['id']}'s board is from an older build")
-        else:
-            ok_.append(f"{c['id']} ({c['block']})")
-    if gone or old:
-        return "fail", "; ".join(
-            ([("; ".join(gone) + ": run `bullpen up`, which drops gone coordinators and reopens boards")]
-             if gone else [])
-            + ([", ".join(old) + ": `bullpen up` restarts " + ("it" if len(old) == 1 else "them")]
-               if old else []))
-    return "ok", ", ".join(ok_)
-
-
-def doctor_repo():
-    """This repo's Repo and its state folder, or (None, folder or None): outside a git
-    repository, or when its config.json doesn't parse."""
-    try:
-        root = repo_root()
-    except Fail:
-        return None, None
-    d = STATE / "repos" / safe(str(root).strip("/").replace("/", "-"))
-    try:
-        return Repo(root), d
-    except (ValueError, Fail):  # its config.json, or the global one, doesn't parse
-        return None, d
-
-
-def doctor_checks(cheap=False):
-    """[(name, state, text)]. cheap leaves out what needs the network or what `up` sees to."""
-    repo, d = doctor_repo()
-    cfg = repo.cfg if repo else DEFAULT_CONFIG
-    why_not = None if repo or not d else \
-        "config.json doesn't parse" if global_parses() else "the global config.json doesn't parse"
-    out = [("rex", check_rex)]
-    if not cheap:
-        out.append(("gh", lambda: check_gh(repo)))
-    out += [("agents", lambda: check_agents(cfg)), ("board", check_board), ("keys", check_keys)]
-    if not cheap:
-        out.append(("watcher", check_watcher))
-    out.append(("state", check_state))
-    out.append(("global", check_global))
-    if d:
-        out.append(("config", lambda: check_config(d)))
-    out += [("setup", lambda: check_hook(repo, "setup", why_not)),
-            ("teardown", lambda: check_hook(repo, "teardown", why_not))]
-    if not cheap:
-        out.append(("coordinators", lambda: check_coordinators(repo, why_not)))
-        out.append(("push", lambda: check_push(repo, why_not)))
-    res = []
-    for name, fn in out:
-        try:
-            res.append((name, *fn()))
-        except (Fail, OSError) as e:
-            res.append((name, "skip", f"can't tell: {e}"))
-    return res
-
-
-def problems_phrase(n):
-    return f"{n} problem{'s' if n != 1 else ''}"
-
-
-def cmd_doctor(args):
-    res = doctor_checks()
-    marks = {"ok": "ok", "fail": "FAIL", "skip": "--"}
-    for name, state, text in res:
-        print(f"{marks[state]:<4}  {name}: {homes(text)}")
-    failed = [name for name, state, _ in res if state == "fail"]
-    n = len(failed)
-    print(f"{problems_phrase(n)}: {', '.join(failed)}." if n else "All good.")
-    return 1 if n else 0
-
-
-def up_hint():
-    """`up`'s one line about problems doctor would find, or None."""
-    try:
-        n = sum(state == "fail" for _, state, _ in doctor_checks(cheap=True))
-    except Exception:  # a hint must never break up
-        return None
-    return f"{problems_phrase(n)}: run `bullpen doctor`" if n else None
 
 
 # ---------- triage: stops the coordinator sees to ----------
@@ -7723,11 +5553,6 @@ def mark_following():
     (STATE / "prs").touch()
 
 
-def clip(text, n=300):
-    text = " ".join((text or "").split())
-    return text if len(text) <= n else text[: n - 1] + "…"
-
-
 def checks(pr):
     """(summary, names of failed checks) from a PR's statusCheckRollup."""
     failed, running, total = [], False, 0
@@ -7904,72 +5729,11 @@ def send_back(repo, t, lines, ask):
          f"`bullpen resume {t['id']}` restarts it" for line in lines], "pr-feedback")
 
 
-# ---------- main ----------
+# ---------- core's commands, for bullpen's parser (cli.py) ----------
 
-# `bullpen --help` lists the commands in these groups, in this order. A label in a
-# command's help that the group's title already says ("(coordinator) ") is left out.
-HELP_GROUPS = [
-    ("You", "(the person's call) ",
-     ["pick", "go", "hide", "board", "ls", "show", "diff", "tour", "tour-comment",
-      "answer", "reply", "accept", "close", "drop"]),
-    ("Coordinator", "(coordinator) ",
-     ["add", "after", "model", "review-mode", "start", "resume", "tell", "peek", "prompt",
-      "adopt", "ask", "ok", "review", "note", "check", "news", "guide"]),
-    ("Worker and reviewer", "",
-     ["ready", "finish", "verdict"]),
-    ("Setup", "",
-     ["up", "doctor", "keys", "config", "rules", "build-board"]),
-]
-USAGE = "usage: bullpen COMMAND [ARGS]\n"
-
-
-class Parser(argparse.ArgumentParser):
-    """The top-level parser: a short usage line and the commands in groups."""
-
-    def format_usage(self):
-        return USAGE
-
-    def format_help(self):
-        sub = next(a for a in self._actions if isinstance(a, argparse._SubParsersAction))
-        helps = {a.dest: a.help for a in sub._choices_actions}
-        width = max(shutil.get_terminal_size().columns - 2, 40)
-        name_w = max(len(n) for _, _, names in HELP_GROUPS for n in names) + 2
-        out = [USAGE, "\n" + textwrap.fill(self.description, width) + "\n"]
-        for title, label, names in HELP_GROUPS:
-            out.append(f"\n{title}:\n")
-            for n in names:
-                h = helps[n].removeprefix(label)
-                out.append(textwrap.fill(h, width, initial_indent=f"  {n:<{name_w}}",
-                                         subsequent_indent=" " * (name_w + 2)) + "\n")
-        out.append("\n" + textwrap.fill("`bullpen COMMAND --help` says more about one.", width) + "\n")
-        return "".join(out)
-
-
-def unknown_command(argv, choices):
-    """The one-line error for a command bullpen doesn't have, else None."""
-    if not argv or argv[0] in ("-h", "--help") or argv[0] in choices:
-        return None
-    name = argv[0]
-    if name.startswith("-"):
-        return f"bullpen: `{name}` goes after a command. `bullpen --help` lists them."
-    close = difflib.get_close_matches(name, [n for n in choices if not n.startswith("_")], n=1)
-    hint = f" Did you mean `{close[0]}`?" if close else ""
-    return f"bullpen: no command `{name}`.{hint} `bullpen --help` lists them."
-
-
-def parser():
-    ap = Parser(prog="bullpen", description=__doc__.splitlines()[0])
-    sub = ap.add_subparsers(dest="cmd", required=True, parser_class=argparse.ArgumentParser)
-
-    p = sub.add_parser("up", help="start (or register) this repo's coordinator and the watcher")
-    p.add_argument("--here", action="store_true", help="make the agent in this pane the coordinator")
-    p.add_argument("--session", help="Rex session (default: this pane's)")
-    p.add_argument("--no-board", action="store_true", help="don't open the task board")
-    p.add_argument("--verbose", action="store_true",
-                   help="name each pane's block ID, and how news reaches the coordinator")
-    p.set_defaults(fn=cmd_up)
-
-    p = sub.add_parser("go", help="focus a task's pane (or the coordinator's, or the board's)")
+def commands(sub):
+    """This module's commands, for bullpen's parser."""
+    p = command(sub, "go", cmd_go, "You", help="focus a task's pane (or the coordinator's, or the board's)")
     p.add_argument("id", nargs="?", help="the task (default: the coordinator)")
     p.add_argument("--next", action="store_true",
                    help="the next task that needs you; once none does, the board on one ready to accept")
@@ -7983,42 +5747,57 @@ def parser():
     p.add_argument("--session", help="the session you're in (key bindings pass it)")
     p.add_argument("--repo", help="the repository the task is in (default: the pane's, else this folder's)")
     p.add_argument("--json", action="store_true", help="print the target instead of focusing it")
-    p.set_defaults(fn=cmd_go)
 
-    p = sub.add_parser("pick", help="type part of any open task, in any repository, and go to it")
-    p.add_argument("--pane", action="store_true", help="open the picker in a floating pane (the jump key)")
-    p.add_argument("--filter", metavar="QUERY", help="print the open tasks matching QUERY, best first")
-    p.add_argument("--from", dest="from_block", default=os.environ.get("REX_BLOCK"),
-                   help="the pane you're in (default: this one)")
-    p.add_argument("--session", help="the session you're in (key bindings pass it)")
-    p.set_defaults(fn=cmd_pick)
-
-    p = sub.add_parser("hide", help="put the worker pane you're in back into its capsule")
+    p = command(sub, "hide", cmd_hide, "You", help="put the worker pane you're in back into its capsule")
     p.add_argument("--from", dest="from_block", default=os.environ.get("REX_BLOCK"),
                    help="the pane to put away (default: this one)")
     p.add_argument("--session", help="the session you're in (key bindings pass it)")
-    p.set_defaults(fn=cmd_hide)
 
-    p = sub.add_parser("board", help="a live list of tasks to switch between")
+    p = command(sub, "board", cmd_board, "You", help="a live list of tasks to switch between")
     p.add_argument("--coordinator", help="the coordinator it sits beside: its tasks are marked")
-    p.set_defaults(fn=cmd_board)
 
-    p = sub.add_parser("build-board", help="build the board from board/ now and put it in place (install.sh runs it)")
-    p.set_defaults(fn=cmd_build_board)
+    p = command(sub, "ls", cmd_ls, "You", help="list tasks")
+    p.add_argument("--all", action="store_true", help="closed tasks too (done and dropped)")
+    p.add_argument("--all-repos", action="store_true",
+                   help="every repository bullpen knows, by repository (those with nothing open left out)")
+    p.add_argument("--json", action="store_true", help="the task records as JSON, with their raw status "
+                   "(with --all-repos: a list of {repo, tasks})")
 
-    p = sub.add_parser("keys", help="print the Rex config line for bullpen's key bindings")
-    p.add_argument("--install", action="store_true",
-                   help="add the line to the end of your Rex config if it's missing, then `rex config reload`")
-    p.set_defaults(fn=cmd_keys)
+    p = command(sub, "show", cmd_show, "You", help="one task")
+    p.add_argument("id", help="the task, like BP-3")
+    p.add_argument("--json", action="store_true", help="its task record as JSON")
 
-    p = sub.add_parser("doctor", help="check bullpen's setup: one line per check, with the fix for what's wrong")
-    p.set_defaults(fn=cmd_doctor)
+    p = command(sub, "diff", cmd_diff, "You",
+                help="a task's changes against its base, in a pager (delta if installed)")
+    p.add_argument("id", help="the task, like BP-3")
+    p.add_argument("--stat", action="store_true", help="just the files changed, no pager")
+    p.add_argument("--pane", action="store_true", help="show it in a floating pane (the board's v)")
+    p.add_argument("--back", action="store_true", help=argparse.SUPPRESS)  # focus the board after
+    p.add_argument("--session", help="the Rex session for its pane (default: the coordinator's)")
 
-    p = sub.add_parser("adopt", help="(coordinator) make tasks yours: their news comes to this pane")
-    p.add_argument("ids", nargs="+", metavar="ID", help="the tasks")
-    p.set_defaults(fn=cmd_adopt)
+    p = command(sub, "answer", cmd_answer, "You", help="press an option of the prompt a task's agent is at")
+    p.add_argument("id", help="the task, like BP-3")
+    p.add_argument("key", help="the option: its number, or y or n")
+    p.add_argument("--prompt", metavar="ID", help="refuse unless it is still this prompt (its id from `prompt`)")
 
-    p = sub.add_parser("add", help="add a task; prints its ID")
+    p = command(sub, "reply", cmd_reply, "You",
+                help="answer what the coordinator asked about a task: it goes to the coordinator")
+    p.add_argument("id", help="the task, like BP-3")
+    p.add_argument("answer", nargs="+", help="the answer")
+
+    p = command(sub, "accept", cmd_accept, "You",
+                help="(the person's call) merge a ready task's PR, or its local branch without a remote (config --merge), and clean up; on a finished task (nothing to merge), close it")
+    p.add_argument("id", help="the task, like BP-3")
+
+    p = command(sub, "close", cmd_close, "You",
+                help="(the person's call) close a finished task: remove its worktree, branch and pane (the same as accept on it)")
+    p.add_argument("id", help="the task, like BP-3")
+
+    p = command(sub, "drop", cmd_drop, "You", help="stop a task, close its PR, remove its worktree")
+    p.add_argument("id", help="the task, like BP-3")
+    p.add_argument("--force", action="store_true", help="drop it even with uncommitted changes in its worktree")
+
+    p = command(sub, "add", cmd_add, "Coordinator", help="add a task; prints its ID")
     p.add_argument("title", help="a short name for the task")
     p.add_argument("--brief", help="what the worker should do, as text")
     p.add_argument("--brief-file", metavar="FILE", help="the same, read from a file (over --brief)")
@@ -8033,26 +5812,25 @@ def parser():
                    help="accept it by itself once review approves it, whatever config --auto-accept says")
     p.add_argument("--no-auto-accept", dest="auto_accept", action="store_false",
                    help="keep it for you to accept even with config --auto-accept on")
-    p.set_defaults(fn=cmd_add)
 
-    p = sub.add_parser("after", help="set the tasks a task waits on (--none: nothing)")
+    p = command(sub, "after", cmd_after, "Coordinator",
+                help="set the tasks a task waits on (--none: nothing)")
     p.add_argument("id", help="the task, like BP-3")
     p.add_argument("deps", nargs="*", metavar="ID", help="the tasks it waits on: it starts once they're accepted")
     p.add_argument("--none", action="store_true", help="it waits on nothing")
-    p.set_defaults(fn=cmd_after)
 
-    p = sub.add_parser("model", help="set the worker model a task starts and resumes with (--clear: the config's)")
+    p = command(sub, "model", cmd_model, "Coordinator",
+                help="set the worker model a task starts and resumes with (--clear: the config's)")
     p.add_argument("id", help="the task, like BP-3")
     p.add_argument("model", nargs="?", help="an alias like opus, or a model ID; default: let Claude Code pick")
     p.add_argument("--clear", action="store_true", help="use the config's worker model again")
-    p.set_defaults(fn=cmd_model)
 
-    p = sub.add_parser("review-mode", help="set how a task's first review goes: full, light or auto")
+    p = command(sub, "review-mode", cmd_review_mode, "Coordinator",
+                help="set how a task's first review goes: full, light or auto")
     p.add_argument("id", help="the task, like BP-3")
     p.add_argument("mode", choices=REVIEW_MODES, help="light: a quick look; auto: light for a small or docs-only change")
-    p.set_defaults(fn=cmd_review_mode)
 
-    p = sub.add_parser("start", help="make a task's worktree and start its worker")
+    p = command(sub, "start", cmd_start, "Coordinator", help="make a task's worktree and start its worker")
     p.add_argument("id", help="the task, like BP-3")
     p.add_argument("--model", help="claude's --model for this task's worker, over the config's")
     p.add_argument("--session", help="the Rex session for its pane (default: the coordinator's)")
@@ -8062,143 +5840,92 @@ def parser():
                    help="accept it by itself once review approves it, whatever config --auto-accept says")
     p.add_argument("--no-auto-accept", dest="auto_accept", action="store_false",
                    help="keep it for you to accept even with config --auto-accept on")
-    p.set_defaults(fn=cmd_start)
 
-    p = sub.add_parser("resume", help="restart a stopped worker, continuing its conversation")
+    p = command(sub, "resume", cmd_resume, "Coordinator",
+                help="restart a stopped worker, continuing its conversation")
     p.add_argument("id", help="the task, like BP-3")
     p.add_argument("message", nargs="?", help="what to type to it first (default: carry on with your brief)")
     p.add_argument("--session", help="the Rex session for its pane (default: the coordinator's)")
-    p.set_defaults(fn=cmd_resume)
 
-    p = sub.add_parser("tell", help="type a message to a task's worker")
+    p = command(sub, "tell", cmd_tell, "Coordinator", help="type a message to a task's worker")
     p.add_argument("id", help="the task, like BP-3")
     p.add_argument("message", nargs="+", help="the words to type")
-    p.set_defaults(fn=cmd_tell)
 
-    p = sub.add_parser("peek", help="print the end of a worker's screen")
+    p = command(sub, "peek", cmd_peek, "Coordinator", help="print the end of a worker's screen")
     p.add_argument("id", help="the task, like BP-3")
     p.add_argument("--lines", type=int, default=40, help="how many lines (default 40)")
     p.add_argument("--vt", action="store_true", help="keep the screen's colours, as terminal escape codes")
-    p.set_defaults(fn=cmd_peek)
 
-    p = sub.add_parser("prompt", help="the prompt a task's agent is at, and its screen, as JSON (for the board)")
+    p = command(sub, "prompt", cmd_prompt, "Coordinator",
+                help="the prompt a task's agent is at, and its screen, as JSON (for the board)")
     p.add_argument("id", help="the task, like BP-3")
     p.add_argument("--lines", type=int, default=40, help="how many lines of screen (default 40)")
-    p.set_defaults(fn=cmd_prompt)
 
-    p = sub.add_parser("answer", help="press an option of the prompt a task's agent is at")
+    p = command(sub, "adopt", cmd_adopt, "Coordinator",
+                help="(coordinator) make tasks yours: their news comes to this pane")
+    p.add_argument("ids", nargs="+", metavar="ID", help="the tasks")
+
+    p = command(sub, "ask", cmd_ask, "Coordinator",
+                help="(coordinator) the task needs the person: the question shows on the board")
     p.add_argument("id", help="the task, like BP-3")
-    p.add_argument("key", help="the option: its number, or y or n")
-    p.add_argument("--prompt", metavar="ID", help="refuse unless it is still this prompt (its id from `prompt`)")
-    p.set_defaults(fn=cmd_answer)
+    p.add_argument("question", nargs="+", help="what the person should decide")
 
-    p = sub.add_parser("reply", help="answer what the coordinator asked about a task: it goes to the coordinator")
+    p = command(sub, "ok", cmd_ok, "Coordinator",
+                help="(coordinator) a task waiting on you is seen to: back to work, nothing typed")
     p.add_argument("id", help="the task, like BP-3")
-    p.add_argument("answer", nargs="+", help="the answer")
-    p.set_defaults(fn=cmd_reply)
 
-    p = sub.add_parser("ready", help="(worker) push the branch, open the PR (none without a remote), tell the coordinator")
+    p = command(sub, "review", cmd_review, "Coordinator",
+                help="(coordinator) a new reviewer in place of one that stopped without a verdict")
+    p.add_argument("id", help="the task, like BP-3")
+
+    p = command(sub, "note", cmd_note, "Coordinator", help="an informational line on the board about a task")
+    p.add_argument("id", help="the task, like BP-3")
+    p.add_argument("text", nargs="+", help="the line")
+
+    p = command(sub, "check", cmd_check, "Coordinator",
+                help="compare each task's status with what its agent is doing now")
+    p.add_argument("ids", nargs="*", metavar="ID", help="only these tasks")
+    p.add_argument("--fix", action="store_true",
+                   help="apply the updates the missed events would have made (news included)")
+    p.add_argument("--quiet", action="store_true", help="print nothing")
+    p.add_argument("--all-repos", action="store_true", help="every repo bullpen knows (the watcher's)")
+
+    p = command(sub, "news", cmd_news, "Coordinator",
+                help="print news logged since the last time; --follow keeps printing")
+    p.add_argument("--follow", action="store_true", help="keep running and print each line as it is logged")
+    p.add_argument("--every", type=float, default=0.5, help=argparse.SUPPRESS)  # seconds between looks
+
+    command(sub, "guide", cmd_guide, "Coordinator", help="print the coordinator's guide")
+
+    p = command(sub, "ready", cmd_ready, "Worker and reviewer",
+                help="(worker) push the branch, open the PR (none without a remote), tell the coordinator")
     p.add_argument("id", help="the task, like BP-3")
     p.add_argument("--summary", help="what you did, as text")
     p.add_argument("--summary-file", metavar="FILE", help="the same, read from a file")
-    p.set_defaults(fn=cmd_ready)
 
-    p = sub.add_parser("finish", help="(worker) the task is done with nothing to merge: no PR, no review")
+    p = command(sub, "finish", cmd_finish, "Worker and reviewer",
+                help="(worker) the task is done with nothing to merge: no PR, no review")
     p.add_argument("id", help="the task, like BP-3")
     p.add_argument("--summary", help="what you did, as text")
     p.add_argument("--summary-file", metavar="FILE", help="the same, read from a file")
-    p.set_defaults(fn=cmd_finish)
 
-    p = sub.add_parser("verdict", help="(reviewer) approve a task or send it back with findings")
+    p = command(sub, "verdict", cmd_verdict, "Worker and reviewer",
+                help="(reviewer) approve a task or send it back with findings")
     p.add_argument("id", help="the task, like BP-3")
     p.add_argument("verdict", choices=["approve", "changes"], help="approve it, or send it back with changes to make")
     p.add_argument("--summary", help="what you did, as text")
     p.add_argument("--summary-file", metavar="FILE", help="the same, read from a file")
-    p.set_defaults(fn=cmd_verdict)
 
-    p = sub.add_parser("ask", help="(coordinator) the task needs the person: the question shows on the board")
-    p.add_argument("id", help="the task, like BP-3")
-    p.add_argument("question", nargs="+", help="what the person should decide")
-    p.set_defaults(fn=cmd_ask)
+    p = command(sub, "up", cmd_up, "Setup",
+                help="start (or register) this repo's coordinator and the watcher")
+    p.add_argument("--here", action="store_true", help="make the agent in this pane the coordinator")
+    p.add_argument("--session", help="Rex session (default: this pane's)")
+    p.add_argument("--no-board", action="store_true", help="don't open the task board")
+    p.add_argument("--verbose", action="store_true",
+                   help="name each pane's block ID, and how news reaches the coordinator")
 
-    p = sub.add_parser("ok", help="(coordinator) a task waiting on you is seen to: back to work, nothing typed")
-    p.add_argument("id", help="the task, like BP-3")
-    p.set_defaults(fn=cmd_ok)
-
-    p = sub.add_parser("review", help="(coordinator) a new reviewer in place of one that stopped without a verdict")
-    p.add_argument("id", help="the task, like BP-3")
-    p.set_defaults(fn=cmd_review)
-
-    p = sub.add_parser("note", help="an informational line on the board about a task")
-    p.add_argument("id", help="the task, like BP-3")
-    p.add_argument("text", nargs="+", help="the line")
-    p.set_defaults(fn=cmd_note)
-
-    p = sub.add_parser("accept", help="(the person's call) merge a ready task's PR, or its local branch without a remote (config --merge), and clean up; on a finished task (nothing to merge), close it")
-    p.add_argument("id", help="the task, like BP-3")
-    p.set_defaults(fn=cmd_accept)
-
-    p = sub.add_parser("close", help="(the person's call) close a finished task: remove its worktree, branch and pane (the same as accept on it)")
-    p.add_argument("id", help="the task, like BP-3")
-    p.set_defaults(fn=cmd_close)
-
-    p = sub.add_parser("drop", help="stop a task, close its PR, remove its worktree")
-    p.add_argument("id", help="the task, like BP-3")
-    p.add_argument("--force", action="store_true", help="drop it even with uncommitted changes in its worktree")
-    p.set_defaults(fn=cmd_drop)
-
-    p = sub.add_parser("tour", help="a guided tour of a ready task's change: step through it "
-                       "(its path, off a terminal), or start writing one")
-    p.add_argument("id", help="the task, like BP-3")
-    p.add_argument("--wait", action="store_true", help="write it now and print its path, not in the background")
-    p.add_argument("--new", action="store_true", help="write a new tour even though there is one")
-    p.add_argument("--show", action="store_true", help="the tour's state and steps, starting nothing")
-    p.add_argument("--step", type=int, metavar="N", help="step N's hunks from git, as a patch")
-    p.add_argument("--json", action="store_true", help="with --show or --step: as JSON (for the board)")
-    p.add_argument("--send", action="store_true",
-                   help="send your draft comments to the worker: the task goes back to working")
-    p.add_argument("--pane", action="store_true",
-                   help="step through it in a floating pane (the board's g); with no tour, write one "
-                        "and open it when it's written")
-    p.add_argument("--view", action="store_true", help="step through it on this terminal")
-    p.add_argument("--path", action="store_true",
-                   help="print a written tour's path, even on a terminal (where it opens by default)")
-    p.add_argument("--back", action="store_true", help=argparse.SUPPRESS)  # then focus the board
-    p.add_argument("--from", dest="from_block", default=os.environ.get("REX_BLOCK"),
-                   help="with --pane: the pane whose window it opens over (default: this one)")
-    p.add_argument("--session", help="with --pane: the session you're in")
-    p.set_defaults(fn=cmd_tour)
-
-    p = sub.add_parser("tour-comment", help="draft comments on a tour's steps: add, list (no STEP) or remove")
-    p.add_argument("id", help="the task, like BP-3")
-    p.add_argument("step", nargs="?", type=int, help="the step the comment is on")
-    p.add_argument("text", nargs="*", help="the comment (mention a line in it to point at one)")
-    p.add_argument("--remove", type=int, metavar="N", help="remove draft comment N")
-    p.add_argument("--json", action="store_true", help="list them as JSON")
-    p.set_defaults(fn=cmd_tour_comment)
-
-    p = sub.add_parser("ls", help="list tasks")
-    p.add_argument("--all", action="store_true", help="closed tasks too (done and dropped)")
-    p.add_argument("--all-repos", action="store_true",
-                   help="every repository bullpen knows, by repository (those with nothing open left out)")
-    p.add_argument("--json", action="store_true", help="the task records as JSON, with their raw status "
-                   "(with --all-repos: a list of {repo, tasks})")
-    p.set_defaults(fn=cmd_ls)
-
-    p = sub.add_parser("show", help="one task")
-    p.add_argument("id", help="the task, like BP-3")
-    p.add_argument("--json", action="store_true", help="its task record as JSON")
-    p.set_defaults(fn=cmd_show)
-
-    p = sub.add_parser("diff", help="a task's changes against its base, in a pager (delta if installed)")
-    p.add_argument("id", help="the task, like BP-3")
-    p.add_argument("--stat", action="store_true", help="just the files changed, no pager")
-    p.add_argument("--pane", action="store_true", help="show it in a floating pane (the board's v)")
-    p.add_argument("--back", action="store_true", help=argparse.SUPPRESS)  # focus the board after
-    p.add_argument("--session", help="the Rex session for its pane (default: the coordinator's)")
-    p.set_defaults(fn=cmd_diff)
-
-    p = sub.add_parser("config", help="show or change this repo's settings (--global: every repo's)")
+    p = command(sub, "config", cmd_config, "Setup",
+                help="show or change this repo's settings (--global: every repo's)")
     p.add_argument("--global", dest="global_", action="store_true",
                    help="change the settings every repository gets unless it sets its own, in "
                         "$XDG_CONFIG_HOME/bullpen/config.json (default ~/.config/bullpen/config.json)")
@@ -8215,98 +5942,34 @@ def parser():
                         "(default off; the board's o key)")
     p.add_argument("--coordinator", metavar="ID",
                    help="the coordinator --board-others is for (default: the one whose pane or board runs it)")
-    p.set_defaults(fn=cmd_config)
 
-    p = sub.add_parser("news", help="print news logged since the last time; --follow keeps printing")
-    p.add_argument("--follow", action="store_true", help="keep running and print each line as it is logged")
-    p.add_argument("--every", type=float, default=0.5, help=argparse.SUPPRESS)  # seconds between looks
-    p.set_defaults(fn=cmd_news)
-
-    p = sub.add_parser("rules", help="print the rules every worker and reviewer gets, and where they're from")
+    p = command(sub, "rules", cmd_rules, "Setup",
+                help="print the rules every worker and reviewer gets, and where they're from")
     p.add_argument("--edit", action="store_true", help="edit your own rules for this repo in $EDITOR")
-    p.set_defaults(fn=cmd_rules)
-
-    p = sub.add_parser("guide", help="print the coordinator's guide")
-    p.set_defaults(fn=cmd_guide)
-
-    p = sub.add_parser("check", help="compare each task's status with what its agent is doing now")
-    p.add_argument("ids", nargs="*", metavar="ID", help="only these tasks")
-    p.add_argument("--fix", action="store_true",
-                   help="apply the updates the missed events would have made (news included)")
-    p.add_argument("--quiet", action="store_true", help="print nothing")
-    p.add_argument("--all-repos", action="store_true", help="every repo bullpen knows (the watcher's)")
-    p.set_defaults(fn=cmd_check)
 
     # The internal commands below (the watcher's and bullpen's own) have no help and no
-    # group, so --help and the unknown-command error leave them out.
-
-    p = sub.add_parser("_event")
+    p = command(sub, "_event", cmd_event)
     p.add_argument("block")
     p.add_argument("state")
     p.add_argument("kind", nargs="?")
     p.add_argument("msg", nargs="?")
-    p.set_defaults(fn=cmd_event)
 
-    p = sub.add_parser("_stuck")
+    p = command(sub, "_stuck", cmd_stuck)
     p.add_argument("block")
     p.add_argument("minutes", type=int)
-    p.set_defaults(fn=cmd_stuck)
 
-    p = sub.add_parser("_flush")
-    p.set_defaults(fn=cmd_flush)
+    command(sub, "_flush", cmd_flush)
 
-    p = sub.add_parser("_prs")
-    p.set_defaults(fn=cmd_prs)
+    command(sub, "_prs", cmd_prs)
 
-    p = sub.add_parser("_limit")
-    p.set_defaults(fn=cmd_limit)
+    command(sub, "_limit", cmd_limit)
 
-    p = sub.add_parser("_gone")
+    p = command(sub, "_gone", cmd_gone)
     p.add_argument("block")
-    p.set_defaults(fn=cmd_gone)
 
-    p = sub.add_parser("_build_board")
-    p.add_argument("--lock-fd", type=int, required=True)
-    p.set_defaults(fn=cmd_build_board_bg)
-
-    p = sub.add_parser("_tour")
-    p.add_argument("id")
-    p.set_defaults(fn=cmd_tour_bg)
-
-    p = sub.add_parser("_push")
-    p.add_argument("base")
-    p.add_argument("--task", help=argparse.SUPPRESS)
-    p.set_defaults(fn=cmd_push_bg)
-
-    p = sub.add_parser("_coordinator_gone")
+    p = command(sub, "_coordinator_gone", cmd_coordinator_gone)
     p.add_argument("id")
     p.add_argument("--wait", type=float, default=GONE_WAIT)
-    p.set_defaults(fn=cmd_coordinator_gone)
 
-    p = sub.add_parser("_auto_accept")
+    p = command(sub, "_auto_accept", cmd_auto_accept)
     p.add_argument("id", help="the task, like BP-3")
-    p.set_defaults(fn=cmd_auto_accept)
-    return ap
-
-
-def main(argv=None):
-    argv = sys.argv[1:] if argv is None else argv
-    ap = parser()
-    if not argv:
-        print(ap.format_help(), end="")
-        return 2
-    sub = next(a for a in ap._actions if isinstance(a, argparse._SubParsersAction))
-    if err := unknown_command(argv, sub.choices):
-        print(err, file=sys.stderr)
-        return 2
-    args = ap.parse_args(argv)
-    try:
-        code = args.fn(args)
-    except Fail as e:
-        print(f"bullpen: {e}", file=sys.stderr)
-        return 1
-    return code if type(code) is int else 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

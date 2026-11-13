@@ -8,7 +8,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from support import setUpModule, tearDownModule, RUN, sh, BullpenTest  # a temp folder for each module
+from support import setUpModule, tearDownModule, BULLPEN, sh, BullpenTest  # a temp folder for each module
 
 
 class PickTest(BullpenTest):
@@ -104,7 +104,7 @@ class PickTest(BullpenTest):
         """Run `bullpen pick` on a terminal of its own, type keys, and return how it exited."""
         import pty
         master, slave = pty.openpty()
-        p = subprocess.Popen([str(RUN), "pick", "--from", "nowhere"], cwd=cwd or self.repo, env=self.env,
+        p = subprocess.Popen([str(BULLPEN), "pick", "--from", "nowhere"], cwd=cwd or self.repo, env=self.env,
                              stdin=slave, stdout=slave, stderr=slave)
         os.close(slave)
         seen = b""

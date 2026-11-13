@@ -1,13 +1,11 @@
-"""What the tests share: fake `rex` and `gh`, a project with a local bare repo as
-origin, and bullpen run from bytecode compiled once.
+"""What the tests share: fake `rex` and `gh`, and a project with a local bare repo as
+origin.
 
 Run the tests: python3 tests/run.py (or python3 -m unittest discover -s tests).
 """
 
-import atexit
 import datetime as dt
 import json
-import marshal
 import os
 import select
 import shutil
@@ -21,33 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 BULLPEN = ROOT / "bin" / "bullpen"
-
-
-def compiled_once(script):
-    """A launcher that runs script from bytecode compiled once here. Python compiles a
-    script it runs directly every time, and bin/bullpen takes about 90 ms to compile:
-    most of a call's time. The launcher runs the same code as if run as script itself
-    (its __file__, argv[0] and tracebacks are script's), so what bullpen spawns of
-    itself still runs bin/bullpen."""
-    folder = Path(tempfile.mkdtemp(prefix="bullpen-tests-bin-"))
-    owner = os.getpid()
-    atexit.register(lambda: os.getpid() == owner and shutil.rmtree(folder, ignore_errors=True))
-    code = folder / "bullpen.code"
-    code.write_bytes(marshal.dumps(compile(script.read_text(), str(script), "exec")))
-    launcher = folder / "bullpen"
-    launcher.write_text(textwrap.dedent(f"""\
-        #!{sys.executable}
-        import marshal, sys
-        sys.argv[0] = {str(script)!r}
-        with open({str(code)!r}, "rb") as f:
-            code = marshal.load(f)
-        exec(code, {{"__name__": "__main__", "__file__": sys.argv[0], "__builtins__": __builtins__}})
-        """))
-    launcher.chmod(0o755)
-    return launcher
-
-
-RUN = compiled_once(BULLPEN)  # what the tests run for bin/bullpen
+sys.path.insert(0, str(ROOT))  # the bullpen package, for the tests that call it directly
 
 FAKE_REX = textwrap.dedent("""\
     #!/usr/bin/env python3
@@ -253,7 +225,7 @@ class BullpenTest(unittest.TestCase):
                     "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@example.com"}
 
     def bp(self, *args, cwd=None, ok=True):
-        p = subprocess.run([str(RUN), *args], cwd=cwd or self.repo, env=self.env,
+        p = subprocess.run([str(BULLPEN), *args], cwd=cwd or self.repo, env=self.env,
                            text=True, capture_output=True)
         if ok and p.returncode != 0:
             self.fail(f"bullpen {' '.join(args)} failed: {p.stderr}")
@@ -348,7 +320,7 @@ class BullpenTest(unittest.TestCase):
     def follow(self, block="blk1"):
         """Start `bullpen news --follow` in a pane (the coordinator's); returns it and a
         function reading its next n lines."""
-        p = subprocess.Popen([str(RUN), "news", "--follow", "--every", "0.05"], cwd=self.repo,
+        p = subprocess.Popen([str(BULLPEN), "news", "--follow", "--every", "0.05"], cwd=self.repo,
                              env={**self.env, "REX_BLOCK": block}, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.addCleanup(lambda: (p.kill(), p.wait(), p.stdout.close(), p.stderr.close()))
         buf = b""

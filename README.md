@@ -64,7 +64,7 @@ After a Rex server restart, run `bullpen up` again: it finds its panes by their
 labels, marks workers whose panes are gone as stopped, and restarts the watcher.
 
 The watcher is also replaced when it is out of date. `up` and `accept` compare
-`lua/watch.lua` and `bin/bullpen` with what the running watcher was started from
+`lua/watch.lua` and bullpen's code (`bin/bullpen` and `bullpen/`) with what the running watcher was started from
 (hashes kept in `watcher.json`); if either changed, say because a merge or a
 pull brought a new version, they close the old watcher and start a new one. A
 current watcher is left alone.
@@ -101,6 +101,7 @@ Reference:
 
 - [Settings](docs/settings.md): `bullpen config`
 - [Where things live](docs/where-things-live.md)
+- [The code](docs/code.md): `bin/bullpen` and the `bullpen/` package, a module per feature
 - [Tests](docs/tests.md): running them
 - [GLOSSARY.md](GLOSSARY.md): the words bullpen uses
 - [docs/prd/](docs/prd/): design notes

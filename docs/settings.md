@@ -23,7 +23,7 @@ branch, the news mode, the push remote and the coordinators belong to one reposi
 so `--global` refuses `--prefix`, `--base`, `--news`, `--push-remote` and `--board-others`. The commands
 (`worker`, `reviewer`, `coordinator_cmd`, `tour`) have no flags: set them in either
 `config.json` by hand. `bullpen config --help` gives each flag's default; the defaults
-are in one table at the top of `bin/bullpen` (`SETTINGS`), with each setting's kind and
+are in one table at the top of `bullpen/core.py` (`SETTINGS`), with each setting's kind and
 whether only a repository can hold it.
 
 A repository's `config.json` holds only what it sets itself. One from before the

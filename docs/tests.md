@@ -14,7 +14,8 @@ and the whole suite once before `ready`. Reviewers run only the tests that check
 claim, never the whole suite.
 
 The tests use fake `rex` and `gh` programs and a local bare repository as origin, and
-run `bin/bullpen` from bytecode compiled once: Python would otherwise compile it on
-every call, most of a call's time. Each test removes its temp folder when it ends.
+run `bin/bullpen` as you do. Tests that call bullpen's functions directly import them
+from the `bullpen` package (`tests/test_helpers.py`). Each test removes its temp folder
+when it ends.
 Each module runs inside a temp folder of its own and fails if anything is left in it
 afterwards.

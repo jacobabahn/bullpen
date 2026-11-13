@@ -45,8 +45,8 @@ class BoardBuildTest(unittest.TestCase):
         self.setUp_with_origin()
         self.other = self.repo  # a repository that isn't bullpen's
         home = self.tmp / "bullpen"
-        for d in ("bin", "lua", "prompts"):
-            shutil.copytree(ROOT / d, home / d)
+        for d in ("bin", "bullpen", "lua", "prompts"):
+            shutil.copytree(ROOT / d, home / d, ignore=shutil.ignore_patterns("__pycache__"))
         (home / "board" / "src").mkdir(parents=True)
         (home / "board" / "Cargo.toml").write_text('[package]\nname = "bullpen-board"\n')
         (home / "board" / "Cargo.lock").write_text("version = 4\n")

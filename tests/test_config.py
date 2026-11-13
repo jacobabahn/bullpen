@@ -6,7 +6,7 @@ import re
 import unittest
 from pathlib import Path
 
-from support import setUpModule, tearDownModule, sh, BullpenTest, ROOT, BULLPEN  # a temp folder for each module
+from support import setUpModule, tearDownModule, sh, BullpenTest, ROOT  # a temp folder for each module
 
 
 class ConfigTest(BullpenTest):
@@ -470,16 +470,12 @@ class ConfigTest(BullpenTest):
 
 class SettingsCopiesTest(unittest.TestCase):
     """The board and the watcher keep their own short copies of some settings: they
-    must agree with bin/bullpen's table."""
+    must agree with the table in bullpen/core.py."""
 
     @classmethod
     def setUpClass(cls):
-        import importlib.util
-        from importlib.machinery import SourceFileLoader
-        loader = SourceFileLoader("bullpen_cli", str(BULLPEN))
-        spec = importlib.util.spec_from_loader("bullpen_cli", loader)
-        cls.bp = importlib.util.module_from_spec(spec)
-        loader.exec_module(cls.bp)
+        from bullpen import core
+        cls.bp = core
 
     def test_the_boards_repo_only_settings_agree(self):
         src = (ROOT / "board" / "src" / "model.rs").read_text()
