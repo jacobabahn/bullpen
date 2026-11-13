@@ -5,9 +5,16 @@
 Accepting a task moves the base branch, so bullpen brings the other open tasks
 on that base up to date, and they don't drift behind and conflict later:
 
-- Working: its worker is told the base moved and to rebase onto it at a good
-  point (after `git fetch origin`, with a remote), fix conflicts and rerun the
-  tests. Its worktree isn't touched under it.
+- Working: told only when the accepted change meets its work. bullpen compares
+  the files the accepted change touched with the files the task changed
+  (committed on its branch, uncommitted, or untracked). No overlap: left alone.
+  Overlap: a trial merge (`git merge-tree`, which writes nothing) tells whether its
+  committed work conflicts. A conflict, or uncommitted changes in a file the
+  accepted change touched, and its worker is told the base moved, which files, and
+  to rebase onto it at a good point (after `git fetch origin`, with a remote) and
+  fix the conflicts. Otherwise it's left alone: nothing needs a working task to be
+  on top of its base (`accept` rebases when it merges). Its worktree isn't touched
+  under it.
 - In review, or with its reviewer waiting on you: left alone. Its next `ready`
   brings it up to date.
 - Waiting on you or the coordinator mid-turn (a permission prompt, a failure): not
@@ -25,7 +32,8 @@ on that base up to date, and they don't drift behind and conflict later:
   worker with the conflicting files (resumed if its pane is gone). Uncommitted
   changes: skipped.
 
-One news line sums it up: `After BP-4: BP-5 told to rebase; BP-8 rebased; BP-6
+One news line sums it up: `After BP-4: BP-5 told to rebase (conflicts in
+bin/bullpen); BP-7 left alone (no overlap); BP-10 left alone (no conflict); BP-8 rebased; BP-6
 rebased, keeping both sides of a conflict in README.md; its approval carried over
 (only the base moved); BP-9 conflicts in bin/bullpen, sent back.` `bullpen config
 --rebase-others off` turns this off.

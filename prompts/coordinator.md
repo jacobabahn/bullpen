@@ -245,7 +245,8 @@ bullpen · BP-3 approved by review and auto-accepted (merged PR #12, rebase)
 bullpen · BP-11 finished (nothing to merge) and was closed by auto-accept: Recorded the demo video, ...
 bullpen · BP-11 closed (finished, nothing to merge)
 bullpen · BP-5 is ready: Tidy the README (approved by review), but the auto-accept was refused: merge refused: ... Send it back to rebase
-bullpen · After BP-8: BP-5 told to rebase; BP-6 rebased; BP-9 conflicts in bin/bullpen, sent back.
+bullpen · After BP-8: BP-5 told to rebase (conflicts in bin/bullpen); BP-7 left alone (no overlap); BP-6 rebased; BP-9 conflicts in bin/bullpen, sent back.
+bullpen · After BP-8: BP-5 told to rebase (uncommitted changes in README.md); BP-7 left alone (no conflict).
 bullpen · After BP-8, main wasn't pushed to github: ... The accept still counts; `bullpen doctor` says how far behind github is.
 bullpen · BP-9 dropped
 bullpen · BP-4 started (BP-3 was accepted)
@@ -319,8 +320,10 @@ bullpen · Your coordinator guide changed (section: News). Read the change below
 - A dependency was dropped: its dependents stay queued. Ask the person whether
   to go ahead without it (`bullpen after <ID> --none`, or other tasks, then
   `bullpen start <ID>`) or drop them too.
-- After an accept, the other open tasks are brought up to date: told to rebase
-  (working), rebased (between turns), or sent back with conflicts. Nothing to do:
+- After an accept, the other open tasks are brought up to date: a working task is
+  told to rebase only when the accepted change conflicts with its work (or touches
+  files it has uncommitted changes in), else left alone (no overlap, or no
+  conflict); between turns, rebased, or sent back with conflicts. Nothing to do:
   the workers handle it. A task skipped for uncommitted changes, or not rebased
   because it waits on the person or on you: see to it, or mention it to them.
 - The base branch wasn't pushed to the push remote (a backup, in local mode): the

@@ -417,7 +417,7 @@ class LocalModeTest(unittest.TestCase):
         self.bp("start", "BP-3")  # working, its pane up
         self.bp("accept", tid)
         self.assertEqual(self.news_lines()[-1], "bullpen · After BP-1: BP-2 conflicts in fix.txt, "
-                         "sent back; BP-3 told to rebase.")
+                         "sent back; BP-3 left alone (no overlap).")
 
     def test_after_accept_a_worker_waiting_on_a_prompt_is_not_rebased(self):
         tid, _ = self.ready_task()
