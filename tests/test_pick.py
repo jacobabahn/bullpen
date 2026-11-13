@@ -215,7 +215,8 @@ class PickTest(BullpenTest):
         self.assertEqual(block["options"]["command"][-3:], ["diff", "BP-1", "--back"])
         self.assertEqual(layer["window_id"], "w1")
         self.assertEqual(self.layer_states(), {"lyr1": "minimized", "lyr2": "normal"})
-        self.assertTrue(self.api("session.set_layer_state")[-1].get("focus"))
+        up = [a for a in self.api("session.set_layer_state") if a["layer_id"] == "lyr2"]
+        self.assertTrue(up[-1].get("focus"))
         self.bp("diff", tid, "--pane")  # again: the old diff pane closes first
         self.assertFalse((self.fake / "alive" / "blk5").exists())
         self.bp("diff", tid, "--back")  # what the pane runs: the board after the pager
