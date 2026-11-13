@@ -18,7 +18,8 @@ In the tour:
   comments on it, then its hunks from git (through delta when it's installed).
   `n` and `p` (or `→` `←`) go to the next and previous step, `j` `k` `space` `b`
   `g` `G` scroll, `esc` (or `q`) closes it back to the board.
-- `c` comments on the step: type it and press `⏎` (`esc` drops it). To point at
+- `c` comments on the step: type it and press `⏎` (`esc` drops it; `ctrl+j`
+  starts a new line; the other keys are in [Typing a line](board.md#typing-a-line)). To point at
   a line, mention it in the text. Comments are drafts, kept with the task, and
   opening the tour again resumes at the step you were on.
 - After the last step, the end lists your comments: `s` sends them back to the

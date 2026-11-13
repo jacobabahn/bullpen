@@ -3856,6 +3856,146 @@ def open_when_written(repo, t, opener):
             f.write(f"{now()} couldn't open the tour: {e}\n")
 
 
+PASTE_START, PASTE_END = "\x1b[200~", "\x1b[201~"
+
+
+def char_width(c):
+    """The columns a character takes on screen."""
+    return 0 if unicodedata.combining(c) else 2 if unicodedata.east_asian_width(c) in "WF" else 1
+
+
+class LineEdit:
+    """What's typed in the picker and in the tour stepper's comment and tell boxes, and
+    the cursor in it (a character index). The board's tell and answer line
+    (board/src/edit.rs) takes the same keys. On one line, a pasted line break is a space;
+    with lines, a paste keeps its breaks and ctrl+j or alt+⏎ starts a new line."""
+
+    LEFT, RIGHT = ("\x1b[D", "\x1bOD", "\x02"), ("\x1b[C", "\x1bOC", "\x06")  # ←, ctrl+b; →, ctrl+f
+    WORD_LEFT = ("\x1bb", "\x1b[1;3D", "\x1b[1;5D")  # alt+b, alt+←, ctrl+←
+    WORD_RIGHT = ("\x1bf", "\x1b[1;3C", "\x1b[1;5C")
+    HOME = ("\x1b[H", "\x1bOH", "\x1b[1~", "\x1b[7~", "\x01")  # Home, ctrl+a
+    END = ("\x1b[F", "\x1bOF", "\x1b[4~", "\x1b[8~", "\x05")  # End, ctrl+e
+    UP, DOWN = ("\x1b[A", "\x1bOA"), ("\x1b[B", "\x1bOB")  # with lines
+    NEW_LINE = ("\n", "\x1b\r")  # ctrl+j, alt+⏎ (with lines)
+
+    def __init__(self, text="", lines=False):
+        self.lines, self.text, self.at, self.left, self.top = lines, "", 0, 0, 0
+        self.paste(text)
+
+    def key(self, k):
+        """Apply one editing key; False when it isn't one (⏎, esc), for the caller."""
+        t, at = self.text, self.at
+        if k.startswith(PASTE_START):
+            self.paste(k[len(PASTE_START):].removesuffix(PASTE_END))
+        elif k in self.LEFT:
+            self.at = max(at - 1, 0)
+        elif k in self.RIGHT:
+            self.at = min(at + 1, len(t))
+        elif k in self.WORD_LEFT:
+            self.at = self.word_start()
+        elif k in self.WORD_RIGHT:
+            self.at = self.word_end()
+        elif k in self.HOME:
+            self.at = self.line_start()
+        elif k in self.END:
+            self.at = self.line_end()
+        elif k in ("\x7f", "\x08"):
+            self.cut(max(at - 1, 0), at)
+        elif k == "\x1b[3~":  # delete
+            self.cut(at, min(at + 1, len(t)))
+        elif k in ("\x17", "\x1b\x7f", "\x1b\x08"):  # ctrl+w, alt+backspace
+            self.cut(self.word_start(), at)
+        elif k == "\x1bd":  # alt+d
+            self.cut(at, self.word_end())
+        elif k == "\x15":  # ctrl+u: to the start of the line
+            self.cut(self.line_start(), at)
+        elif k == "\x0b":  # ctrl+k: to its end
+            self.cut(at, self.line_end())
+        elif self.lines and k in self.NEW_LINE:
+            self.insert("\n")
+        elif self.lines and k in self.UP + self.DOWN:
+            self.move_line(-1 if k in self.UP else 1)
+        elif k.isprintable() and not k.startswith("\x1b"):
+            self.insert(k)
+        else:
+            return False
+        return True
+
+    def paste(self, text):
+        """Pasted text at the cursor: a tab is a space, a line break is one unless this
+        has lines, and other control characters go."""
+        text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", " ")
+        if not self.lines:
+            text = text.replace("\n", " ")
+        self.insert("".join(c for c in text if c == "\n" or c.isprintable()))
+
+    def insert(self, text):
+        self.text = self.text[:self.at] + text + self.text[self.at:]
+        self.at += len(text)
+
+    def cut(self, a, b):
+        self.text, self.at = self.text[:a] + self.text[b:], a
+
+    def word_start(self):
+        """Where the word before the cursor starts (the spaces after it go with it)."""
+        return len(re.sub(r"\S*\s*$", "", self.text[:self.at]))
+
+    def word_end(self):
+        return self.at + re.match(r"\s*\S*", self.text[self.at:]).end()
+
+    def line_start(self):
+        return self.text.rfind("\n", 0, self.at) + 1
+
+    def line_end(self):
+        n = self.text.find("\n", self.at)
+        return len(self.text) if n < 0 else n
+
+    def move_line(self, by):
+        """Up or down a line, to the same column or the line's end."""
+        start, col = self.line_start(), self.at - self.line_start()
+        if by < 0 and start:
+            prev = self.text.rfind("\n", 0, start - 1) + 1
+            self.at = min(prev + col, start - 1)
+        elif by > 0 and self.line_end() < len(self.text):
+            nxt = self.line_end() + 1
+            end = self.text.find("\n", nxt)
+            self.at = min(nxt + col, len(self.text) if end < 0 else end)
+
+    def view(self, room):
+        """On one line: what's shown in room columns, and the cursor's column in it. The
+        shown part moves only when the cursor would leave it, as a shell's line does."""
+        w = lambda a, b: sum(char_width(c) for c in self.text[a:b])
+        room = max(room, 1)  # the cursor takes a column of its own at the end
+        self.left = min(self.left, self.at)
+        while self.left < self.at and w(self.left, self.at) >= room:
+            self.left += 1
+        to = self.left
+        while to < len(self.text) and w(self.left, to + 1) <= room:
+            to += 1
+        return self.text[self.left:to], w(self.left, self.at)
+
+    def rows(self, width, most):
+        """With lines: the text wrapped to width, at most `most` rows of it around the
+        cursor, and the cursor's (row, column) in them."""
+        width, out, cur, i = max(width, 2), [], (0, 0), 0
+        for line in self.text.split("\n"):
+            row, used = "", 0
+            for c in line:
+                if used + char_width(c) > width - 1:  # a column for the cursor at the end
+                    out.append(row)
+                    row, used = "", 0
+                if i == self.at:
+                    cur = (len(out), used)
+                row, used, i = row + c, used + char_width(c), i + 1
+            if i == self.at:
+                cur = (len(out), used)
+            out.append(row)
+            i += 1  # the line break
+        most = max(most, 1)
+        self.top = min(max(self.top, cur[0] - most + 1), cur[0])
+        return out[self.top:self.top + most], (cur[0] - self.top, cur[1])
+
+
 STEP_NEXT = ("n", "l", "\x1b[C", "\x1bOC")  # n, l, →
 STEP_BACK = ("p", "h", "\x1b[D", "\x1bOD")  # p, h, ←
 LINE_DOWN = ("j", "\x1b[B", "\x1bOB", "\x0e")  # j, ↓, ctrl+n
@@ -3867,6 +4007,9 @@ STEP_KEYS = ("n next · p back · j k scroll · c comment · t tell · v diff ·
              "n next · p back · c comment · t tell · v diff · ⏎ open · a accept · esc close",
              "n next · p back · c comment · t tell · esc close",
              "n p · c comment · t tell · esc close")
+COMMENT_KEYS = ("⏎ saves · ctrl+j new line · esc cancels · mention a line to point at it",
+                "⏎ saves · ctrl+j new line · esc cancels",
+                "⏎ save · ctrl+j line · esc cancel")
 END_KEYS = ("s send them back · a accept · p back · t tell · v diff · ⏎ open · esc close",
             "s send · a accept · p back · t tell · esc close",
             "s send · a accept · p back · esc close")
@@ -3950,7 +4093,7 @@ class Stepper:
         self.tid, self.title, self.steps, self.commit = tid, title, tour["steps"], tour["commit"]
         self.comments, self.diff = comments, diff
         self.at = min(max(at, 0), len(self.steps))
-        self.top, self.mode, self.text, self.msg, self.sure = 0, "read", "", "", False
+        self.top, self.mode, self.edit, self.msg, self.sure = 0, "read", LineEdit(), "", False
         self.cache = {}
 
     def at_end(self):
@@ -3975,7 +4118,7 @@ class Stepper:
         if k == "v":
             return "diff"
         if k == "t":
-            self.mode, self.text = "tell", ""
+            self.mode, self.edit = "tell", LineEdit()
             return None
         if k == "a":
             return self.accept_key(sure)
@@ -3986,7 +4129,7 @@ class Stepper:
                 self.msg = "No comments to send: p goes back to the steps."
                 return None
         elif k == "c":
-            self.mode, self.text = "comment", ""
+            self.mode, self.edit = "comment", LineEdit(lines=True)
             return None
         if k in STEP_NEXT:
             self.go(self.at + 1)
@@ -4020,22 +4163,22 @@ class Stepper:
         return None
 
     def comment_key(self, k):
-        """A key while a comment, or a line to tell the worker, is typed."""
+        """A key while a comment (lines), or a line to tell the worker, is typed."""
+        if self.edit.key(k):
+            return None
         if k in ("\r", "\n"):
-            text, mode, self.mode, self.text = " ".join(self.text.split()), self.mode, "read", ""
+            mode, text, self.mode = self.mode, self.typed_text(), "read"
             return (mode, text) if text else None
         if k in ("\x1b", "\x03", "\x07"):
-            said = "Comment not saved." if self.mode == "comment" else "Not sent."
-            self.mode, self.text, self.msg = "read", "", said
-        elif k in ("\x7f", "\x08"):
-            self.text = self.text[:-1]
-        elif k == "\x15":
-            self.text = ""
-        elif k == "\x17":
-            self.text = re.sub(r"\S*\s*$", "", self.text)
-        elif k.isprintable() and not k.startswith("\x1b") and len(self.text) < 2000:
-            self.text += k
+            self.mode, self.msg = "read", "Comment not saved." if self.mode == "comment" else "Not sent."
         return None
+
+    def typed_text(self):
+        """What's typed, to save or send: a tell on one line, a comment's lines without
+        the spaces at their ends or blank lines around them."""
+        if self.mode == "tell":
+            return " ".join(self.edit.text.split())
+        return "\n".join(line.rstrip() for line in self.edit.text.split("\n")).strip("\n")
 
     def on_step(self, i):
         """The drafts on step i of this tour."""
@@ -4067,14 +4210,20 @@ class Stepper:
     def prompt(self):
         return f"Comment on step {self.at + 1}: " if self.mode == "comment" else f"Tell {self.tid}: "
 
-    def typed(self, width):
-        """The end of what's typed, as much as fits after the prompt."""
-        room = max(width - len(self.prompt()) - 3, 1)
-        return self.text[-room:]
+    def box(self, width, height):
+        """The rows of the box something is typed in, and the cursor's (row, column) in
+        them from 0. A tell is one line after its prompt; a comment is its prompt, then its
+        lines, up to half the body's rows."""
+        if self.mode == "tell":
+            shown, col = self.edit.view(width - len(self.prompt()) - 3)
+            return [f" {BOLD}{self.prompt()}{OFF}{shown}"], (0, 1 + len(self.prompt()) + col)
+        lines, (row, col) = self.edit.rows(width - 2, max((height - 5) // 2, 1))
+        return [f" {BOLD}{self.prompt().rstrip()}{OFF}"] + [" " + line for line in lines], (row + 1, 1 + col)
 
     def cursor(self, width, height):
         """(row, column) of the cursor, from 1, while a comment is typed."""
-        return height - 1, 2 + len(self.prompt()) + len(self.typed(width))
+        rows, (row, col) = self.box(width, height)
+        return height - len(rows) + row, col + 1
 
     def screen(self, width, height):
         """The stepper's lines: a header, the body from self.top, a message line and the keys."""
@@ -4086,7 +4235,8 @@ class Stepper:
         room = max(width - len(where) - 4, 0)
         head = (head[:room - 1] + "…") if len(head) > room else head
         out = [BOLD + " " + head + " " * max(width - 2 - len(head) - len(where), 1) + where + OFF, ""]
-        rows = max(height - 4, 1)
+        typing = self.box(width, height)[0] if self.mode in ("comment", "tell") else [""]
+        rows = max(height - 3 - len(typing), 1)
         body = self.body(width)
         self.top = min(self.top, max(len(body) - rows, 0))
         shown = body[self.top:self.top + rows]
@@ -4094,9 +4244,9 @@ class Stepper:
         out = [clip_line(line, width - 1) for line in out]
         more = len(body) - self.top - rows
         if self.mode in ("comment", "tell"):
-            out.append(f" {BOLD}{self.prompt()}{OFF}{self.typed(width)}")
-            out.append(f" {DIM}⏎ saves · esc cancels · mention a line to point at it{OFF}" if self.mode == "comment"
-                       else f" {DIM}⏎ sends it now · esc cancels{OFF}")
+            out += typing
+            keys = COMMENT_KEYS if self.mode == "comment" else ("⏎ sends it now · esc cancels",)
+            out.append(f" {DIM}{next((k for k in keys if len(k) <= width - 2), keys[-1])}{OFF}")
         else:
             down = f"  ↓ {more} more" if more > 0 else ""
             out.append(" " + (BOLD + self.msg + OFF if self.msg else DIM + down.strip() + OFF))
@@ -4120,7 +4270,7 @@ def stepper_tui(st, act, moved):
     old = termios.tcgetattr(fd)
     decoder = codecs.getincrementaldecoder("utf-8")("replace")
     tty.setraw(fd)
-    sys.stdout.write("\x1b[?1049h\x1b[?7l")  # its own screen; long lines are cut, not wrapped
+    sys.stdout.write("\x1b[?1049h\x1b[?7l" + PASTE_ON)  # its own screen; long lines are cut, not wrapped
     try:
         while True:
             size = shutil.get_terminal_size()
@@ -4140,7 +4290,7 @@ def stepper_tui(st, act, moved):
                     moved(st.at)
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
-        sys.stdout.write("\x1b[?7h\x1b[?25h\x1b[?1049l")
+        sys.stdout.write(PASTE_OFF + "\x1b[?7h\x1b[?25h\x1b[?1049l")
         sys.stdout.flush()
 
 
@@ -5944,6 +6094,7 @@ def pick_filter(query, lines):
 
 PICK_UP = ("\x1b[A", "\x1bOA", "\x10", "\x0b")  # ↑, ctrl+p, ctrl+k
 PICK_DOWN = ("\x1b[B", "\x1bOB", "\x0e")  # ↓, ctrl+n
+PICK_PROMPT = "jump to> "
 PICK_HINT = "⏎ go · esc close · ↑↓ move"
 
 
@@ -5952,7 +6103,7 @@ class Picker:
 
     def __init__(self, lines, colors=None):
         """colors: each line's mark colour (an SGR code), as on the board."""
-        self.lines, self.colors, self.query, self.sel = lines, colors, "", 0
+        self.lines, self.colors, self.edit, self.sel = lines, colors, LineEdit(), 0
         self.shown = pick_filter("", lines)
         self.msg = "" if lines else "no open tasks in any repository"
 
@@ -5966,22 +6117,27 @@ class Picker:
             self.sel = max(self.sel - 1, 0)
         elif k in PICK_DOWN:
             self.sel = min(self.sel + 1, max(len(self.shown) - 1, 0))
-        elif k in ("\x7f", "\x08"):
-            self.search(self.query[:-1])
-        elif k == "\x15":  # ctrl+u
-            self.search("")
-        elif k == "\x17":  # ctrl+w
-            self.search(re.sub(r"\S*\s*$", "", self.query))
-        elif k.isprintable() and not k.startswith("\x1b"):
-            self.search(self.query + k)
+        else:
+            query = self.query
+            if self.edit.key(k) and self.query != query:
+                self.search()
         return None
 
-    def search(self, query):
-        self.query, self.sel, self.msg = query, 0, ""
-        self.shown = pick_filter(query, self.lines)
+    @property
+    def query(self):
+        return self.edit.text
+
+    def search(self):
+        self.sel, self.msg = 0, ""
+        self.shown = pick_filter(self.query, self.lines)
 
     def chosen(self):
         return self.shown[self.sel] if self.shown else None
+
+    def typed(self, width):
+        """The query as shown after the prompt, and the cursor's column on screen, from 1."""
+        shown, col = self.edit.view(width - len(PICK_PROMPT) - 1)
+        return shown, len(PICK_PROMPT) + col + 1
 
     def screen(self, width, height):
         """The picker's lines: the query, a hint, then the matching tasks around the selected one."""
@@ -5991,7 +6147,7 @@ class Picker:
         # a failure in the normal weight, after the count; else the keys, dim
         hint = (f"\x1b[2m{count}\x1b[0m  {fit(self.msg, max(width - len(count) - 2, 0))}" if self.msg
                 else f"\x1b[2m{fit(f'{count}  {PICK_HINT}', width)}\x1b[0m")
-        out = [f"jump to> {self.query}", hint]
+        out = [f"{PICK_PROMPT}{self.typed(width)[0]}", hint]
         for n, i in enumerate(self.shown[first:first + rows], first):
             line = self.paint(fit(self.lines[i], max(width - 2, 0)), i)
             out.append(f"\x1b[7m> {line}\x1b[0m" if n == self.sel else f"  {line}")
@@ -6006,10 +6162,11 @@ class Picker:
 
 
 def split_keys(text):
-    """The keys in what the terminal sent: an escape sequence (an arrow) is one key."""
+    """The keys in what the terminal sent: an escape sequence (an arrow), an alt+key, or
+    a whole paste is one key."""
     out, i = [], 0
     while i < len(text):
-        m = re.match(r"\x1b(\[[0-?]*[ -/]*[@-~]|O.)", text[i:])
+        m = re.match(r"\x1b\[200~.*?\x1b\[201~|\x1b(\[[0-?]*[ -/]*[@-~]|O.|[^\x1b\[O])", text[i:], re.S)
         n = m.end() if m else 1
         out.append(text[i:i + n])
         i += n
@@ -6022,7 +6179,18 @@ def read_keys(fd, decoder):
         return ["\x03"]  # the terminal went away
     if data == b"\x1b" and select.select([fd], [], [], 0.03)[0]:
         data += os.read(fd, 1024)  # the rest of an arrow, not esc
-    return split_keys(decoder.decode(data))
+    text = decoder.decode(data)
+    # a paste is one key however many reads it takes (unended after a second: its keys)
+    while PASTE_START in text and PASTE_END not in text[text.rindex(PASTE_START):]:
+        more = os.read(fd, 65536) if select.select([fd], [], [], 1)[0] else b""
+        if not more:
+            break
+        text += decoder.decode(more)
+    return split_keys(text)
+
+
+# bracketed paste on and off: a paste arrives marked, so its line breaks don't press ⏎
+PASTE_ON, PASTE_OFF = "\x1b[?2004h", "\x1b[?2004l"
 
 
 def pick_tui(p, choose):
@@ -6032,11 +6200,12 @@ def pick_tui(p, choose):
     old = termios.tcgetattr(fd)
     decoder = codecs.getincrementaldecoder("utf-8")("replace")
     tty.setraw(fd)
+    sys.stdout.write(PASTE_ON)
     try:
         while True:
             size = shutil.get_terminal_size()
             lines = p.screen(size.columns, size.lines)
-            sys.stdout.write("\x1b[H\x1b[2J" + "\r\n".join(lines) + f"\x1b[1;{len(lines[0]) + 1}H")
+            sys.stdout.write("\x1b[H\x1b[2J" + "\r\n".join(lines) + f"\x1b[1;{p.typed(size.columns)[1]}H")
             sys.stdout.flush()
             for k in read_keys(fd, decoder):
                 act = p.key(k)
@@ -6049,7 +6218,7 @@ def pick_tui(p, choose):
                     break
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
-        sys.stdout.write("\x1b[H\x1b[2J")
+        sys.stdout.write(PASTE_OFF + "\x1b[H\x1b[2J")
         sys.stdout.flush()
 
 

@@ -336,8 +336,10 @@ class HelpersTest(unittest.TestCase):
         for k in "x" * 80:
             st.key(k)
         out = plain(st.screen(60, 12))
-        self.assertEqual(out[10], " Comment on step 1: " + "x" * 38)  # the end of what's typed
-        self.assertEqual(st.cursor(60, 12), (11, 59))
+        # the prompt on its own row, what's typed wrapped under it
+        self.assertEqual(out[8:11], [" Comment on step 1:", " " + "x" * 57, " " + "x" * 23])
+        self.assertEqual(out[11], " ⏎ saves · ctrl+j new line · esc cancels")
+        self.assertEqual(st.cursor(60, 12), (11, 25))
         st.key("\x1b")
         st.diff = lambda i, w: ["\x1b[32m+" + "y" * 100 + "\x1b[0m", "宽" * 40]
         st.cache.clear()
@@ -352,6 +354,102 @@ class HelpersTest(unittest.TestCase):
         self.assertEqual(clip("\x1b[1mabc\x1b[0mdef", 4), "\x1b[1mabc\x1b[0md")
         self.assertEqual(clip("ab", 5), "ab")
         self.assertEqual(clip("宽宽宽", 5), "宽宽")
+
+    def test_line_edit_moves_and_cuts_at_the_cursor(self):
+        e = self.bp.LineEdit()
+        shown = lambda: e.text[:e.at] + "|" + e.text[e.at:]
+        for k in ["u", "s", "e", " ", "p", "g", "\x1b[D", "\x1b[D", "X"]:
+            self.assertTrue(e.key(k), k)
+        self.assertEqual(shown(), "use X|pg")
+        for keys, want in [(["\x01"], "|use Xpg"), (["\x1b[F"], "use Xpg|"), (["\x1bb"], "use |Xpg"),
+                           (["\x1b[1;5C"], "use Xpg|"), (["\x17"], "use |"), (["\x1b[H", "\x1b[3~"], "|se "),
+                           (["\x06", "\x0b"], "s|"), (["\x15"], "|"), (["\x1b[C", "\x7f"], "|")]:
+            for k in keys:
+                e.key(k)
+            self.assertEqual(shown(), want, keys)
+        for k in ["\r", "\x1b", "\x03", "\x1b[Z"]:  # for the caller
+            self.assertFalse(e.key(k), repr(k))
+        # no cap
+        e.key("\x1b[200~" + "x" * 3000 + "\x1b[201~")
+        self.assertEqual(len(e.text), 3000)
+
+    def test_line_edit_takes_a_paste_on_one_line_or_with_its_lines(self):
+        e = self.bp.LineEdit("[]")
+        e.key("\x1b[D")
+        e.key("\x1b[200~one\r\ntwo\nthree\tfour\x07\x1b[201~")
+        self.assertEqual((e.text, e.at), ("[one two three four]", 19))
+        e = self.bp.LineEdit(lines=True)
+        e.key("\x1b[200~one\r\ntwo\x1b[201~")
+        self.assertEqual(e.text, "one\ntwo")
+        e.key("\n")  # ctrl+j: a new line
+        e.key("x")
+        e.key("\x1b[A")  # up: the same column, or the line's end
+        self.assertEqual(e.text[:e.at], "one\nt")
+        e.key("\x1b[A")
+        e.key("\x15")  # ctrl+u: to the start of this line only
+        self.assertEqual(e.text, "ne\ntwo\nx")
+        e.key("\x1b[B")
+        e.key("\x1b[B")
+        e.key("\x05")
+        e.key("\x1b\r")  # alt+⏎ too
+        self.assertEqual(e.text, "ne\ntwo\nx\n")
+
+    def test_line_edit_views_keep_the_cursor_in_sight(self):
+        e = self.bp.LineEdit("abcdefghij")
+        self.assertEqual(e.view(5), ("ghij", 4))
+        for _ in range(3):
+            e.key("\x1b[D")
+        self.assertEqual(e.view(5), ("ghij", 1))  # the view stays until the cursor reaches its edge
+        e.key("\x1b[D")
+        e.key("\x1b[D")
+        self.assertEqual(e.view(5), ("fghij", 0))
+        e.key("\x01")
+        self.assertEqual(e.view(5), ("abcde", 0))
+        e = self.bp.LineEdit("abcdefgh\nij", lines=True)
+        self.assertEqual(e.rows(5, 9), (["abcd", "efgh", "ij"], (2, 2)))
+        self.assertEqual(e.rows(5, 2), (["efgh", "ij"], (1, 2)))  # the rows around the cursor
+        e.key("\x1b[A")
+        e.key("\x01")
+        self.assertEqual(e.rows(5, 2), (["abcd", "efgh"], (0, 0)))
+
+    def test_a_comment_can_have_lines_and_a_tell_is_one(self):
+        st = self.stepper()
+        st.key("c")
+        st.key("\x1b[200~Use the helper:\n\n  helper(x)  \n\x1b[201~")
+        st.key("\n")
+        for k in "Then test it ":
+            st.key(k)
+        plain = lambda lines: [re.sub(r"\x1b\[[0-9;]*m", "", line).rstrip() for line in lines]
+        out = plain(st.screen(42, 16))
+        self.assertEqual(len(out), 16)
+        self.assertEqual(out[9:], [" Comment on step 1:", " Use the helper:", "", "   helper(x)", "",
+                                   " Then test it", " ⏎ saves · ctrl+j new line · esc cancels"])
+        self.assertEqual(st.cursor(42, 16), (15, 15))
+        self.assertEqual(st.key("\r"), ("comment", "Use the helper:\n\n  helper(x)\n\nThen test it"))
+        st.key("t")
+        st.key("\x1b[200~one\ntwo\x1b[201~")  # a pasted line break doesn't send it
+        self.assertEqual(st.mode, "tell")
+        st.key("\x1bb")  # alt+b: a word back
+        st.key("\x17")
+        self.assertEqual(st.key("\r"), ("tell", "two"))
+
+    def test_the_picker_edits_its_query_at_the_cursor(self):
+        p = self.bp.Picker(["BP-1  working  Fix login", "BP-2  queued  Cover logout"])
+        for k in "lgn":
+            p.key(k)
+        p.key("\x1b[D")
+        p.key("\x1b[B")  # down moves the selection, not the cursor
+        self.assertEqual(p.sel, 1 if len(p.shown) > 1 else 0)
+        p.key("o")
+        self.assertEqual((p.query, p.sel), ("lgon", 0))  # a new search starts at the top
+        self.assertEqual(p.typed(42), ("lgon", 13))  # the cursor before n
+        p.key("\x1b[D")
+        self.assertEqual(p.sel, 0)  # moving the cursor isn't a new search
+        self.assertEqual(p.screen(42, 5)[0], "jump to> lgon")
+
+    def test_split_keys_keeps_a_paste_and_alt_keys_whole(self):
+        self.assertEqual(self.bp.split_keys("a\x1b[200~x\ny\x1b[201~\x1bb\x1b\r\x1b\x1b"),
+                         ["a", "\x1b[200~x\ny\x1b[201~", "\x1bb", "\x1b\r", "\x1b", "\x1b"])
 
     def test_split_keys_keeps_escape_sequences_whole(self):
         self.assertEqual(self.bp.split_keys("ab\x1b[Bc\x1bOA\x1b"), ["a", "b", "\x1b[B", "c", "\x1bOA", "\x1b"])

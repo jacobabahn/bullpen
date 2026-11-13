@@ -132,6 +132,27 @@ coordinator's own pane, `accept` and `drop` post nothing: it already knows.
 Tasks that waited on the accepted one start by themselves (see
 [Dependencies](dependencies.md)).
 
+## Typing a line
+
+A tell (`t`), an answer (`i`), the picker's search, and a comment or tell in a
+tour all take the same editing keys:
+
+| Key | Does |
+| --- | --- |
+| `←` `→` (`ctrl+b` `ctrl+f`) | move a character |
+| `alt+←` `alt+→` (`alt+b` `alt+f`, `ctrl+←` `ctrl+→`) | move a word |
+| `Home` `End` (`ctrl+a` `ctrl+e`) | go to the start or the end of the line |
+| `backspace` `delete` | delete a character before or at the cursor |
+| `ctrl+w` (`alt+backspace`) | delete the word before the cursor; `alt+d` the one after |
+| `ctrl+u` `ctrl+k` | delete to the start or the end of the line |
+
+There is no length limit. A long line shows the part around the cursor. Pasted
+text goes in whole: a line break in it is a space, so a paste never sends the
+line, and a paste on the board with no line open does nothing. A tour comment
+can have more than one line: `ctrl+j` (or `alt+⏎`) starts a new one, `↑` `↓`
+move between them, and a paste keeps its line breaks. In the picker, `ctrl+k` and
+`↑` `↓` still move the selection.
+
 ## Answering from the board
 
 A task that needs you for a question gets `i answer` on its key line:
