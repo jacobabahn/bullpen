@@ -47,6 +47,8 @@ CASES = [
     ("diff BP-3 --stat", ["diff", "BP-3", "--stat"], "fixture"),
     ("check", ["check"], "fixture"),
     ("check (real rex)", ["check"], "real"),
+    ("note BP-3 (writes the task)", ["note", "BP-3", "Waiting on CI"], "fixture"),
+    ("model BP-1 opus (writes the task)", ["model", "BP-1", "opus"], "fixture"),
 ]
 
 

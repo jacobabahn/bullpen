@@ -24,9 +24,14 @@ function names where it can:
 - `core.mojo`: paths, config layering, `Repo`, `Task` (a Doc: `t.s(key)`, `t.truthy(key)`,
   `t.get(key)` for a node), status words
 - `args.mojo`: each command's flags, options and positionals (no argparse)
-- `rex.mojo`, `coordinators.mojo`: the parts of those the read-only commands need
+- `rex.mojo`, `coordinators.mojo`, `agents.mojo`: the parts of those the ported commands need
+- `text.mojo` (width, fit, wrap, Python's strip and splitlines), `textutil.mojo` (`\w`, screen lines)
+- the commands: `show.mojo` and `task_line.mojo` (`ls`, `show`), `news.mojo`, `peek.mojo`,
+  `diff.mojo` (`--stat`), `check.mojo` (with `events.mojo`, `stops.mojo`), `add.mojo` (`add`,
+  `after`, `model`, `review-mode`), `triage.mojo` (`ok`, `note`); `start`, `review` and `hooks.mojo`
+  hold the few helpers of those Python modules that the others need
 
 Conventions: typed `def` (Mojo 1.2 removed `fn`), structs for records, a command's error is
 `raise Error(msg)` (main prints `bullpen: msg`, exit 1). A Python `None` is "" for a string,
--1 for a node index. No Python interop anywhere unless marked `# PYTHON INTEROP` (there is none so far).
+-1 for a node index. No Python interop anywhere (only `bench/interop_probe.mojo`, which measures its cost).
 Keep each file under 1,000 lines.
