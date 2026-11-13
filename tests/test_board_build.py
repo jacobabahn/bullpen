@@ -35,9 +35,14 @@ FAKE_CARGO = textwrap.dedent("""\
         out = home / "target" / "release" / name
         out.parent.mkdir(parents=True, exist_ok=True)
         source = " ".join((home / crate / "src" / "main.rs").read_text().split())
-        # the command line it builds runs the commands Rust owns with the real build (they
-        # read the state, not this checkout), and hands the rest to this copy's Python
-        rust = f'case $1 in {RUST_OWNED}) exec "{RUST_BIN}" "$@" ;; esac\\n'
+        # the command line it builds runs the commands Rust owns with a copy of the real
+        # build in this checkout's target (so this checkout is its home: `board` runs this
+        # checkout's board), and hands the rest to this copy's Python
+        real = out.parent / "bullpen-real"
+        if name == "bullpen":
+            import shutil
+            shutil.copy2(RUST_BIN, real)
+        rust = f'case $1 in {RUST_OWNED}) exec "{real}" "$@" ;; esac\\n'
         # a command a port moved: "// moved: NAME" in its main.rs, which it answers itself
         for line in (home / crate / "src" / "main.rs").read_text().splitlines():
             if line.startswith("// moved: "):
