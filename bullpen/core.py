@@ -551,7 +551,7 @@ def migrate_stops(repo):
 #   failed     its turn failed
 #   ended      it ended its turn without ready (a reviewer: without a verdict)
 #   exited     its pane closed before ready (a reviewer: before a verdict)
-#   pane_gone  its pane wasn't found again after a Rex restart
+#   pane_gone  its pane wasn't found again after a Rex restart (a worker is stopped)
 #   not_sent   review findings or PR feedback didn't reach the worker
 #   limit      it couldn't be continued after the usage limit
 #   setup      its worktree's setup failed, so its worker never started

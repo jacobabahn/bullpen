@@ -83,8 +83,9 @@ Background panes don't survive a Rex server restart: Rex keeps them only while i
 server runs, and rexurrect doesn't save them. After one, `bullpen up` (or `go`) finds
 the pane gone and marks its task stopped, as for any pane that's gone; `bullpen resume
 BP-3` starts the worker again and continues its conversation. A reviewer lost that
-way costs only a new review: `bullpen check` reports its pane gone, and `bullpen review
-BP-3` (the coordinator's) starts a new one.
+way costs only a new review: when `up` (or `go`) finds its pane gone, the task stops
+on its reviewer and goes to its coordinator (or to you, with none running), whose
+`bullpen review BP-3` starts a new one.
 
 `bullpen config --model opus` sets the model for workers and reviewers (follow-up
 and light reviews too); `--worker-model`, `--reviewer-model` and

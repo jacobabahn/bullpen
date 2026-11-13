@@ -13,12 +13,13 @@ from .rex import (
     board_label, coordinator_label, find_pane, find_panes, review_label, rex_alive, rex_close,
     rex_focus, rex_view,
 )
-from .agents import is_limited, on_reviewer, pane
+from .agents import is_limited, on_reviewer, pane, whose_turn
 from .coordinators import (
     alive, calling_coordinator, coordinator_at, home_of, on_board, owner, primary, session_for,
 )
 from .panes import find, gather, hide, show
 from .board import ensure_board
+from .stops import stop
 
 
 def go_target(repo, args):
@@ -327,6 +328,12 @@ def relink_reviewers(repo, session, view):
         r.update(block=hit[2] if hit else None, session=session)
         if hit:
             index_block(hit[2], repo, f"{t['id']} review")
+        elif whose_turn(t) == "reviewer" and not r.get("verdict") and not is_limited(t):
+            # gone after a Rex restart (a background reviewer always is): its coordinator
+            # hears of it, as of one that exited (a limited one starts again at the reset)
+            stop(repo, t, "reviewer", "pane_gone", "Reviewer's pane was gone",
+                 f"{t['id']}'s reviewer's pane was gone after a Rex restart: "
+                 f"`bullpen review {t['id']}` starts a new one")
         repo.save_task(t)
 
 

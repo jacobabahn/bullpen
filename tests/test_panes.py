@@ -236,6 +236,26 @@ class BackgroundTest(PanesTest):
 
 
 class ReviewersTest(PanesTest):
+    def test_a_reviewer_gone_after_a_rex_restart_goes_to_the_coordinator(self):
+        tid = self.start_task()
+        reviewer = self.commit_and_ready(tid)
+        (self.fake / "alive" / reviewer).unlink()  # detached blocks don't survive a restart
+        self.bp("up")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["stop"], t["review"]["block"]),
+                         ("triage", {"by": "reviewer", "kind": "pane_gone"}, None))
+        self.assertIn(f"`bullpen review {tid}` starts a new one", self.news_lines()[-1])
+        self.bp("review", tid)  # what the coordinator does
+        self.assertEqual(self.show(tid)["status"], "review")
+
+    def test_an_approved_task_keeps_its_status_when_its_reviewer_is_gone(self):
+        tid = self.start_task()
+        reviewer = self.commit_and_ready(tid)
+        self.verdict(tid, "approve")  # which closes the reviewer
+        (self.fake / "alive" / reviewer).unlink(missing_ok=True)
+        self.bp("up")
+        self.assertEqual(self.show(tid)["status"], "ready")
+
     def test_reviewers_default_to_the_background_whatever_workers_do(self):
         tid = self.start_task()
         reviewer = self.commit_and_ready(tid)
