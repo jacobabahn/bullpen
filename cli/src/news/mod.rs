@@ -119,6 +119,28 @@ pub fn tell_coordinator(repo: &Repo, task: &Obj, event: &str, text: &str) -> Res
     )
 }
 
+/// The command a coordinator follows its news with (its guide and `up` name it).
+pub fn follow_cmd() -> String {
+    let me = vec![
+        bullpen_core::paths::self_bin().display().to_string(),
+        "news".into(),
+        "--follow".into(),
+    ];
+    bullpen_core::text::shell_join(&rex::with_state(&me))
+}
+
+/// One line saying how news reaches the coordinator.
+pub fn news_mode_line(repo: &Repo) -> String {
+    if repo.cfg_str("news") == "monitor" {
+        return format!(
+            "news: by monitor. Nothing is typed: the coordinator must run the Monitor tool on `{}` (its guide says how).",
+            follow_cmd()
+        );
+    }
+    "news: typed into the coordinator's pane (`bullpen config --news monitor`: by Claude Code's Monitor tool instead)."
+        .into()
+}
+
 /// Append text to a file, made when missing.
 fn append(path: &Path, text: &str) -> Res<()> {
     let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path)?;

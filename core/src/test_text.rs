@@ -55,3 +55,12 @@ fn strip_and_split_use_pythons_whitespace() {
     assert_eq!(ljust("é", 3), "é  ");
     assert_eq!(rjust("é", 3), "  é");
 }
+
+#[test]
+fn quote_is_shlexs() {
+    assert_eq!(quote(""), "''");
+    assert_eq!(quote("a-b/c.d_e@f%g+h=i:j,k"), "a-b/c.d_e@f%g+h=i:j,k");
+    assert_eq!(quote("it's here"), "'it'\"'\"'s here'");
+    assert_eq!(quote("é"), "'é'");
+    assert_eq!(shell_join(&["env", "A=b c", "x"]), "env 'A=b c' x");
+}

@@ -1,6 +1,6 @@
-//! A repo's coordinators, and who sees to a task (bullpen/coordinators.py), as far as
-//! reading them: which one a pane is, which are alive, and whose a task is. Dropping a
-//! gone one (`_coordinator_gone`) stays with Python until T10.
+//! A repo's coordinators, and who sees to a task (bullpen/coordinators.py): which one a
+//! pane is, which are alive, and whose a task is; adding one, and dropping those whose
+//! panes are gone (`up`). The watcher's `_coordinator_gone` stays with Python until T10.
 //!
 //! cfg["coordinators"] lists them, oldest (the primary) first: {"id": "c1", "block",
 //! "session", "board": {"block", "session"}, "board_others"}. A task belongs to the one
@@ -8,8 +8,9 @@
 //! running, else every running coordinator.
 
 use bullpen_core::json::{obj, s, Obj};
+use bullpen_core::repo::{index_block, unindex_block};
 use bullpen_core::{Repo, Res};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 /// The repo's coordinators, oldest (the primary) first (an entry that isn't an object is left out).
 pub fn coordinators(repo: &Repo) -> Vec<&Obj> {
@@ -40,6 +41,51 @@ pub fn coordinator_mut<'a>(repo: &'a mut Repo, cid: &str) -> Option<&'a mut Obj>
     list.iter_mut()
         .filter_map(Value::as_object_mut)
         .find(|c| !cid.is_empty() && s(c, "id") == cid)
+}
+
+/// A new coordinator in pane block: its ID.
+pub fn add_coordinator(repo: &mut Repo, block: &str, session: &str) -> Res<String> {
+    let n = repo.cfg.get("next_coordinator").and_then(Value::as_i64).unwrap_or(1);
+    let cid = format!("c{n}");
+    repo.cfg.insert("next_coordinator".into(), json!(n + 1));
+    let c = json!({"id": cid, "block": block, "session": session, "board": null});
+    match repo.cfg.get_mut("coordinators").and_then(Value::as_array_mut) {
+        Some(list) => list.push(c),
+        None => {
+            repo.cfg.insert("coordinators".into(), json!([c]));
+        }
+    }
+    index_block(block, repo, "coordinator")?;
+    Ok(cid)
+}
+
+/// Forget coordinators whose panes are gone, and close their boards. Their tasks' news
+/// goes to the others.
+pub fn prune(repo: &mut Repo) -> Res<()> {
+    let gone: Vec<Obj> = coordinators(repo).into_iter().cloned().collect();
+    for c in gone {
+        if !alive(Some(&c))? {
+            drop_coordinator(repo, &c)?;
+        }
+    }
+    Ok(())
+}
+
+/// Forget coordinator c, whose pane is gone, and close its board.
+fn drop_coordinator(repo: &mut Repo, c: &Obj) -> Res<()> {
+    let b = obj(c, "board");
+    if !s(b, "block").is_empty() {
+        crate::rex::rex_close(s(b, "session"), s(b, "block"))?;
+        unindex_block(s(b, "block"))?;
+    }
+    unindex_block(s(c, "block"))?;
+    if let Some(list) = repo.cfg.get_mut("coordinators").and_then(Value::as_array_mut) {
+        if let Some(i) = list.iter().position(|o| o.as_object() == Some(c)) {
+            list.remove(i);
+        }
+    }
+    println!("coordinator {}: its pane is gone, so it is dropped", s(c, "id"));
+    Ok(())
 }
 
 /// Does coordinator c's board show the task? Only one c sees to, or one nobody sees

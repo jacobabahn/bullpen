@@ -3,7 +3,7 @@
 import os
 import time
 
-from .core import Repo, SELF, command, index_block, repo_root, unindex_block
+from .core import Repo, SELF, command, repo_root, unindex_block
 from .jobs import background
 from .rex import coordinator_label, find_panes, rex_alive, rex_close, rex_view
 
@@ -78,23 +78,6 @@ def calling_coordinator(repo):
     its block ID as REX_BLOCK. Unsure (no REX_BLOCK, or a stored block that is out of
     date) counts as none."""
     return coordinator_at(repo, os.environ.get("REX_BLOCK"), boards=False)
-
-
-def add_coordinator(repo, block, session):
-    n = repo.cfg["next_coordinator"]
-    c = {"id": f"c{n}", "block": block, "session": session, "board": None}
-    repo.cfg["next_coordinator"] = n + 1
-    repo.cfg["coordinators"].append(c)
-    index_block(block, repo, "coordinator")
-    return c
-
-
-def prune(repo):
-    """Forget coordinators whose panes are gone, and close their boards. Their tasks'
-    news goes to the others."""
-    for c in list(repo.cfg["coordinators"]):
-        if not alive(c):
-            drop_coordinator(repo, c)
 
 
 def drop_coordinator(repo, c):

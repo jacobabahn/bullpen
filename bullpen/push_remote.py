@@ -3,8 +3,8 @@
 import argparse
 import fcntl
 
-from .core import Fail, Repo, clip, command, commits, git, repo_root
-from .modes import push_base, push_remote, quiet_git
+from .core import Fail, Repo, clip, command, repo_root
+from .modes import push_remote, quiet_git
 from .news import news
 
 
@@ -53,51 +53,6 @@ def cmd_push_bg(args):
                           + f"`bullpen doctor` says how far behind {remote} is.",
          everyone=t is PUSH_NEWS)
     return 1
-
-
-def catch_up_push(repo):
-    """`up`: push the base branch when it has commits the push remote didn't get (after
-    an offline spell, say), as far as this checkout last saw it. Says what it started."""
-    remote = push_remote(repo)
-    if not remote or git(repo.root, "remote", "get-url", remote, check=False).returncode != 0:
-        return None
-    base = repo.base()
-    if git(repo.root, "rev-parse", "-q", "--verify", f"refs/heads/{base}", check=False).returncode != 0:
-        return None
-    seen = f"refs/remotes/{remote}/{base}"
-    if git(repo.root, "rev-parse", "-q", "--verify", seen, check=False).returncode == 0:
-        if int(git(repo.root, "rev-list", "--count", f"{seen}..refs/heads/{base}").stdout.strip()) == 0:
-            return None
-    return push_base(repo, base)
-
-
-def check_push(repo, why_not=None):
-    """The push remote: there, reachable without a prompt, and how far behind the base."""
-    if not repo:
-        return "skip", f"can't tell: {why_not or 'not in a git repository'}"
-    name = repo.cfg.get("push_remote")
-    if not name:
-        return "skip", "none (`bullpen config --push-remote <remote>` backs up the base branch after each accept)"
-    if repo.has_origin():
-        return "skip", f"{name} is set, but this repo has an origin remote (remote mode), so nothing is pushed to it"
-    if git(repo.root, "remote", "get-url", name, check=False).returncode != 0:
-        return "fail", (f"there's no remote {name}: `git remote add {name} <url>`, "
-                        f"or `bullpen config --push-remote \"\"`")
-    base = repo.base()
-    p = quiet_git(repo, "ls-remote", "--heads", name, f"refs/heads/{base}", timeout=20)
-    if p.returncode != 0:
-        return "fail", f"can't reach {name} without a prompt: {push_reason(p.stderr or p.stdout, name, base)}"
-    theirs = (p.stdout.split() or [None])[0]
-    if not theirs:
-        return "fail", f"{name} has no {base} yet: `git push {name} {base}`"
-    if git(repo.root, "cat-file", "-e", f"{theirs}^{{commit}}", check=False).returncode != 0 or \
-            git(repo.root, "merge-base", "--is-ancestor", theirs, f"refs/heads/{base}", check=False).returncode != 0:
-        return "fail", (f"{name}'s {base} has commits this one doesn't, so pushes are rejected: "
-                        f"`git pull {name} {base}`, then `git push {name} {base}`")
-    n = int(git(repo.root, "rev-list", "--count", f"{theirs}..refs/heads/{base}").stdout.strip())
-    if n:
-        return "fail", f"{name} is {commits(n)} behind {base}: `git push {name} {base}`"
-    return "ok", f"{name} has {base} as it is here"
 
 
 def commands(sub):

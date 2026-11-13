@@ -1,0 +1,22 @@
+# T5: setup (up, doctor, guide). `build` and `_build_board` build the checkout itself, so
+# tests/test_board_build.py and test_self_update.py cover them, with a fake cargo.
+# env:BULLPEN_BOARD keeps up's background build to the command line, which is current.
+guide
+usage guide --x
+env:BULLPEN_BOARD=/bin/true up
+env:BULLPEN_BOARD=/bin/true up --verbose
+env:BULLPEN_BOARD=/bin/true up --no-board
+env:BULLPEN_BOARD=/bin/true up --session session:9
+env:BULLPEN_BOARD=/bin/true env:FIXTURE=deadcoords up
+env:BULLPEN_BOARD=/bin/true env:FIXTURE=deadcoords up --verbose
+env:BULLPEN_BOARD=/bin/true env:REX_BLOCK=blk1 up --here
+env:BULLPEN_BOARD=/bin/true env:REX_BLOCK=blk77 up --here
+env:BULLPEN_BOARD=/bin/true up --here
+env:BULLPEN_BOARD=/bin/true env:FIXTURE=panes up
+env:BULLPEN_BOARD=/bin/true env:FIXTURE=nocoord up
+env:BULLPEN_BOARD=/bin/true env:FIXTURE=nocoord up --verbose
+env:BULLPEN_BOARD=/bin/true env:FIXTURE=nocoord env:REX_BLOCK=blk1 up --here
+usage up --sess
+doctor
+env:BULLPEN_BOARD=/bin/true doctor
+env:FIXTURE=deadcoords doctor

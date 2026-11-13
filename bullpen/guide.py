@@ -4,7 +4,7 @@ import difflib
 import os
 import sys
 
-from .core import Fail, PROMPTS, STATE, command, known_repos
+from .core import Fail, PROMPTS, STATE, known_repos
 from .coordinators import alive
 from .news import follow_cmd, news
 
@@ -13,14 +13,6 @@ def guide_text():
     """The coordinator's guide, with this bullpen's own path in its commands."""
     text = (PROMPTS / "coordinator.md").read_text()
     return text.replace("{{follow}}", follow_cmd())
-
-
-def guide_file(repo):
-    """The guide as a file, for the coordinator's system prompt."""
-    path = repo.dir / "coordinator.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(guide_text())
-    return path
 
 
 # ---------- telling running coordinators that their guide changed ----------
@@ -124,12 +116,3 @@ def tell_guide_changes(repo):
                 r.save()
     except (Fail, OSError, ValueError) as e:
         print(f"bullpen: couldn't tell the coordinators about their guide: {e}", file=sys.stderr)
-
-
-def cmd_guide(args):
-    print(guide_text())
-
-
-def commands(sub):
-    """This module's commands, for bullpen's parser."""
-    command(sub, "guide", cmd_guide, "Coordinator", help="print the coordinator's guide")

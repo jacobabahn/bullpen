@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from .core import (
-    Fail, HOME, Repo, SELF, command, file_hash, git, now, read_json, repo_root, write_json,
+    Fail, HOME, SELF, file_hash, git, now, read_json, write_json,
 )
 from .jobs import background
 from .news import news
@@ -107,16 +107,6 @@ def lock_build(wait):
         f.close()
         return None
     return f
-
-
-def building():
-    if not BUILD_LOCK.exists():
-        return False
-    f = lock_build(wait=False)
-    if f is None:
-        return True
-    f.close()
-    return False
 
 
 def names(progs):
@@ -229,51 +219,6 @@ def build(progs, background=False, nice=False):
     return [], None, progs
 
 
-def cmd_build(args):
-    """Build bullpen's command line and the board now, whatever their source holds
-    (install.sh runs this)."""
-    progs = programs()
-    if not progs:
-        raise Fail(f"{HOME} has no Cargo.toml: nothing to build")
-    lock = lock_build(wait=False)
-    if lock is None:
-        print("another build of bullpen is running: waiting for it")
-        lock = lock_build(wait=True)
-    with lock:
-        failed, why, built = build(progs)
-    if failed:
-        raise Fail(f"{names(failed)} weren't built: {why} (log: {BUILD_LOG})" if len(failed) > 1 else
-                   f"{names(failed)} wasn't built: {why} (log: {BUILD_LOG})")
-    for p in built:
-        print(f"built {p.what}: {p.installed}")
-    watcher_after(built)
-
-
-def cmd_build_bg(args):
-    """`up` or accept started this, holding the build lock for it (--lock-fd), which
-    it keeps until it's done, news included."""
-    with open(args.lock_fd, "a", closefd=True):
-        progs = programs(background=True)
-        try:
-            failed, why, built = build(progs, background=True)
-        except Exception as e:  # noqa: BLE001 - say it once, whatever it was
-            failed, why, built = [p for p in progs if p.stale()], f"{type(e).__name__}: {e}", []
-            for p in failed:
-                p.set_stamp(failed=p.source_hash())
-        watcher_after(built)
-        if not failed:
-            return 0
-        try:
-            repo = Repo(repo_root())
-        except (Fail, ValueError):
-            return 1
-        for p in failed:
-            tid, kind = p.news_as
-            news(repo, {"id": tid}, kind, f"{p.subject()} wasn't rebuilt: {why}. {p.keeps}. "
-                 f"Log: {BUILD_LOG}. Fix it, then run `bullpen build`.", everyone=True)
-        return 1
-
-
 def watcher_after(built):
     """A new command line: a running watcher is replaced, so it runs the new build."""
     if CLI in built:
@@ -316,16 +261,7 @@ def not_in_build(name):
     handed over a command whose Python is gone), or no build at all."""
     name = name or "--help"
     if not os.access(CLI.installed, os.X_OK):
-        return f"bullpen: bullpen isn't built: run `{SELF} build` (it needs cargo)"
+        return f"bullpen: bullpen isn't built: run {HOME / 'install.sh'} (it needs cargo)"
     failed = read_json(CLI.stamp, {}).get("failed")
     log = f" (its last build failed: {BUILD_LOG})" if failed else ""
     return f"bullpen: `{name}` isn't in this build of bullpen: rebuild it with `bullpen build`{log}"
-
-
-def commands(sub):
-    """This module's commands, for bullpen's parser."""
-    command(sub, "build", cmd_build, "Setup",
-            help="build bullpen and the board now and put them in place (install.sh runs it)")
-
-    p = command(sub, "_build_board", cmd_build_bg)
-    p.add_argument("--lock-fd", type=int, required=True)

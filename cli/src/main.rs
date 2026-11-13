@@ -7,15 +7,20 @@
 mod agents;
 mod args;
 mod board;
+mod build;
 mod commands;
 mod coordinators;
 mod diff;
+mod doctor;
 mod go;
+mod guide;
 mod help;
+mod jobs;
 mod modes;
 mod news;
 mod notifications;
 mod panes;
+mod push_remote;
 mod rex;
 mod saves;
 mod show;
@@ -23,6 +28,8 @@ mod start;
 mod stops;
 mod task_line;
 mod triage;
+mod up;
+mod watcher;
 
 use bullpen_core::paths;
 use commands::Owner;
@@ -64,6 +71,8 @@ fn run(f: fn(&[String]) -> bullpen_core::fail::Res<i32>, argv: &[OsString]) -> i
 fn main() {
     // die quietly on a closed pipe, as a shell tool does, rather than panic
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
+    // bullpen's checkout, from this program's path while it still has one (`build` renames a new one over it)
+    let _ = paths::home();
     let mut argv: Vec<OsString> = std::env::args_os().skip(1).collect();
     let Some(first) = argv.first().map(|a| a.to_string_lossy().into_owned()) else {
         print!("{}", help::top_help(help::term_width()));

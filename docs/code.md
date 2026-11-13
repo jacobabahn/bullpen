@@ -22,6 +22,8 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   it isn't in this build: the build is older than its source. First it waits for the
   build that's running, or builds it, and runs the call again with the new build
   (`board_build.catch_up`); only when it can't does it say to run `bullpen build`.
+  With no build at all, it says to run `install.sh`, which builds the first copy with
+  cargo itself (`bullpen build` is the command line's own).
 - The Rust is one cargo workspace (`Cargo.toml`, one `Cargo.lock`, built into
   `target/`): `core/` (`bullpen-core`: tasks, config, wording, what the command line
   and the board share), `cli/` (`bullpen-cli`, the program `bullpen`) and `board/`.
@@ -33,9 +35,11 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   twin, and `task_line.py` is `core/src/words.rs`' and `cli/src/task_line.rs`' (for
   `pick` and `config`); `news.py` (`news`, `tell_coordinator`, `ready_news`, the outboxes),
   `notifications.py` (`notify`), `stops.py`, `agents.py`, `coordinators.py`, `modes.py`,
-  `rex.py` and `panes.py` (for launch, review and `up`) are twins of `cli/src/`'s for the
-  Python commands, and so are `go.py` (only `relink`, for `up`) and `board.py`
-  (`ensure_board`, `old_board` and the board's paths, for `up`, doctor and the build). There is one bridge,
+  `rex.py` and `panes.py` (for launch and review) are twins of `cli/src/`'s for the
+  Python commands, and so are, for accept: `guide.py` (`tell_guide_changes`),
+  `watcher.py` (`refresh_watcher`), `board_build.py` (`rebuild_if_stale`, and the
+  catch-up of a command an old build hands over), `board.py` (the board's paths, for
+  board_build) and `jobs.py`. There is one bridge,
   the run queue: a Rust save that frees a slot runs `bullpen _queue` (Python's
   `start_queued`, reading the tasks fresh) once the command is done, until T6 moves the
   queue to Rust.
@@ -87,13 +91,25 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
 - `diff.rs`: `diff` (the pager, `--stat`, `--pane`)
 - `agents.rs`: a task's worker and reviewer, and the one it waits on
 - `coordinators.rs`: a repo's coordinators, who sees to a task, whose board shows it
-  (`on_board`), and the session to work in (`session_for`)
+  (`on_board`), the session to work in (`session_for`), and adding and pruning them
 - `news/`: `mod.rs`: a news line (`news`, `tell_coordinator`), the outboxes and typing
   them into coordinators' panes (`deliver`, `has_draft`); `read.rs`: `news` and
   `news --follow`
 - `notifications.rs`: the person's notifications (the save hook) and `_flush`
 - `stops.rs`: a worker or reviewer stopping (its callers move from T6 on)
-- `modes.rs`: the task's base ref (the adapters move in T8)
+- `modes.rs`: the task's and the repo's base ref, and the one way to push (`quiet_git`,
+  `push_base`); the adapters move in T8
+- `jobs.rs`: starting a background job so it outlives the command and its pane (a
+  double fork), with its output in `jobs.log` and its failure in the news
+- `up.rs`: `up`
+- `guide.rs`: `guide`, and telling running coordinators their guide changed (with
+  difflib's diff, ported)
+- `watcher.rs`: starting the watcher, and replacing it when the code changes (the same
+  stamp as the Python's)
+- `build.rs`: `build` and `_build_board` (the build lock passed by fd), and `up`'s
+  `rebuild_if_stale`
+- `push_remote.rs`: `up`'s catch-up push, and doctor's check of the push remote
+- `doctor/`: `mod.rs`: `doctor` and `up`'s hint; `checks.rs`: the checks
 - `start/mod.rs`: `add`, `after`, `model`, `review-mode`, what a task waits on, and
   which saves move the run queue (`slot_freed`); `peek.rs`: `peek`
 - `triage.rs`: `ask`, `ok` and `note`
@@ -116,10 +132,10 @@ importing the one with the command being run, or all of them for `--help`):
   rather than reading the task's `block` or its review's `session`
 - `coordinators.py`: a repo's coordinators, and who sees to a task (`sees_to`)
 - `panes.py`: where a worker's or reviewer's pane lives: making, showing, hiding and
-  finding it again, and keeping it there (`gather`; a twin, for launch, review and `up`)
+  finding it again, and keeping it there (a twin, for launch and review)
 - `news.py`: news lines, and the outboxes typed into coordinators' panes
 - `notifications.py`: the person's notifications
-- `guide.py`: the coordinator's guide, and telling running coordinators it changed
+- `guide.py`: telling running coordinators their guide changed (a twin, for accept)
 - `limit.py`: the usage limit
 - `stops.py`: a worker or reviewer stopping: triage, or the person
 - `hooks.py`: a worktree's setup and teardown hooks
@@ -130,7 +146,8 @@ importing the one with the command being run, or all of them for `--help`):
 - `review.py`: what a review covers, starting a reviewer
 - `answer.py`: answering a prompt from the board, `reply`
 - `triage.py`: the coordinator's `review`
-- `watcher.py`: starting the watcher, and replacing it when the code changes
+- `watcher.py`: starting the watcher, and replacing it when the code changes (a twin,
+  for accept and board_build)
 - `close.py`: the one close step (`close`) that accept, close, drop and auto-accept
   share, and the `close` and `drop` commands
 - `task_line.py`: one task line, as the board says it (a twin, for `pick` and `config`)
@@ -138,20 +155,16 @@ importing the one with the command being run, or all of them for `--help`):
 - `tours.py`: guided review tours and the person's comments on them
 - `stepper.py`: reading a tour on the board, and the `tour` command that opens it
 - `ready.py`: `ready` and `finish`
-- `board.py`: the board's program, and its pane beside a coordinator (a twin, for `up`,
-  doctor and board_build)
-- `board_build.py`: building bullpen's command line and the board, and rebuilding them
-  when their source changes
-- `push_remote.py`: the push remote's background push and its checks, in local mode
+- `board.py`: where the board's program is built (for board_build)
+- `board_build.py`: rebuilding bullpen's command line and the board when their source
+  changes (a twin, for accept), and the catch-up of a command an old build hands over
+- `push_remote.py`: the push remote's background push (`_push`), in local mode
 - `keys.py`: bullpen's key bindings in the Rex config
 - `accept.py`: accepting a task, and rebasing the others after it
 - `auto_accept.py`: a reviewer's verdict, and auto-accept
 - `prs.py`: following a task's pull request after ready
 - `config.py`: `config`
-- `go.py`: finding a repo's panes again after a Rex restart (`relink`; a twin, for `up`)
-- `doctor.py`: `bullpen doctor`
 - `pick.py`: the jump picker
-- `up.py`: `up`
 - `events.py`: what the watcher reports: an agent's events, a pane that closed, no
   progress, the usage limit's reset
 - `check.py`: `check`, which applies the events the watcher missed

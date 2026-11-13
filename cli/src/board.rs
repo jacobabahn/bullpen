@@ -113,7 +113,7 @@ fn board_program(b: &Obj) -> Res<Option<String>> {
 /// A running board's program, when it isn't the one `bullpen board` runs now: an older
 /// install's path, which a rebuild never replaces, so the board never reloads. (A board
 /// on the right path whose file was rebuilt reloads by itself.) Else None.
-fn old_board(b: &Obj) -> Res<Option<String>> {
+pub fn old_board(b: &Obj) -> Res<Option<String>> {
     Ok(board_program(b)?.filter(|prog| realpath(Path::new(prog)) != realpath(&board_exe())))
 }
 

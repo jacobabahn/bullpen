@@ -272,7 +272,8 @@ class EntryTest(BullpenTest):
         self.assertEqual({c["name"]: c["owner"] for c in table if c["owner"] != "python"},
                          {"build-board": "alias of build", "_nop": "rust", "_commands": "rust",
                           **dict.fromkeys(["go", "hide", "adopt", "board", "ls", "show", "diff", "add", "after",
-                                           "model", "review-mode", "peek", "ask", "ok", "note", "news", "_flush"],
+                                           "model", "review-mode", "peek", "ask", "ok", "note", "news", "guide",
+                                           "up", "build", "_build_board", "doctor", "_flush"],
                                           "rust")})
 
     def test_help_and_an_unknown_command_come_from_rust(self):
@@ -341,8 +342,7 @@ class EntryTest(BullpenTest):
         self.assertIn("worker_model", json.loads(p.stdout))
         p = run("--help")
         self.assertEqual(p.returncode, 2)
-        self.assertEqual(p.stderr, f"bullpen: bullpen isn't built: run `{home / 'bin' / 'bullpen'} build` "
-                                   f"(it needs cargo)\n")
+        self.assertEqual(p.stderr, f"bullpen: bullpen isn't built: run {home / 'install.sh'} (it needs cargo)\n")
 
 
 class CodeTest(unittest.TestCase):

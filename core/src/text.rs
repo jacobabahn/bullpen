@@ -228,6 +228,23 @@ pub fn upper_first(s: &str) -> String {
         .unwrap_or_default()
 }
 
+/// shlex.quote: a word sh reads back as itself.
+pub fn quote(word: &str) -> String {
+    if word.is_empty() {
+        return "''".into();
+    }
+    let safe = |c: char| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c);
+    if word.chars().all(safe) {
+        return word.into();
+    }
+    format!("'{}'", word.replace('\'', "'\"'\"'"))
+}
+
+/// shlex.join: the words as one sh command line.
+pub fn shell_join<S: AsRef<str>>(words: &[S]) -> String {
+    words.iter().map(|w| quote(w.as_ref())).collect::<Vec<_>>().join(" ")
+}
+
 #[cfg(test)]
 #[path = "test_text.rs"]
 mod tests;

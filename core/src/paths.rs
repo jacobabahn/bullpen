@@ -11,7 +11,14 @@ pub fn user_home() -> String {
 /// bullpen's checkout (core.HOME): the nearest folder above this program that has
 /// bin/bullpen-py. The installed program is HOME/target/bullpen and cargo's own is
 /// HOME/target/release/bullpen; a test binary falls back to the folder above core/.
+/// Found once, at the first call: `build` renames a new program over the running one,
+/// after which this one's own path no longer resolves.
 pub fn home() -> PathBuf {
+    static HOME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    HOME.get_or_init(find_home).clone()
+}
+
+fn find_home() -> PathBuf {
     let exe = std::env::current_exe()
         .and_then(|p| p.canonicalize())
         .unwrap_or_default();

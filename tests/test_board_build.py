@@ -39,9 +39,10 @@ FAKE_CARGO = textwrap.dedent("""\
         # build in this checkout's target (so this checkout is its home: `board` runs this
         # checkout's board), and hands the rest to this copy's Python
         real = out.parent / "bullpen-real"
-        if name == "bullpen":
+        if name == "bullpen":  # a copy renamed into place: the old one may be running
             import shutil
-            shutil.copy2(RUST_BIN, real)
+            shutil.copy2(RUST_BIN, f"{real}.tmp")
+            os.replace(f"{real}.tmp", real)
         rust = f'case $1 in {RUST_OWNED}) exec "{real}" "$@" ;; esac\\n'
         # a command a port moved: "// moved: NAME" in its main.rs, which it answers itself
         for line in (home / crate / "src" / "main.rs").read_text().splitlines():
@@ -98,6 +99,9 @@ class BoardBuildTest(unittest.TestCase):
         (self.tmp / "home").mkdir()
         self.env.update(HOME=str(self.tmp / "home"), PATH=f"{self.fake}:{self.env['PATH']}")
         self.target = home / "target"
+        # as install.sh leaves it before its first `bullpen build`: the command line, with no stamp
+        self.target.mkdir()
+        shutil.copy2(ROOT / "target" / "bullpen", self.target / "bullpen")
 
     def bp(self, *args, cwd=None, ok=True):
         p = subprocess.run([str(self.bin), *args], cwd=cwd or self.repo, env=self.env,

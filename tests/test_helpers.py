@@ -8,7 +8,7 @@ import unittest
 
 from support import setUpModule, tearDownModule, ROOT  # a temp folder for each module
 from bullpen import (
-    agents, answer, check, cli, core, doctor, limit, line_edit, notifications, pick, stepper,
+    agents, answer, check, cli, core, limit, line_edit, notifications, pick, stepper,
     task_line,
 )
 
@@ -410,23 +410,6 @@ class HelpersTest(unittest.TestCase):
 
     def test_split_keys_keeps_escape_sequences_whole(self):
         self.assertEqual(line_edit.split_keys("ab\x1b[Bc\x1bOA\x1b"), ["a", "b", "\x1b[B", "c", "\x1bOA", "\x1b"])
-
-    def test_rex_versions_compare_previews_before_releases(self):
-        key = doctor.rex_version_key
-        self.assertLess(key("0.1.0-preview.12"), doctor.REX_MIN)
-        self.assertEqual(key("0.1.0-preview.13"), doctor.REX_MIN)
-        self.assertGreater(key("0.1.0"), key("0.1.0-preview.99"))
-        self.assertGreater(key("v0.2.0-preview.1"), doctor.REX_MIN)
-        self.assertIsNone(key("dev"))
-
-    def test_a_shebangs_program_skips_envs_options(self):
-        prog = doctor.shebang_program
-        self.assertEqual(prog(["/bin/bash", "-e"]), "/bin/bash")
-        self.assertEqual(prog(["/usr/bin/env", "bash"]), "bash")
-        self.assertEqual(prog(["/usr/bin/env", "-S", "bash", "-e"]), "bash")
-        self.assertEqual(prog(["/usr/bin/env", "-Sbash", "-e"]), "bash")
-        self.assertEqual(prog(["/usr/bin/env", "-i", "FOO=1", "-u", "BAR", "python3"]), "python3")
-        self.assertIsNone(prog(["/usr/bin/env", "-S"]))
 
     # ---------- reading prompts ----------
 
