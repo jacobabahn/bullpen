@@ -167,6 +167,14 @@ class BoardBuildTest(unittest.TestCase):
         self.assertIn("v2()", self.board())
         self.assertEqual(self.board_lines(), [])  # a build that works isn't news
 
+    def test_up_leaves_the_build_running_in_the_background(self):
+        (self.fake / "cargo_slow").write_text("3")
+        start = time.time()
+        self.assertIn("rebuilding", self.bp("up").stdout)
+        self.assertLess(time.time() - start, 2.5)  # it didn't wait for cargo
+        self.settle()
+        self.assertIn("fn main() {}", self.board())
+
     def test_a_build_renames_a_copy_of_each_program_into_place(self):
         out = self.bp("build").stdout
         self.assertEqual(out.splitlines(), [f"built bullpen's command line: {self.target / 'bullpen'}",

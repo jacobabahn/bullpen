@@ -58,6 +58,12 @@ pub fn background(job: &Job, wait: bool) -> Option<u32> {
         return None;
     }
     let (r, w) = (fds[0], fds[1]);
+    // Neither end may reach the job (as os.pipe's can't): EOF on r must come when the
+    // supervisor writes the pid, not when the job and all it starts have ended.
+    for fd in fds {
+        // SAFETY: plain fcntl on fds this process just made (pipe2 isn't on macOS)
+        unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+    }
     // SAFETY: this program is single-threaded; the child only runs Rust code it owns
     // and leaves by _exit, never back into the command's code.
     let pid = unsafe { libc::fork() };
