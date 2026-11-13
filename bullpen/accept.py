@@ -3,9 +3,11 @@
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
-from .core import CLOSED, Fail, HOME, Repo, command, git, is_status, pr_short, repo_root, run_later, worker_idle
+from .core import (CLOSED, Fail, HOME, Repo, command, git, is_status, load_savers, pr_short, repo_root, run_later,
+                   worker_idle)
 from .modes import mode, task_base_ref
 from .rex import rex_alive, rex_type
 from .news import news, tell_coordinator
@@ -35,6 +37,10 @@ def accept(repo, t, auto=False):
     keys = keys_hash()
     touched = changed_files(repo, t)  # before the merge: what the others are checked against
     m = mode(repo, t)
+    # The merge may replace bullpen's own code (its main checkout, in local mode): from
+    # here on the command imports nothing, so it runs the old code to the end. The
+    # save's modules are the only ones it would import later.
+    load_savers()
     m.merge(repo, t)  # raises, leaving the task as it was, if it can't
     close(repo, t, "done", lambda: accepted(repo, t, m, auto, merged_outside, touched, keys),
           withdraw=False, auto_accepted=auto)
@@ -43,7 +49,8 @@ def accept(repo, t, auto=False):
 def accepted(repo, t, m, auto, merged_outside, touched, keys):
     """What follows a merge, once the task is closed: the news, the merge's follow-up
     in the task's mode, the other tasks rebased, and whatever the merge changed in
-    bullpen itself."""
+    bullpen itself. Each step runs whatever another did: one that fails is said, and
+    the rest go on."""
     merge = repo.cfg["merge"]
     if t.get("pr"):
         print(f"{t['id']} done (merged {t['pr']})")
@@ -55,25 +62,56 @@ def accepted(repo, t, m, auto, merged_outside, touched, keys):
     else:
         print(f"{t['id']} done")
         how = "nothing to merge"
-    if auto:
-        news(repo, t, "accepted", f"{t['id']} approved by review and auto-accepted ({how})")
-    else:
-        tell_coordinator(repo, t, "accepted", f"{t['id']} accepted ({how})")
-    said = m.after_merge(repo, t)  # the branch deleted on origin, or the push remote
-    if said:
-        print(said)
-    if how != "nothing to merge":
-        rebase_others(repo, t, touched)
-    run_later()  # the run queue starts the next task now, before the rest
-    tell_guide_changes(repo)  # the merge may have changed the coordinator's guide
-    refresh_watcher(repo)  # the merge may have changed the watcher itself
-    if repo.root.resolve() == HOME.resolve():  # bullpen's own checkout: maybe the board too
-        said = rebuild_board_if_stale(repo)
+
+    def tell():
+        if auto:
+            news(repo, t, "accepted", f"{t['id']} approved by review and auto-accepted ({how})")
+        else:
+            tell_coordinator(repo, t, "accepted", f"{t['id']} accepted ({how})")
+
+    def follow_up():
+        said = m.after_merge(repo, t)  # the branch deleted on origin, or the push remote
         if said:
             print(said)
-    if keys_hash() != keys:  # last: the line the board shows
-        news(repo, t, "keys", KEYS_CHANGED, everyone=True)
-        print(KEYS_CHANGED)
+
+    def rebuild_board():
+        if repo.root.resolve() == HOME.resolve():  # bullpen's own checkout: maybe the board too
+            said = rebuild_board_if_stale(repo)
+            if said:
+                print(said)
+
+    def keys_news():
+        if keys_hash() != keys:  # last: the line the board shows
+            news(repo, t, "keys", KEYS_CHANGED, everyone=True)
+            print(KEYS_CHANGED)
+
+    steps = [
+        ("the accepted news", tell),
+        ("the merge's follow-up", follow_up),
+        ("rebasing the other tasks", lambda: how != "nothing to merge" and rebase_others(repo, t, touched)),
+        ("the run queue", run_later),  # starts the next task now, before the rest
+        ("telling the coordinators about guide changes", lambda: tell_guide_changes(repo)),
+        ("refreshing the watcher", lambda: refresh_watcher(repo)),  # the merge may have changed it
+        ("rebuilding the board", rebuild_board),
+        ("the keys-changed news", keys_news),
+    ]
+    for what, step in steps:
+        each_step(repo, t, what, step)
+
+
+def each_step(repo, t, what, step):
+    """Run one of the steps after an accept. If it fails, say so (stderr, and news to
+    the coordinator) rather than lose the rest."""
+    try:
+        step()
+    except Exception as e:  # anything: the merge is done, and the other steps still run
+        why = " ".join(str(e).split()) or type(e).__name__
+        line = f"{t['id']} was accepted, but {what} failed: {why}"
+        print(f"bullpen: {line}", file=sys.stderr)
+        try:
+            news(repo, t, "accept_failed", line)
+        except Exception as e2:
+            print(f"bullpen: and the news of it failed too: {e2}", file=sys.stderr)
 
 
 def changed_files(repo, t):

@@ -1,9 +1,13 @@
 """Local mode with a backup remote: accept pushes the base branch there."""
 
 import json
+import shutil
+import subprocess
 import time
 import unittest
+from pathlib import Path
 
+import support
 import test_local_mode  # its setup, not its tests: a bare import keeps them out of this module
 from support import setUpModule, tearDownModule, sh, BullpenTest  # a temp folder for each module
 
@@ -169,3 +173,32 @@ class PushRemoteTest(unittest.TestCase):
         self.assertEqual(lines["push"], ("--", "backup is set, but this repo has an origin remote (remote mode), "
                                                 "so nothing is pushed to it"))
         (self.fake / "gh.log").unlink(missing_ok=True)  # doctor's gh check, in remote mode: fine here
+
+    def test_an_accept_that_changes_bullpens_own_code_still_does_what_follows(self):
+        # The project is bullpen itself, run from its main checkout: the merge replaces
+        # the code of the accept that's running. The task makes notifications.py (loaded
+        # by the first save, after the merge) need what only the new agents.py has.
+        for d in ("bin", "bullpen", "prompts", "lua"):
+            shutil.copytree(support.ROOT / d, self.repo / d, ignore=shutil.ignore_patterns("__pycache__"))
+        (self.repo / ".gitignore").write_text("__pycache__/\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "bullpen")
+        self.bp("config", "--review", "off")
+        tid = self.start_task()
+        wt = Path(self.show(tid)["worktree"])
+        with (wt / "bullpen" / "agents.py").open("a") as f:
+            f.write("\n\ndef brand_new():\n    return 1\n")
+        n = wt / "bullpen" / "notifications.py"
+        n.write_text(n.read_text().replace("from .agents import ", "from .agents import brand_new, ", 1))
+        self.git("commit", "-qam", "Needs the new agents.py", cwd=wt)
+        self.bp("ready", tid, "--summary", "Done.", cwd=wt)
+        nxt = self.bp("add", "Next", "--brief", "x", "--after", tid).stdout.strip()
+        own = self.repo / "bin" / "bullpen"  # the accept runs from the code it merges into
+        p = subprocess.run([str(own), "accept", tid], cwd=self.repo, env=self.env, text=True, capture_output=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(p.stderr, "")
+        self.assertIn("brand_new", (self.repo / "bullpen" / "agents.py").read_text())  # merged
+        log = next((self.tmp / "state").rglob("news.log")).read_text()
+        self.assertIn(f"{tid} accepted (merged into main", log)
+        self.assertEqual(self.backup_main(), self.git("rev-parse", "main"))
+        self.assertEqual(self.show(nxt)["status"], "working")  # the run queue moved

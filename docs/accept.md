@@ -38,6 +38,23 @@ rebased, keeping both sides of a conflict in README.md; its approval carried ove
 (only the base moved); BP-9 conflicts in bin/bullpen, sent back.` `bullpen config
 --rebase-others off` turns this off.
 
+## The steps after the merge
+
+Once the task is merged and saved as done, `accept` (and auto-accept) goes on in this
+order: the news line, the merge's follow-up (the branch deleted on origin, or the push
+to the push remote in local mode), the other tasks rebased, the run queue, telling the
+coordinators their guide changed, the watcher refreshed, the board rebuilt (in
+bullpen's own repository), and the news that the keys changed. Each step runs whatever
+another did: one that fails is said on stderr and in a news line, `BP-4 was accepted,
+but the run queue failed: ...`, and the rest still run.
+
+In local mode, accepting a task in bullpen's own repository merges into the checkout
+bullpen runs from, so the merge replaces the code of the accept that's running. The
+accept loads every module it can still need before it merges (the save's modules, the
+only ones a command imports later), so it runs the old code to the end and never mixes
+old and new. What it starts after the merge runs the new code: the background push,
+the watcher's calls, a rebuilt board.
+
 ## Auto-accept
 
 Off by default: you accept each task yourself. Turn it on with `bullpen config

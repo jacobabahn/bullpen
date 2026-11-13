@@ -146,6 +146,10 @@ higher one, the higher one registers with the lower:
   `working` or closes (`move_queue`). A command imports only its own module, so
   `cli.main` has the first save import these three (`core.LOAD_SAVERS`), and their
   functions run in one order (`cli.SAVERS`) whichever the command imported first.
+  A command that can replace bullpen's own code under itself imports them first
+  (`core.load_savers`): `accept`, before it merges into the checkout bullpen runs from,
+  and the tour stepper, which stays open while others accept. Otherwise a module
+  imported after that would be the new code, beside the old the command already runs.
 - What a save sets off that should wait for the command's own work (the run queue,
   whose news follows the command's) goes to `core.later(key, fn)`. `cli.main` runs
   it when the command returns (`core.run_later`), and a command that closes the pane

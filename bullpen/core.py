@@ -365,6 +365,15 @@ SAVED = []
 LOAD_SAVERS = []
 
 
+def load_savers():
+    """Import the modules that act on a save now, if the command hasn't yet. A command
+    that may replace bullpen's own code under itself (accept, merging into the main
+    checkout bullpen runs from) calls this before it does: a module imported after
+    that would be the new code, mixed with the old the command already runs."""
+    while LOAD_SAVERS:
+        LOAD_SAVERS.pop()()
+
+
 def on_save(fn):
     """Call fn(repo, t, old) after every save_task, in the order registered."""
     SAVED.append(fn)
@@ -482,8 +491,7 @@ class Repo:
             # when it entered its current status; fine-grained so `go --next` can order it
             t["since"] = dt.datetime.now().astimezone().isoformat(timespec="microseconds")
         write_json(self.task_path(t["id"]), t)
-        while LOAD_SAVERS:
-            LOAD_SAVERS.pop()()
+        load_savers()
         for fn in SAVED:
             fn(self, t, old)
 

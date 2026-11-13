@@ -13,7 +13,8 @@ import time
 import tty
 from pathlib import Path
 
-from .core import Fail, Repo, SELF, TERMINAL, clip, command, now, read_json, repo_root, write_json
+from .core import (Fail, Repo, SELF, TERMINAL, clip, command, load_savers, now, read_json, repo_root,
+                   write_json)
 from .rex import (
     find_pane, find_panes, rex_alive, rex_api, rex_close, rex_focus, rex_view, set_layer,
     with_state,
@@ -394,6 +395,9 @@ def view_tour(repo, t, back=False):
         raise Fail(f"{t['id']} has no tour: `bullpen tour {t['id']}` writes one")
     if not sys.stdin.isatty():
         raise Fail("the tour needs a terminal (the board's g opens it in a pane)")
+    # It stays open while other tasks are accepted, and one may change bullpen's own
+    # code: sending the comments saves the task, which mustn't import the new code then.
+    load_savers()
     run_ = t.get("tour") or {}
     if run_.get("state") == "written" and not run_.get("stale") and not tour_stale(repo, t, tour):
         run_["opened"] = tour["commit"]  # the board marks it toured (not for the old code's tour)

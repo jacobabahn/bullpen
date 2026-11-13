@@ -1,7 +1,10 @@
 """After ready: following the PR, auto-accept, rebasing the others."""
 
+import contextlib
+import io
 import json
 import textwrap
+import unittest
 from pathlib import Path
 
 from support import setUpModule, tearDownModule, sh, BullpenTest  # a temp folder for each module
@@ -453,3 +456,38 @@ class AcceptTest(BullpenTest):
         (Path(wt) / "README").write_text("edited\n")
         self.assertIsNone(self.accept_first())
         self.assertEqual(self.news_lines()[-1], "bullpen · After BP-1: BP-2 left alone (no overlap).")
+
+
+class AfterMergeTest(unittest.TestCase):
+    """The steps after an accept's merge, in this process, with what they call stubbed."""
+
+    def stub(self, mod, name, fn):
+        self.addCleanup(setattr, mod, name, getattr(mod, name))
+        setattr(mod, name, fn)
+
+    def test_a_step_that_fails_is_said_and_the_others_still_run(self):
+        from bullpen import accept, core
+        ran, said = [], []
+        self.stub(accept, "tell_coordinator", lambda repo, t, event, text: said.append((event, text)))
+        self.stub(accept, "news", lambda repo, t, event, text, **kw: said.append((event, text)))
+        self.stub(accept, "tell_guide_changes", lambda repo: ran.append("guide"))
+        self.stub(accept, "refresh_watcher", lambda repo: ran.append("watcher"))
+        self.stub(accept, "keys_hash", lambda: "new")
+
+        class Mode:
+            def after_merge(self, repo, t):
+                raise ImportError("cannot import name 'placed'")
+
+        class Repo:
+            cfg = {"merge": "squash"}
+            root = Path("/nowhere")
+
+        core.later("queue", lambda: ran.append("queue"))
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            accept.accepted(Repo(), {"id": "BP-1"}, Mode(), False, False, None, "old")
+        self.assertEqual(ran, ["queue", "guide", "watcher"])
+        failed = "BP-1 was accepted, but the merge's follow-up failed: cannot import name 'placed'"
+        self.assertEqual(said, [("accepted", "BP-1 accepted (nothing to merge)"), ("accept_failed", failed),
+                                ("keys", accept.KEYS_CHANGED)])
+        self.assertEqual(err.getvalue(), f"bullpen: {failed}\n")
