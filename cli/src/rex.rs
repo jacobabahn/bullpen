@@ -375,6 +375,33 @@ pub fn pane_process(session: &str, block: &str) -> Res<Option<Value>> {
     Ok(serde_json::from_str(&p.stdout).ok())
 }
 
+/// The text on a pane's screen, or "" if Rex can't say.
+pub fn screen(session: &str, block: &str) -> Res<String> {
+    let p = run(&rex_argv(session, &["capture"], &["-b", block]), false)?;
+    Ok(if p.ok() { p.stdout } else { String::new() })
+}
+
+/// The program's own (root) status record in the pane, as Rex keeps it, or None.
+pub fn program_status(session: &str, block: &str) -> Res<Option<Obj>> {
+    let p = run(
+        &rex_argv(session, &["block", "call"], &["-b", block, "program_status"]),
+        false,
+    )?;
+    if !p.ok() {
+        return Ok(None);
+    }
+    let Ok(v) = serde_json::from_str::<Value>(&p.stdout) else {
+        return Ok(None);
+    };
+    let records = v.as_object().and_then(|o| o.get("records")).and_then(Value::as_array);
+    Ok(records
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .find(|r| !truthy(r.get("id")))
+        .cloned())
+}
+
 #[cfg(test)]
 #[path = "test_rex.rs"]
 mod tests;

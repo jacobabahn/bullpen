@@ -33,6 +33,7 @@ mod review;
 mod rex;
 mod rules;
 mod saves;
+mod screen;
 mod show;
 mod start;
 mod stops;
