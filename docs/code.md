@@ -51,8 +51,10 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   fresh) once the command is done.
 - `cli/check/compare.sh` runs each case of `cli/check/cases-*.txt` with the Python and
   the Rust build in a fresh fixture, and compares stdout, stderr, exit code and the
-  state folder (and the global config.json), byte for byte, and what the fake Rex was asked and its windows after. Each port adds cases for what it moves, and runs them
-  against main's Python (`BULLPEN_PY=<main checkout>/bin/bullpen-py`).
+  state folder (and the global config.json), byte for byte, and what the fake Rex was asked and its windows after. Each port adds cases for what it moves. Its Python is
+  by default the one of the commit the branch started from (`git merge-base HEAD
+  main`, a copy in the work folder), never the live main checkout; `BULLPEN_PY` picks
+  another.
 
 ## The Rust
 

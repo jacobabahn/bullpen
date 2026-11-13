@@ -399,7 +399,8 @@ def main(d, now):
                                    indent=2) + "\n")
 
     env = {"HOME": home, "BULLPEN_STATE": state, "BULLPEN_REX": fake / "rex", "FAKE_DIR": fake,
-           "XDG_CONFIG_HOME": d / "config", "FIXTURE_ROOT": root}
+           "XDG_CONFIG_HOME": d / "config", "FIXTURE_ROOT": root,
+           "BULLPEN_NO_BUILD": 1}  # never build, or take the build lock in, the checkout it runs from
     for k, v in env.items():
         print(f"export {k}='{v}'")
     print("unset REX_BLOCK REX_SESSION NO_COLOR")

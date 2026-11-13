@@ -16,7 +16,19 @@ command line first, at low priority, when its source changed since the last buil
 and stops with cargo's error if it doesn't build. A test module run any other way
 says so when the build is missing or older than its source: run `tests/run.py`, or
 `bin/bullpen build`. The board isn't built for the tests: they give bullpen a fake one
-(`BULLPEN_BOARD`).
+(`BULLPEN_BOARD`). Nor is this checkout, by anything a test runs: `tests/support.py`
+sets `BULLPEN_NO_BUILD=1`, so bullpen never builds, or takes the build lock in, the
+checkout it runs from (docs/rebuilds.md). The tests about building build a copy of
+bullpen, with a fake cargo (`tests/test_board_build.py`).
+
+`cli/check/compare.sh` compares each case of `cli/check/cases-*.txt` between the Rust
+build and a Python, each in a fresh fixture (`cli/check/fixture.py`). The Python is by
+default the one of the commit this branch started from (`git merge-base HEAD main`):
+a `git archive` copy in the work folder, removed afterwards, with the Rust build
+copied in as its build. A case whose command that Python doesn't have shows as
+`NO PY`, naming that commit: compare it against one whose Python has it, with
+`BULLPEN_PY=<a worktree of it>/bin/bullpen-py`. Its fixtures set `BULLPEN_NO_BUILD`
+too.
 
 The test processes run at low priority (nice 10), as does everything they start, so
 several agents can run the suite at once and the machine stays responsive. They use

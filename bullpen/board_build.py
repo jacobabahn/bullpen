@@ -33,6 +33,13 @@ SHARED = ("Cargo.toml", "Cargo.lock")  # the workspace's: both programs are buil
 BUILD_WAIT = float(os.environ.get("BULLPEN_BUILD_WAIT") or 600)
 # The commands that build: Rust's since T5. An older build hands them to the Python (BP-119)
 BUILD_ENTRIES = ("build", "build-board", "_build_board")
+# A test's or a compare's fixture (tests/support.py, cli/check/): bullpen never builds,
+# or takes the build lock in, the checkout it runs from (cli/src/build.rs's twin)
+NO_BUILD = "bullpen: builds are off here (BULLPEN_NO_BUILD is set: a test's or a compare's fixture)"
+
+
+def no_build():
+    return bool(os.environ.get("BULLPEN_NO_BUILD"))
 
 
 class Program:
@@ -152,6 +159,8 @@ def names(progs):
 def rebuild_if_stale(repo):
     """`up`, and an accept in HOME's own repo: when a program's source isn't what it was
     built from, build it in the background. Says what it started; never fails."""
+    if no_build():
+        return None
     try:
         stale = []
         for p in programs(background=True):
@@ -258,6 +267,8 @@ def catch_up(argv):
     be the build, and would wait for itself."""
     # this very call, run again (the build and the Python exec, so the pid stays): not the
     # jobs a call that caught up starts, which may need to catch up themselves
+    if no_build():
+        return  # a fixture: the call fails with not_in_build's line
     if os.environ.get("BULLPEN_CAUGHT_UP") == str(os.getpid()) or CLI not in programs() or not os.access(CLI.installed, os.X_OK):
         return
     if read_json(CLI.stamp, {}).get("failed") == CLI.source_hash():
@@ -298,6 +309,9 @@ def build_entry(argv):
 
 def build_now():
     """`build`: build bullpen's command line and the board now, whatever their source holds."""
+    if no_build():
+        print(NO_BUILD, file=sys.stderr)
+        return 1
     progs = programs()
     if not progs:
         print(f"bullpen: {HOME} has no Cargo.toml: nothing to build", file=sys.stderr)

@@ -268,11 +268,14 @@ class BullpenTest(unittest.TestCase):
         sh("git", "-C", str(self.repo), "commit", "-qm", "init")
         sh("git", "-C", str(self.repo), "remote", "add", "origin", str(origin))
         sh("git", "-C", str(self.repo), "push", "-q", "-u", "origin", "main")
-        # A board of the test's own: bullpen never builds the real one (BULLPEN_BOARD set).
+        # A board of the test's own: bullpen never builds the real one (BULLPEN_BOARD set),
+        # and never builds, or takes the build lock in, this checkout (BULLPEN_NO_BUILD):
+        # the tests that are about building (test_board_build's) build a copy, without it.
         board = fake / "bullpen-board"
         board.write_text("#!/bin/sh\n")
         board.chmod(0o755)
         self.env = {**os.environ, "BULLPEN_STATE": str(self.tmp / "state"), "BULLPEN_BOARD": str(board),
+                    "BULLPEN_NO_BUILD": "1",
                     "BULLPEN_REX": str(fake / "rex"), "BULLPEN_GH": str(fake / "gh"),
                     "FAKE_DIR": str(fake), "REX_SESSION": "session:1", "REX_BLOCK": "me",
                     "XDG_CONFIG_HOME": str(self.tmp / "xdg"),

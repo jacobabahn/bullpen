@@ -208,6 +208,14 @@ pub fn programs(background: bool) -> Vec<&'static Program> {
         .collect()
 }
 
+/// A test's or a compare's fixture (tests/support.py, cli/check/) sets BULLPEN_NO_BUILD:
+/// bullpen never builds, or takes the build lock in, the checkout it runs from.
+pub fn no_build() -> bool {
+    std::env::var_os("BULLPEN_NO_BUILD").is_some_and(|v| !v.is_empty())
+}
+
+const NO_BUILD: &str = "builds are off here (BULLPEN_NO_BUILD is set: a test's or a compare's fixture)";
+
 /// The build lock's open file, locked, or None when another build holds it (wait=false).
 fn lock_build(wait: bool) -> Res<Option<File>> {
     Ok(bullpen_core::lock::take(&build_lock(), wait)?)
@@ -262,7 +270,7 @@ fn wait_for_build() -> Res<File> {
 
 /// Is a build running (holding the lock)?
 pub fn building() -> Res<bool> {
-    if !build_lock().exists() {
+    if no_build() || !build_lock().exists() {
         return Ok(false);
     }
     Ok(lock_build(false)?.is_none())
@@ -285,6 +293,9 @@ pub fn rebuild_if_stale(repo: &Repo) -> Option<String> {
 }
 
 fn start_rebuild(repo: &Repo) -> Res<Option<String>> {
+    if no_build() {
+        return Ok(None);
+    }
     let mut stale = Vec::new();
     for p in programs(true) {
         if !p.stale()? {
@@ -493,6 +504,9 @@ pub fn build(progs: Vec<&'static Program>, background: bool, nice: bool) -> Res<
 /// holds (install.sh runs this).
 pub fn cmd_build(argv: &[String]) -> Res<i32> {
     Args::parse("build", argv, &[]);
+    if no_build() {
+        return fail(NO_BUILD);
+    }
     let progs = programs(false);
     if progs.is_empty() {
         return fail(format!("{} has no Cargo.toml: nothing to build", home().display()));

@@ -90,3 +90,18 @@ board by itself. Boards started from an older install's path
 (`board/target/bullpen-board`, from before the workspace) don't reload themselves:
 `bullpen doctor` names them, and `bullpen up` restarts them. `bullpen build-board`
 is the old name of `bullpen build`, until the port is done.
+
+## Fixtures never build
+
+A test's or a compare's fixture runs bullpen from a real checkout (the one being
+tested, or the base `cli/check/compare.sh` compares against), with a HOME and a
+state of its own. A build set off there would build that checkout in the fixture's
+environment, and hold its build lock against the person's own builds (BP-120: a
+compare run caught up, built main's checkout, failed, and the accept's rebuild found
+its lock held and skipped). So `tests/support.py`, `cli/check/fixture.py` and
+`compare.sh` set `BULLPEN_NO_BUILD=1` for every bullpen they run. With it set, bullpen
+never builds, or takes the build lock in, its checkout: no catch-up (a command its
+Python doesn't have fails with the plain `` `keys` isn't in this build of bullpen ``
+line), no background rebuild from `up` or accept, and `bullpen build` says `builds are
+off here`. The tests that are about building (`tests/test_board_build.py` and the
+modules that use its setup) build a copy of bullpen, without it.

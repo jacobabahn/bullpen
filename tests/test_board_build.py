@@ -97,7 +97,7 @@ class BoardBuildTest(unittest.TestCase):
         cargo = self.fake / "cargo"
         cargo.write_text(fake_cargo())
         cargo.chmod(0o755)
-        del self.env["BULLPEN_BOARD"]
+        del self.env["BULLPEN_BOARD"], self.env["BULLPEN_NO_BUILD"]  # about building: this copy builds
         (self.tmp / "home").mkdir()
         self.env.update(HOME=str(self.tmp / "home"), PATH=f"{self.fake}:{self.env['PATH']}",
                         # bin/bullpen-cargo's account home and mise: the test's, never the person's

@@ -169,6 +169,22 @@ class SelfUpdateTest(unittest.TestCase):
         self.assertEqual(self.builds(), 2)
         self.assertEqual(self.bp("keys").stderr, "")  # the next call runs the new build at once
 
+    def test_a_moved_command_in_a_fixture_never_touches_the_build(self):
+        # BP-121: a test's or compare.sh's call (BULLPEN_NO_BUILD) to a command missing from its Python
+        self.move_keys(self.home)
+        (self.target / "build.lock").unlink(missing_ok=True)
+        before = {f.name: f.read_bytes() for f in self.target.iterdir() if f.is_file()}
+        self.env["BULLPEN_NO_BUILD"] = "1"
+        p = self.bp("keys", ok=False)
+        self.assertEqual((p.returncode, p.stderr),
+                         (2, "bullpen: `keys` isn't in this build of bullpen: rebuild it with `bullpen build`\n"))
+        self.assertEqual(self.builds(), 1)  # setUp's: no cargo
+        self.assertEqual({f.name: f.read_bytes() for f in self.target.iterdir() if f.is_file()}, before)  # no lock, no stamp
+        self.assertIn("builds are off here", self.bp("build", ok=False).stderr)
+        self.assertNotIn("rebuilding", self.bp("up").stdout)
+        self.assertEqual(self.builds(), 1)
+        self.assertFalse((self.target / "build.lock").exists())
+
     def test_a_job_of_a_call_that_caught_up_catches_up_too(self):
         self.move_keys(self.home)
         self.env["BULLPEN_CAUGHT_UP"] = "1"  # its parent's: an auto-accept that caught up, say
