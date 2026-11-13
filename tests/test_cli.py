@@ -3,6 +3,7 @@
 import ast
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -250,24 +251,90 @@ class CliTest(BullpenTest):
             self.assertEqual(lines[name], ("--", "can't tell: config.json doesn't parse"))
 
 
+class EntryTest(BullpenTest):
+    """bin/bullpen, the Rust entry (target/bullpen) and its hand-over to the Python (docs/code.md)."""
+
+    def strict(self, *args):
+        """bullpen run with the hand-over to Python made a failure (as cli/check/compare.sh runs it)."""
+        return subprocess.run([str(BULLPEN), *args], cwd=self.repo, env=dict(self.env, BULLPEN_RUST_STRICT="1"),
+                              text=True, capture_output=True)
+
+    def test_the_table_is_the_commands_python_declares(self):
+        from bullpen import cli
+        table = json.loads(self.bp("_commands").stdout)
+        self.assertEqual([c["name"] for c in table if c["owner"] == "python"], list(cli.COMMANDS))
+        sub = next(a for a in cli.parser()._actions if a.choices)
+        helps = {a.dest: a.help for a in sub._choices_actions}
+        for c in table:
+            if c["owner"] == "python":
+                self.assertEqual((c["group"], c["help"] or None),
+                                 (sub.choices[c["name"]].group, helps.get(c["name"])), c["name"])
+        self.assertEqual({c["name"]: c["owner"] for c in table if c["owner"] != "python"},
+                         {"build-board": "alias of build", "_nop": "rust", "_commands": "rust"})
+
+    def test_help_and_an_unknown_command_come_from_rust(self):
+        p = self.strict("--help")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertTrue(p.stdout.startswith("usage: bullpen COMMAND [ARGS]\n"))
+        p = self.strict("acept")
+        self.assertEqual((p.returncode, p.stderr), (2, "bullpen: no command `acept`. Did you mean `accept`? "
+                                                       "`bullpen --help` lists them.\n"))
+        self.assertEqual(self.strict("_nop").returncode, 0)
+        p = self.strict("ls")  # Python's: handed over, which strict mode refuses
+        self.assertEqual((p.returncode, p.stderr), (3, "bullpen-rust: not in Rust: ls\n"))
+
+    def test_a_python_command_reaches_python_whole(self):
+        self.assertEqual(json.loads(self.bp("ls", "--js").stdout), [])  # argparse's prefix rules
+        p = self.bp("ls", "--al", ok=False)
+        self.assertEqual(p.stderr.splitlines()[-1], "bullpen ls: error: ambiguous option: --al could match --all, --all-repos")
+        p = self.bp("ls", "--bogus", ok=False)
+        self.assertEqual(p.returncode, 2)
+        self.assertEqual(p.stderr.splitlines()[-1], "bullpen ls: error: unrecognized arguments: --bogus")
+        # the old name of build is build, as Python owns it
+        self.assertTrue(self.bp("build-board", "--help").stdout.startswith("usage: bullpen build [-h]"))
+
+    def test_python_says_when_a_command_isnt_in_this_build(self):
+        # an older build hands Python a command Python no longer has (here, one Rust owns)
+        p = subprocess.run(["python3", "-S", str(ROOT / "bin" / "bullpen-py"), "_nop"], cwd=self.repo, env=self.env,
+                           text=True, capture_output=True)
+        self.assertEqual(p.returncode, 2)
+        self.assertEqual(p.stderr, "bullpen: `_nop` isn't in this build of bullpen: rebuild it with `bullpen build`\n")
+
+    def test_without_a_build_bin_bullpen_runs_the_python(self):
+        home = self.tmp / "bullpen"
+        for d in ("bin", "bullpen"):
+            shutil.copytree(ROOT / d, home / d, ignore=shutil.ignore_patterns("__pycache__"))
+        run = lambda *a: subprocess.run([str(home / "bin" / "bullpen"), *a], cwd=self.repo, env=self.env,
+                                        text=True, capture_output=True)
+        p = run("ls", "--json")
+        self.assertEqual((p.returncode, p.stdout), (0, "[]\n"))
+        p = run("--help")
+        self.assertEqual(p.returncode, 2)
+        self.assertEqual(p.stderr, f"bullpen: bullpen isn't built: run `{home / 'bin' / 'bullpen'} build` "
+                                   f"(it needs cargo)\n")
+
+
 class CodeTest(unittest.TestCase):
     """bin/bullpen and the bullpen package (docs/code.md)."""
 
-    def test_bin_bullpen_finds_the_package_through_a_link(self):
+    def test_bin_bullpen_finds_its_checkout_through_a_link(self):
         with tempfile.TemporaryDirectory() as d:
-            link = os.path.join(d, "bullpen")
-            os.symlink(BULLPEN, link)  # what install.sh makes
-            p = subprocess.run([link, "--help"], cwd=d, text=True, capture_output=True)
-        self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertIn("usage: bullpen COMMAND", p.stdout)
+            for link in (os.path.join(d, "bullpen"), os.path.join(d, "bin", "bullpen")):  # install.sh's, in a bin/
+                os.makedirs(os.path.dirname(link), exist_ok=True)
+                os.symlink(BULLPEN, link)
+                p = subprocess.run([link, "--help"], cwd=d, text=True, capture_output=True)
+                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertIn("usage: bullpen COMMAND", p.stdout)
 
-    def test_the_entry_script_only_runs_the_package(self):
-        # Python compiles the script it runs on every call, but caches a package's bytecode
-        self.assertLess(len(BULLPEN.read_text().splitlines()), 20)
+    def test_the_entry_scripts_stay_small(self):
+        # sh forks nothing on the usual path; Python compiles the script it runs on every
+        # call, but caches a package's bytecode
+        self.assertLess(len(BULLPEN.read_text().splitlines()), 10)
+        self.assertLess(len((ROOT / "bin" / "bullpen-py").read_text().splitlines()), 20)
 
     def test_each_module_stays_under_a_thousand_lines(self):
-        long = {f.name: n for f in sorted((ROOT / "bullpen").glob("*.py"))
-                if (n := len(f.read_text().splitlines())) >= 1000}
+        files = [*(ROOT / "bullpen").glob("*.py"), *(ROOT / "core").rglob("*.rs"), *(ROOT / "cli").rglob("*.rs")]
+        long = {str(f.relative_to(ROOT)): n for f in sorted(files) if (n := len(f.read_text().splitlines())) >= 1000}
         self.assertEqual(long, {})
 
     def modules(self):

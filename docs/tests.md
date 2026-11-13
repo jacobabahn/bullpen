@@ -1,13 +1,22 @@
 # Tests
 
 ```sh
-python3 tests/run.py                  # the whole suite, across CPUs: about 78 s on 16
+python3 tests/run.py                  # builds the command line, then the whole suite, across CPUs: about 78 s on 16
 python3 tests/run.py -j 8             # on 8 processes instead
 python3 tests/run.py tour local_mode  # only tests whose module, class or name has one of these
 python3 tests/run.py --slowest 20     # and list the 20 slowest
-python3 -m unittest discover -s tests # the same tests one at a time: about 9 minutes
-cd board && cargo test                # the board's: well under a second once built
+python3 -m unittest discover -s tests # the same tests one at a time: about 9 minutes (build first)
+cargo test --workspace                # the Rust tests: core's, the command line's and the board's
+cli/check/compare.sh                  # the Rust against the Python, byte for byte (docs/code.md)
 ```
+
+The tests run `bin/bullpen`, which runs the Rust build (`target/bullpen`) and hands
+the commands still in Python to `bin/bullpen-py`. So `tests/run.py` builds the
+command line first, at low priority, when its source changed since the last build,
+and stops with cargo's error if it doesn't build. A test module run any other way
+says so when the build is missing or older than its source: run `tests/run.py`, or
+`bin/bullpen build`. The board isn't built for the tests: they give bullpen a fake one
+(`BULLPEN_BOARD`).
 
 The test processes run at low priority (nice 10), as does everything they start, so
 several agents can run the suite at once and the machine stays responsive. They use
@@ -20,10 +29,16 @@ claim, never the whole suite.
 
 The tests use fake `rex` and `gh` programs and a local bare repository as origin, and
 run `bin/bullpen` as you do. Tests that call bullpen's functions directly import them
-from the `bullpen` package (`tests/test_helpers.py`). Each test removes its temp folder
+from the `bullpen` package (`tests/test_helpers.py`); as the code moves to Rust, those
+cases move into the Rust tests beside the module, under the same names. Each test removes its temp folder
 when it ends.
 Each module runs inside a temp folder of its own and fails if anything is left in it
 afterwards.
+
+## The Rust tests
+
+`core` and `cli` keep their tests the board's way, below: beside each module, as
+`test_<module>.rs`.
 
 ## The board's tests
 

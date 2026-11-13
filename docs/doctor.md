@@ -9,16 +9,17 @@ non-zero when anything fails. It checks:
   [local mode](local-mode.md)
 - the programs in the coordinator, worker and reviewer commands (Claude Code's
   `claude`, unless you changed them) are on PATH
-- the board is built from `board/`'s source as it is now (`Cargo.toml`, `Cargo.lock`
-  and `src/`, by hash), or being rebuilt. Else it says why: its last build failed
-  (with the log), `board/` has uncommitted changes, or it just hasn't been rebuilt
-  yet; `bullpen build-board` fixes each
+- bullpen's command line (`bullpen`) and the board (`board`) are each built from
+  their source as it is now (by hash: see [Rebuilds](rebuilds.md)), or being rebuilt.
+  Else it says why: the last build failed (with the log), the source has uncommitted
+  changes, or it just hasn't been rebuilt yet; `bullpen build` fixes each
 - the keys are in your Rex config: Rex lists the `bullpen_next`, `bullpen_board`,
   `bullpen_coordinator` and `bullpen_jump` actions (`rex actions`). With some of them
   listed and one missing, the line is there but Rex loaded an older `keys.lua`: the
   fix is `rex config reload`. With none listed, it's `bullpen keys --install`
-- the watcher is running, from the current `watch.lua` and bullpen code (`bin/bullpen`
-  and `bullpen/*.py`; the hashes in `watcher.json`)
+- the watcher is running, from the current `watch.lua` and bullpen code (`bin/bullpen`,
+  `bin/bullpen-py`, `bullpen/*.py` and the build, `target/bullpen`; the hashes in
+  `watcher.json`)
 - the state folder is writable, and this repo's `config.json` parses
 - the global `config.json` (see [Settings](settings.md)), if there is one, parses
   and sets nothing only a repository can have

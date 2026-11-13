@@ -1,5 +1,6 @@
-"""bullpen rebuilding the board from its own checkout, with a fake cargo."""
+"""bullpen rebuilding its command line and the board from its own checkout, with a fake cargo."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -22,18 +23,25 @@ FAKE_CARGO = textwrap.dedent("""\
         sys.exit("mise ERROR No version is set for shim: cargo")
     if (d / "cargo_fails").exists():
         sys.exit("error[E0425]: cannot find value `x` in this scope")
-    board = Path(sys.argv[sys.argv.index("--manifest-path") + 1]).parent
-    out = board / "target" / "release" / "bullpen-board"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("#!/bin/sh\\n# built from: " + " ".join((board / "src" / "main.rs").read_text().split()) + "\\n")
-    out.chmod(0o755)
+    home = Path(sys.argv[sys.argv.index("--manifest-path") + 1]).parent
+    packages = [sys.argv[i + 1] for i, a in enumerate(sys.argv) if a == "-p"]
+    for package, crate, name in (("bullpen-cli", "cli", "bullpen"), ("bullpen-board", "board", "bullpen-board")):
+        if package not in packages:
+            continue
+        out = home / "target" / "release" / name
+        out.parent.mkdir(parents=True, exist_ok=True)
+        source = " ".join((home / crate / "src" / "main.rs").read_text().split())
+        # the command line it builds hands every command to the Python, as the real one does T1's
+        run = f'exec python3 -S "{home}/bin/bullpen-py" "$@"' if name == "bullpen" else ""
+        out.write_text(f"#!/bin/sh\\n# built from: {source}\\n{run}\\n")
+        out.chmod(0o755)
 """)
 
 
 class BoardBuildTest(unittest.TestCase):
-    """bullpen rebuilding the board from its own checkout: a copy of bullpen with a
-    board/ of its own, which is also the repository its tasks are in (local mode), and
-    a fake cargo."""
+    """bullpen rebuilding its programs from its own checkout: a copy of bullpen with a
+    workspace of its own (core/, cli/ and board/), which is also the repository its tasks
+    are in (local mode), and a fake cargo."""
 
     setUp_with_origin = BullpenTest.setUp
     rex_calls = BullpenTest.rex_calls
@@ -47,11 +55,13 @@ class BoardBuildTest(unittest.TestCase):
         home = self.tmp / "bullpen"
         for d in ("bin", "bullpen", "lua", "prompts"):
             shutil.copytree(ROOT / d, home / d, ignore=shutil.ignore_patterns("__pycache__"))
-        (home / "board" / "src").mkdir(parents=True)
-        (home / "board" / "Cargo.toml").write_text('[package]\nname = "bullpen-board"\n')
-        (home / "board" / "Cargo.lock").write_text("version = 4\n")
-        (home / "board" / "src" / "main.rs").write_text("fn main() {}\n")
-        (home / ".gitignore").write_text("board/target/\n")
+        (home / "Cargo.toml").write_text('[workspace]\nmembers = ["core", "cli", "board"]\n')
+        (home / "Cargo.lock").write_text("version = 4\n")
+        for crate, main in (("core", "lib.rs"), ("cli", "main.rs"), ("board", "main.rs")):
+            (home / crate / "src").mkdir(parents=True)
+            (home / crate / "Cargo.toml").write_text(f'[package]\nname = "bullpen-{crate}"\n')
+            (home / crate / "src" / main).write_text("fn main() {}\n")
+        (home / ".gitignore").write_text("/target/\n")
         sh("git", "init", "-q", "-b", "main", str(home))
         sh("git", "-C", str(home), "add", ".")
         sh("git", "-C", str(home), "-c", "user.name=T", "-c", "user.email=t@example.com",
@@ -64,7 +74,7 @@ class BoardBuildTest(unittest.TestCase):
         del self.env["BULLPEN_BOARD"]
         (self.tmp / "home").mkdir()
         self.env.update(HOME=str(self.tmp / "home"), PATH=f"{self.fake}:{self.env['PATH']}")
-        self.target = home / "board" / "target"
+        self.target = home / "target"
 
     def bp(self, *args, cwd=None, ok=True):
         p = subprocess.run([str(self.bin), *args], cwd=cwd or self.repo, env=self.env,
@@ -76,7 +86,7 @@ class BoardBuildTest(unittest.TestCase):
     def settle(self):
         """Wait for a background build to be done: it holds the lock until then."""
         import fcntl
-        lock = self.target / "bullpen-board.lock"
+        lock = self.target / "build.lock"
         deadline = time.time() + 15
         while lock.exists():
             with lock.open("a") as f:
@@ -86,19 +96,19 @@ class BoardBuildTest(unittest.TestCase):
                 except BlockingIOError:
                     pass
             if time.time() > deadline:
-                self.fail("the board's build didn't finish")
+                self.fail("bullpen's build didn't finish")
             time.sleep(0.05)
 
     def builds(self):
         log = self.fake / "cargo.log"
         return len(log.read_text().splitlines()) if log.exists() else 0
 
-    def board(self):
-        b = self.target / "bullpen-board"
+    def board(self, name="bullpen-board"):
+        b = self.target / name
         return b.read_text() if b.exists() else None
 
-    def edit_board(self, text, commit=True):
-        (self.home / "board" / "src" / "main.rs").write_text(text)
+    def edit_board(self, text, commit=True, crate="board"):
+        (self.home / crate / "src" / "main.rs").write_text(text)
         if commit:
             sh("git", "-C", str(self.home), "-c", "user.name=T", "-c", "user.email=t@example.com",
                "commit", "-qam", "Change the board")
@@ -128,20 +138,25 @@ class BoardBuildTest(unittest.TestCase):
         self.assertIn("v2()", self.board())
         self.assertEqual(self.board_lines(), [])  # a build that works isn't news
 
-    def test_a_build_renames_a_copy_into_place(self):
-        self.bp("build-board")
-        cargo_out = self.target / "release" / "bullpen-board"
+    def test_a_build_renames_a_copy_of_each_program_into_place(self):
+        out = self.bp("build").stdout
+        self.assertEqual(out.splitlines(), [f"built bullpen's command line: {self.target / 'bullpen'}",
+                                            f"built the board: {self.target / 'bullpen-board'}"])
+        for name in ("bullpen", "bullpen-board"):
+            cargo_out = self.target / "release" / name
+            built = self.target / name
+            self.assertEqual(built.read_text(), cargo_out.read_text())
+            self.assertNotEqual(os.stat(built).st_ino, os.stat(cargo_out).st_ino)  # not cargo's hard link
         board = self.target / "bullpen-board"
-        self.assertEqual(board.read_text(), cargo_out.read_text())
-        self.assertNotEqual(os.stat(board).st_ino, os.stat(cargo_out).st_ino)  # not cargo's hard link
         ino = os.stat(board).st_ino
         self.edit_board("fn main() { v2() }\n")
-        self.bp("build-board")
+        self.bp("build")
         self.assertNotEqual(os.stat(board).st_ino, ino)  # a new file: running boards see it replaced
-        self.assertEqual([p.name for p in self.target.iterdir() if p.name.startswith(".bullpen-board")], [])
+        self.assertEqual([p.name for p in self.target.iterdir() if p.name.startswith(".bullpen")], [])
+        self.assertEqual(json.loads((self.target / "bullpen.json").read_text()).keys(), {"source"})
 
     def test_accept_in_bullpens_own_repo_rebuilds_the_board(self):
-        self.bp("build-board")
+        self.bp("build")
         self.bp("config", "--review", "off")
         tid = self.start_task()
         wt = Path(self.show(tid)["worktree"])
@@ -154,8 +169,25 @@ class BoardBuildTest(unittest.TestCase):
         self.assertEqual(self.builds(), 2)
         self.assertIn("accepted()", self.board())
 
+    def test_accept_in_bullpens_own_repo_rebuilds_the_command_line(self):
+        self.bp("build")
+        self.bp("config", "--review", "off")
+        tid = self.start_task()
+        wt = Path(self.show(tid)["worktree"])
+        (wt / "cli" / "src" / "main.rs").write_text("fn main() { accepted() }\n")
+        sh("git", "-C", str(wt), "commit", "-qam", "Command line change")
+        self.bp("ready", tid, "--summary", "Changed the command line.", cwd=wt)
+        out = self.bp("accept", tid).stdout
+        self.assertIn("rebuilding bullpen's command line in the background (its source changed)", out)
+        self.assertNotIn("running boards reload", out)  # the board's source didn't change
+        self.settle()
+        self.assertEqual(self.builds(), 2)
+        self.assertIn("accepted()", self.board("bullpen"))
+        self.assertNotIn("accepted()", self.board())
+        self.assertEqual(self.show(tid)["status"], "done")  # the new build runs the next call
+
     def test_an_accept_that_changes_the_keys_says_to_reload_once(self):
-        self.bp("build-board")
+        self.bp("build")
         self.bp("config", "--review", "off")
         tid = self.start_task()
         wt = Path(self.show(tid)["worktree"])
@@ -178,7 +210,7 @@ class BoardBuildTest(unittest.TestCase):
         self.assertEqual(self.news_log().count("Keys changed"), 1)
 
     def test_accept_in_another_repo_never_builds(self):
-        self.bp("build-board")
+        self.bp("build")
         self.edit_board("fn main() { pulled() }\n")  # stale, as after a pull
         self.repo = self.other
         sh("git", "-C", str(self.repo), "remote", "remove", "origin")
@@ -198,7 +230,7 @@ class BoardBuildTest(unittest.TestCase):
         self.assertEqual(self.builds(), 2)
 
     def test_a_dirty_board_is_skipped_with_one_news_line(self):
-        self.bp("build-board")
+        self.bp("build")
         before = self.board()
         self.edit_board("fn main() { half_done( }\n", commit=False)
         self.bp("up")
@@ -220,7 +252,7 @@ class BoardBuildTest(unittest.TestCase):
         self.assertIn("half_done(", self.board())
 
     def test_a_failed_build_is_one_news_line_and_the_old_board_stays(self):
-        self.bp("build-board")
+        self.bp("build")
         before = self.board()
         self.edit_board("fn main() { broken }\n")
         (self.fake / "cargo_fails").write_text("")
@@ -232,7 +264,7 @@ class BoardBuildTest(unittest.TestCase):
         self.assertEqual(self.board(), before)
         lines = self.board_lines()
         self.assertEqual(len(lines), 1, lines)
-        log = self.target / "bullpen-board.log"
+        log = self.target / "build.log"
         self.assertIn(f"Log: {log}", lines[0])
         self.assertIn("error[E0425]", lines[0])
         self.assertIn("error[E0425]", log.read_text())
@@ -240,12 +272,12 @@ class BoardBuildTest(unittest.TestCase):
         self.assertEqual(state, "FAIL")
         self.assertIn("its build failed", text)
         (self.fake / "cargo_fails").unlink()
-        self.bp("build-board")  # the fix doctor names
+        self.bp("build")  # the fix doctor names
         self.assertEqual(self.doctor_board()[0], "ok")
 
     def test_a_mise_shim_without_a_version_says_so(self):
         (self.fake / "cargo_mise").write_text("")
-        p = self.bp("build-board", ok=False)
+        p = self.bp("build", ok=False)
         self.assertIn("mise shim with no Rust version set", p.stderr)
         self.assertFalse((self.target / "bullpen-board").exists())
 
@@ -255,11 +287,11 @@ class BoardBuildTest(unittest.TestCase):
         rustup.parent.mkdir(parents=True)
         rustup.write_text(FAKE_CARGO.replace('(d / "cargo_mise").exists()', "False"))
         rustup.chmod(0o755)
-        self.bp("build-board")
+        self.bp("build")
         self.assertIn("fn main() {}", self.board())
 
     def test_board_runs_the_built_copy(self):
-        self.bp("build-board")
+        self.bp("build")
         board = self.target / "bullpen-board"
         board.write_text("#!/bin/sh\necho \"$0\"\n")
         self.assertEqual(self.bp("board").stdout.strip(), str(board))

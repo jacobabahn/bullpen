@@ -193,9 +193,21 @@ def sh(*cmd, cwd=None):
     return subprocess.run(cmd, cwd=cwd, check=True, text=True, capture_output=True).stdout
 
 
+def check_build():
+    """The tests run bin/bullpen, which runs the Rust build: it must be built from the
+    source as it is (tests/run.py builds it first)."""
+    if os.environ.get("BULLPEN_TESTS_BUILT"):
+        return
+    from bullpen import board_build as b
+    if not b.CLI.installed.exists() or b.read_json(b.CLI.stamp, {}).get("source") != b.CLI.source_hash():
+        raise RuntimeError("bullpen's command line isn't built from its source as it is: "
+                           "run the tests with tests/run.py (it builds first), or run `bin/bullpen build`")
+
+
 def setUpModule():
     """Run the suite in a temp folder of its own, so a test that leaves files behind fails it."""
     global SUITE_TMP, OUTER_TMPDIR
+    check_build()
     OUTER_TMPDIR = os.environ.get("TMPDIR")
     SUITE_TMP = tempfile.mkdtemp(prefix="bullpen-tests-")
     os.environ["TMPDIR"] = tempfile.tempdir = SUITE_TMP

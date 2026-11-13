@@ -31,13 +31,14 @@ pane), and `a` accepts (merges) a ready one, or closes a finished one. The words
 ## Install
 
 ```sh
-./install.sh          # links bin/bullpen into ~/.local/bin and builds the board
+./install.sh          # builds bullpen and its board, and links bin/bullpen into ~/.local/bin
 ```
 
 Needs Rex (a server from preview.13 on, for minimized floating panes), git, `gh`
-(signed in), Claude Code and, to build the task board, Rust's `cargo`. After a
-change to the board's source, bullpen rebuilds it by itself (see
-[Board rebuilds](docs/rebuilds.md)); `bullpen build-board` builds it now.
+(signed in), Claude Code, Python 3, and Rust's `cargo`: bullpen's command line and its
+task board are Rust programs, and `install.sh` stops without cargo. After a change to
+their source, bullpen rebuilds them by itself (see [Rebuilds](docs/rebuilds.md));
+`bullpen build` builds them now.
 
 ## How it works
 
@@ -68,7 +69,7 @@ After a Rex server restart, run `bullpen up` again: it finds its panes by their
 labels, marks workers whose panes are gone as stopped, and restarts the watcher.
 
 The watcher is also replaced when it is out of date. `up` and `accept` compare
-`lua/watch.lua` and bullpen's code (`bin/bullpen` and `bullpen/`) with what the running watcher was started from
+`lua/watch.lua` and bullpen's code (`bin/`, `bullpen/` and the build, `target/bullpen`) with what the running watcher was started from
 (hashes kept in `watcher.json`); if either changed, say because a merge or a
 pull brought a new version, they close the old watcher and start a new one. A
 current watcher is left alone.
@@ -99,13 +100,13 @@ How it behaves: what bullpen does by itself as tasks move along, and the setting
 - [Rules](docs/rules.md)
 - [Worktree setup](docs/worktree-setup.md)
 - [Local mode](docs/local-mode.md): no `origin` remote, and the push remote
-- [Board rebuilds](docs/rebuilds.md)
+- [Rebuilds](docs/rebuilds.md): bullpen's command line and the board
 
 Reference:
 
 - [Settings](docs/settings.md): `bullpen config`
 - [Where things live](docs/where-things-live.md)
-- [The code](docs/code.md): `bin/bullpen` and the `bullpen/` package, a module per feature
+- [The code](docs/code.md): the entry, the Rust (`core/`, `cli/`) and the `bullpen/` package
 - [Tests](docs/tests.md): running them
 - [GLOSSARY.md](GLOSSARY.md): the words bullpen uses
 - [docs/prd/](docs/prd/): design notes

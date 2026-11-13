@@ -1,0 +1,26 @@
+# T1: the entry's own output. The help differs from main's Python (before T1) only in the
+# Setup group's build line: `build-board` became `build`.
+--help
+-h
+--help ls
+env:COLUMNS=30 --help
+env:COLUMNS=42 --help
+env:COLUMNS=61 --help
+env:COLUMNS=77 --help
+env:COLUMNS=100 --help
+env:COLUMNS=133 --help
+env:COLUMNS=250 --help
+tty --help
+tty40 --help
+acept BP-1
+frobnicate
+_evnt
+--bogus
+-x ls
+shw BP-3
+stat BP-3
+revew
+aftr
+doctr
+pik
+tour-coment

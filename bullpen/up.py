@@ -10,7 +10,7 @@ from .news import news_mode_line
 from .guide import give_guide, guide_file, guide_text, tell_guide_changes
 from .watcher import ensure_watcher
 from .board import ensure_board
-from .board_build import rebuild_board_if_stale
+from .board_build import rebuild_if_stale
 from .push_remote import catch_up_push
 from .go import relink
 from .doctor import up_hint
@@ -77,7 +77,7 @@ def cmd_up(args):
     pushed = catch_up_push(repo)
     if pushed:
         print(pushed)
-    rebuilt = rebuild_board_if_stale(repo)
+    rebuilt = rebuild_if_stale(repo)
     if rebuilt:
         print(rebuilt)
     hint = up_hint()

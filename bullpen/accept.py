@@ -16,7 +16,7 @@ from .start import hand_back
 from .review import is_doc, keep_approval, rebase_check, shortstat, start_review
 from .watcher import refresh_watcher
 from .close import close, close_task
-from .board_build import rebuild_board_if_stale
+from .board_build import rebuild_if_stale
 from .keys import KEYS_CHANGED, keys_hash
 
 
@@ -74,9 +74,9 @@ def accepted(repo, t, m, auto, merged_outside, touched, keys):
         if said:
             print(said)
 
-    def rebuild_board():
-        if repo.root.resolve() == HOME.resolve():  # bullpen's own checkout: maybe the board too
-            said = rebuild_board_if_stale(repo)
+    def rebuild():
+        if repo.root.resolve() == HOME.resolve():  # bullpen's own checkout: maybe its programs too
+            said = rebuild_if_stale(repo)
             if said:
                 print(said)
 
@@ -92,7 +92,7 @@ def accepted(repo, t, m, auto, merged_outside, touched, keys):
         ("the run queue", run_later),  # starts the next task now, before the rest
         ("telling the coordinators about guide changes", lambda: tell_guide_changes(repo)),
         ("refreshing the watcher", lambda: refresh_watcher(repo)),  # the merge may have changed it
-        ("rebuilding the board", rebuild_board),
+        ("rebuilding bullpen and the board", rebuild),
         ("the keys-changed news", keys_news),
     ]
     for what, step in steps:

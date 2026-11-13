@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Run the tests across CPUs.
+"""Build bullpen's command line, then run the tests across CPUs.
 
     python3 tests/run.py                 # the whole suite
     python3 tests/run.py board tour      # only tests whose module, class or name has one of these
     python3 tests/run.py -j 4            # 4 processes (default: one per CPU)
 
-Each process runs a few tests at a time, in a temp folder of its own (setUpModule), so
+The tests run bin/bullpen, which runs the Rust build (target/bullpen): it's built first
+(at low priority), and the run stops with cargo's error if that fails. Each process
+runs a few tests at a time, in a temp folder of its own (setUpModule), so
 tests that share nothing but the machine run side by side. The processes run at low
 priority (nice 10), and so does everything they start, so several agents running the
 suite at once leave the machine responsive. Exits 1 if any test fails.
@@ -22,6 +24,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))  # the test modules import by name, here and in each process
+sys.path.insert(0, str(HERE.parent))  # the bullpen package, which builds the command line
 CHUNK = 3  # tests of one class run together: few enough to keep every CPU busy at the end
 JOBS = os.cpu_count() or 1  # every CPU: nice 10 already gives way to everything else
 NICE = 10
@@ -100,6 +103,19 @@ def run_chunk(names):
         return 0, 0, [("ERROR", " ".join(names), traceback.format_exc())], {}
 
 
+def build():
+    """Build the command line the tests run, unless it's built from its source as it is.
+    Exits with cargo's error when the build fails."""
+    from bullpen import board_build as b
+    st = b.read_json(b.CLI.stamp, {})
+    if b.CLI.installed.exists() and st.get("source") == b.CLI.source_hash():
+        return
+    with b.lock_build(wait=True):
+        failed, why, _ = b.build([b.CLI], nice=True)
+    if failed:
+        sys.exit(f"bullpen's command line didn't build: {why}\n\n{b.BUILD_LOG.read_text()}")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Run the tests across CPUs.")
     ap.add_argument("only", nargs="*", help="run only tests whose ID has one of these words")
@@ -107,6 +123,8 @@ def main():
                     help=f"processes to run (default: one per CPU, {JOBS} here)")
     ap.add_argument("--slowest", type=int, default=0, metavar="N", help="list the N slowest tests")
     args = ap.parse_args()
+    build()
+    os.environ["BULLPEN_TESTS_BUILT"] = "1"  # support.py checks the build only without run.py
     loader = unittest.TestLoader()
     suite = loader.discover(str(HERE), top_level_dir=str(HERE))
     if loader.errors:  # a module that doesn't import: say why, run nothing

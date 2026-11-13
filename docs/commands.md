@@ -40,7 +40,7 @@ bullpen accept BP-1   # merge its PR (or local branch; rebase), close its pane, 
                       # a finished task (nothing to merge): remove its worktree, branch and pane
 bullpen close BP-1    # the same as accept, for a finished task only
 bullpen drop BP-1     # close its PR, pane and worktree without merging
-bullpen build-board   # build the board now (see Board rebuilds)
+bullpen build         # build bullpen's command line and the board now (see Rebuilds)
 ```
 
 A command that can't act on a task says its status in the board's words, with the

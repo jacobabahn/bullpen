@@ -254,7 +254,7 @@ bullpen · BP-9 dropped
 bullpen · BP-4 started (BP-3 was accepted)
 bullpen · BP-6 started (BP-9 was dropped, freeing a slot)
 bullpen · BP-10 waits on BP-9, which was dropped, so it stays queued. Ask the person what to do: ...
-bullpen · The board wasn't rebuilt: cargo failed: error[E0425]: .... Boards keep running the old one. Log: ... Fix it, then run `bullpen build-board`.
+bullpen · The board wasn't rebuilt: cargo failed: error[E0425]: .... Boards keep running the old one. Log: ... Fix it, then run `bullpen build`.
 bullpen · Your coordinator guide changed (section: News). Read the change below and follow it from now on:
 ```
 

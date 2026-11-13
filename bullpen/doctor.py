@@ -16,8 +16,8 @@ from .modes import repo_base_ref
 from .rex import rex_alive
 from .coordinators import alive
 from .watcher import watcher_stamp
-from .board import BOARD, BOARD_LOG, BOARD_STAMP, old_board
-from .board_build import board_building, board_dirty, board_source_hash
+from .board import old_board
+from .board_build import BOARD_PROGRAM, BUILD_LOG, CLI, building
 from .push_remote import check_push
 
 
@@ -87,27 +87,38 @@ def check_agents(cfg):
 
 
 def check_board():
-    """Built from the board's source as it is now (see board_source_hash)."""
+    """Built from the board's source as it is now (see board_build.Program)."""
     if os.environ.get("BULLPEN_BOARD"):
         exe = Path(os.environ["BULLPEN_BOARD"])
         if os.access(exe, os.X_OK):
             return "ok", f"{exe} (BULLPEN_BOARD)"
         return "fail", f"BULLPEN_BOARD is {exe}, which isn't an executable file"
-    build = f"run `{SELF} build-board`"
+    return check_build(BOARD_PROGRAM, "running boards reload when it's done")
+
+
+def check_cli():
+    """bin/bullpen's Rust build, built from its source as it is now."""
+    return check_build(CLI, "commands run it from their next call")
+
+
+def check_build(prog, then):
+    """A program bullpen builds from its own checkout: built from its source as it is now, or being built."""
+    build = f"run `{SELF} build`"
     cargo = "" if shutil.which("cargo") else " (it needs cargo: https://rustup.rs)"
-    if board_building():
-        return "ok", f"being rebuilt now (log: {BOARD_LOG}); running boards reload when it's done"
-    if not os.access(BOARD, os.X_OK):
+    src = ", ".join(f"{c}/" for c in prog.crates)
+    if building():
+        return "ok", f"being rebuilt now (log: {BUILD_LOG}); {then}"
+    if not os.access(prog.installed, os.X_OK):
         return "fail", f"not built: {build}{cargo}"
-    src, st = board_source_hash(), read_json(BOARD_STAMP, {})
-    if st.get("source") == src:
-        return "ok", f"{BOARD}, built from board/ as it is"
-    if st.get("failed") == src:
-        return "fail", f"older than board/: its build failed (log: {BOARD_LOG}). Fix that, then {build}{cargo}"
-    if board_dirty():
-        return "fail", (f"older than board/, which has uncommitted changes, so bullpen won't build it by "
+    st = read_json(prog.stamp, {})
+    if st.get("source") == prog.source_hash():
+        return "ok", f"{prog.installed}, built from {src} as they are"
+    if st.get("failed") == prog.source_hash():
+        return "fail", f"older than {src}: its build failed (log: {BUILD_LOG}). Fix that, then {build}{cargo}"
+    if prog.dirty():
+        return "fail", (f"older than {src}, which have uncommitted changes, so bullpen won't build it by "
                         f"itself: commit them, or {build} to build them as they are")
-    return "fail", f"older than board/: `bullpen up` rebuilds it in the background, or {build}{cargo}"
+    return "fail", f"older than {src}: `bullpen up` rebuilds it in the background, or {build}{cargo}"
 
 
 def check_keys():
@@ -306,7 +317,8 @@ def doctor_checks(cheap=False):
     out = [("rex", check_rex)]
     if not cheap:
         out.append(("gh", lambda: check_gh(repo)))
-    out += [("agents", lambda: check_agents(cfg)), ("board", check_board), ("keys", check_keys)]
+    out += [("agents", lambda: check_agents(cfg)), ("bullpen", check_cli), ("board", check_board),
+            ("keys", check_keys)]
     if not cheap:
         out.append(("watcher", check_watcher))
     out.append(("state", check_state))

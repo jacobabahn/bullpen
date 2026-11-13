@@ -1,11 +1,67 @@
 # The code
 
-bullpen's Python is the `bullpen/` package, beside `bin/`. `bin/bullpen` is only the
-entry script: it finds the package from its own resolved path (so `install.sh`'s link
-to it works) and runs `bullpen.cli.main`. Python caches a package's bytecode, but
-compiles a script it runs on every call, so keeping the script small makes every call
-(the board's, the watcher's, the keys') about twice as fast. Lua, the key bindings
-and bullpen's own background jobs still run `bin/bullpen`.
+bullpen's command line is moving from Python to Rust, one group of commands at a time
+(the plan: BP-101's `rust-port-plan.md`). Until the last of it moves, both are here:
+
+- `bin/bullpen` is the entry everything runs: people, `install.sh`'s link, Lua, the key
+  bindings, the board and bullpen's own background jobs. It's a small `sh` script that
+  runs the Rust build, `target/bullpen`, or before the first build the Python
+  (`bin/bullpen-py`). It forks nothing on its usual path.
+- `target/bullpen` (`cli/src/main.rs`) looks the command up in its table,
+  `cli/src/commands.rs`: every command, its group in `--help`, its help line, and who
+  owns it. No command or `--help` prints the help and a name bullpen doesn't have is one
+  line ("Did you mean"), both from Rust (`cli/src/help.rs`). A Rust command runs there.
+  A Python one is handed over whole, with `exec` of `bin/bullpen-py` before anything is
+  read or written, so its arguments, help and errors are argparse's. A command is
+  always one side's, never some calls each: `tests/test_cli.py` checks that the
+  Python-owned names are exactly the ones `cli.COMMANDS` declares (`bullpen _commands`
+  prints the table). Moving a command changes its row's owner and deletes its Python.
+- `bin/bullpen-py` is the Python entry: it finds the `bullpen/` package beside it and
+  runs `bullpen.cli.main`. Python caches a package's bytecode, but compiles a script it
+  runs on every call, so it stays small. Python given a command it doesn't have says
+  it isn't in this build: the build is older than its source (`bullpen build`).
+- The Rust is one cargo workspace (`Cargo.toml`, one `Cargo.lock`, built into
+  `target/`): `core/` (`bullpen-core`: tasks, config, wording, what the command line
+  and the board share), `cli/` (`bullpen-cli`, the program `bullpen`) and `board/`.
+  `core` never depends on `cli`. Rust tests sit beside each module as
+  `test_<module>.rs`. rustfmt with `max_width = 120` (`rustfmt.toml`) for `core` and
+  `cli`; the board isn't formatted yet.
+- Python code that still calls code that moved keeps its own copy, a twin: library
+  code, frozen, deleted with its last Python caller. `bullpen/core.py` is `core/`'s
+  twin. There are no bridges yet (the plan has one, the run queue, from T3).
+- `cli/check/compare.sh` runs each case of `cli/check/cases-*.txt` with the Python and
+  the Rust build in a fresh fixture, and compares stdout, stderr, exit code and the
+  state folder, byte for byte. Each port adds cases for what it moves, and runs them
+  against main's Python (`BULLPEN_PY=<main checkout>/bin/bullpen-py`).
+
+## The Rust
+
+`core/src/`:
+
+- `fail.rs`: `Fail`, a command's error ("bullpen: ...", exit 1), and `Res`
+- `paths.rs`: bullpen's checkout (from the program's own resolved path), the state
+  folder, Rex, `bin/bullpen` and `bin/bullpen-py`
+- `settings.rs`: the settings table, in `config`'s order
+- `config.rs`: the defaults, the global config, a repo's, and the migrations
+- `repo.rs`: `Repo`: its config and tasks, `save_task` (which returns the task as it
+  was: the cli runs what a save sets off), the repo a command runs in
+- `task.rs`: a task's status (`set_status`), stops, and the board's words for it
+- `json.rs`: JSON as Python's `json` writes it (indent 2, ASCII only, keys in order)
+- `text.rs`, `widths.rs`: widths and cuts as Python's, and textwrap
+- `timeutil.rs`: ISO stamps as Python's `isoformat`, ages, the clock
+- `proc.rs`: running a program, `git`, `file_hash` (`sha256.rs`)
+- `lock.rs`: flock, the same lock as Python's `fcntl.flock`
+
+`cli/src/`:
+
+- `main.rs`: the entry: look the command up, run it or hand it to Python
+- `commands.rs`: the table, in `--help`'s order, one line per command
+- `args.rs`: a command's arguments by argparse's rules, and its usage and help
+- `help.rs`: the top-level help and the unknown-command line, as the Python wrote them
+- `saves.rs`: saving a task and what it sets off (`save`), `later` and `run_later`. No
+  Rust command saves a task yet: the hooks are stubs.
+
+## The Python
 
 The modules, each importing only the ones above it in this list (and `cli.py`
 importing the one with the command being run, or all of them for `--help`):
@@ -43,7 +99,8 @@ importing the one with the command being run, or all of them for `--help`):
 - `stepper.py`: reading a tour on the board, and the `tour` command that opens it
 - `ready.py`: `ready` and `finish`
 - `board.py`: the board's program, and its pane beside a coordinator
-- `board_build.py`: rebuilding the board when its source changes
+- `board_build.py`: building bullpen's command line and the board, and rebuilding them
+  when their source changes
 - `push_remote.py`: the push remote's background push and its checks, in local mode
 - `keys.py`: bullpen's key bindings in the Rex config
 - `accept.py`: accepting a task, and rebasing the others after it
@@ -59,16 +116,16 @@ importing the one with the command being run, or all of them for `--help`):
 - `events.py`: what the watcher reports: an agent's events, a pane that closed, no
   progress, the usage limit's reset
 - `check.py`: `check`, which applies the events the watcher missed
-- `cli.py`: the parser and `main`. It keeps only the `--help` groups' titles and
-  their order (`GROUPS`), the modules with commands (`MODULES`), and which module
-  declares each command (`COMMANDS`).
+- `cli.py`: the parser and `main`. It keeps only the groups' titles (`GROUPS`), the
+  modules with commands (`MODULES`), and which module declares each command Python
+  owns (`COMMANDS`). The help comes from the Rust entry.
 
 Each module with commands declares them in its own `commands(sub)`, with
 `core.command(sub, name, fn, group, help=...)`; the group is a title in `cli.GROUPS`,
-and internal commands (the watcher's and bullpen's own, named `_...`) have none.
-`bullpen --help` lists a group's commands in `MODULES` order, then in the order each
-module declares them. A new command touches its own module, and `cli.COMMANDS`
-(a test checks that it says what the modules declare).
+and internal commands (the watcher's and bullpen's own, named `_...`) have none. A
+new command touches its own module, `cli.COMMANDS` (a test checks that it says what
+the modules declare) and its row in `cli/src/commands.rs`, which gives `bullpen --help`
+its order.
 
 A command function (`cmd_...`) only reads its arguments and calls plain functions;
 no other code calls it. Auto-accept calls `accept.accept`, and `check --fix` calls
@@ -126,14 +183,16 @@ board and the watcher call bullpen all the time, so a call imports only what it
 needs (BP-94 took `ls` from about 72 ms to 37 ms):
 
 - `cli.main` imports only the module with the command being run (`cli.COMMANDS`)
-  and builds only its parser. `--help` and no command build them all.
+  and builds only its parser.
 - `cli.Formatter` loads argparse's colours (Python 3.14's `_colorize`, about 13 ms)
   and the terminal's width (`shutil`) only when it formats help or usage.
-- `bin/bullpen` runs `python3 -S`: `site` adds nothing to a standard-library program.
+- `bin/bullpen-py` runs `python3 -S`: `site` adds nothing to a standard-library program.
+- The `sh` entry adds about 0.5 ms to a call and the Rust hand-over about 1 ms; a
+  command in Rust takes about 4 ms.
 - A standard module that takes over a millisecond to import and that most calls never
   use (`shutil`, `hashlib`, `tempfile`, `textwrap`) is imported in the function that
   needs it, with a comment saying why. A module compiles its patterns on first use
-  (re caches them), not on import. `python3 -X importtime bin/bullpen ls` shows what
+  (re caches them), not on import. `python3 -X importtime bin/bullpen-py ls` shows what
   a call imports.
 
 ## No import loops
@@ -162,4 +221,5 @@ higher one, the higher one registers with the lower:
   function the stepper hands `tours.write_tour`.
 
 A file stays under 1,000 lines unless there's a good reason; a test
-(`tests/test_cli.py`) holds every module to it.
+(`tests/test_cli.py`) holds every Python module and every `.rs` file in `core/` and
+`cli/` to it.

@@ -11,10 +11,16 @@ from .coordinators import session_for
 
 
 def code_hash():
-    """A hash of bullpen's Python code: the entry script and the package's modules."""
+    """A hash of bullpen's code: the entry scripts, the package's modules, and the Rust
+    build (target/bullpen) when there is one."""
     h = hashlib.sha256(Path(SELF).read_bytes())
+    py = Path(SELF).with_name("bullpen-py")
+    h.update(py.read_bytes())
     for f in sorted(Path(__file__).parent.glob("*.py")):
         h.update(f.name.encode() + b"\0" + f.read_bytes())
+    built = Path(SELF).parent.parent / "target" / "bullpen"
+    if built.is_file():
+        h.update(b"target/bullpen\0" + built.read_bytes())
     return h.hexdigest()
 
 

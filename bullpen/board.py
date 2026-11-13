@@ -65,22 +65,16 @@ def old_board(b):
     return None
 
 
-BOARD_SRC = HOME / "board"
-TARGET = BOARD_SRC / "target"
+TARGET = HOME / "target"  # the cargo workspace's (board_build.py builds it)
 # What boards run: a copy of cargo's output, renamed into place once it's whole, so a
 # board never runs a half-written file (cargo's own output is a hard link it rewrites).
 BOARD = TARGET / "bullpen-board"
 CARGO_BOARD = TARGET / "release" / "bullpen-board"
-# {"source": the source hash BOARD was built from, "failed": a hash whose build failed,
-#  "skipped": one not built because board/ had uncommitted changes}
-BOARD_STAMP = TARGET / "bullpen-board.json"
-BOARD_LOG = TARGET / "bullpen-board.log"
-BOARD_LOCK = TARGET / "bullpen-board.lock"
 
 
 def board_exe():
     """The board program `bullpen board` runs: BULLPEN_BOARD, else the copy bullpen
-    builds, else cargo's own output (built by an older install.sh)."""
+    builds, else cargo's own output."""
     if os.environ.get("BULLPEN_BOARD"):
         return Path(os.environ["BULLPEN_BOARD"])
     return BOARD if BOARD.exists() or not CARGO_BOARD.exists() else CARGO_BOARD

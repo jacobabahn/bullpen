@@ -1,4 +1,6 @@
-"""bullpen's command line: the parser, built from each module's commands, and main."""
+"""bullpen's command line in Python: the parser, built from each module's commands, and
+main. The Rust entry (cli/src/main.rs, run by bin/bullpen) prints the top-level help
+and the unknown-command line, and hands over the commands this side still owns."""
 
 import argparse
 import importlib
@@ -8,15 +10,16 @@ from . import __doc__ as ABOUT
 from . import core
 from .core import Fail, run_later
 
-# The modules with commands, in the order `bullpen --help` lists a group's commands.
+# The modules with commands (cli/src/commands.rs lists their commands in `bullpen --help`'s order).
 MODULES = ("go", "board", "show", "answer", "accept", "close", "stepper", "tours", "pick", "start",
            "triage", "check", "news", "guide", "ready", "auto_accept", "up", "config", "rules",
            "push_remote", "board_build", "keys", "doctor", "coordinators", "notifications", "prs",
            "events")
 
-# Each command and the module that declares it, in --help's order. A call imports only
-# its command's module (and what that imports), not all of them: start-up is most of a
-# call's time. A test checks this against what the modules declare.
+# Each command Python owns and the module that declares it, in --help's order. A call
+# imports only its command's module (and what that imports), not all of them: start-up
+# is most of a call's time. A test checks this against what the modules declare, and
+# another against the Rust entry's table (cli/src/commands.rs): a command is one side's.
 COMMANDS = {
     "go": "go", "hide": "go", "adopt": "go",
     "board": "board",
@@ -39,7 +42,7 @@ COMMANDS = {
     "config": "config",
     "rules": "rules",
     "_push": "push_remote",
-    "build-board": "board_build", "_build_board": "board_build",
+    "build": "board_build", "_build_board": "board_build",
     "keys": "keys",
     "doctor": "doctor",
     "_coordinator_gone": "coordinators",
@@ -52,9 +55,8 @@ COMMANDS = {
 # their hooks run: the run queue, the person's notification, the PR to follow.
 SAVERS = ("start", "notifications", "prs")
 
-# `bullpen --help` lists the commands in these groups, in this order: each command
-# names its group (core.command). A label in a command's help that the group's title
-# already says ("(coordinator) ") is left out.
+# The groups a command's help may name (core.command). The Rust entry lists them in
+# `bullpen --help`, from its own table (cli/src/help.rs).
 GROUPS = [
     ("You", "(the person's call) "),
     ("Coordinator", "(coordinator) "),
@@ -62,15 +64,6 @@ GROUPS = [
     ("Setup", ""),
 ]
 USAGE = "usage: bullpen COMMAND [ARGS]\n"
-
-
-def grouped(sub):
-    """{group title: [(name, its parser)]} in GROUPS' order; internal commands left out."""
-    out = {title: [] for title, _ in GROUPS}
-    for name, p in sub.choices.items():
-        if p.group:
-            out[p.group].append((name, p))
-    return out
 
 
 class Formatter(argparse.HelpFormatter):
@@ -111,41 +104,10 @@ class CommandParser(argparse.ArgumentParser):
 
 
 class Parser(CommandParser):
-    """The top-level parser: a short usage line and the commands in groups."""
+    """The top-level parser: a short usage line."""
 
     def format_usage(self):
         return USAGE
-
-    def format_help(self):
-        import shutil
-        import textwrap
-        sub = next(a for a in self._actions if isinstance(a, argparse._SubParsersAction))
-        helps = {a.dest: a.help for a in sub._choices_actions}
-        groups = grouped(sub)
-        width = max(shutil.get_terminal_size().columns - 2, 40)
-        name_w = max(len(n) for cmds in groups.values() for n, _ in cmds) + 2
-        out = [USAGE, "\n" + textwrap.fill(self.description, width) + "\n"]
-        for title, label in GROUPS:
-            out.append(f"\n{title}:\n")
-            for n, _ in groups[title]:
-                h = helps[n].removeprefix(label)
-                out.append(textwrap.fill(h, width, initial_indent=f"  {n:<{name_w}}",
-                                         subsequent_indent=" " * (name_w + 2)) + "\n")
-        out.append("\n" + textwrap.fill("`bullpen COMMAND --help` says more about one.", width) + "\n")
-        return "".join(out)
-
-
-def unknown_command(argv, choices):
-    """The one-line error for a command bullpen doesn't have, else None."""
-    if not argv or argv[0] in ("-h", "--help") or argv[0] in choices:
-        return None
-    name = argv[0]
-    if name.startswith("-"):
-        return f"bullpen: `{name}` goes after a command. `bullpen --help` lists them."
-    import difflib
-    close = difflib.get_close_matches(name, [n for n in choices if not n.startswith("_")], n=1)
-    hint = f" Did you mean `{close[0]}`?" if close else ""
-    return f"bullpen: no command `{name}`.{hint} `bullpen --help` lists them."
 
 
 def module(name):
@@ -171,14 +133,11 @@ def parser(modules=MODULES):
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    if not argv:
-        print(parser().format_help(), end="")
-        return 2
-    if err := unknown_command(argv, COMMANDS):
-        print(err, file=sys.stderr)
+    if not argv or argv[0] not in COMMANDS:
+        print(module("board_build").not_in_build(argv[0] if argv else None), file=sys.stderr)
         return 2
     core.LOAD_SAVERS[:] = [load_savers]
-    args = parser([COMMANDS[argv[0]]] if argv[0] in COMMANDS else MODULES).parse_args(argv)
+    args = parser([COMMANDS[argv[0]]]).parse_args(argv)
     try:
         code = args.fn(args)
     except Fail as e:
