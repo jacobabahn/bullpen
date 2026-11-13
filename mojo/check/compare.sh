@@ -7,7 +7,8 @@
 # a fresh fixture (fixture.py) is made, Python's bin/bullpen runs in it, then a fresh
 # one again for mojo/build/bullpen: their stdout, stderr, exit code and the state
 # folder afterwards (every file but locks) must be the same. A case starting `tty `
-# runs on a terminal 100 columns wide (`tty40 `: 40 wide). MOJO_BIN: the binary to
+# runs on a terminal 100 columns wide (`tty40 `: 40 wide). Leading `env:NAME=VALUE ` words
+# set NAME for the run, and for fixture.py (FIXTURE=a,b picks its extras). MOJO_BIN: the binary to
 # check (default mojo/build/bullpen). Prints one line per case,
 # a diff for each that differs, and exits 1 if any did. Stamps from the run's own
 # time (a command's now()) read as <now>. A case starting `usage ` is a usage error:
@@ -25,8 +26,11 @@ if [ $# -gt 0 ]; then cases=("$@"); else mapfile -t cases < <(cat "$here"/cases*
 run_one() {  # run_one PROGRAM CASE OUTDIR
     local prog=$1 case=$2 out=$3 cols="" usage=""
     mkdir -p "$out"
-    local envs
-    envs=$(python3 "$here/fixture.py" "$work/fx" "$now") || { echo "fixture.py failed" >&2; exit 2; }
+    local envs sets=()
+    while [[ $case == env:* ]]; do
+        sets+=("${case%% *}"); sets[-1]=${sets[-1]#env:}; case=${case#* }
+    done
+    envs=$(env "${sets[@]}" python3 "$here/fixture.py" "$work/fx" "$now") || { echo "fixture.py failed" >&2; exit 2; }
     eval "$envs"
     case "$case" in usage\ *) usage=1; case=${case#usage } ;; esac
     case "$case" in
@@ -37,6 +41,7 @@ run_one() {  # run_one PROGRAM CASE OUTDIR
     t0=$(date +%s.%N)
     (
         cd "$FIXTURE_ROOT" || { echo "no fixture" >&2; exit 2; }
+        for kv in "${sets[@]}"; do export "$kv"; done
         if [ -n "$cols" ]; then
             script -qec "stty cols $cols rows 50; $prog $case; echo \"[exit \$?]\"" /dev/null >"$out/stdout" 2>&1 </dev/null
             echo 0 >"$out/code"
