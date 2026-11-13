@@ -4413,6 +4413,7 @@ def cmd_accept(args):
     if t["status"] != "ready" and not merged_outside:
         raise Fail(f"{is_status(t)}, not ready to accept or finished")
     keys = keys_hash()
+    touched = changed_files(repo, t)  # before the merge: what the others are checked against
     if t.get("pr"):
         p = None if merged_outside else run(
             [repo.gh(), "pr", "merge", t["pr"], f"--{repo.cfg['merge']}"],
@@ -4451,7 +4452,7 @@ def cmd_accept(args):
         if said:
             print(said)
     if how != "nothing to merge":
-        rebase_others(repo, t)
+        rebase_others(repo, t, touched)
     start_queued(repo, t, "accepted")
     tell_guide_changes(repo)  # the merge may have changed the coordinator's guide
     refresh_watcher(repo)  # the merge may have changed the watcher itself
@@ -4548,10 +4549,21 @@ def move_base(repo, base, old, new):
     git(repo.root, "update-ref", "-m", "bullpen accept", f"refs/heads/{base}", new, old)
 
 
-def rebase_others(repo, accepted):
+def changed_files(repo, t):
+    """The files a task's branch changes against its base (both paths of a rename), or
+    None when that can't be told (no worktree, or a base that already has the branch)."""
+    wt = t.get("worktree")
+    if not wt or not Path(wt).is_dir():
+        return None
+    p = git(wt, "diff", "-z", "--name-only", "--no-renames", f"{task_base_ref(repo, t)}...HEAD", check=False)
+    return (set(p.stdout.split("\0")) - {""} or None) if p.returncode == 0 else None
+
+
+def rebase_others(repo, accepted, touched=None):
     """After an accept, bring the other open tasks on the same base up to date: tell a
-    working agent to rebase, rebase one between turns, and leave a running review be.
-    One news line sums it up. Off with `config --rebase-others off`."""
+    working agent to rebase when the accepted change (the files in touched) conflicts
+    with its work, rebase one between turns, and leave a running review be. One news
+    line sums it up. Off with `config --rebase-others off`."""
     if not repo.cfg["rebase_others"]:
         return
     base = accepted["base"]
@@ -4564,7 +4576,7 @@ def rebase_others(repo, accepted):
     said = []
     for o in others:
         try:
-            line = rebase_other(repo, o, accepted)
+            line = rebase_other(repo, o, accepted, touched)
         except Fail as e:
             line = f"{o['id']} not rebased ({e})"
         if line:
@@ -4573,7 +4585,7 @@ def rebase_others(repo, accepted):
         news(repo, accepted, "rebased", f"After {accepted['id']}: {'; '.join(said)}.", everyone=True)
 
 
-def rebase_other(repo, t, accepted):
+def rebase_other(repo, t, accepted, touched=None):
     """Bring one task up to date with its base; say how in a few words, or None when
     there was nothing to do."""
     wt, ref = t["worktree"], task_base_ref(repo, t)
@@ -4583,10 +4595,7 @@ def rebase_other(repo, t, accepted):
     if t["status"] == "review" or (r.get("block") and not r.get("verdict")):
         return f"{t['id']} left in review"  # a reviewer is on it; its next ready rebases it
     if t["status"] == "working" and rex_alive(t.get("session"), t.get("block")):
-        rex_type(t["session"], t["block"],
-                 f"{t['base']} moved: {accepted['id']} was just accepted. At a good point, "
-                 f"{onto(ref)}, fix any conflicts, and rerun the tests.")
-        return f"{t['id']} told to rebase"
+        return tell_to_rebase(t, accepted, ref, touched)
     if not worker_idle(t):
         who = "the person" if t["status"] == "needs" else "its coordinator"
         return f"{t['id']} waiting on {who}, not rebased"  # mid-turn: on a prompt, or failed
@@ -4759,6 +4768,52 @@ def check_push(repo, why_not=None):
     if n:
         return "fail", f"{name} is {commits(n)} behind {base}: `git push {name} {base}`"
     return "ok", f"{name} has {base} as it is here"
+
+
+def rebase_need(wt, ref, touched):
+    """Whether a working task's work meets the accepted change (the files in touched;
+    None: whatever its base gained since the task branched off). Returns ("conflict",
+    files) for committed work that doesn't merge cleanly, ("uncommitted", files) for
+    uncommitted changes in files the change touched, or (None, why) to leave it alone."""
+    names = lambda *a: set(git(wt, *a, "-z", check=False).stdout.split("\0")) - {""}
+    if touched is None:
+        touched = names("diff", "--name-only", "--no-renames", f"HEAD...{ref}")
+    committed = names("diff", "--name-only", "--no-renames", f"{ref}...HEAD")
+    uncommitted = (names("diff", "--name-only", "--no-renames", "HEAD") |
+                   names("ls-files", "--others", "--exclude-standard"))
+    if not touched & (committed | uncommitted):
+        return None, "no overlap"
+    conflicts = set()
+    if touched & committed:
+        p = git(wt, "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", ref, "HEAD",
+                check=False)
+        if p.returncode == 1:  # the tree, then the conflicted files
+            conflicts = set(p.stdout.split("\0")[1:]) - {""}
+        elif p.returncode != 0:  # it couldn't tell: say so to the worker rather than guess
+            conflicts = touched & committed
+    if conflicts:
+        return "conflict", sorted(conflicts)
+    if touched & uncommitted:
+        return "uncommitted", sorted(touched & uncommitted)
+    return None, "no conflict"
+
+
+def tell_to_rebase(t, accepted, ref, touched):
+    """A working task: type into its pane that the base moved, only when that meets its
+    work (a conflict, or uncommitted changes in the files the accepted change touched)."""
+    need, files = rebase_need(t["worktree"], ref, touched)
+    if not need:
+        return f"{t['id']} left alone ({files})"
+    names = ", ".join(files)
+    if need == "conflict":
+        what, said = f"your branch conflicts with it in {names}", f"conflicts in {names}"
+    else:
+        what = f"it changed {names}, where you have uncommitted changes"
+        said = f"uncommitted changes in {names}"
+    rex_type(t["session"], t["block"],
+             f"{t['base']} moved: {accepted['id']} was just accepted, and {what}. At a good point, "
+             f"{onto(ref)} and fix the conflicts.")
+    return f"{t['id']} told to rebase ({said})"
 
 
 def onto(ref):

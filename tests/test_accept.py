@@ -374,18 +374,26 @@ class AcceptTest(BullpenTest):
 
     # ---------- rebase after accept ----------
 
-    def two_tasks(self):
-        """BP-1 and BP-2 started, review off, each with a commit; BP-1 ready."""
+    def two_tasks(self, one="one.txt", two="two.txt", same=False):
+        """BP-1 and BP-2 started, review off, each with a commit (BP-2's: a file named
+        two, written as BP-1 writes its own when same); BP-1 ready."""
         self.bp("config", "--review", "off")
         self.start_task("First")
         self.bp("add", "Second", "--brief", "x")
         self.bp("start", "BP-2")
-        for tid, name in (("BP-1", "one.txt"), ("BP-2", "two.txt")):
+        for tid, name in (("BP-1", one), ("BP-2", two)):
             wt = self.show(tid)["worktree"]
-            (Path(wt) / name).write_text(f"{tid}\n")
+            (Path(wt) / name).write_text("BP-1\n" if same else f"{tid}\n")
             sh("git", "-C", wt, "add", ".")
             sh("git", "-C", wt, "commit", "-qm", f"{tid} work")
         self.bp("ready", "BP-1", "--summary", "done")
+
+    def accept_first(self):
+        """Accept BP-1 (merged on GitHub): the line typed into BP-2's pane, or None."""
+        self.merge_on_github("BP-1")
+        self.bp("accept", "BP-1")
+        said = [line for block, line in self.typed() if block == self.block("BP-2")]
+        return said[-1] if said else None
 
     def test_after_accept_a_ready_task_is_rebased_and_pushed(self):
         self.two_tasks()
@@ -401,15 +409,47 @@ class AcceptTest(BullpenTest):
         self.assertEqual(t["rebased"], "main")  # the board says "Rebased onto main."
         self.assertEqual(self.news_lines()[-1], "bullpen · After BP-1: BP-2 rebased.")
 
-    def test_after_accept_a_working_task_is_told_not_rebased(self):
+    def test_after_accept_a_working_task_with_no_overlap_is_left_alone(self):
         self.two_tasks()
         wt = self.show("BP-2")["worktree"]
         head = sh("git", "-C", wt, "rev-parse", "HEAD")
-        self.merge_on_github("BP-1")
-        self.bp("accept", "BP-1")
+        self.assertIsNone(self.accept_first())
         self.assertEqual(sh("git", "-C", wt, "rev-parse", "HEAD"), head)
-        block, line = [x for x in self.typed() if x[0] == self.block("BP-2")][-1]
-        self.assertIn("git fetch origin", line)
-        self.assertIn("rebase your branch onto origin/main", line)
         self.assertEqual(self.show("BP-2")["status"], "working")
-        self.assertEqual(self.news_lines()[-1], "bullpen · After BP-1: BP-2 told to rebase.")
+        self.assertEqual(self.news_lines()[-1], "bullpen · After BP-1: BP-2 left alone (no overlap).")
+
+    def test_after_accept_a_working_task_that_merges_cleanly_is_left_alone(self):
+        self.two_tasks("shared.txt", "shared.txt", same=True)  # the same file, the same change
+        self.assertIsNone(self.accept_first())
+        self.assertEqual(self.news_lines()[-1], "bullpen · After BP-1: BP-2 left alone (no conflict).")
+
+    def test_after_accept_a_working_task_that_conflicts_is_told_the_files(self):
+        self.two_tasks("shared.txt", "shared.txt")
+        wt = self.show("BP-2")["worktree"]
+        head = sh("git", "-C", wt, "rev-parse", "HEAD")
+        line = self.accept_first()
+        self.assertEqual(sh("git", "-C", wt, "rev-parse", "HEAD"), head)  # its worktree isn't touched
+        self.assertIn("BP-1 was just accepted, and your branch conflicts with it in shared.txt", line)
+        self.assertIn("run `git fetch origin`, then rebase your branch onto origin/main and fix the conflicts",
+                      line)
+        self.assertNotIn("rerun the tests", line)
+        self.assertEqual(self.show("BP-2")["status"], "working")
+        self.assertEqual(self.news_lines()[-1],
+                         "bullpen · After BP-1: BP-2 told to rebase (conflicts in shared.txt).")
+
+    def test_after_accept_uncommitted_changes_in_a_touched_file_are_told(self):
+        self.two_tasks()
+        wt = self.show("BP-2")["worktree"]
+        (Path(wt) / "one.txt").write_text("mine\n")  # untracked, where BP-1 added it
+        line = self.accept_first()
+        self.assertIn("it changed one.txt, where you have uncommitted changes", line)
+        self.assertEqual((Path(wt) / "one.txt").read_text(), "mine\n")
+        self.assertEqual(self.news_lines()[-1],
+                         "bullpen · After BP-1: BP-2 told to rebase (uncommitted changes in one.txt).")
+
+    def test_after_accept_uncommitted_changes_elsewhere_leave_it_alone(self):
+        self.two_tasks()
+        wt = self.show("BP-2")["worktree"]
+        (Path(wt) / "README").write_text("edited\n")
+        self.assertIsNone(self.accept_first())
+        self.assertEqual(self.news_lines()[-1], "bullpen · After BP-1: BP-2 left alone (no overlap).")
