@@ -38,11 +38,11 @@ class SelfUpdateTest(unittest.TestCase):
 
     def move_tour(self, where):
         """A port's commit in where: `tour` moves to Rust (cli/ changes) and its Python goes.
-        (`tour` and `_tour` are the Python's last commands, until T11b.)"""
+        (`tour` is the Python's last command, until T11b.)"""
         where = Path(where)
         (where / "cli" / "src" / "main.rs").write_text("// moved: tour\nfn main() { tour() }\n")
         cli = where / "bullpen" / "cli.py"
-        text = cli.read_text().replace('"tour": "stepper", "_tour": "stepper",', "")
+        text = cli.read_text().replace('"tour": "stepper",', "")
         modules = re.search(r"MODULES = \(([^)]*)\)", text)
         rest = [m for m in re.findall(r'"(\w+)"', modules.group(1)) if m != "stepper"]
         cli.write_text(text.replace(modules.group(0), f"MODULES = {tuple(rest)!r}"))
@@ -156,13 +156,14 @@ class SelfUpdateTest(unittest.TestCase):
         self.bp("config", "--review", "off")
         self.bp("ready", tid, "--summary", "Fixed.", cwd=wt)
         # T11a's merge, not yet built: cli/ changes, and _tour's Python is gone
-        (self.home / "cli" / "src" / "main.rs").write_text("// moved: keys\nfn main() { keys() }\n")
+        # (the new build answers _t11a, a name only it has, itself)
+        (self.home / "cli" / "src" / "main.rs").write_text("// moved: _t11a\nfn main() { _t11a() }\n")
         self.git("commit", "-qam", "_tour moves to Rust")
         self.old_build("_tour", "tour-comment")
         self.assertIn("writing a tour of", self.bp("tour", tid).stdout)
         self.wait_for("no tour", lambda: (self.show(tid).get("tour") or {}).get("state") == "written", wait=30)
         self.assertNotIn("case $1 in _tour|", self.board("bullpen"))  # the new build is in place
-        self.assertEqual(self.bp("keys").stdout, "keys runs in the new build\n")
+        self.assertEqual(self.bp("_t11a").stdout, "_t11a runs in the new build\n")
         self.settle()
         self.assertNotIn(" job: ", self.news_log())
 
