@@ -3,6 +3,7 @@
 import ast
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -275,7 +276,7 @@ class EntryTest(BullpenTest):
                                            "model", "review-mode", "peek", "ask", "ok", "note", "news", "guide",
                                            "up", "build", "_build_board", "doctor", "_flush", "start", "resume",
                                            "tell", "_queue", "rules", "pick", "config", "ready", "review",
-                                           "verdict"],
+                                           "verdict", "close", "drop", "finish", "_push"],
                                           "rust")})
 
     def test_help_and_an_unknown_command_come_from_rust(self):
@@ -467,9 +468,27 @@ class CodeTest(unittest.TestCase):
         from bullpen import cli, core, saves  # noqa: F401
         self.assertIn(saves.move_queue, core.SAVED)
 
+    def rust_calls(self, names):
+        """(file, function called, its arguments' text) for each call of one of names in
+        cli/src (not its tests; not a method or a path's, like libc::close)."""
+        out = []
+        for f in sorted((ROOT / "cli" / "src").rglob("*.rs")):
+            if f.name.startswith("test_"):
+                continue
+            text = f.read_text()
+            for m in re.finditer(r"(?<![\w:.])(%s)\(" % "|".join(map(re.escape, names)), text):
+                if text[:m.start()].endswith("fn "):
+                    continue  # its definition
+                depth, i = 1, m.end()
+                while depth and i < len(text):
+                    depth += {"(": 1, ")": -1}.get(text[i], 0)
+                    i += 1
+                out.append((str(f.relative_to(ROOT / "cli" / "src")), m.group(1), text[m.end():i - 1]))
+        return out
+
     def test_only_the_mode_adapters_push(self):
-        # one way to push: quiet_git, which never waits on a prompt, in modes.py (and the
-        # push remote's background push)
+        # one way to push: quiet_git, which never waits on a prompt, in modes (and the
+        # push remote's background push); the Python twin and the Rust alike
         pushes = []
         for mod, tree in self.modules().items():
             for n in ast.walk(tree):
@@ -477,10 +496,18 @@ class CodeTest(unittest.TestCase):
                 if f in ("git", "quiet_git", "run") and any(
                         isinstance(a, ast.Constant) and a.value == "push" for x in n.args for a in ast.walk(x)):
                     pushes.append((mod, f))
-        self.assertEqual({m for m, _ in pushes}, {"modes", "push_remote"})
+        self.assertEqual({m for m, _ in pushes}, {"modes"})
         self.assertEqual({f for _, f in pushes}, {"quiet_git"})
+        calls = self.rust_calls(["git", "quiet_git", "quiet_git_in", "run", "run_in", "run_with", "run_input"])
+        pushes = {(f, name) for f, name, args in calls if '"push"' in args}
+        self.assertEqual({f for f, _ in pushes}, {"modes.rs", "push_remote.rs"})
+        self.assertEqual({name for _, name in pushes}, {"quiet_git", "quiet_git_in"})
+        self.assertNotIn('"push"', "".join(args for _, name, args in calls if name in ("git", "run_with")))
 
     def test_close_accept_and_drop_share_one_close_step(self):
         self.assertEqual(sorted(f for m, f in self.calls("close") if m in ("accept", "close")),
-                         ["accept", "close_task", "cmd_drop"])
+                         ["accept", "close_task"])
         self.assertEqual(self.calls("remove_worktree"), [("close", "close")])
+        rust = [(f, args.split(",")[0]) for f, _, args in self.rust_calls(["close"])]
+        self.assertEqual(rust, [("close.rs", "repo"), ("close.rs", "&repo")])  # close_task's and drop's
+        self.assertEqual([f for f, _, _ in self.rust_calls(["remove_worktree"])], ["close.rs"])

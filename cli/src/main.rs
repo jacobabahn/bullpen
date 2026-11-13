@@ -9,6 +9,7 @@ mod args;
 mod auto_accept;
 mod board;
 mod build;
+mod close;
 mod commands;
 mod config;
 mod coordinators;

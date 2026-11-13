@@ -1,6 +1,6 @@
 """What's left of starting tasks in Python, as twins of cli/src/start/ for the commands
-Python still runs: what a task waits on (task_line), a dropped dependency (close), an
-agent's pane and handing a worker a message (accept, verdict, events, prs, tours). The
+Python still runs: what a task waits on (task_line), an agent's pane and handing a
+worker a message (accept, verdict, events, prs, tours). The
 commands, and the run queue, are Rust's; Python's saves move the queue through saves.py.
 """
 
@@ -8,7 +8,6 @@ from .core import back_to_work, index_block, is_claude, model_in, resolve, set_s
 from .rex import rex_alive, type_to_worker
 from .coordinators import session_for
 from .panes import place
-from .news import news
 
 
 # ---------- dependencies ----------
@@ -32,21 +31,6 @@ def waits_phrase(repo, t, tasks=None):
     if not deps:
         return ""
     return "Waits on " + ", ".join(d + {"dropped": " (dropped)", None: " (missing)"}.get(st, "") for d, st in deps)
-
-
-def dropped_dep(repo, t):
-    """t was dropped: the tasks waiting on it stay todo, with one news line."""
-    waiting = [o["id"] for o in repo.tasks() if o["status"] == "todo" and t["id"] in (o.get("after") or [])]
-    if not waiting:
-        return
-    names = ", ".join(waiting)
-    one = waiting[0]
-    verb = "waits" if len(waiting) == 1 else "wait"
-    stays = "it stays" if len(waiting) == 1 else "they stay"
-    news(repo, t, "dropped-dependency",
-         f"{names} {verb} on {t['id']}, which was dropped, so {stays} queued. Ask the person what to do: "
-         f"`bullpen after {one} --none` (or other tasks) to go ahead without it, then "
-         f"`bullpen start {one}`; or drop {'it' if len(waiting) == 1 else 'them'}", everyone=True)
 
 
 def launch(repo, t, session, first, resume):

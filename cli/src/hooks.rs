@@ -1,6 +1,7 @@
-//! A worktree's setup hook (bullpen/hooks.py): the repo's config.json `setup`, else
-//! .bullpen/setup.sh as committed on the task's base, run in the new worktree. The
-//! teardown and removing a worktree move with close (T8); Python keeps hooks.py (a twin).
+//! A worktree's hooks (bullpen/hooks.py): the repo's config.json `setup` or `teardown`,
+//! else .bullpen/<name>.sh as committed on the task's base, run in the worktree: setup
+//! in a new one, teardown before it goes (remove_worktree, close's). Python keeps
+//! hooks.py (a twin) for its close (accept's) until T9.
 
 use crate::modes::task_base_ref;
 use crate::stops::stop;
@@ -12,7 +13,7 @@ use bullpen_core::{Repo, Res};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::ExitStatusExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 /// Where the task's setup or teardown writes what it says.
@@ -103,6 +104,53 @@ pub fn run_hook(repo: &Repo, t: &Obj, name: &str) -> Res<Option<Ran>> {
         source: h.source,
         over: h.over,
     }))
+}
+
+/// Run the task's teardown before its worktree goes. A failure is logged and said,
+/// never in the way. Returns whether one ran.
+fn tear_down(repo: &Repo, t: &Obj) -> bool {
+    let wt = s(t, "worktree");
+    if wt.is_empty() || !Path::new(wt).exists() {
+        return false;
+    }
+    match run_hook(repo, t, "teardown") {
+        Err(e) => {
+            eprintln!("{}: teardown couldn't run: {e}", s(t, "id"));
+            false
+        }
+        Ok(None) => false,
+        Ok(Some(r)) => {
+            if r.code != 0 {
+                eprintln!(
+                    "{}: teardown failed (exit {}): see {}; removing the worktree anyway",
+                    s(t, "id"),
+                    r.code,
+                    r.log.display()
+                );
+            }
+            true
+        }
+    }
+}
+
+/// Remove the task's worktree (its teardown first) and its branch.
+pub fn remove_worktree(repo: &Repo, t: &Obj, force: bool) -> Res<()> {
+    // what a teardown leaves behind mustn't keep the worktree (drop checked it was clean before)
+    let force = tear_down(repo, t) || force;
+    let wt = s(t, "worktree");
+    if !wt.is_empty() && Path::new(wt).exists() {
+        let mut args = vec!["worktree", "remove"];
+        if force {
+            args.push("--force");
+        }
+        args.push(wt);
+        git(&repo.root, &args, true)?;
+    }
+    let branch = s(t, "branch");
+    if !branch.is_empty() {
+        git(&repo.root, &["branch", "-D", branch], false)?;
+    }
+    Ok(())
 }
 
 /// An OSError as Python says it: "[Errno 2] No such file or directory: 'x'".

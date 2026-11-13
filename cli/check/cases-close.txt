@@ -1,0 +1,53 @@
+# T8: close, drop, finish and _push. The fixture is in local mode; a PR made before the record (BP-8, BP-41) is remote mode's, and the fake gh is asked to close it.
+close BP-21
+close BP-22
+close BP-17
+close BP-3
+close BP-23
+close BP-404
+env:FIXTURE=teardown close BP-21
+usage close
+close --help
+drop BP-3
+drop BP-3 --force
+drop BP-17
+drop BP-33
+drop BP-1
+drop BP-26
+drop BP-10
+drop BP-12
+drop BP-8
+drop BP-41
+drop BP-23
+drop BP-404
+env:FIXTURE=queued drop BP-3 --force
+env:FIXTURE=teardown drop BP-17
+env:FIXTURE=teardown drop BP-3 --force
+env:FIXTURE=badteardown drop BP-17
+env:FIXTURE=teardown,badteardown drop BP-33
+usage drop
+usage drop BP-3 --forc
+drop --help
+finish BP-33 --summary "Recorded the demo."
+finish BP-33 --summary-file "$FIXTURE_ROOT/../summary.md" $(printf '# The notes\n\nAre in the wiki.\n' >"$FIXTURE_ROOT/../summary.md")
+finish BP-33
+finish BP-33 --summary-file "$FIXTURE_ROOT/../empty.md" $(: >"$FIXTURE_ROOT/../empty.md")
+finish BP-17 --summary "Nothing to merge?"
+finish BP-3 --summary "Done"
+finish BP-1 --summary "Done"
+finish BP-23 --summary "Done"
+finish BP-26 --summary "Done"
+finish BP-404 --summary "Done"
+env:FIXTURE=autofinish finish BP-33 --summary "# Recorded it"
+env:FIXTURE=autofinish,teardown finish BP-33 --summary "Recorded it"
+usage finish
+finish --help
+_push main
+_push main --task BP-17
+env:FIXTURE=pushremote _push main
+env:FIXTURE=pushremote _push main --task BP-17
+env:FIXTURE=pushremote _push nosuch --task BP-17
+env:FIXTURE=badpush _push main
+env:FIXTURE=badpush _push main --task BP-17
+env:FIXTURE=badpush _push main --task BP-404
+usage _push

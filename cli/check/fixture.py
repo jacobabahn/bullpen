@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from tests.support import FAKE_REX  # noqa: E402
+from tests.support import FAKE_GH, FAKE_REX  # noqa: E402
 
 
 def sh(*cmd, cwd=None):
@@ -196,6 +196,8 @@ def main(d, now):
     # the fake rex: these panes are alive; some have screens and status records
     (fake / "rex").write_text(FAKE_REX)
     (fake / "rex").chmod(0o755)
+    (fake / "gh").write_text(FAKE_GH)  # what it was asked goes to gh.log: never the real GitHub
+    (fake / "gh").chmod(0o755)
     (fake / "alive").mkdir()
     for blk in ("blk1", "blk2", "blk3", "blk4", "blk5", "blk8", "blk11", "blk12", "blk13", "blk14", "blk15", "blk16"):
         (fake / "alive" / blk).write_text("")
@@ -455,9 +457,22 @@ def main(d, now):
             (fake / "alive" / blk).write_text("")
     if "noreview" in extras:
         config(review=False)
+    if "teardown" in extras:  # a committed teardown script that works
+        commit(".bullpen/teardown.sh", "echo \"tearing down $BULLPEN_TASK in $BULLPEN_WORKTREE\"\n")
+    if "badteardown" in extras:  # a teardown in the config that fails
+        config(teardown="echo nope >&2; exit 4")
+    if "pushremote" in extras:  # a push remote that takes the push
+        sh("git", "init", "-q", "--bare", "-b", "main", str(d / "backup.git"))
+        g("remote", "add", "backup", str(d / "backup.git"))
+        config(push_remote="backup")
+    if "badpush" in extras:  # a push remote that isn't there
+        g("remote", "add", "nowhere", str(d / "nowhere.git"))
+        config(push_remote="nowhere")
+    if "autofinish" in extras:  # BP-33 (nothing committed) auto-accepts
+        retask(33, auto_accept=True)
 
     env = {"HOME": home, "BULLPEN_STATE": state, "BULLPEN_REX": fake / "rex", "FAKE_DIR": fake,
-           "XDG_CONFIG_HOME": d / "config", "FIXTURE_ROOT": root,
+           "XDG_CONFIG_HOME": d / "config", "FIXTURE_ROOT": root, "BULLPEN_GH": fake / "gh",
            "BULLPEN_NO_BUILD": 1}  # never build, or take the build lock in, the checkout it runs from
     for k, v in env.items():
         print(f"export {k}='{v}'")

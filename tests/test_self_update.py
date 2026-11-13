@@ -132,6 +132,21 @@ class SelfUpdateTest(unittest.TestCase):
         self.settle()
         self.assertNotIn(" job: ", self.news_log())
 
+    def test_an_accept_through_the_old_build_pushes_with_the_new_build(self):
+        # BP-119 for T8: the old build hands _push to the Python, which no longer has it
+        # (T8 moved it); the push catches up (waits for accept's rebuild, or builds both
+        # programs itself, so accept's rebuild skips), then the new build pushes
+        self.bp("config", "--review", "off")
+        tid, wt = self.task_moving_keys()
+        self.old_build("_push", "close", "drop", "finish")
+        self.bp("accept", tid)
+        self.assert_rebuilt_and_pushed()
+        self.assertNotIn("case $1 in _push|", self.board("bullpen"))  # the new build is in place
+        state = next((self.tmp / "state" / "repos").iterdir())
+        self.assertRegex((state / "jobs.log").read_text(),  # it caught up, either way
+                         r"`_push` is (newer than this build: building it first|in the build that's running)")
+        self.assertNotIn(" job: ", self.news_log())
+
     def with_a_stuck_build(self, *args):
         """bullpen args while a build that never ends holds the lock (this test's pid in it)."""
         lock = (self.target / "build.lock").open("a")
@@ -247,13 +262,14 @@ class SelfUpdateTest(unittest.TestCase):
         sh("git", "-C", str(wt), "commit", "-qm", "Fix")
         self.bp("ready", tid, "--summary", "Fixed.", cwd=wt)
         state = next((self.tmp / "state" / "repos").iterdir())
-        (state / "push.lock").mkdir()  # the push dies on it, with a traceback
+        (state / "push.lock").mkdir()  # the push dies on it, saying only "bullpen: ..." on stderr
         self.bp("accept", tid)
         self.wait_for("no news of the push", lambda: " job: " in self.news_log())
         line = next(l for l in self.news_log().splitlines() if " job: " in l)
-        self.assertIn(f"{tid} job: bullpen · Pushing main to backup failed: IsADirectoryError", line)
+        self.assertIn(f"{tid} job: bullpen · Pushing main to backup failed: bullpen: can't take the push lock "
+                      f"{state / 'push.lock'}: Is a directory", line)
         self.assertIn(f"Log: {state / 'jobs.log'}", line)
-        self.assertIn("Traceback", (state / "jobs.log").read_text())
+        self.assertIn("Is a directory", (state / "jobs.log").read_text())
 
     def test_a_build_restarts_a_running_watcher(self):
         self.bp("up")

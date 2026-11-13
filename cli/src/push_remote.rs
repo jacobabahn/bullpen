@@ -1,12 +1,77 @@
 //! The push remote: a backup of the base branch, in local mode (bullpen/push_remote.py).
-//! `up` catches up a push it missed, and doctor checks the remote; the push itself
-//! (`_push`) is still Python's until T8.
+//!
+//! config --push-remote names a remote (not origin: with origin, bullpen is in remote
+//! mode and the setting does nothing). After accept merges into the local base branch,
+//! the base branch alone is pushed there, in the background (`_push`), never forced.
+//! Pushes take a lock and push the branch as it is then, so two accepts in a row can't
+//! race: the later push carries both. A failed push leaves the accept standing, with
+//! one news line. `up` catches up a push it missed, and doctor checks the remote.
 
+use crate::args::{pos, value, Arg, Args, Nargs, SUPPRESS};
 use crate::modes::{push_base, push_remote, quiet_git};
+use crate::news::{news, Opts};
+use bullpen_core::json::Obj;
 use bullpen_core::proc::git;
+use bullpen_core::repo::repo_root;
 use bullpen_core::task::{clip, commits};
 use bullpen_core::text::{split, splitlines, squash, strip};
-use bullpen_core::{Repo, Res};
+use bullpen_core::{lock, Repo, Res};
+use serde_json::json;
+
+const PUSH: &[Arg] = &[pos("base", Nargs::One, ""), value("--task", "TASK", SUPPRESS)];
+
+/// `_push` (bullpen): push the base branch to the push remote, one push at a time. A
+/// failure is news (to the task's coordinator, or everyone), and exit 1.
+pub fn cmd_push(argv: &[String]) -> Res<i32> {
+    let a = Args::parse("_push", argv, PUSH);
+    let repo = Repo::new(repo_root()?)?;
+    let Some(remote) = push_remote(&repo)? else {
+        return Ok(0);
+    };
+    let base = a.arg("base").unwrap_or("");
+    std::fs::create_dir_all(&repo.dir)?;
+    let p = {
+        let path = repo.dir.join("push.lock");
+        let _lock = lock::lock(&path) // an earlier push finishes first
+            .map_err(|e| bullpen_core::Fail(format!("can't take the push lock {}: {e}", path.display())))?;
+        // The branch as it is now: a later accept's commits go too, never an older tip.
+        let refspec = format!("refs/heads/{base}:refs/heads/{base}");
+        quiet_git(&repo, &["push", "-q", &remote, &refspec], 60)?
+    };
+    if p.ok() {
+        return Ok(0);
+    }
+    let task = a
+        .opt("--task")
+        .filter(|t| !t.is_empty())
+        .and_then(|t| repo.task(t).ok());
+    let out = if p.stderr.is_empty() { &p.stdout } else { &p.stderr };
+    let why = push_reason(out, &remote, base);
+    let (after, counts) = match &task {
+        Some(t) => (
+            format!("After {}, ", bullpen_core::json::s(t, "id")),
+            "The accept still counts; ",
+        ),
+        None => (String::new(), ""),
+    };
+    let line = format!(
+        "{after}{base} wasn't pushed to {remote}: {why}. {counts}`bullpen doctor` says how far behind {remote} is."
+    );
+    // the news log's task column when no task is behind a push
+    let push_news: Obj = json!({"id": "push"}).as_object().cloned().unwrap_or_default();
+    let everyone = task.is_none();
+    news(
+        &repo,
+        task.as_ref().unwrap_or(&push_news),
+        "push",
+        &line,
+        Opts {
+            everyone,
+            ..Opts::default()
+        },
+    )?;
+    Ok(1)
+}
 
 /// Why git push (or ls-remote) failed, in a few words.
 pub fn push_reason(out: &str, remote: &str, base: &str) -> String {

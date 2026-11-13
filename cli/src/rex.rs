@@ -175,6 +175,14 @@ pub fn rex_focus(session: &str, block: &str) -> Res<()> {
     Ok(())
 }
 
+/// Close a pane this command may run in: last, after the work it set off (run_later),
+/// since closing it may end this process.
+pub fn close_last(session: &str, block: &str) -> Res<()> {
+    crate::saves::run_later();
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    rex_close(session, block)
+}
+
 pub fn rex_close(session: &str, block: &str) -> Res<()> {
     if !block.is_empty() {
         let mut argv = vec![rex(), "block".into(), "close".into(), block.into()];

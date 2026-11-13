@@ -1,12 +1,14 @@
-//! Local mode and remote mode (bullpen/modes.py), as far as what a task's branch is
-//! compared with, publishing it (`ready`), and the one way to push (quiet_git,
-//! push_base). The adapters' other verbs (merge, withdraw, ...) move in T8; Python keeps
-//! its own modes.py (a twin).
+//! Local mode and remote mode (bullpen/modes.py): the steps that differ between them.
+//! A task's mode is the one recorded when it was published (`local`), else the repo's
+//! (an origin remote: remote mode). Here: what a task's branch is compared with,
+//! publishing it (`ready`), withdrawing it (close and drop), and the one way to push
+//! (quiet_git, push_base). Merging and what follows a merge are accept's, and move with
+//! it (T9); Python keeps its own modes.py (a twin).
 
 use crate::jobs::{background, Job};
 use bullpen_core::json::{get, py_str, s, truthy, Obj};
 use bullpen_core::paths::self_bin;
-use bullpen_core::proc::{git, text, Done};
+use bullpen_core::proc::{git, run_in, text, Done};
 use bullpen_core::{Repo, Res};
 use std::io::Read;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
@@ -21,13 +23,33 @@ pub fn is_local(repo: &Repo, t: &Obj) -> Res<bool> {
 
 /// Is the task in remote mode? Its record from when it was published, else the repo's.
 fn remote(repo: &Repo, t: &Obj) -> Res<bool> {
+    match recorded_remote(t) {
+        Some(remote) => Ok(remote),
+        None => repo.has_origin(),
+    }
+}
+
+/// The task's mode as it records it (true: remote), or None: it goes by the repo's.
+pub fn recorded_remote(t: &Obj) -> Option<bool> {
     if let Some(local) = get(t, "local") {
-        return Ok(!truthy(Some(local)));
+        return Some(!truthy(Some(local)));
     }
-    if truthy(t.get("pr")) {
-        return Ok(true); // published before the record was kept
+    truthy(t.get("pr")).then_some(true) // published before the record was kept
+}
+
+/// Withdraw what was published of the task, unmerged: in remote mode close its PR (and
+/// delete its branch on origin); in local mode nothing was published.
+pub fn withdraw(repo: &Repo, t: &Obj, delete_branch: bool) -> Res<()> {
+    if !remote(repo, t)? || !truthy(t.get("pr")) {
+        return Ok(());
     }
-    repo.has_origin()
+    let pr = py_str(t.get("pr").unwrap_or(&serde_json::Value::Null));
+    run_in(&[repo.gh(), "pr".into(), "close".into(), pr], &repo.root, false)?;
+    let branch = s(t, "branch");
+    if delete_branch && !branch.is_empty() {
+        quiet_git(repo, &["push", "-q", "origin", "--delete", branch], 60)?;
+    }
+    Ok(())
 }
 
 /// What the task's branch is compared with: origin's copy of its base branch in remote
@@ -219,3 +241,7 @@ pub fn publish(repo: &Repo, t: &mut Obj, ahead: i64, base_ref: &str, summary: &s
     }
     Ok(format!("pushed {branch}; pull request: {}", s(t, "pr")))
 }
+
+#[cfg(test)]
+#[path = "test_modes.rs"]
+mod tests;

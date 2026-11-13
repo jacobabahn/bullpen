@@ -11,9 +11,9 @@ from . import core
 from .core import Fail, run_later
 
 # The modules with commands (cli/src/commands.rs lists their commands in `bullpen --help`'s order).
-MODULES = ("answer", "accept", "close", "stepper", "tours",
-           "check", "ready", "auto_accept",
-           "push_remote", "keys", "coordinators", "prs", "events")
+MODULES = ("answer", "accept", "stepper", "tours",
+           "check", "auto_accept",
+           "keys", "coordinators", "prs", "events")
 
 # Each command Python owns and the module that declares it, in --help's order. A call
 # imports only its command's module (and what that imports), not all of them: start-up
@@ -22,13 +22,10 @@ MODULES = ("answer", "accept", "close", "stepper", "tours",
 COMMANDS = {
     "answer": "answer", "reply": "answer", "prompt": "answer",
     "accept": "accept",
-    "close": "close", "drop": "close",
     "tour": "stepper", "_tour": "stepper",
     "tour-comment": "tours",
     "check": "check",
-    "finish": "ready",
     "_auto_accept": "auto_accept",
-    "_push": "push_remote",
     "keys": "keys",
     "_coordinator_gone": "coordinators",
     "_prs": "prs",

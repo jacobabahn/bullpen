@@ -8,8 +8,8 @@ use crate::jobs::{background, Job};
 use crate::news::ready_news;
 use crate::ready::{summary_text, SUMMARY, SUMMARY_FILE};
 use crate::review::{review_kind, rounds};
-use crate::rex::rex_close;
-use crate::saves::{run_later, save};
+use crate::rex::close_last;
+use crate::saves::save;
 use crate::start::launch::hand_back;
 use crate::stops::stop;
 use bullpen_core::json::{obj, py_str, s, truthy};
@@ -19,7 +19,6 @@ use bullpen_core::settings::WAITING;
 use bullpen_core::task::{auto_accepts, clip, commits, set_status, where_};
 use bullpen_core::{fail, Repo, Res};
 use serde_json::{json, Value};
-use std::io::Write;
 
 const VERDICT: &[Arg] = &[
     pos("id", Nargs::One, "the task, like BP-3"),
@@ -151,12 +150,4 @@ fn auto_accept(repo: &Repo, id: &str) {
         pass_fds: vec![],
     };
     background(&job, true);
-}
-
-/// Close a pane this command may run in: last, after the work it set off (run_later),
-/// since closing it may end this process.
-fn close_last(session: &str, block: &str) -> Res<()> {
-    run_later();
-    let _ = std::io::stdout().flush();
-    rex_close(session, block)
 }
