@@ -39,7 +39,7 @@ CASES = [
     ("ls --json", ["ls", "--json"], "fixture"),
     ("ls", ["ls"], "fixture"),
     ("ls --all", ["ls", "--all"], "fixture"),
-    ("ls --all (real, 92 tasks)", ["ls", "--all"], "real"),
+    ("ls --all (real state, 99 tasks)", ["ls", "--all"], "real"),
     ("ls --all-repos", ["ls", "--all-repos"], "fixture"),
     ("show BP-17", ["show", "BP-17"], "fixture"),
     ("show BP-17 --json", ["show", "BP-17", "--json"], "fixture"),
