@@ -360,8 +360,9 @@ class TourTest(unittest.TestCase):
         self.answer([{"title": "All", "note": "n", "hunks": [{"file": "a.txt"}, {"file": "fix1.txt"}]}])
         out = self.bp("tour", tid, "--pane", "--from", "blk1", "--session", "session:1").stdout
         self.assertIn(f"writing a tour of {tid}: it opens when it's done", out)
-        for _ in range(100):
-            if self.show(tid)["tour"]["state"] != "writing":
+        label = lambda: [la["layout"]["block"]["label"] for la in self.api("session.new_layer")][-1:]
+        for _ in range(100):  # it's written, then its pane opens
+            if self.show(tid)["tour"]["state"] != "writing" and label() == [f"bullpen: {tid} tour"]:
                 break
             time.sleep(0.1)
         self.assertEqual(self.show(tid)["tour"]["state"], "written")

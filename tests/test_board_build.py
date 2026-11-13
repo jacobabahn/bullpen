@@ -16,6 +16,7 @@ FAKE_CARGO = textwrap.dedent("""\
     #!/usr/bin/env python3
     import json, os, sys
     from pathlib import Path
+    RUST_BIN, RUST_OWNED = "{rust_bin}", "{rust_owned}"
     d = Path(os.environ["FAKE_DIR"])
     with open(d / "cargo.log", "a") as f:
         f.write(json.dumps(sys.argv[1:]) + "\\n")
@@ -31,11 +32,21 @@ FAKE_CARGO = textwrap.dedent("""\
         out = home / "target" / "release" / name
         out.parent.mkdir(parents=True, exist_ok=True)
         source = " ".join((home / crate / "src" / "main.rs").read_text().split())
-        # the command line it builds hands every command to the Python, as the real one does T1's
-        run = f'exec python3 -S "{home}/bin/bullpen-py" "$@"' if name == "bullpen" else ""
+        # the command line it builds runs the commands Rust owns with the real build (they
+        # read the state, not this checkout), and hands the rest to this copy's Python
+        rust = f'case $1 in {RUST_OWNED}) exec "{RUST_BIN}" "$@" ;; esac\\n'
+        run = rust + f'exec python3 -S "{home}/bin/bullpen-py" "$@"' if name == "bullpen" else ""
         out.write_text(f"#!/bin/sh\\n# built from: {source}\\n{run}\\n")
         out.chmod(0o755)
 """)
+
+
+def fake_cargo():
+    """FAKE_CARGO, with the commands the real build (target/bullpen) runs itself."""
+    rust_bin = ROOT / "target" / "bullpen"
+    table = json.loads(subprocess.run([str(rust_bin), "_commands"], capture_output=True, text=True).stdout)
+    owned = "|".join(c["name"] for c in table if c["owner"] == "rust")
+    return FAKE_CARGO.replace("{rust_bin}", str(rust_bin)).replace("{rust_owned}", owned)
 
 
 class BoardBuildTest(unittest.TestCase):
@@ -69,7 +80,7 @@ class BoardBuildTest(unittest.TestCase):
         self.home = self.repo = home
         self.bin = home / "bin" / "bullpen"
         cargo = self.fake / "cargo"
-        cargo.write_text(FAKE_CARGO)
+        cargo.write_text(fake_cargo())
         cargo.chmod(0o755)
         del self.env["BULLPEN_BOARD"]
         (self.tmp / "home").mkdir()
@@ -287,7 +298,7 @@ class BoardBuildTest(unittest.TestCase):
         (self.fake / "cargo_mise").write_text("")
         rustup = self.tmp / "home" / ".cargo" / "bin" / "cargo"
         rustup.parent.mkdir(parents=True)
-        rustup.write_text(FAKE_CARGO.replace('(d / "cargo_mise").exists()', "False"))
+        rustup.write_text(fake_cargo().replace('(d / "cargo_mise").exists()', "False"))
         rustup.chmod(0o755)
         self.bp("build")
         self.assertIn("fn main() {}", self.board())

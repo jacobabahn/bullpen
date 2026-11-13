@@ -365,13 +365,14 @@ class ReviewTest(BullpenTest):
         self.bp("add", "Next", "--brief", "x", "--after", dep)  # BP-3: BP-1 takes the one slot
         self.assertEqual(self.show("BP-3")["status"], "todo")
         self.ready(tid)  # the approval carries over; auto-accept waits on the running checks
-        for _ in range(100):
-            if self.show("BP-3")["status"] == "working":
+        started = "bullpen · BP-3 started (BP-1 is ready, freeing a slot)"
+        for _ in range(100):  # it's saved working, then its news is written
+            if self.show("BP-3")["status"] == "working" and started in self.news_lines():
                 break
             time.sleep(0.1)
         self.assertEqual((self.show(tid)["status"], self.show(tid).get("auto_wait")), ("ready", True))
         self.assertEqual(self.show("BP-3")["status"], "working")
-        self.assertIn("bullpen · BP-3 started (BP-1 is ready, freeing a slot)", self.news_lines())
+        self.assertIn(started, self.news_lines())
 
     def test_ready_again_frees_its_slot(self):
         self.bp("config", "--max-running", "1")
