@@ -720,32 +720,9 @@ mod tests {
     use std::time::Instant;
 
     fn app(tasks: Vec<Task>, gap: usize, layout: Layout) -> App {
-        let (tx, _) = std::sync::mpsc::channel();
-        App {
-            dir: Default::default(),
-            root: Default::default(),
-            bullpen: Default::default(),
-            me: None,
-            repo_name: "repo".into(),
-            cfg: Config { bottom_gap: gap, layout, ..Config::default_for_test() },
-            tasks,
-            others: Default::default(),
-            sel: None,
-            closed: false,
-            msg: Note::default(),
-            top: 0,
-            pending: None,
-            running: Vec::new(),
-            mode: Mode::Normal,
-            height: 0,
-            page: 1,
-            started: Instant::now(),
-            tx,
-            peeking: false,
-            peek_failed: false,
-            peek_due: Instant::now(),
-            exe: None,
-        }
+        let mut a = App::for_test(tasks);
+        a.cfg = Config { bottom_gap: gap, layout, ..Config::default_for_test() };
+        a
     }
 
     fn ready(id: &str) -> Task {

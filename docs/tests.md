@@ -38,5 +38,11 @@ in the folder's `testing.rs` (`board/src/model/testing.rs`: `task()`,
 `test_<module>.rs`. The `test_` name means bullpen treats the file as a test file when
 it rebases: two tasks that both added tests at the end of it keep both.
 
-`main.rs` and `ui.rs` still keep their tests in a `mod tests` at the bottom, until
-they are split the same way.
+`board/src/app/` is the same: `App` and its modes in `mod.rs` (tests in `test_app.rs`),
+the keys in `keys.rs`, the background commands in `jobs.rs` and reloading the board's
+program in `restart.rs`. A test builds a board with `App::for_test(tasks)` (in
+`board/src/app/testing.rs`, with `press()`, `Scratch` and the other shared helpers),
+so a new field on `App` is set in `App::new` alone.
+
+`ui.rs` still keeps its tests in a `mod tests` at the bottom, until it is split the
+same way.

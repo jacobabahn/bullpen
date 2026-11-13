@@ -91,7 +91,10 @@ impl TourShow {
 /// Why a task waits on someone: {"by": "worker" | "reviewer", "kind": "prompt" | ...}.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Stop {
+    /// read only by the tests: the board says who from `why` (once main.rs's `App` was
+    /// in a private module, the compiler saw that)
     #[serde(default)]
+    #[allow(dead_code)]
     pub by: String,
     #[serde(default)]
     pub kind: String,
