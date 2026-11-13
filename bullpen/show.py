@@ -28,25 +28,26 @@ def cmd_ls(args):
     if args.all_repos:
         return ls_repos(args)
     repo = Repo(repo_root())
-    tasks = listed(repo, args)
+    every = repo.tasks()  # read once: reading them is most of ls's own time
+    tasks = listed(every, args)
     if args.json:
         print(json.dumps(tasks, indent=2))
         return
     if not tasks:
         print("no open tasks" + ("" if args.all else " (--all shows finished ones)"))
-    for line in ls_lines(repo, tasks, term_width(), colored()):
+    for line in ls_lines(repo, tasks, term_width(), colored(), every):
         print(line)
 
 
 SENTENCE_ROOM = 24  # columns a cut line must leave for the board's sentence, or ls takes two rows
 
 
-def ls_lines(repo, tasks, width=None, color=False):
+def ls_lines(repo, tasks, width=None, color=False, every=None):
     """`ls`'s lines, in the board's order: one task_line each, whole when piped (width
     None), cut to the width on a terminal. When a line would leave under SENTENCE_ROOM
     columns for some task's sentence (a narrow terminal, a long title), the board's
-    two rows each instead."""
-    every = {t["id"]: t for t in repo.tasks()}
+    two rows each instead. every: all the repo's tasks, when the caller has read them."""
+    every = {t["id"]: t for t in (repo.tasks() if every is None else every)}
     idw = max((len(t["id"]) for t in tasks), default=0)
     tasks = board_order(tasks)
     if width is None:
@@ -60,18 +61,19 @@ def ls_lines(repo, tasks, width=None, color=False):
 def ls_repos(args):
     """`ls --all-repos`: the open tasks of every repository bullpen knows, by repository.
     One with nothing open, or whose checkout is gone, is left out."""
-    groups = [(r, ts) for r in known_repos() for ts in [listed(r, args)] if ts]
+    groups = [(r, ts, every) for r in known_repos() for every in [r.tasks()]
+              for ts in [listed(every, args)] if ts]
     if args.json:
-        print(json.dumps([{"repo": str(r.root), "tasks": ts} for r, ts in groups], indent=2))
+        print(json.dumps([{"repo": str(r.root), "tasks": ts} for r, ts, _ in groups], indent=2))
         return
     if not groups:
         print("no open tasks in any repository" + ("" if args.all else " (--all shows finished ones)"))
     width = term_width()
-    for i, (r, ts) in enumerate(groups):
+    for i, (r, ts, every) in enumerate(groups):
         if i:
             print()
         print(f"{r.root.name}  ({r.root})")
-        for line in ls_lines(r, ts, width and width - 2, colored()):
+        for line in ls_lines(r, ts, width and width - 2, colored(), every):
             print("  " + line)
 
 

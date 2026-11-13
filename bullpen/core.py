@@ -771,6 +771,6 @@ def home(path):
     return "~" + path[len(h):] if h != "/" and (path == h or path.startswith(h + "/")) else path
 
 
-def listed(repo, args):
-    """The tasks `ls` lists: the open ones, or all with --all."""
-    return [t for t in repo.tasks() if args.all or t["status"] not in CLOSED]
+def listed(tasks, args):
+    """Of a repo's tasks, the ones `ls` lists: the open ones, or all with --all."""
+    return [t for t in tasks if args.all or t["status"] not in CLOSED]
