@@ -160,7 +160,7 @@ fn try_continue(repo: &Repo, t: &mut Obj, who: &str, id: &str) -> Res<String> {
         return Ok(format!("{id}'s reviewer (its pane was gone: started again)"));
     }
     let was_alive = alive(s(t, "session"), s(t, "block"))?;
-    if let Some(failed) = hand_back(repo, t, LIMIT_CONTINUE)? {
+    if let Some(failed) = hand_back(repo, t, LIMIT_CONTINUE, "limit")? {
         return fail(failed);
     }
     Ok(if was_alive {

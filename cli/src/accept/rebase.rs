@@ -466,7 +466,7 @@ pub fn send_back_conflict(
         names_of(files),
         onto(base_ref)
     );
-    hand_back(repo, t, &msg)
+    hand_back(repo, t, &msg, "rebase")
 }
 
 /// Whether the task's committed branch conflicts with its base as it is now (fetched

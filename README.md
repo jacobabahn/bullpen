@@ -94,6 +94,7 @@ How it behaves: what bullpen does by itself as tasks move along, and the setting
 - [Finish with nothing to merge](docs/finish.md)
 - [Triage](docs/triage.md)
 - [No progress and status drift](docs/check.md): `bullpen check`
+- [Stats](docs/stats.md): where each task's time went, `bullpen stats`
 - [Usage limit](docs/usage-limit.md)
 - [News](docs/news.md): how news reaches the coordinator, and guide changes
 - [Notifications](docs/notifications.md)

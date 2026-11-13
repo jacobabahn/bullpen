@@ -117,7 +117,7 @@ pub fn cmd_verdict(argv: &[String]) -> Res<i32> {
         if let Some(Value::Object(gh)) = t.get_mut("gh").filter(|v| truthy(Some(v))) {
             gh.shift_remove("sent"); // it's the review it is fixing now, not GitHub
         }
-        let failed = match hand_back(&repo, &mut t, &msg) {
+        let failed = match hand_back(&repo, &mut t, &msg, if rebase { "rebase" } else { "review" }) {
             Ok(failed) => failed,
             Err(e) => Some(clip(&e.0, 160)),
         };
@@ -182,6 +182,7 @@ fn accept_approved(repo: &Repo, t: &mut Obj) -> Res<()> {
         let facts = [pr_short(&py_str(&t["pr"])), "approved by review".to_string()];
         match pr_checks_now(repo, t)? {
             "failing" => {
+                refused(repo, t, "checks", "its PR's checks are failing");
                 let then = ", but not auto-accepted: its PR's checks are failing";
                 return ready_news(repo, t, &facts, then, false);
             }
@@ -239,7 +240,9 @@ pub fn run_auto_accept(repo: &Repo, t: &mut Obj) -> Res<()> {
     t.shift_remove("auto_wait");
     write_obj(&repo.task_path(s(&t, "id")), &t)?;
     let facts = [where_(&t), "approved by review".to_string()];
-    let Some((base_ref, files, shown)) = base_conflict(repo, &t)? else {
+    let conflict = base_conflict(repo, &t)?;
+    refused(repo, &t, if conflict.is_some() { "conflict" } else { "other" }, &e.0);
+    let Some((base_ref, files, shown)) = conflict else {
         // not a conflict: the person sees to it
         return ready_news(
             repo,
@@ -285,6 +288,13 @@ pub fn run_auto_accept(repo: &Repo, t: &mut Obj) -> Res<()> {
             stop(repo, &mut t, "worker", "not_sent", why, &[line], "not-sent").map(|_| ())
         }
     }
+}
+
+/// An auto-accept that didn't merge the task, on its timeline: reason is "conflict",
+/// "checks" or "other".
+fn refused(repo: &Repo, t: &Obj, reason: &str, why: &str) {
+    let fields = json!({"reason": reason, "why": clip(why, 160)});
+    bullpen_core::timeline::record(&repo.dir, s(t, "id"), "accept_refused", fields);
 }
 
 /// How many times an auto-accept refused for a conflict sends a task back to rebase

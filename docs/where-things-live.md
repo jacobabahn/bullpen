@@ -6,6 +6,8 @@
   and tours with their drafts and logs as `<ID>.tour.json`, `<ID>.tour-comments.json` and
   `<ID>.tour.log` (see [Guided review tours](tours.md)).
 - Worktrees: `<repo>-bullpen/<ID>` next to the repository.
+- Each task's timeline, for `bullpen stats`: `timeline/<ID>.jsonl` beside the tasks.
+  See [Stats](stats.md).
 - News: `news.log` beside the tasks (each line names the coordinators it is for,
   as `[c1]`), with `news-<id>.cursor` (how far each coordinator's `bullpen news`
   has read) and `outbox-<id>.txt` (typed news waiting for an empty input). See

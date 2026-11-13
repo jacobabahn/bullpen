@@ -39,6 +39,10 @@ _Avoid_: reason (for the recorded stop), needs (for any stop).
 
 **Hand back**: give the worker a message to act on (review findings, a rebase conflict, PR feedback, carrying on after the usage limit), typing it into its pane or resuming it in a new one. The task is working again once the message reaches the worker.
 
+**Timeline**: what happened to a task, one entry per event (added, a change of status, a turn ended, a review started or finished, an auto-accept refused), written by its saves. `bullpen stats` adds it up into the time in each **phase** (working, rebasing, in review, waiting for the person, ...). `core/src/timeline.rs`; see `docs/stats.md`.
+
+**Trip back**: the task sent back to work after `ready`: by a review, a rebase conflict, the person, or its PR's comments. Its reason is on the timeline.
+
 **Run queue**: the `todo` tasks that wait on others (`--after`): bullpen starts each by itself once those are all accepted, while fewer than `max_running` tasks are working. A plain `todo` task waits for the coordinator to start it. A task leaving `working` (to review, ready or finished), or closing (accepted, closed or dropped), frees a slot, and the queue starts the next; a stop doesn't. It hears of this from the status change itself (`move_queue` in `cli/src/saves.rs`), so no caller has to remember it.
 
 **Close step**: the one way a task ends, for accept, close, drop and auto-accept: its reviewer, its PR, its worktree and branch, its status, the news, and its worker's pane last. `close` in `cli/src/close.rs`.

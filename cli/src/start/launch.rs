@@ -20,6 +20,7 @@ use bullpen_core::task::{
     back_to_work, is_claude, is_status, model_in, pr_short, set_auto_accept, set_status, slug, status_words, with_model,
 };
 use bullpen_core::text::strip;
+use bullpen_core::timeline;
 use bullpen_core::words::open_deps;
 use bullpen_core::{fail, Repo, Res};
 use serde_json::{json, Value};
@@ -357,9 +358,11 @@ pub fn launch(repo: &Repo, t: &mut Obj, session: &str, first: &str, resume: bool
 /// resumed in a new one with msg. Once the worker has it the task is working (saved),
 /// and its next event is never taken for a repeat. Returns None, or why the message
 /// didn't reach the worker: the task is left as it was, unsaved. A Fail when a new pane
-/// can't be started.
-pub fn hand_back(repo: &Repo, t: &mut Obj, msg: &str) -> Res<Option<String>> {
+/// can't be started. back: why it goes back to work, for its timeline ("review",
+/// "rebase", "person", "pr", "limit").
+pub fn hand_back(repo: &Repo, t: &mut Obj, msg: &str, back: &str) -> Res<Option<String>> {
     if !alive(s(t, "session"), s(t, "block"))? {
+        timeline::send_back(t, back);
         let mut session = session_for(repo, None)?;
         if session.is_empty() {
             session = s(t, "session").to_string();
@@ -372,6 +375,7 @@ pub fn hand_back(repo: &Repo, t: &mut Obj, msg: &str) -> Res<Option<String>> {
     }
     if s(t, "status") != "working" {
         back_to_work(t);
+        timeline::send_back(t, back);
     }
     t.insert("last".into(), Value::Null);
     save(repo, t)?;
@@ -426,6 +430,9 @@ pub fn cmd_tell(argv: &[String]) -> Res<i32> {
     }
     rex_type(s(&t, "session"), s(&t, "block"), &a.args("message").join(" "))?;
     if matches!(s(&t, "status"), "needs" | "triage" | "ready" | "finished") {
+        if matches!(s(&t, "status"), "ready" | "finished") {
+            timeline::send_back(&mut t, "person"); // a ready task told more: sent back
+        }
         back_to_work(&mut t);
         t.insert("last".into(), Value::Null);
         save(&repo, &mut t)?;

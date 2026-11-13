@@ -15,6 +15,7 @@ pub mod sha1;
 pub mod sha256;
 pub mod task;
 pub mod text;
+pub mod timeline;
 pub mod timeutil;
 pub mod words;
 

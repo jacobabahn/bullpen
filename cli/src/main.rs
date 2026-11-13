@@ -43,6 +43,7 @@ mod saves;
 mod screen;
 mod show;
 mod start;
+mod stats;
 mod stepper;
 mod stops;
 mod task_line;

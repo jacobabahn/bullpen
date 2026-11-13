@@ -42,6 +42,7 @@ bullpen close BP-1    # the same as accept, for a finished task only
 bullpen close BP-1 --keep-branch --as port  # end it unmerged, its branch kept as port (see finish.md)
 bullpen drop BP-1     # close its PR, pane and worktree without merging
 bullpen build         # build bullpen's command line and the board now (see Rebuilds)
+bullpen stats BP-1    # where its time went: its timeline and totals (no ID: across closed tasks; see stats.md)
 ```
 
 A command that can't act on a task says its status in the board's words, with the

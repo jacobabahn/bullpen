@@ -76,6 +76,8 @@ bullpen close BP-3          # the same as accept, for a finished task only
 bullpen close BP-3 --keep-branch [--as NAME]  # only when the person asks: end it unmerged,
                             # its branch kept (pushed to origin or the push remote first)
 bullpen drop BP-3           # only when the person asks: close it and remove its worktree
+bullpen stats BP-3          # where its time went: timeline, time per phase, review rounds, trips back
+bullpen stats --last 20 --json  # the same across closed tasks: medians, slowest, trips back by reason
 ```
 
 Write long briefs to a file and pass `--brief-file`. Bullpen appends the

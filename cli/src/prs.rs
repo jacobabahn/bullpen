@@ -264,7 +264,7 @@ fn send_back(repo: &Repo, t: &mut Obj, lines: &[String], ask: &str) -> Res<()> {
     }
     if alive(s(t, "session"), s(t, "block"))? {
         let msg = clip(&format!("{ask} Then commit and run your ready command again."), 2000);
-        if let Some(failed) = hand_back(repo, t, &msg)? {
+        if let Some(failed) = hand_back(repo, t, &msg, "pr")? {
             // its reviewer, if it had one, is closed: the coordinator passes this on
             let said =
                 each(&|l| format!("{l}. The message didn't reach its worker ({failed}): `bullpen tell {id}` it"));

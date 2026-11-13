@@ -451,7 +451,7 @@ pub fn send_comments(repo: &Repo, t: &mut Obj) -> Res<String> {
          comment, say why in your ready summary.",
         path.display()
     );
-    let failed = match hand_back(repo, t, &msg) {
+    let failed = match hand_back(repo, t, &msg, "person") {
         Ok(failed) => failed,
         Err(e) => Some(clip(&e.0, 160)),
     };

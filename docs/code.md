@@ -68,6 +68,9 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   mark, the board's order, its age, and the board's sentence (`board_detail`, and its
   parts: `status_detail`, `with_gh`, `auto_detail`, `model_detail`, `doing_said`)
 - `timeutil.rs`: ISO stamps as Python's `isoformat`, ages, the clock
+- `timeline.rs`: a task's timeline (`timeline/<ID>.jsonl`): what a save changed
+  (`changes`, from `save_task`), the trip-back mark a step that sends a task back sets
+  (`send_back`; `hand_back` takes its reason), and `record` for an event no save shows
 - `proc.rs`: running a program, `git`, `file_hash` (`sha256.rs`)
 - `sha1.rs`: SHA-1, for a review's own lines (hashlib's)
 - `lock.rs`: flock
@@ -164,6 +167,9 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `events/`: what the watcher (lua/watch.lua) reports: `mod.rs`: an agent's events
   (`_event`) and a pane that closed (`_gone`); `stuck.rs`: an agent that shows no
   progress (`_stuck`) and the usage limit's reset (`_limit`)
+- `stats/`: `stats` (docs/stats.md): `mod.rs`: the command, one task's stats and the
+  totals across tasks, in words or JSON; `totals.rs`: the time in each phase and the
+  counts, from a timeline; `old.rs`: a task's news, for one from before timelines
 - `check.rs`: `check`, and `--fix`, which applies the events the watcher missed
   through `events::event` and `events::gone`
 - `tours/`: guided review tours. `mod.rs`: a tour's files, the diff it is written on

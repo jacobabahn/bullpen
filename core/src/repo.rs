@@ -9,6 +9,7 @@ use crate::proc::{git, run};
 use crate::settings::{is_internal, is_repo_only};
 use crate::task::task_num;
 use crate::text::strip;
+use crate::timeline;
 use crate::timeutil::{iso_now, iso_now_micro};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -197,7 +198,8 @@ impl Repo {
     /// status changed (or it has no since), when it entered it; a new status drops
     /// its note, stuck and auto_wait. Returns the task as it was saved before ({} for
     /// a new one): what a save sets off (the run queue, a notification, a PR to
-    /// follow) is the caller's to run, with both.
+    /// follow) is the caller's to run, with both. What changed goes on the task's
+    /// timeline (timeline.rs).
     pub fn save_task(&self, t: &mut Obj) -> Res<Obj> {
         if s(t, "id").is_empty() {
             return fail("a task to save has no id");
@@ -215,7 +217,9 @@ impl Repo {
             // when it entered its current status; fine-grained so `go --next` can order it
             t.insert("since".into(), json!(iso_now_micro()));
         }
+        let entries = timeline::changes(&old, t);
         json::write_obj(&path, t)?;
+        timeline::append(&self.dir, s(t, "id"), &entries);
         Ok(old)
     }
 
