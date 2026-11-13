@@ -8,7 +8,6 @@ import shutil
 import subprocess
 import sys
 import time
-from pathlib import Path
 
 from .core import (
     Fail, HOME, Repo, SELF, file_hash, git, now, read_json, repo_root, write_json,
@@ -188,23 +187,15 @@ def rebuild_if_stale(repo):
         return None
 
 
-MISE_NO_VERSION = "No version is set for shim"
+# The one lookup of cargo every build uses (cli/src/build.rs's twin): it runs the first
+# cargo that works here, with what it needs, and when none does says what it tried.
+BULLPEN_CARGO = HOME / "bin" / "bullpen-cargo"
+NO_CARGO = "bullpen-cargo: no cargo works here"
 
 
-def cargo_command():
-    """[cargo] to build with, or (None, why not)."""
-    cargo = shutil.which("cargo")
-    if not cargo:
-        rustup = Path.home() / ".cargo" / "bin" / "cargo"
-        if os.access(rustup, os.X_OK):
-            return [str(rustup)], None
-        return None, "cargo isn't on PATH (install Rust: https://rustup.rs)"
-    return [cargo], None
-
-
-def run_cargo(cargo, log, progs, nice=False):
-    """Build these programs with cargo, its output appended to log: (ok, why not)."""
-    argv = [*cargo, "build", "--release", "--manifest-path", str(HOME / "Cargo.toml")]
+def run_cargo(log, progs, nice=False):
+    """Build these programs with cargo (bin/bullpen-cargo), its output appended to log: (ok, why not)."""
+    argv = [str(BULLPEN_CARGO), "build", "--release", "--manifest-path", str(HOME / "Cargo.toml")]
     for p in progs:
         argv += ["-p", p.package]
     proc = subprocess.run(["nice", *argv] if nice else argv, cwd=HOME, stdin=subprocess.DEVNULL, text=True,
@@ -213,15 +204,10 @@ def run_cargo(cargo, log, progs, nice=False):
     log.flush()
     if proc.returncode == 0:
         return True, None
-    out = proc.stdout + proc.stderr
-    if MISE_NO_VERSION in out:
-        rustup = Path.home() / ".cargo" / "bin" / "cargo"
-        if os.access(rustup, os.X_OK) and rustup.resolve() != Path(cargo[0]).resolve():
-            log.write(f"{cargo[0]} is a mise shim with no version set here: trying {rustup}\n")
-            return run_cargo([str(rustup)], log, progs, nice)
-        return False, (f"{cargo[0]} is a mise shim with no Rust version set for {HOME}: set one "
-                       f"(for example `mise use -g rust`, or a mise.toml in {HOME}), or install rustup's cargo")
-    lines = [l for l in out.splitlines() if l.strip()]
+    lines = [l for l in (proc.stdout + proc.stderr).splitlines() if l.strip()]
+    none = next((l for l in lines if l.startswith(NO_CARGO)), None)
+    if none:
+        return False, none[len("bullpen-cargo: "):].strip()
     err = next((l for l in lines if l.startswith("error")), lines[-1] if lines else f"exit {proc.returncode}")
     return False, f"cargo failed: {err.strip()}"
 
@@ -237,10 +223,7 @@ def build(progs, background=False, nice=False):
     srcs = {p.name: p.source_hash() for p in progs}
     with BUILD_LOG.open("w") as log:
         log.write(f"{now()} building {names(progs)} from {HOME}\n")
-        cargo, why = cargo_command()
-        ok = False
-        if cargo:
-            ok, why = run_cargo(cargo, log, progs, nice)
+        ok, why = run_cargo(log, progs, nice)
         missing = [p for p in progs if not os.access(p.cargo_out, os.X_OK)]
         if ok and missing:
             ok, why = False, f"cargo made no {missing[0].cargo_out}"

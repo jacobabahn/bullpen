@@ -1,0 +1,195 @@
+#!/bin/sh
+# Run cargo for bullpen's build: the first cargo that works here, with what it needs.
+#
+#   bullpen-cargo ARGS...    run that cargo with ARGS in bullpen's checkout
+#   bullpen-cargo --which    say which cargo it would use, and how (doctor)
+#
+# Every place that runs cargo on bullpen runs this, so they all find the same one:
+# `bullpen build` and the background rebuild (cli/src/build.rs), the Python's twin
+# (bullpen/board_build.py, which tests/run.py builds with) and install.sh.
+#
+# A rebuild starts wherever the command that set it off runs: an interactive shell, an
+# agent's pane, the watcher, a double-forked job, a test's or compare.sh's fixture. So
+# their PATH and HOME differ, and cargo is often rustup's proxy (or mise's shim of it),
+# which reads its toolchain from $RUSTUP_HOME, by default $HOME/.rustup: with HOME
+# pointing elsewhere it has "no default". The candidates, in order:
+#
+#   1. the one that worked last time, with what it needed (target/cargo.env)
+#   2. each cargo on PATH
+#   3. rustup's: $CARGO_HOME/bin/cargo, $HOME/.cargo/bin/cargo, and the account's own
+#      ~/.cargo/bin/cargo (from the password database, whatever $HOME says)
+#   4. mise's Rust (`mise where rust`): never `mise exec`, which would install one
+#
+# Each is checked with a cheap `cargo --version` in the checkout (RUSTUP_AUTO_INSTALL=0:
+# a check never downloads). A rustup cargo with no default toolchain is tried again with
+# the account's own rustup (RUSTUP_HOME and CARGO_HOME), then with a toolchain that
+# rustup has installed (RUSTUP_TOOLCHAIN, which it says). The one that works is
+# remembered; when none does, the last line on stderr says what was tried and why each
+# failed, and it exits 127. The tests set BULLPEN_ACCOUNT_HOME (the account's home) and
+# BULLPEN_MISE (mise).
+here=$(cd "$(dirname "$0")/.." && pwd)
+found=$here/target/cargo.env
+account=${BULLPEN_ACCOUNT_HOME:-$(eval echo "~$(id -un 2>/dev/null)" 2>/dev/null)}
+case $account in /*) ;; *) account=$HOME ;; esac
+mise=${BULLPEN_MISE:-mise}
+nl='
+'
+tried=""  # what failed: "; "-separated
+seen=""   # the cargos checked, one per line (resolved)
+
+# The environment of the one being checked, and of the one found.
+c_rustup_home="" c_cargo_home="" c_toolchain="" note="" out=""
+
+# check CARGO: does `CARGO --version` work in the checkout, with c_*? Its output in $out.
+check() {
+    out=$(cd "$here" && env RUSTUP_AUTO_INSTALL=0 ${c_rustup_home:+"RUSTUP_HOME=$c_rustup_home"} \
+        ${c_cargo_home:+"CARGO_HOME=$c_cargo_home"} ${c_toolchain:+"RUSTUP_TOOLCHAIN=$c_toolchain"} \
+        "$1" --version </dev/null 2>&1)
+}
+
+# why: what $out says went wrong, in a few words.
+why() {
+    case $out in
+        *"No version is set for shim"* | *"is not currently active"*)
+            echo "a mise shim with no Rust version set for $here" ;;
+        *"no default is configured"* | *"no default toolchain"*)
+            echo "rustup has no default toolchain in ${c_rustup_home:-${RUSTUP_HOME:-$HOME/.rustup}}" ;;
+        *)
+            line=$(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | grep -m1 -i 'error' ||
+                printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | head -n1)
+            echo "${line:-it failed with no output}" ;;
+    esac
+}
+
+fail() {  # fail WHAT WHY
+    tried="${tried:+$tried; }$1: $2"
+}
+
+# toolchain RUSTUP_HOME: a toolchain rustup has installed there (stable first, else the newest).
+toolchain() {
+    ls "$1/toolchains" 2>/dev/null | grep -v '^\.' | grep -m1 '^stable-' ||
+        ls "$1/toolchains" 2>/dev/null | grep -v '^\.' | sort -t. -k1,1n -k2,2n -k3,3n | tail -n1
+}
+
+# try WHAT CARGO: check it, then (rustup with no default) the account's rustup and an
+# installed toolchain. Leaves c_* set to what it needs when it works.
+try() {
+    what=$1 cargo=$2
+    c_rustup_home="" c_cargo_home="" c_toolchain="" note=""
+    [ -n "$cargo" ] && [ -x "$cargo" ] || return 1
+    real=$(readlink -f "$cargo" 2>/dev/null || echo "$cargo")
+    case "$nl$seen$nl" in *"$nl$cargo$nl"* | *"$nl$real$nl"*) return 1 ;; esac
+    # a mise shim is mise itself: it isn't the cargo it runs
+    case $real in */mise) ;; *) seen="$seen$nl$real" ;; esac
+    seen="$seen$nl$cargo"
+    check "$cargo" && return 0
+    reason=$(why)
+    case $out in *"no default is configured"* | *"no default toolchain"*) ;; *)
+        fail "$what" "$reason"
+        return 1 ;;
+    esac
+    rh=${RUSTUP_HOME:-$HOME/.rustup}
+    if [ "$rh" != "$account/.rustup" ] && [ -d "$account/.rustup" ]; then
+        # the account's own rustup: this one's HOME (or RUSTUP_HOME) points elsewhere
+        c_rustup_home=$account/.rustup c_cargo_home=$account/.cargo
+        check "$cargo" && return 0
+        case $out in *"no default is configured"* | *"no default toolchain"*) ;; *)
+            fail "$what" "$reason; with RUSTUP_HOME=$c_rustup_home: $(why)"
+            return 1 ;;
+        esac
+        rh=$c_rustup_home
+    fi
+    tc=$(toolchain "$rh")
+    if [ -n "$tc" ]; then
+        c_rustup_home=$rh c_toolchain=$tc
+        if check "$cargo"; then
+            note="rustup has no default toolchain: using $tc (set one with \`rustup default $tc\`)"
+            return 0
+        fi
+        fail "$what" "$reason; with RUSTUP_TOOLCHAIN=$tc: $(why)"
+        return 1
+    fi
+    fail "$what" "$reason, and none installed"
+    return 1
+}
+
+# remembered: the one that worked last time, with what it needed.
+remembered() {
+    [ -f "$found" ] || return 1
+    cargo="" r_home="" r_cargo_home="" r_toolchain="" r_note=""
+    while IFS='=' read -r k v; do
+        case $k in
+            cargo) cargo=$v ;;
+            RUSTUP_HOME) r_home=$v ;;
+            CARGO_HOME) r_cargo_home=$v ;;
+            RUSTUP_TOOLCHAIN) r_toolchain=$v ;;
+            note) r_note=$v ;;
+        esac
+    done <"$found"
+    [ -n "$cargo" ] && [ -x "$cargo" ] || return 1
+    c_rustup_home=$r_home c_cargo_home=$r_cargo_home c_toolchain=$r_toolchain note=$r_note
+    check "$cargo" && return 0
+    fail "the one that worked last time ($cargo)" "$(why)"
+    c_rustup_home="" c_cargo_home="" c_toolchain="" note=""
+    return 1
+}
+
+remember() {
+    mkdir -p "$here/target" 2>/dev/null || return 0
+    tmp=$found.$$
+    {
+        echo "cargo=$cargo"
+        [ -n "$c_rustup_home" ] && echo "RUSTUP_HOME=$c_rustup_home"
+        [ -n "$c_cargo_home" ] && echo "CARGO_HOME=$c_cargo_home"
+        [ -n "$c_toolchain" ] && echo "RUSTUP_TOOLCHAIN=$c_toolchain"
+        [ -z "$note" ] || echo "note=$note"
+    } >"$tmp" 2>/dev/null && mv -f "$tmp" "$found" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+    return 0
+}
+
+lookup() {
+    if remembered; then
+        return 0
+    fi
+    # every cargo on PATH, not only the first: a mise shim often comes before rustup's
+    any=""
+    rest=$PATH:
+    while [ -n "$rest" ]; do
+        dir=${rest%%:*} rest=${rest#*:}
+        case $dir in /*) ;; *) continue ;; esac
+        [ -x "$dir/cargo" ] && [ ! -d "$dir/cargo" ] || continue
+        any=1
+        try "cargo on PATH ($dir/cargo)" "$dir/cargo" && return 0
+    done
+    [ -n "$any" ] || fail "cargo on PATH" "there's none"
+    [ -n "$CARGO_HOME" ] && try "\$CARGO_HOME's ($CARGO_HOME/bin/cargo)" "$CARGO_HOME/bin/cargo" && return 0
+    try "rustup's ($HOME/.cargo/bin/cargo)" "$HOME/.cargo/bin/cargo" && return 0
+    try "rustup's ($account/.cargo/bin/cargo)" "$account/.cargo/bin/cargo" && return 0
+    if command -v "$mise" >/dev/null 2>&1; then
+        where=$(cd "$here" && "$mise" where rust </dev/null 2>/dev/null)
+        if [ -n "$where" ]; then
+            try "mise's Rust ($where/bin/cargo)" "$where/bin/cargo" && return 0
+        fi
+    fi
+    return 1
+}
+
+if ! lookup; then
+    echo "bullpen-cargo: no cargo works here: tried ${tried:-nothing}. Install Rust (https://rustup.rs), or fix one of these" >&2
+    exit 127
+fi
+remember
+if [ "$1" = "--which" ]; then
+    with=""
+    [ -n "$c_rustup_home" ] && with="$with, RUSTUP_HOME=$c_rustup_home"
+    [ -n "$c_cargo_home" ] && with="$with, CARGO_HOME=$c_cargo_home"
+    [ -n "$c_toolchain" ] && with="$with, RUSTUP_TOOLCHAIN=$c_toolchain"
+    version=$(printf '%s\n' "$out" | head -n1)
+    echo "$cargo ($version${with:+; with ${with#, }})${note:+: $note}"
+    exit 0
+fi
+[ -n "$note" ] && echo "bullpen-cargo: $note" >&2
+[ -n "$c_rustup_home" ] && export RUSTUP_HOME="$c_rustup_home"
+[ -n "$c_cargo_home" ] && export CARGO_HOME="$c_cargo_home"
+[ -n "$c_toolchain" ] && export RUSTUP_TOOLCHAIN="$c_toolchain"
+exec "$cargo" "$@"

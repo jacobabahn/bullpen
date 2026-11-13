@@ -46,6 +46,9 @@ fn doctor_checks(cheap: bool) -> Vec<(&'static str, &'static str, String)> {
     out.push(("agents", Box::new(|| check_agents(&cfg))));
     out.push(("bullpen", Box::new(check_cli)));
     out.push(("board", Box::new(check_board)));
+    if !cheap {
+        out.push(("cargo", Box::new(check_cargo)));
+    }
     out.push(("keys", Box::new(check_keys)));
     if !cheap {
         out.push(("watcher", Box::new(check_watcher)));

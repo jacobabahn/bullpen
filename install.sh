@@ -7,22 +7,15 @@ here=$(cd "$(dirname "$0")" && pwd)
 # and its task board (board/) are Rust programs, built in place: bin/bullpen runs
 # target/bullpen, which runs target/bullpen-board. bullpen rebuilds them by itself when
 # their source changes (`bullpen up`, and an accept in this checkout).
-# cargo as bullpen's build finds it (board_build.py's cargo_command and run_cargo): the
-# one on PATH, else rustup's; a mise shim with no Rust version set here falls back to
-# rustup's, or says to set one.
-rustup=$HOME/.cargo/bin/cargo
-cargo=$(command -v cargo || echo "$rustup")
-if ! [ -x "$cargo" ]; then
-    echo "install.sh: bullpen needs cargo, and it isn't on PATH: install Rust (https://rustup.rs), then run this again" >&2
-    exit 1
-fi
+# cargo as every build of bullpen finds it (bin/bullpen-cargo): the first that works
+# here, whether on PATH, rustup's or mise's; when none does, it says what it tried.
 mkdir -p "$here/target"
 log=$here/target/install.log
 
 # Build bullpen's command line with cargo, its output shown and kept in $log.
 build_cli() {
-    { "$1" build --release --manifest-path "$here/Cargo.toml" -p bullpen-cli 2>&1; echo $? >"$log.status"; } |
-        tee "$log"
+    { "$here/bin/bullpen-cargo" build --release --manifest-path "$here/Cargo.toml" -p bullpen-cli 2>&1
+        echo $? >"$log.status"; } | tee "$log"
     [ "$(cat "$log.status")" = 0 ]
 }
 
@@ -30,18 +23,7 @@ build_cli() {
 # every time (cargo does nothing when it's current): whatever state the build is in
 # (missing, older than its source, a build that failed, one whose commands moved since),
 # this puts a command line built from the source as it is in place.
-if ! build_cli "$cargo"; then
-    if ! grep -q "No version is set for shim" "$log"; then
-        echo "install.sh: bullpen wasn't built (see above; log: $log)" >&2
-        exit 1
-    fi
-    if ! [ -x "$rustup" ] || [ "$(readlink -f "$rustup")" = "$(readlink -f "$cargo")" ]; then
-        echo "install.sh: $cargo is a mise shim with no Rust version set for $here: set one (for example \`mise use -g rust\`, or a mise.toml in $here), or install rustup's cargo" >&2
-        exit 1
-    fi
-    echo "install.sh: $cargo is a mise shim with no version set here: trying $rustup" >&2
-    build_cli "$rustup" || { echo "install.sh: bullpen wasn't built (see above; log: $log)" >&2; exit 1; }
-fi
+build_cli || { echo "install.sh: bullpen wasn't built (see above; log: $log)" >&2; exit 1; }
 rm -f "$log.status"
 cp "$here/target/release/bullpen" "$here/target/.bullpen.install"
 mv "$here/target/.bullpen.install" "$here/target/bullpen"

@@ -45,16 +45,45 @@ builds that program again in the background:
   still isn't done after 600s: if it's stuck, stop it (`kill 1234`) and run this again ``,
   exiting 1.
 - A new command line replaces the running watcher, so its calls run the new build.
-- cargo can be a mise shim with no Rust version set for bullpen's folder. Then
-  bullpen (and `install.sh`) tries rustup's `~/.cargo/bin/cargo`, and failing that says to set a
-  version. It never changes your mise config.
+- Every build runs cargo through one lookup, `bin/bullpen-cargo` (see below), so a
+  build finds the same working cargo whether it starts in your shell, an agent's pane,
+  the watcher, a background job or a test's fixture.
+
+## Which cargo
+
+A build starts wherever the command that set it off runs, and their environments
+differ: an agent's pane may have mise's shims on PATH and no `~/.cargo/bin`, and a
+test's or `cli/check/compare.sh`'s fixture sets HOME to a folder of its own. rustup's
+cargo is a proxy that reads its toolchain from `$RUSTUP_HOME`, by default
+`$HOME/.rustup`, so with HOME pointing elsewhere it says "no default is configured"
+(BP-120: a compare run against main's Python, right after an accept, set off the
+catch-up build of main with the fixture's HOME). `bin/bullpen-cargo` runs the first
+cargo that works, trying in order:
+
+1. the one that worked last time, with what it needed (`target/cargo.env`)
+2. each cargo on PATH (a mise shim often comes before rustup's)
+3. rustup's: `$CARGO_HOME/bin/cargo`, `$HOME/.cargo/bin/cargo`, and the account's own
+   `~/.cargo/bin/cargo` (from the password database, whatever HOME says)
+4. mise's Rust (`mise where rust`), never `mise exec`, which would install one
+
+Each is checked with `cargo --version` in bullpen's folder first (with
+`RUSTUP_AUTO_INSTALL=0`: a check never downloads). A rustup cargo with no default
+toolchain is tried again with the account's own rustup (`RUSTUP_HOME`, `CARGO_HOME`),
+then with a toolchain rustup has installed (`RUSTUP_TOOLCHAIN`), which the build log
+says: `` rustup has no default toolchain: using 1.99.1-x86_64-unknown-linux-gnu (set
+one with `rustup default ...`) ``. It never changes your rustup or mise config. When
+none works, the build fails with what it tried and why each failed, in the news line
+and from `bullpen build`: `` no cargo works here: tried cargo on PATH
+(~/.local/share/mise/shims/cargo): a mise shim with no Rust version set for ...; ...
+``. `bullpen doctor` checks it (`cargo`), from its own environment, which is the one a
+rebuild it set off would have.
 
 From any state of the build (none, older than its source, a build that failed, a stuck
 one stopped by hand, or an old build that hands `build` itself to a Python that no
 longer has it), `bullpen build` builds both programs again, and so does
 `./install.sh`, which builds the command line with cargo itself first, every time
 (cargo does nothing when it's current), so it never depends on the build in place. Both
-find cargo the same way, mise shim included.
+find cargo the same way (`bin/bullpen-cargo`), and so does `tests/run.py`.
 
 With `BULLPEN_BOARD` set (a board program of your own), bullpen doesn't build the
 board by itself. Boards started from an older install's path

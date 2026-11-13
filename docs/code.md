@@ -26,7 +26,9 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   to the catch-up, which would wait for the lock the background build holds itself:
   `board_build.build_entry` builds with the Python's twin (BP-119).
   With no build at all, it says to run `install.sh`, which builds the command line with
-  cargo itself, every time, before `bullpen build` (the command line's own).
+  cargo itself, every time, before `bullpen build` (the command line's own). Every place
+  that runs cargo on bullpen runs it through `bin/bullpen-cargo`, the one lookup of a
+  working cargo (docs/rebuilds.md).
 - The Rust is one cargo workspace (`Cargo.toml`, one `Cargo.lock`, built into
   `target/`): `core/` (`bullpen-core`: tasks, config, wording, what the command line
   and the board share), `cli/` (`bullpen-cli`, the program `bullpen`) and `board/`.

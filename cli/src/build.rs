@@ -17,8 +17,8 @@ use crate::jobs::{background, Job};
 use crate::news::{news, Opts};
 use crate::watcher::restart_watcher;
 use bullpen_core::json::{read_obj, write_obj, Obj};
-use bullpen_core::paths::{home, self_bin, user_home};
-use bullpen_core::proc::{file_hash, git, run_with, which};
+use bullpen_core::paths::{home, self_bin};
+use bullpen_core::proc::{file_hash, git, run_with};
 use bullpen_core::repo::repo_root;
 use bullpen_core::text::{splitlines, strip, upper_first};
 use bullpen_core::timeutil::iso_now;
@@ -362,35 +362,25 @@ fn say(repo: &Repo, p: &Program, text: &str) -> Res<()> {
     )
 }
 
-const MISE_NO_VERSION: &str = "No version is set for shim";
-
-/// rustup's cargo, in ~/.cargo/bin.
-fn rustup_cargo() -> PathBuf {
-    PathBuf::from(user_home()).join(".cargo/bin/cargo")
+/// The one lookup of cargo every build uses (bin/bullpen-cargo): it runs the first cargo
+/// that works here, with what it needs, and when none does says what it tried.
+pub fn bullpen_cargo() -> PathBuf {
+    home().join("bin").join("bullpen-cargo")
 }
+
+/// What bin/bullpen-cargo says when no cargo works: its last stderr line starts with it.
+const NO_CARGO: &str = "bullpen-cargo: no cargo works here";
 
 fn executable(p: &Path) -> bool {
     std::ffi::CString::new(p.as_os_str().as_encoded_bytes())
         .is_ok_and(|c| unsafe { libc::access(c.as_ptr(), libc::X_OK) } == 0)
 }
 
-/// The cargo to build with, or why there's none.
-fn cargo_command() -> Result<String, String> {
-    if let Some(cargo) = which("cargo") {
-        return Ok(cargo);
-    }
-    let rustup = rustup_cargo();
-    if executable(&rustup) {
-        return Ok(rustup.display().to_string());
-    }
-    Err("cargo isn't on PATH (install Rust: https://rustup.rs)".into())
-}
-
-/// Build these programs with cargo, its output appended to log: Ok, or why not.
-fn run_cargo(cargo: &str, log: &mut File, progs: &[&Program], nice: bool) -> Res<Result<(), String>> {
+/// Build these programs with cargo (bin/bullpen-cargo), its output appended to log: Ok, or why not.
+fn run_cargo(log: &mut File, progs: &[&Program], nice: bool) -> Res<Result<(), String>> {
     let manifest = home().join("Cargo.toml").display().to_string();
     let mut argv: Vec<String> = vec![
-        cargo.into(),
+        bullpen_cargo().display().to_string(),
         "build".into(),
         "--release".into(),
         "--manifest-path".into(),
@@ -413,24 +403,10 @@ fn run_cargo(cargo: &str, log: &mut File, progs: &[&Program], nice: bool) -> Res
         return Ok(Ok(()));
     }
     let out = format!("{}{}", proc.stdout, proc.stderr);
-    if out.contains(MISE_NO_VERSION) {
-        let rustup = rustup_cargo();
-        let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-        if executable(&rustup) && canon(&rustup) != canon(Path::new(cargo)) {
-            writeln!(
-                log,
-                "{cargo} is a mise shim with no version set here: trying {}",
-                rustup.display()
-            )?;
-            return run_cargo(&rustup.display().to_string(), log, progs, nice);
-        }
-        return Ok(Err(format!(
-            "{cargo} is a mise shim with no Rust version set for {h}: set one (for example `mise use -g rust`, \
-             or a mise.toml in {h}), or install rustup's cargo",
-            h = home().display()
-        )));
-    }
     let lines: Vec<&str> = splitlines(&out).into_iter().filter(|l| !strip(l).is_empty()).collect();
+    if let Some(none) = lines.iter().find(|l| l.starts_with(NO_CARGO)) {
+        return Ok(Err(strip(&none["bullpen-cargo: ".len()..]).to_string()));
+    }
     let err = lines
         .iter()
         .find(|l| l.starts_with("error"))
@@ -481,10 +457,7 @@ pub fn build(progs: Vec<&'static Program>, background: bool, nice: bool) -> Res<
         names(&progs),
         home().display()
     )?;
-    let mut res = match cargo_command() {
-        Ok(cargo) => run_cargo(&cargo, &mut log, &progs, nice)?,
-        Err(why) => Err(why),
-    };
+    let mut res = run_cargo(&mut log, &progs, nice)?;
     if res.is_ok() {
         if let Some(missing) = progs.iter().find(|p| !executable(&p.cargo_out())) {
             res = Err(format!("cargo made no {}", missing.cargo_out().display()));

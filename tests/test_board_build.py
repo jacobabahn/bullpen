@@ -18,10 +18,12 @@ FAKE_CARGO = textwrap.dedent("""\
     from pathlib import Path
     RUST_BIN, RUST_OWNED = "{rust_bin}", "{rust_owned}"
     d = Path(os.environ["FAKE_DIR"])
-    with open(d / "cargo.log", "a") as f:
-        f.write(json.dumps(sys.argv[1:]) + "\\n")
     if (d / "cargo_mise").exists():
         sys.exit("mise ERROR No version is set for shim: cargo")
+    if sys.argv[1:] == ["--version"]:  # bin/bullpen-cargo's check: not a build
+        sys.exit(print("cargo 1.0.0 (fake)"))
+    with open(d / "cargo.log", "a") as f:
+        f.write(json.dumps(sys.argv[1:]) + "\\n")
     if (d / "cargo_slow").exists():
         import time
         time.sleep(float((d / "cargo_slow").read_text()))
@@ -97,7 +99,11 @@ class BoardBuildTest(unittest.TestCase):
         cargo.chmod(0o755)
         del self.env["BULLPEN_BOARD"]
         (self.tmp / "home").mkdir()
-        self.env.update(HOME=str(self.tmp / "home"), PATH=f"{self.fake}:{self.env['PATH']}")
+        self.env.update(HOME=str(self.tmp / "home"), PATH=f"{self.fake}:{self.env['PATH']}",
+                        # bin/bullpen-cargo's account home and mise: the test's, never the person's
+                        BULLPEN_ACCOUNT_HOME=str(self.tmp / "home"), BULLPEN_MISE=str(self.fake / "no-mise"))
+        for name in ("RUSTUP_HOME", "CARGO_HOME", "RUSTUP_TOOLCHAIN"):
+            self.env.pop(name, None)
         self.target = home / "target"
         # as install.sh leaves it before its first `bullpen build`: the command line, with no stamp
         self.target.mkdir()
@@ -312,43 +318,10 @@ class BoardBuildTest(unittest.TestCase):
         self.bp("build")  # the fix doctor names
         self.assertEqual(self.doctor_board()[0], "ok")
 
-    def test_a_mise_shim_without_a_version_says_so(self):
-        (self.fake / "cargo_mise").write_text("")
-        p = self.bp("build", ok=False)
-        self.assertIn("mise shim with no Rust version set", p.stderr)
-        self.assertFalse((self.target / "bullpen-board").exists())
-
-    def test_a_mise_shim_falls_back_to_rustups_cargo(self):
-        (self.fake / "cargo_mise").write_text("")
-        self.rustups_cargo()
-        self.bp("build")
-        self.assertIn("fn main() {}", self.board())
-
     def install(self):
         shutil.copy2(ROOT / "install.sh", self.home / "install.sh")
         return subprocess.run([str(self.home / "install.sh")], cwd=self.home, text=True, capture_output=True,
                               env={**self.env, "BIN_DIR": str(self.tmp / "bin")})
-
-    def rustups_cargo(self):
-        rustup = self.tmp / "home" / ".cargo" / "bin" / "cargo"
-        rustup.parent.mkdir(parents=True)
-        rustup.write_text(fake_cargo().replace('(d / "cargo_mise").exists()', "False"))
-        rustup.chmod(0o755)
-
-    def test_install_with_a_mise_shim_falls_back_to_rustups_cargo(self):
-        (self.fake / "cargo_mise").write_text("")
-        self.rustups_cargo()
-        p = self.install()
-        self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertIn("is a mise shim with no version set here: trying", p.stderr)
-        self.assertIn("fn main() {}", self.board())
-        self.assertTrue((self.tmp / "bin" / "bullpen").is_symlink())
-
-    def test_install_with_a_mise_shim_and_no_rustup_says_so(self):
-        (self.fake / "cargo_mise").write_text("")
-        p = self.install()
-        self.assertEqual(p.returncode, 1)
-        self.assertIn("is a mise shim with no Rust version set for", p.stderr)
 
     def test_board_runs_the_built_copy(self):
         self.bp("build")

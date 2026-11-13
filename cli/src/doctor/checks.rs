@@ -2,13 +2,13 @@
 //! "fail" (with the fix in the text) or "skip" (it doesn't apply, or can't be told).
 
 use crate::board::old_board;
-use crate::build::{build_log, building, Program, BOARD, CLI};
+use crate::build::{build_log, building, bullpen_cargo, programs, Program, BOARD, CLI};
 use crate::coordinators::{alive, coordinators};
 use crate::modes::repo_base_ref;
 use crate::watcher::{watcher_record, watcher_stamp};
 use bullpen_core::config::{global_config_path, read_global_file};
 use bullpen_core::json::{get, obj, py_str, strs, truthy, Obj};
-use bullpen_core::paths::{rex, self_bin, state};
+use bullpen_core::paths::{home, rex, self_bin, state};
 use bullpen_core::proc::{git, run, run_in, run_input, which};
 use bullpen_core::settings::{is_internal, is_repo_only};
 use bullpen_core::text::{split, splitlines, strip};
@@ -263,11 +263,6 @@ pub fn check_cli() -> Check {
 /// A program bullpen builds from its own checkout: built from its source as it is now, or being built.
 fn check_build(prog: &Program, then: &str) -> Check {
     let build = format!("run `{} build`", self_bin().display());
-    let cargo = if which("cargo").is_some() {
-        ""
-    } else {
-        " (it needs cargo: https://rustup.rs)"
-    };
     let src = prog
         .crates
         .iter()
@@ -280,7 +275,7 @@ fn check_build(prog: &Program, then: &str) -> Check {
         return Ok(("ok", format!("being rebuilt now (log: {log}); {then}")));
     }
     if !executable(&prog.installed()) {
-        return Ok(("fail", format!("not built: {build}{cargo}")));
+        return Ok(("fail", format!("not built: {build}")));
     }
     let st = prog.stamp()?;
     let hash = Value::String(prog.source_hash()?);
@@ -293,7 +288,7 @@ fn check_build(prog: &Program, then: &str) -> Check {
     if st.get("failed") == Some(&hash) {
         return Ok((
             "fail",
-            format!("older than {src}: its build failed (log: {log}). Fix that, then {build}{cargo}"),
+            format!("older than {src}: its build failed (log: {log}). Fix that, then {build}"),
         ));
     }
     if prog.dirty()? {
@@ -307,7 +302,33 @@ fn check_build(prog: &Program, then: &str) -> Check {
     }
     Ok((
         "fail",
-        format!("older than {src}: `bullpen up` rebuilds it in the background, or {build}{cargo}"),
+        format!("older than {src}: `bullpen up` rebuilds it in the background, or {build}"),
+    ))
+}
+
+/// The cargo bullpen's build would use (bin/bullpen-cargo), found the way a build
+/// started from here would find it: a background rebuild inherits this environment.
+pub fn check_cargo() -> Check {
+    if programs(false).is_empty() {
+        return Ok((
+            "skip",
+            format!("{} has no Cargo.toml: nothing to build", home().display()),
+        ));
+    }
+    let lookup = bullpen_cargo().display().to_string();
+    let p = run_in(&[lookup.as_str(), "--which"], &home(), false)?;
+    if p.ok() {
+        return Ok(("ok", strip(&p.stdout).to_string()));
+    }
+    let said = splitlines(&p.stderr)
+        .into_iter()
+        .rev()
+        .find(|l| !strip(l).is_empty())
+        .unwrap_or_default();
+    let said = said.strip_prefix("bullpen-cargo: ").unwrap_or(said);
+    Ok((
+        "fail",
+        format!("{said}: bullpen's build can't run (from here, or a rebuild started from here)"),
     ))
 }
 
