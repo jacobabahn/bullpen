@@ -45,8 +45,10 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   catch-up of a command an old build hands over), `board.py` (the board's paths, for
   board_build) and `jobs.py`; and `start.py` (`launch` and `hand_back` for accept,
   verdict, events, prs and tours; `dropped_dep` for drop; `waits_phrase` for task_line),
-  `rules.py` (`task_rules`, for review), `hooks.py` (the teardown, for close) and
-  `limit.py` (for events). There is one bridge, the run queue: a Python save that frees a
+  `rules.py` (`task_rules`, for review), `hooks.py` (the teardown, for close),
+  `limit.py` (for events), `review.py` (what a review covers, `start_review`,
+  `keep_approval`, `close_reviewer`, for accept, events, prs, tours, close and finish)
+  and `ready.py`'s `summary_text` (for finish). There is one bridge, the run queue: a Python save that frees a
   slot runs Rust's `bullpen _queue` (`saves.py`'s `move_queue`, which reads the tasks
   fresh) once the command is done.
 - `cli/check/compare.sh` runs each case of `cli/check/cases-*.txt` with the Python and
@@ -76,6 +78,7 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   mark, the board's order, its age, and the board's sentence (`board_detail`)
 - `timeutil.rs`: ISO stamps as Python's `isoformat`, ages, the clock
 - `proc.rs`: running a program, `git`, `file_hash` (`sha256.rs`)
+- `sha1.rs`: SHA-1, for a review's own lines (the same hashes as `review.py`'s)
 - `lock.rs`: flock, the same lock as Python's `fcntl.flock`
 
 `cli/src/`:
@@ -102,17 +105,18 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
 - `agents.rs`: a task's worker and reviewer, and the one it waits on
 - `coordinators.rs`: a repo's coordinators, who sees to a task, whose board shows it
   (`on_board`), the session to work in (`session_for`), and adding and pruning them
-- `news/`: `mod.rs`: a news line (`news`, `tell_coordinator`), the outboxes and typing
+- `news/`: `mod.rs`: a news line (`news`, `tell_coordinator`, `ready_news`), the outboxes and typing
   them into coordinators' panes (`deliver`, `has_draft`); `read.rs`: `news` and
   `news --follow`
 - `notifications.rs`: the person's notifications (the save hook) and `_flush`
 - `stops.rs`: a worker or reviewer stopping
 - `hooks.rs`: a worktree's setup hook (`set_up`; the teardown moves in T8)
-- `rules.rs`: the rules every worker and reviewer gets, and `rules`
+- `rules.rs`: the rules every worker and reviewer gets (`task_rules`), and `rules`
 - `limit.rs`: the usage limit, as far as `start` and the queue need it (`limit_active`,
   `limit_phrase`)
-- `modes.rs`: the task's and the repo's base ref, and the one way to push (`quiet_git`,
-  `push_base`); the adapters move in T8
+- `modes.rs`: the task's and the repo's base ref, the task's mode (`is_local`), `ready`'s
+  `publish`, and the one way to push (`quiet_git`, `push_base`); the adapters' other
+  verbs move in T8
 - `jobs.rs`: starting a background job so it outlives the command and its pane (a
   double fork), with its output in `jobs.log` and its failure in the news
 - `up.rs`: `up`
@@ -133,6 +137,13 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
 - `pick.rs`: the jump picker (`pick`, `--filter`, `--pane`)
 - `line_edit.rs`: typing on a terminal: raw mode, bracketed paste, the keys a read
   gives, and the line editor the picker (and the stepper, from T11b) uses
+- `review.rs`: what a review covers (`patch_id`, `own_lines`, `rebase_check`,
+  `keep_approval`), the kind of a first review, starting a reviewer (`start_review`),
+  `close_reviewer`, what `ready` does with review on (`review_at_ready`), and the
+  coordinator's `review`
+- `ready.rs`: `ready`, and the summary a worker or reviewer gives (`summary_text`)
+- `auto_accept.rs`: a reviewer's `verdict`; an approval with auto-accept runs Python's
+  `_auto_accept` as a job and waits for it, before the verdict closes the reviewer's pane
 
 ## The Python
 
@@ -162,9 +173,8 @@ importing the one with the command being run, or all of them for `--help`):
 - `rules.py`: the rules every worker and reviewer gets (a twin, for review)
 - `saves.py`: the run queue's save hook (`move_queue`), which runs Rust's `_queue`
 - `start.py`: what a task waits on, an agent's pane, handing a worker a message (twins)
-- `review.py`: what a review covers, starting a reviewer
+- `review.py`: what a review covers, starting a reviewer (a twin)
 - `answer.py`: answering a prompt from the board, `reply`
-- `triage.py`: the coordinator's `review`
 - `watcher.py`: starting the watcher, and replacing it when the code changes (a twin,
   for accept and board_build)
 - `close.py`: the one close step (`close`) that accept, close, drop and auto-accept
@@ -172,7 +182,7 @@ importing the one with the command being run, or all of them for `--help`):
 - `line_edit.py`: typing on a terminal, for the stepper (a twin of `line_edit.rs`)
 - `tours.py`: guided review tours and the person's comments on them
 - `stepper.py`: reading a tour on the board, and the `tour` command that opens it
-- `ready.py`: `ready` and `finish`
+- `ready.py`: `finish`, and `summary_text` (a twin)
 - `board.py`: where the board's program is built (for board_build)
 - `board_build.py`: rebuilding bullpen's command line and the board when their source
   changes (a twin, for accept), the catch-up of a command an old build hands over, and
@@ -180,7 +190,7 @@ importing the one with the command being run, or all of them for `--help`):
 - `push_remote.py`: the push remote's background push (`_push`), in local mode
 - `keys.py`: bullpen's key bindings in the Rex config
 - `accept.py`: accepting a task, and rebasing the others after it
-- `auto_accept.py`: a reviewer's verdict, and auto-accept
+- `auto_accept.py`: auto-accept (`_auto_accept`, which `verdict` and `ready` start)
 - `prs.py`: following a task's pull request after ready
 - `events.py`: what the watcher reports: an agent's events, a pane that closed, no
   progress, the usage limit's reset
@@ -238,8 +248,8 @@ working. Rex's `session.view` lists only placed blocks: `BACKGROUND.find` asks
 
 The steps that differ between the modes go through one of two adapters in
 `modes.py`, `REMOTE` (origin and gh) or `LOCAL` (the local base branch and the push
-remote), with the same six verbs: `publish` (at ready), `merge`, `after_merge`,
-`withdraw`, `refresh` (push a branch bullpen rebased) and `base_ref`.
+remote), with the same verbs: `publish` (at ready: Rust's, `cli/src/modes.rs`), `merge`,
+`after_merge`, `withdraw`, `refresh` (push a branch bullpen rebased) and `base_ref`.
 `mode(repo, t)` picks one: the mode recorded on the task when it was published (its
 `local`, true or false), else the repo's as it is now. Code doesn't ask
 `repo.has_origin()` about a task; that's only for the repo itself (doctor, the push

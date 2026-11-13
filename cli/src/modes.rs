@@ -1,7 +1,7 @@
 //! Local mode and remote mode (bullpen/modes.py), as far as what a task's branch is
-//! compared with, and the one way to push (quiet_git, push_base: what `up` and doctor
-//! need). The adapters' other verbs (publish, merge, withdraw, ...) move in T8; Python keeps its own modes.py (a twin).
-#![allow(dead_code)] // its callers (review, ready) move in T7
+//! compared with, publishing it (`ready`), and the one way to push (quiet_git,
+//! push_base). The adapters' other verbs (merge, withdraw, ...) move in T8; Python keeps
+//! its own modes.py (a twin).
 
 use crate::jobs::{background, Job};
 use bullpen_core::json::{get, py_str, s, truthy, Obj};
@@ -10,8 +10,14 @@ use bullpen_core::proc::{git, text, Done};
 use bullpen_core::{Repo, Res};
 use std::io::Read;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+
+/// Is the task in local mode? Its record from when it was published, else the repo's.
+pub fn is_local(repo: &Repo, t: &Obj) -> Res<bool> {
+    Ok(!remote(repo, t)?)
+}
 
 /// Is the task in remote mode? Its record from when it was published, else the repo's.
 fn remote(repo: &Repo, t: &Obj) -> Res<bool> {
@@ -62,8 +68,13 @@ fn push_env(repo: &Repo, cmd: &mut Command) -> Res<()> {
 /// git on the network, away from any terminal (no prompt can reach the person), in a
 /// session of its own; after timeout seconds it is killed and says so.
 pub fn quiet_git(repo: &Repo, args: &[&str], timeout: u64) -> Res<Done> {
+    quiet_git_in(repo, &repo.root, args, timeout)
+}
+
+/// quiet_git, in cwd (a task's worktree) rather than the repo's root.
+pub fn quiet_git_in(repo: &Repo, cwd: &Path, args: &[&str], timeout: u64) -> Res<Done> {
     let mut cmd = Command::new("git");
-    cmd.arg("-C").arg(&repo.root).args(args);
+    cmd.arg("-C").arg(cwd).args(args);
     push_env(repo, &mut cmd)?;
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     // SAFETY: only setsid between fork and exec
@@ -145,4 +156,66 @@ pub fn push_base(repo: &Repo, base: &str, tid: Option<&str>) -> Res<Option<Strin
     // the tests: wait, to look at what it did
     background(&job, std::env::var("BULLPEN_PUSH_WAIT").is_ok_and(|v| !v.is_empty()));
     Ok(Some(format!("pushing {base} to {remote} in the background")))
+}
+
+/// What a failed git said, on one line.
+pub fn failed(p: &Done) -> String {
+    let said = if p.stderr.is_empty() { &p.stdout } else { &p.stderr };
+    said.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// `ready`'s publish: in remote mode push the branch and open its PR (once); in local
+/// mode nothing leaves this machine. Says what it did.
+pub fn publish(repo: &Repo, t: &mut Obj, ahead: i64, base_ref: &str, summary: &str) -> Res<String> {
+    let branch = s(t, "branch").to_string();
+    if is_local(repo, t)? {
+        return Ok(format!(
+            "local branch {branch} ({} ahead of {base_ref}; no remote, so nothing pushed)",
+            bullpen_core::task::commits(ahead)
+        ));
+    }
+    let wt = std::path::PathBuf::from(s(t, "worktree"));
+    let to = format!("HEAD:refs/heads/{branch}");
+    let p = quiet_git_in(
+        repo,
+        &wt,
+        &["push", "-q", "--force-with-lease", "-u", "origin", &to],
+        600,
+    )?;
+    if !p.ok() {
+        return bullpen_core::fail(format!("pushing {branch} to origin failed: {}", failed(&p)));
+    }
+    if let Some(serde_json::Value::Object(gh)) = t.get_mut("gh").filter(|v| truthy(Some(v))) {
+        gh.insert("new".into(), serde_json::json!(0)); // what it says about the new push comes later
+        gh.insert("checks".into(), serde_json::Value::Null);
+    }
+    if !truthy(t.get("pr")) {
+        let summary = bullpen_core::text::strip(summary);
+        let body = format!(
+            "{}\n\nBullpen task {}.\n",
+            if summary.is_empty() { s(t, "title") } else { summary },
+            s(t, "id")
+        );
+        let title = format!("{} ({})", s(t, "title"), s(t, "id"));
+        let base = py_str(t.get("base").unwrap_or(&serde_json::Value::Null));
+        let argv = [
+            repo.gh(),
+            "pr".into(),
+            "create".into(),
+            "--base".into(),
+            base,
+            "--head".into(),
+            branch.clone(),
+            "--title".into(),
+            title,
+            "--body-file".into(),
+            "-".into(),
+        ];
+        let out = bullpen_core::proc::run_with(&argv, Some(&wt), Some(&body), true)?.stdout;
+        let pr = bullpen_core::text::splitlines(bullpen_core::text::strip(&out))
+            .last()
+            .map_or(String::new(), |l| l.to_string());
+        t.insert("pr".into(), serde_json::json!(pr));
+    }
+    Ok(format!("pushed {branch}; pull request: {}", s(t, "pr")))
 }

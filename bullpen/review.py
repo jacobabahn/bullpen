@@ -1,51 +1,18 @@
-"""Reviews: what a review covers, starting a reviewer, and what ready does with review on."""
+"""Reviews: what a review covers, and starting a reviewer. A twin of cli/src/review.rs (with
+`ready`'s review and the coordinator's `review`) for accept, events, tours and prs."""
 
 import re
 from pathlib import Path
 
 from .core import (
-    PROMPTS, SELF, auto_accepts, commits, git, head, index_block, merge_base, resolve, run,
-    set_status, unindex_block, where, with_model,
+    PROMPTS, SELF, git, head, index_block, merge_base, resolve, run, set_status, unindex_block,
+    with_model,
 )
-from .jobs import background
 from .rex import review_label, rex_close
-from .agents import pane, running
+from .agents import pane
 from .coordinators import session_for
 from .panes import place
-from .news import ready_news
 from .rules import task_rules
-
-
-def review_at_ready(repo, t, base_ref):
-    """ready with review on: keep an approval that still covers the code, leave a reviewer
-    that is on this very commit, or start a review. Returns what to tell the worker."""
-    r = t.get("review") or {}
-    if t.get("tour_sent"):
-        # the person sent comments back after a tour: a review checks them, whatever the code
-        start_review(repo, t, base_ref)
-        return (f"A reviewer checks that the person's comments are addressed now: end your turn, and "
-                f"you'll hear back if it asks for changes.")
-    check = rebase_check(t, base_ref)
-    kept = check[1] if check and check[0] == "kept" else None
-    if kept:
-        keep_approval(t, base_ref)
-        set_status(t, "ready")
-        repo.save_task(t)
-        if auto_accepts(repo, t):
-            # not here: accepting closes the worker's pane, which this runs in
-            background([SELF, "_auto_accept", t["id"]], repo.root, repo.dir / "jobs.log",
-                       f"{t['id']}'s auto-accept", t["id"])
-        else:
-            ready_news(repo, t, [commits(t.get("commits") or 0), where(t), f"its approval carried over: {kept}"])
-        return f"Its review approval carries over ({kept}), so there's no new review: end your turn."
-    if (t["status"] == "review" and r.get("block") and r.get("commit") == head(t["worktree"])
-            and running(t, "reviewer")):
-        repo.save_task(t)
-        return ("A reviewer is already checking this commit: end your turn, and you'll hear back "
-                "if it asks for changes.")
-    start_review(repo, t, base_ref, rebase=check[1] if check else None)
-    return (f"A reviewer checks it now ({review_kind(t['review'])}): end your turn, and you'll "
-            f"hear back if it asks for changes.")
 
 
 # ---------- what a review covers ----------

@@ -1,5 +1,5 @@
-//! The coordinator's commands for a task that stopped (bullpen/triage.py): `ask` and
-//! `ok`; and `note`. `review` (a new reviewer) stays with Python until T7.
+//! The coordinator's commands for a task that stopped: `ask` and `ok`; and `note`.
+//! `review` (a new reviewer) is in review.rs.
 
 use crate::agents::{running, waits_on};
 use crate::args::{pos, Arg, Args, Nargs};

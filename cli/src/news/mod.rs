@@ -102,6 +102,81 @@ pub fn news_to(repo: &Repo, task: &Obj, everyone: bool) -> Res<(Vec<String>, boo
     Ok((from.iter().map(|c| s(c, "id").to_string()).collect(), waits))
 }
 
+/// The news that the task is ready: `BP-3 is ready: <title> (<facts>)<then>`, the title
+/// second, where a long line is cut last. A task that was ready before is "ready
+/// again", "after a rebase" if its base moved since; a line word for word the one
+/// before it about the task isn't sent again.
+pub fn ready_news(repo: &Repo, t: &mut Obj, facts: &[String], then: &str, again: bool) -> Res<()> {
+    let wt = s(t, "worktree");
+    let base = if !wt.is_empty() && Path::new(wt).is_dir() {
+        bullpen_core::proc::merge_base(wt, &crate::modes::task_base_ref(repo, t)?)?
+    } else {
+        None
+    };
+    let told = bullpen_core::json::get(t, "ready_told").cloned();
+    let mut said = "";
+    if told.is_some() || again {
+        let moved = told.as_ref().is_some_and(|v| bullpen_core::json::truthy(Some(v)))
+            && base
+                .as_ref()
+                .is_some_and(|b| told.as_ref().and_then(|v| v.as_str()) != Some(b.as_str()));
+        said = if moved { " again after a rebase" } else { " again" };
+    }
+    t.insert("ready_told".into(), serde_json::json!(base.unwrap_or_default()));
+    bullpen_core::json::write_obj(&repo.task_path(s(t, "id")), t)?; // not a save: the status didn't change here
+    let facts: Vec<&str> = facts.iter().map(String::as_str).filter(|f| !f.is_empty()).collect();
+    let mut text = format!("{} is ready{said}: {}", s(t, "id"), s(t, "title"));
+    if !facts.is_empty() {
+        text += &format!(" ({})", facts.join(", "));
+    }
+    text += then;
+    if last_news(repo, s(t, "id")).as_deref() == Some(format!("{NEWS_MARK}{}", squash(&text)).as_str()) {
+        return Ok(());
+    }
+    say(repo, t, "ready", &text)
+}
+
+/// The last line of news about task tid, as it was logged, or None.
+pub fn last_news(repo: &Repo, tid: &str) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(repo.dir.join("news.log")).ok()?;
+    let size = f.metadata().ok()?.len();
+    f.seek(SeekFrom::Start(size.saturating_sub(65536))).ok()?;
+    let mut data = Vec::new();
+    f.read_to_end(&mut data).ok()?;
+    let text = String::from_utf8_lossy(&data);
+    splitlines(&text)
+        .into_iter()
+        .rev()
+        .find_map(|line| match news_line(line) {
+            Some((id, said)) if id == tid => Some(said.to_string()),
+            _ => None,
+        })
+}
+
+/// (task ID, what it said) of a news.log line: `<stamp>[ [to]] <id> <event>: <said>`
+/// (the regex `\S+(?: \[[^\]]*\])? (\S+) [^ :]+: (.*)$`).
+pub fn news_line(line: &str) -> Option<(&str, &str)> {
+    let first = line.find(char::is_whitespace).filter(|i| *i > 0)?;
+    let rest = &line[first..];
+    let after_to = rest
+        .strip_prefix(" [")
+        .and_then(|r| r.find(']').map(|i| &r[i + 1..]))
+        .and_then(|r| id_and_said(r));
+    after_to.or_else(|| id_and_said(rest))
+}
+
+/// " <id> <event>: <said>" (no line break in it).
+fn id_and_said(rest: &str) -> Option<(&str, &str)> {
+    let rest = rest.strip_prefix(' ')?;
+    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    let (id, rest) = rest.split_at(end);
+    let rest = rest.strip_prefix(' ').filter(|_| !id.is_empty())?;
+    let end = rest.find([' ', ':']).filter(|i| *i > 0)?;
+    let said = rest[end..].strip_prefix(": ")?;
+    (!said.contains('\n')).then_some((id, said))
+}
+
 /// News of something the person may have done elsewhere (the board, a shell). The
 /// coordinator whose pane ran it isn't told: it would only repeat what it just ran.
 pub fn tell_coordinator(repo: &Repo, task: &Obj, event: &str, text: &str) -> Res<()> {

@@ -8,7 +8,7 @@ on it (`local`: true or false); every later step goes by that record, so a task
 finishes the way it started even if an origin is added or removed meanwhile. Before
 that, it goes by the repo as it is now.
 
-Each adapter has the same six verbs: publish, merge, after_merge, withdraw, refresh
+Each adapter has the same five verbs (publish is Rust's: cli/src/modes.rs): merge, after_merge, withdraw, refresh
 (after a rebase) and base_ref. Every push goes through quiet_git, which never lets
 git wait on a prompt.
 """
@@ -17,7 +17,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from .core import Fail, SELF, commits, git, run
+from .core import Fail, SELF, git, run
 from .jobs import background
 
 
@@ -96,21 +96,6 @@ def push_base(repo, base, t=None):
 class Remote:
     local = False
 
-    def publish(self, repo, t, ahead, base_ref, summary):
-        """Push the branch and open its PR (once). Says what it did."""
-        p = quiet_git(repo, "push", "-q", "--force-with-lease", "-u", "origin",
-                      f"HEAD:refs/heads/{t['branch']}", cwd=t["worktree"], timeout=600)
-        if p.returncode != 0:
-            raise Fail(f"pushing {t['branch']} to origin failed: {failed(p)}")
-        if t.get("gh"):
-            t["gh"].update(new=0, checks=None)  # what it says about the new push comes later
-        if not t.get("pr"):
-            body = (summary.strip() or t["title"]) + f"\n\nBullpen task {t['id']}.\n"
-            p = run([repo.gh(), "pr", "create", "--base", t["base"], "--head", t["branch"],
-                     "--title", f"{t['title']} ({t['id']})", "--body-file", "-"], cwd=t["worktree"], input=body)
-            t["pr"] = p.stdout.strip().splitlines()[-1]
-        return f"pushed {t['branch']}; pull request: {t['pr']}"
-
     def merge(self, repo, t):
         """Merge the PR on GitHub, unless it was merged there already. Raises Fail,
         leaving the task as it was, when GitHub refuses."""
@@ -156,10 +141,6 @@ class Remote:
 
 class Local:
     local = True
-
-    def publish(self, repo, t, ahead, base_ref, summary):
-        """Nothing leaves this machine."""
-        return f"local branch {t['branch']} ({commits(ahead)} ahead of {base_ref}; no remote, so nothing pushed)"
 
     def merge(self, repo, t):
         if t.get("branch"):

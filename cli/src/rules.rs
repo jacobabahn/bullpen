@@ -1,6 +1,7 @@
 //! The rules every worker and reviewer gets (bullpen/rules.py): the repo's
 //! .bullpen/rules.md as committed, then the person's own, and the `rules` command.
-//! Python keeps rules.py's helpers (a twin) for review.py's `task_rules`.
+//! Python keeps rules.py's helpers (a twin) for review.py's `task_rules`, which review.rs
+//! has here too.
 
 use crate::args::{flag, Args};
 use bullpen_core::proc::git;
@@ -47,6 +48,20 @@ pub fn rules_text(sources: &[(String, String)]) -> String {
         .map(|(_, text)| text.as_str())
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+/// The rules the task's worker was given; for a task started before rules were saved,
+/// the ones on its base now.
+pub fn task_rules(repo: &Repo, t: &bullpen_core::Obj) -> Res<String> {
+    let saved = repo
+        .dir
+        .join("briefs")
+        .join(format!("{}.rules.md", bullpen_core::json::s(t, "id")));
+    if saved.exists() {
+        return Ok(strip(&std::fs::read_to_string(&saved)?).to_string());
+    }
+    let committed = committed_rules_on(repo, &crate::modes::task_base_ref(repo, t)?)?;
+    Ok(rules_text(&rule_sources(repo, committed.as_deref(), "")?))
 }
 
 const RULES: &[crate::args::Arg] = &[flag("--edit", "edit your own rules for this repo in $EDITOR")];

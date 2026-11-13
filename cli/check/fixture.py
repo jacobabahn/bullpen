@@ -13,6 +13,7 @@ while. Print the environment to run bullpen in it: `eval "$(fixture.py DIR NOW)"
 """
 
 import datetime as dt
+import hashlib
 import json
 import os
 import shutil
@@ -397,6 +398,63 @@ def main(d, now):
         path = tasks / "BP-23.json"
         path.write_text(json.dumps({**json.loads(path.read_text()), "summary": "  Merged the parser.\n"},
                                    indent=2) + "\n")
+
+    def retask(n, **kw):  # change task n's fields
+        path = tasks / f"BP-{n}.json"
+        path.write_text(json.dumps({**json.loads(path.read_text()), **kw}, indent=2) + "\n")
+
+    def out(*a, cwd):
+        return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True, env=git_env).stdout
+
+    def covers(wt, base="main"):  # what a review of wt's commit recorded: (commit, base, patch, own)
+        diff = out("diff", "--binary", f"{base}...HEAD", cwd=wt)
+        patch = subprocess.run(["git", "-C", wt, "patch-id", "--stable"], input=diff, text=True,
+                               capture_output=True).stdout.split()[0]
+        own, h = {}, None
+        for line in out("diff", "-U0", "--binary", "--no-color", "--no-ext-diff", "--no-renames",
+                      f"{base}...HEAD", cwd=wt).split("\n"):
+            if line.startswith("diff --git "):
+                pair = line[len("diff --git "):]
+                h = own[pair[2:2 + (len(pair) - 5) // 2]] = hashlib.sha1()
+            elif h and not line.startswith(("index ", "@@")):
+                h.update(line.encode() + b"\n")
+        return (out("rev-parse", "HEAD", cwd=wt).strip(), out("merge-base", base, "HEAD", cwd=wt).strip(), patch,
+                {k: v.hexdigest() for k, v in own.items()})
+
+    # BP-17's approval: on its commit (approved), its patch in another commit (reworded), its own lines
+    # with the base moved under it (moved), or with its own lines changed where a rebase conflicted (conflicted)
+    for kind in ("approved", "reworded", "moved", "conflicted"):
+        if kind not in extras:
+            continue
+        commit, base, patch, own = covers(wt17)
+        r = dict(review_full, block=None, commit=commit, base=base, patch=patch, own=own)
+        if kind == "reworded":
+            r.update(commit="0" * 40)
+        if kind in ("moved", "conflicted"):
+            r.update(commit="0" * 40, base="1" * 40, patch="2" * 40)
+        if kind == "conflicted":
+            r.update(own={"docs.md": "3" * 40}, conflict=["docs.md"], conflict_diff=str(sdir / "briefs" / "c.diff"))
+            (sdir / "briefs" / "c.diff").write_text("<<<<<<< ours\n=======\n>>>>>>> theirs\n")
+        retask(17, review=r, status="working", block="blk4", session="session:1")
+    if "inreview" in extras:  # BP-17 in review, its reviewer gone without a verdict
+        retask(17, status="review", review={"round": 1, "kind": "light", "why": "docs only", "block": "blk19",
+                                            "session": "session:1", "verdict": None, "prev": None})
+    if "toursent" in extras:  # the person's comments on BP-17's tour, sent back
+        (sdir / "briefs" / "BP-17.tour-comments.md").write_text("Rename it.\n")
+        commit, base, _, _ = covers(wt17)
+        retask(17, tour_sent={"n": 1, "count": 1, "file": str(sdir / "briefs" / "BP-17.tour-comments.md"),
+                              "commit": commit, "base": base})
+    if "verdicts" in extras:  # reviewers in panes for each kind of review
+        retask(36, review={"round": 1, "kind": "rebase", "block": "blk17", "session": "session:1",
+                           "verdict": None}, commits=2)
+        retask(37, review={"round": 2, "kind": "tour", "tour": 1, "block": "blk18", "session": "session:1",
+                           "verdict": None}, tour_sent={"n": 1, "count": 2, "file": "x"})
+        retask(11, review={"round": 3, "kind": "followup", "block": "blk10", "verdict": None},
+               pr="https://github.com/me/proj/pull/11", gh={"sent": True})
+        for blk in ("blk17", "blk18", "blk10"):
+            (fake / "alive" / blk).write_text("")
+    if "noreview" in extras:
+        config(review=False)
 
     env = {"HOME": home, "BULLPEN_STATE": state, "BULLPEN_REX": fake / "rex", "FAKE_DIR": fake,
            "XDG_CONFIG_HOME": d / "config", "FIXTURE_ROOT": root,

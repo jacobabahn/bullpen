@@ -64,6 +64,11 @@ goes to `jobs.log` in the repo's state folder, and a job that fails without sayi
 itself (killed, or a traceback) is one news line: `Pushing main to backup failed:
 ... Log: .../jobs.log`.
 
+A verdict's auto-accept is a job too (`_auto_accept`, its output in `jobs.log`), but the
+verdict waits for it: the accept closes the worker's pane, not the reviewer's, and the
+verdict closes the reviewer's only once the accept is done. An approval carried over at
+`ready` starts it in the background, since that accept closes the pane `ready` runs in.
+
 ## Auto-accept
 
 Off by default: you accept each task yourself. Turn it on with `bullpen config

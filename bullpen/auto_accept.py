@@ -1,19 +1,11 @@
-"""A reviewer's verdict, and accepting an approved task by itself (config --auto-accept)."""
+"""Accepting an approved task by itself (config --auto-accept). (The reviewer's `verdict`
+is Rust's: cli/src/auto_accept.rs, which runs `_auto_accept` for an approval.)"""
 
 import json
 import os
 
-from .core import (
-    Fail, Repo, WAITING, auto_accepts, clip, command, commits, pr_short, repo_root, run,
-    set_status, unindex_block, where, write_json,
-)
-from .rex import close_last
-from .agents import pane
+from .core import Fail, Repo, command, pr_short, repo_root, run, where, write_json
 from .news import ready_news
-from .stops import stop
-from .start import hand_back
-from .review import review_kind
-from .ready import summary_text
 from .accept import accept
 
 
@@ -23,65 +15,6 @@ def cmd_auto_accept(args):
     t = repo.task(args.id)
     if t["status"] == "ready" and (t.get("review") or {}).get("verdict") == "approved":
         auto_accept(repo, t)
-
-
-def cmd_verdict(args):
-    """(reviewer) approve the task, or send findings back to its worker."""
-    repo = Repo(repo_root())
-    t = repo.task(args.id)
-    r = t.get("review") or {}
-    if t["status"] not in ("review", *WAITING) or not r.get("block"):
-        raise Fail(f"{t['id']} isn't in review")
-    text = summary_text(args, "findings")
-    tour, rebase = r.get("kind") == "tour", r.get("kind") == "rebase"
-    findings = repo.dir / "briefs" / (f"{t['id']}.tour-{r['tour']}.review.findings.md" if tour else
-                                      f"{t['id']}.review-{r['round']}.rebase.findings.md" if rebase
-                                      else f"{t['id']}.review-{r['round']}.findings.md")
-    findings.write_text(text + "\n")
-    rounds = repo.cfg["review_rounds"]
-    r.update(verdict="approved" if args.verdict == "approve" else "changes", findings=str(findings))
-    reviewer = pane(t, "reviewer")
-    unindex_block(r["block"])
-    r["block"] = None
-    pr = where(t)
-    t.pop("auto_wait", None)  # a new verdict decides again
-    if tour:
-        t.pop("tour_sent", None)  # reviewed: the next review follows up on this one
-    if args.verdict == "approve":
-        set_status(t, "ready")
-        repo.save_task(t)
-        if auto_accepts(repo, t):
-            auto_accept(repo, t)
-        else:
-            why = f": {r['why']}" if r.get("why") else ""  # last, so not in brackets in brackets
-            ready_news(repo, t, [commits(t.get("commits") or 0), pr,
-                                 "a rebase check approved the conflict resolution" if rebase else
-                                 f"approved by {review_kind({**r, 'why': None})}{why}"])
-    elif tour or rebase or r["round"] < rounds:
-        said = ("The reviewer says the person's comments aren't all addressed yet" if tour else
-                "A rebase check says the conflict resolution isn't right" if rebase else
-                f"The reviewer asked for changes (review round {r['round']} of {rounds})")
-        msg = (f"{said}. Read {findings}, fix what you agree with, commit, and run your ready command "
-               f"again. If you disagree with a finding, say why in your ready summary.")
-        if t.get("gh"):
-            t["gh"].pop("sent", None)  # it's the review it is fixing now, not GitHub
-        try:
-            failed = hand_back(repo, t, msg)
-        except Fail as e:
-            failed = clip(str(e), 160)
-        if failed:
-            # nobody is on it: the coordinator passes the findings on
-            stop(repo, t, "worker", "not_sent", "Review findings didn't reach its worker",
-                 f"{t['id']}'s reviewer asked for changes, but the message didn't reach its worker "
-                 f"({failed}). The findings are in {findings}: `bullpen tell {t['id']}` it to read them",
-                 "not-sent")
-    else:
-        set_status(t, "ready", f"Review still asks for changes after {rounds} rounds")
-        repo.save_task(t)
-        ready_news(repo, t, [pr], f", but review still asks for changes after {rounds} rounds: "
-                   f"findings in {findings}")
-    print(f"verdict recorded: {args.verdict}")
-    close_last(*reviewer)  # last: this closes the pane we may be running in
 
 
 # ---------- auto-accept ----------
@@ -155,12 +88,5 @@ def checks(pr):
 
 def commands(sub):
     """This module's commands, for bullpen's parser."""
-    p = command(sub, "verdict", cmd_verdict, "Worker and reviewer",
-                help="(reviewer) approve a task or send it back with findings")
-    p.add_argument("id", help="the task, like BP-3")
-    p.add_argument("verdict", choices=["approve", "changes"], help="approve it, or send it back with changes to make")
-    p.add_argument("--summary", help="what you did, as text")
-    p.add_argument("--summary-file", metavar="FILE", help="the same, read from a file")
-
     p = command(sub, "_auto_accept", cmd_auto_accept)
     p.add_argument("id", help="the task, like BP-3")

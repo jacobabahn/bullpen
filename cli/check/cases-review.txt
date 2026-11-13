@@ -1,0 +1,49 @@
+# T7: ready, review (the coordinator's) and verdict. The fixture is in local mode: ready publishes nothing.
+ready BP-17
+ready BP-17 --summary "Wrote the docs, again."
+ready BP-17 --summary-file "$FIXTURE_ROOT/../summary.md" $(printf '# Docs\n\nDone.\n' >"$FIXTURE_ROOT/../summary.md")
+ready BP-17 --summary-file "$FIXTURE_ROOT/../nothing.md"
+ready BP-17 --summary-file "$FIXTURE_ROOT/../empty.md" $(: >"$FIXTURE_ROOT/../empty.md")
+ready BP-17 --summary-file "$FIXTURE_ROOT"
+ready BP-3
+ready BP-33 --summary "Nothing yet"
+ready BP-1
+ready BP-404
+env:FIXTURE=noreview ready BP-17
+env:FIXTURE=noreview ready BP-17 --summary "Again"
+env:FIXTURE=approved ready BP-17
+env:FIXTURE=reworded ready BP-17
+env:FIXTURE=moved ready BP-17
+env:FIXTURE=conflicted ready BP-17
+env:FIXTURE=rules ready BP-17
+env:FIXTURE=toursent ready BP-17
+env:FIXTURE=toursent,noreview ready BP-17
+env:FIXTURE=inreview ready BP-17
+usage ready
+ready --help
+review BP-11
+review BP-41
+review BP-1
+review BP-23
+review BP-9
+env:FIXTURE=inreview review BP-17
+env:FIXTURE=inreview,rules review BP-17
+env:FIXTURE=verdicts review BP-11
+usage review
+verdict BP-10 approve --summary "Looks right."
+verdict BP-10 changes --summary "Two bugs."
+verdict BP-32 changes --summary-file "$FIXTURE_ROOT/../f.md" $(printf 'One bug.\n' >"$FIXTURE_ROOT/../f.md")
+verdict BP-41 changes --summary "Still wrong."
+verdict BP-41 approve --summary "Fine now."
+verdict BP-10 approve
+verdict BP-10 approve --summary-file "$FIXTURE_ROOT/../nothing.md"
+verdict BP-36 approve --summary "x"
+verdict BP-3 approve --summary "x"
+env:FIXTURE=verdicts verdict BP-36 approve --summary "The resolution is right."
+env:FIXTURE=verdicts verdict BP-36 changes --summary "It dropped a line."
+env:FIXTURE=verdicts verdict BP-37 approve --summary "All addressed."
+env:FIXTURE=verdicts verdict BP-37 changes --summary "One left."
+env:FIXTURE=verdicts verdict BP-11 changes --summary "Still a bug."
+env:FIXTURE=verdicts verdict BP-11 approve --summary "Good."
+usage verdict BP-10 maybe
+usage verdict BP-10

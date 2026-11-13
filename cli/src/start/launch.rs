@@ -355,7 +355,6 @@ pub fn launch(repo: &Repo, t: &mut Obj, session: &str, first: &str, resume: bool
 /// and its next event is never taken for a repeat. Returns None, or why the message
 /// didn't reach the worker: the task is left as it was, unsaved. A Fail when a new pane
 /// can't be started.
-#[allow(dead_code)] // its callers (verdict, events, accept) move from T7 on
 pub fn hand_back(repo: &Repo, t: &mut Obj, msg: &str) -> Res<Option<String>> {
     if !alive(s(t, "session"), s(t, "block"))? {
         let mut session = session_for(repo, None)?;

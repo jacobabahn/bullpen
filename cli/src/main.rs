@@ -6,6 +6,7 @@
 
 mod agents;
 mod args;
+mod auto_accept;
 mod board;
 mod build;
 mod commands;
@@ -26,6 +27,8 @@ mod notifications;
 mod panes;
 mod pick;
 mod push_remote;
+mod ready;
+mod review;
 mod rex;
 mod rules;
 mod saves;

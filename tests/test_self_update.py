@@ -108,6 +108,30 @@ class SelfUpdateTest(unittest.TestCase):
         self.assertNotIn("case $1 in build|", self.board("bullpen"))  # the new build is in place
         self.bp("build")  # a moved command runs, in Rust
 
+    def test_a_verdict_through_the_old_build_catches_up_and_auto_accepts(self):
+        # BP-119 for T7: the old build hands verdict to the Python, which no longer has it
+        # (T7 moved it); the call builds first, then the new build's verdict runs _auto_accept
+        self.bp("config", "--auto-accept", "on")
+        tid = self.start_task()
+        wt = Path(self.show(tid)["worktree"])
+        (wt / "fix.txt").write_text("fixed\n")
+        sh("git", "-C", str(wt), "add", ".")
+        sh("git", "-C", str(wt), "commit", "-qm", "Fix")
+        self.bp("ready", tid, "--summary", "Fixed.", cwd=wt)
+        # T7's merge, not yet built: cli/ changes (the new build answers keys itself) and verdict's Python is gone
+        (self.home / "cli" / "src" / "main.rs").write_text("// moved: keys\nfn main() { keys() }\n")
+        self.git("commit", "-qam", "verdict moves to Rust")
+        self.old_build("verdict", "ready", "review")
+        p = self.bp("verdict", tid, "approve", "--summary", "Fine.", cwd=wt)
+        self.assertIn("`verdict` is newer than this build: building it first", p.stderr)
+        self.assertIn("verdict recorded: approve", p.stdout)
+        self.assertEqual(self.show(tid)["status"], "done")
+        self.assertNotIn("case $1 in verdict|", self.board("bullpen"))  # the new build is in place
+        self.assertEqual(self.bp("keys").stdout, "keys runs in the new build\n")
+        self.wait_for("no push", lambda: self.git("rev-parse", "main", cwd=self.backup) == self.git("rev-parse", "main"))
+        self.settle()
+        self.assertNotIn(" job: ", self.news_log())
+
     def with_a_stuck_build(self, *args):
         """bullpen args while a build that never ends holds the lock (this test's pid in it)."""
         lock = (self.target / "build.lock").open("a")

@@ -274,7 +274,8 @@ class EntryTest(BullpenTest):
                           **dict.fromkeys(["go", "hide", "adopt", "board", "ls", "show", "diff", "add", "after",
                                            "model", "review-mode", "peek", "ask", "ok", "note", "news", "guide",
                                            "up", "build", "_build_board", "doctor", "_flush", "start", "resume",
-                                           "tell", "_queue", "rules", "pick", "config"],
+                                           "tell", "_queue", "rules", "pick", "config", "ready", "review",
+                                           "verdict"],
                                           "rust")})
 
     def test_help_and_an_unknown_command_come_from_rust(self):
