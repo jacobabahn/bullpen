@@ -206,7 +206,8 @@ class QueueTest(BullpenTest):
         self.assertEqual(self.show("BP-2")["status"], "todo")
         self.bp("_queue", "--repo", str(self.repo), "--by", dep, "--how", "accepted")
         self.assertEqual(self.show("BP-2")["status"], "working")
-        self.assertIn(f"bullpen · BP-2 started ({dep} was accepted)", self.news_lines())
+        log = next((self.tmp / "state" / "repos").iterdir()) / "news.log"
+        self.assertIn(f"bullpen · BP-2 started ({dep} was accepted)", log.read_text())
 
     def test_which_status_changes_move_the_queue(self):
         from bullpen.start import slot_freed

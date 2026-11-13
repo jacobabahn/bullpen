@@ -52,10 +52,14 @@ pub fn cmd_news(argv: &[String]) -> Res<i32> {
             Err(_) => crate::args::usage_error("news", SPEC, &format!("argument --every: invalid float value: '{e}'")),
         },
     };
-    // SAFETY: plain handlers set once, before anything is printed
+    // SAFETY: plain handlers set once, before anything is printed. Not SA_RESTART: a
+    // follower waiting for the lock stops at Ctrl-C, as the Python did.
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
-        libc::signal(libc::SIGINT, on_sigint as *const () as libc::sighandler_t);
+        let mut act: libc::sigaction = std::mem::zeroed();
+        act.sa_sigaction = on_sigint as *const () as libc::sighandler_t;
+        libc::sigemptyset(&mut act.sa_mask);
+        libc::sigaction(libc::SIGINT, &act, std::ptr::null_mut());
     }
     let mut repo = Repo::new(repo_root()?)?;
     std::fs::create_dir_all(&repo.dir)?;
@@ -75,7 +79,11 @@ pub fn cmd_news(argv: &[String]) -> Res<i32> {
     };
     // One reader at a time, or lines would come twice. A second follower waits for the
     // first to go (a monitor being replaced); a one-off read doesn't.
-    let Some(_lock) = bullpen_core::lock::take(&repo.dir.join(name), follow)? else {
+    let lock = match bullpen_core::lock::take(&repo.dir.join(name), follow) {
+        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => return Ok(0), // Ctrl-C while waiting
+        held => held?,
+    };
+    let Some(_lock) = lock else {
         return fail("news is being followed already (`bullpen news --follow` is running)");
     };
     let mut offset = match news_cursor(&repo, &cid)? {

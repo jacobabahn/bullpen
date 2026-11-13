@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import signal
 import shutil
 import subprocess
 from pathlib import Path
@@ -75,6 +76,30 @@ class NewsTest(BullpenTest):
         self.stop(first)
         self.ask(tid, "three")
         self.assertEqual([l.rsplit(" ", 1)[-1] for l in lines2(1)], ["three"])
+
+    def test_ctrl_c_ends_a_follower_quietly(self):
+        tid = self.start_task()
+        self.bp("config", "--news", "monitor")
+        p, lines, _ = self.follow()
+        self.ask(tid, "one")
+        self.assertEqual(len(lines(1)), 1)
+        p.send_signal(signal.SIGINT)
+        self.assertEqual(p.wait(10), 0)
+        self.assertEqual(p.stderr.read(), b"")
+
+    def test_a_follower_whose_reader_is_gone_leaves_the_line_it_lost(self):
+        tid = self.start_task()
+        self.bp("config", "--news", "monitor")
+        p, lines, _ = self.follow()
+        self.ask(tid, "one")
+        self.assertEqual(len(lines(1)), 1)
+        p.stdout.close()  # the monitor is gone
+        self.ask(tid, "two")
+        self.assertEqual(p.wait(10), 0)
+        self.assertEqual(p.stderr.read(), b"")
+        p, lines, quiet = self.follow()
+        self.assertEqual([l.rsplit(" ", 1)[-1] for l in lines(1)], ["two"])  # printed to nobody: it comes again
+        self.assertTrue(quiet())
 
     def test_news_prints_the_lines_since_last_time_and_exits(self):
         self.assertEqual(self.bp_in("blk1", "news").stdout, "")  # no news.log yet
