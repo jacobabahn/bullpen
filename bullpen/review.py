@@ -1,6 +1,5 @@
 """Reviews: what a review covers, starting a reviewer, and what ready does with review on."""
 
-import hashlib
 import re
 import subprocess
 from pathlib import Path
@@ -76,6 +75,7 @@ def own_lines(wt, base_ref):
     context or line numbers: what stays the same when only the base moved under it."""
     out = git(wt, "diff", "-U0", "--binary", "--no-color", "--no-ext-diff", "--no-renames",
               f"{base_ref}...HEAD").stdout
+    import hashlib  # here, not at the top: it loads OpenSSL
     files, h = {}, None
     for line in out.split("\n"):
         if line.startswith("diff --git "):

@@ -75,8 +75,15 @@ def grouped(sub):
 
 class Formatter(argparse.HelpFormatter):
     """argparse's formatter, but its colours (Python 3.14's _colorize, which takes about
-    13 ms to import) load when it first formats something, not whenever a parser is
-    built: most calls never print help or usage."""
+    13 ms to import) and the terminal's width (shutil, which imports the compression
+    modules) load when it first formats something, not whenever a parser is built:
+    most calls never print help or usage."""
+
+    def __init__(self, prog, indent_increment=2, max_help_position=24, width=None, **kw):
+        super().__init__(prog, indent_increment, max_help_position, width or 0, **kw)
+        if width is None:
+            del self._width, self._max_help_position
+            self._wants_width = (indent_increment, max_help_position)
 
     def _set_color(self, color):
         self.__dict__.pop("_theme", None)
@@ -86,6 +93,12 @@ class Formatter(argparse.HelpFormatter):
     def __getattr__(self, name):
         if name in ("_theme", "_decolor") and "_wants_color" in self.__dict__:
             super()._set_color(self._wants_color)
+            return self.__dict__[name]
+        if name in ("_width", "_max_help_position") and "_wants_width" in self.__dict__:
+            import shutil
+            indent_increment, max_help_position = self._wants_width
+            self._width = shutil.get_terminal_size().columns - 2
+            self._max_help_position = min(max_help_position, max(self._width - 20, indent_increment * 2))
             return self.__dict__[name]
         raise AttributeError(name)
 

@@ -1,6 +1,5 @@
 """Answering a task's prompt from the board, and replying to what the coordinator asked."""
 
-import hashlib
 import json
 import re
 
@@ -33,6 +32,7 @@ def prompt_id(lines):
     """A short ID for a prompt from its lines: the same prompt on screen again, not
     just the same question ("Do you want to proceed?" asks about every command)."""
     text = "\n".join(l.strip() for l in lines if l.strip() and not RULE_RE.match(l))
+    import hashlib  # here, not at the top: it loads OpenSSL
     return hashlib.sha1(text.encode()).hexdigest()[:12]
 
 

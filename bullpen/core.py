@@ -5,13 +5,10 @@ with on_save.
 """
 
 import datetime as dt
-import hashlib
 import json
 import os
 import re
-import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 
 
@@ -192,6 +189,7 @@ def read_json(path, default=None):
 
 def write_json(path, data):
     path = Path(path)
+    import tempfile  # here, not at the top: most calls write nothing (start-up is most of a call)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
     with os.fdopen(fd, "w") as f:
@@ -211,6 +209,7 @@ def slug(title, n=40):
 
 def resolve(cmd):
     """Absolute path for the program, so Rex panes don't depend on PATH."""
+    import shutil  # here, not at the top: it imports the compression modules
     exe = shutil.which(cmd[0])
     return [exe or cmd[0], *cmd[1:]]
 
@@ -263,6 +262,7 @@ def clip(text, n=300):
 
 
 def file_hash(path):
+    import hashlib  # here, not at the top: it loads OpenSSL
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 

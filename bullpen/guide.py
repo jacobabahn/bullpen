@@ -1,7 +1,6 @@
 """The coordinator's guide, and telling running coordinators when it changed."""
 
 import difflib
-import hashlib
 import os
 import sys
 
@@ -42,6 +41,7 @@ GUIDE_DIFF_LINES = 40  # a longer diff is summed up by its sections instead
 
 
 def guide_hash(text):
+    import hashlib  # here, not at the top: it loads OpenSSL
     return hashlib.sha256(text.encode()).hexdigest()
 
 

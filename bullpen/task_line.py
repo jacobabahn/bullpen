@@ -2,7 +2,6 @@
 
 import datetime as dt
 import os
-import shutil
 import sys
 import textwrap
 import unicodedata
@@ -248,7 +247,10 @@ def task_rows(repo, t, every=None, idw=0, width=80, color=False, at=None, lines=
 
 def term_width():
     """The terminal's width when stdout is one, else None: piped output is whole."""
-    return shutil.get_terminal_size().columns if sys.stdout.isatty() else None
+    if not sys.stdout.isatty():
+        return None
+    import shutil  # here, not at the top: it imports the compression modules
+    return shutil.get_terminal_size().columns
 
 
 def colored():

@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import shutil
 import subprocess
 import sys
 import tty
@@ -187,6 +186,7 @@ def cmd_diff(args):
     if args.stat:
         print(diff_stat(wt, base_ref, t["id"]))
         return
+    import shutil  # here, not at the top: ls and show don't need it
     delta = shutil.which("delta")
     tty = sys.stdout.isatty()
     color = ["--color=always"] if tty and not delta else ["--no-color"]
