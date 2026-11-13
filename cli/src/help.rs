@@ -3,7 +3,7 @@
 //! textwrap (hyphens break too), the terminal's width as shutil reads it, and difflib's
 //! close match.
 
-use crate::commands::{Command, Owner, COMMANDS};
+use crate::commands::{Command, COMMANDS};
 
 /// The help's groups, in order, and the label a command's help drops in its own group
 /// (the title already says it).
@@ -36,9 +36,7 @@ pub fn term_width() -> usize {
 
 /// The commands `--help` lists in a group, in the table's order.
 fn listed(group: &str) -> impl Iterator<Item = &'static Command> + '_ {
-    COMMANDS
-        .iter()
-        .filter(move |c| c.group == Some(group) && !matches!(c.owner, Owner::Alias(_)))
+    COMMANDS.iter().filter(move |c| c.group == Some(group))
 }
 
 /// The top-level help for a terminal `cols` wide.
@@ -69,9 +67,7 @@ pub fn unknown_command(name: &str) -> String {
     if name.starts_with('-') {
         return format!("bullpen: `{name}` goes after a command. `bullpen --help` lists them.");
     }
-    let offered = COMMANDS
-        .iter()
-        .filter(|c| !c.name.starts_with('_') && !matches!(c.owner, Owner::Alias(_)));
+    let offered = COMMANDS.iter().filter(|c| !c.name.starts_with('_'));
     let hint = close_match(name, offered.map(|c| c.name))
         .map(|m| format!(" Did you mean `{m}`?"))
         .unwrap_or_default();

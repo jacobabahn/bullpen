@@ -33,6 +33,7 @@ fn dep_path_finds_a_cycle() {
 
 #[test]
 fn a_slot_is_freed_by_leaving_working_for_review_ready_or_finished_or_by_closing() {
+    // and test_queue.py's test_which_status_changes_move_the_queue, over the Python's
     let st = |s: &str| t(json!({"status": s}));
     for to in ["review", "ready", "finished"] {
         assert_eq!(slot_freed(&st("working"), &st(to)), Some(to));
@@ -47,7 +48,9 @@ fn a_slot_is_freed_by_leaving_working_for_review_ready_or_finished_or_by_closing
     for to in ["needs", "triage", "stopped"] {
         assert_eq!(slot_freed(&st("working"), &st(to)), None);
     }
-    assert_eq!(slot_freed(&st("review"), &st("ready")), None);
+    for (from, to) in [("review", "ready"), ("triage", "review"), ("done", "done")] {
+        assert_eq!(slot_freed(&st(from), &st(to)), None, "{from} -> {to}");
+    }
     assert_eq!(slot_freed(&Obj::new(), &st("todo")), None);
     assert_eq!(slot_freed(&st("done"), &st("dropped")), None);
 }

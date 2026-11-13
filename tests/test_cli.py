@@ -1,12 +1,10 @@
 """Help, ls and doctor, and the code's layout."""
 
-import ast
 import json
 import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 
@@ -253,111 +251,92 @@ class CliTest(BullpenTest):
 
 
 class EntryTest(BullpenTest):
-    """bin/bullpen, the Rust entry (target/bullpen) and its hand-over to the Python (docs/code.md)."""
+    """bin/bullpen and the Rust entry (target/bullpen) it runs (docs/code.md)."""
 
-    def strict(self, *args):
-        """bullpen run with the hand-over to Python made a failure (as cli/check/compare.sh runs it)."""
-        return subprocess.run([str(BULLPEN), *args], cwd=self.repo, env=dict(self.env, BULLPEN_RUST_STRICT="1"),
-                              text=True, capture_output=True)
+    def call(self, *args):
+        """bullpen, whatever its exit."""
+        return subprocess.run([str(BULLPEN), *args], cwd=self.repo, env=self.env, text=True, capture_output=True)
 
-    def test_the_table_is_the_commands_python_declares(self):
-        from bullpen import cli
+    def test_the_table_lists_every_command(self):
         table = json.loads(self.bp("_commands").stdout)
-        # none, since T11b moved `tour`: the Python is only the catch-up of an old build's call (T13 removes it)
-        self.assertEqual([c["name"] for c in table if c["owner"] == "python"], list(cli.COMMANDS))
-        self.assertEqual(cli.COMMANDS, {})
-        self.assertEqual({c["name"]: c["owner"] for c in table if c["owner"] != "python"},
-                         {"build-board": "alias of build", "_nop": "rust", "_commands": "rust",
-                          **dict.fromkeys(["go", "hide", "adopt", "board", "ls", "show", "diff", "add", "after",
-                                           "model", "review-mode", "peek", "ask", "ok", "note", "news", "guide",
-                                           "up", "build", "_build_board", "doctor", "_flush", "start", "resume",
-                                           "tell", "_queue", "rules", "pick", "config", "ready", "review",
-                                           "verdict", "close", "drop", "finish", "_push", "answer", "reply",
-                                           "prompt", "check", "_event", "_stuck", "_limit", "_gone",
-                                           "_coordinator_gone", "_tour", "tour-comment", "accept",
-                                           "_auto_accept", "keys", "_prs", "tour"],
-                                          "rust")})
+        self.assertEqual({c["name"] for c in table},
+                         {"_nop", "_commands", "go", "hide", "adopt", "board", "ls", "show", "diff", "add", "after",
+                          "model", "review-mode", "peek", "ask", "ok", "note", "news", "guide", "up", "build",
+                          "_build_board", "doctor", "_flush", "start", "resume", "tell", "_queue", "rules", "pick",
+                          "config", "ready", "review", "verdict", "close", "drop", "finish", "_push", "answer",
+                          "reply", "prompt", "check", "_event", "_stuck", "_limit", "_gone", "_coordinator_gone",
+                          "_tour", "tour-comment", "accept", "_auto_accept", "keys", "_prs", "tour"})
 
-    def test_help_and_an_unknown_command_come_from_rust(self):
-        p = self.strict("--help")
+    def test_help_and_an_unknown_command(self):
+        p = self.call("--help")
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertTrue(p.stdout.startswith("usage: bullpen COMMAND [ARGS]\n"))
-        p = self.strict("acept")
+        p = self.call("acept")
         self.assertEqual((p.returncode, p.stderr), (2, "bullpen: no command `acept`. Did you mean `accept`? "
                                                        "`bullpen --help` lists them.\n"))
-        self.assertEqual(self.strict("_nop").returncode, 0)
-
-    def test_a_python_command_reaches_python_whole(self):
-        # the old name of build is build, as Python owns it
-        self.assertTrue(self.bp("build-board", "--help").stdout.startswith("usage: bullpen build [-h]"))
+        p = self.call("build-board")  # build's old name, gone with the Python
+        self.assertEqual((p.returncode, p.stderr), (2, "bullpen: no command `build-board`. Did you mean `build`? "
+                                                       "`bullpen --help` lists them.\n"))
+        self.assertEqual(self.call("_nop").returncode, 0)
 
     def test_config_and_pick_are_rusts_with_argparses_rules(self):
-        self.assertIn("worker_model", json.loads(self.strict("config", "--js").stdout))  # argparse's prefix rules
-        p = self.strict("config", "--reviewer-")
+        self.assertIn("worker_model", json.loads(self.call("config", "--js").stdout))  # argparse's prefix rules
+        p = self.call("config", "--reviewer-")
         self.assertEqual(p.stderr.splitlines()[-1], "bullpen config: error: ambiguous option: --reviewer- could match "
                                                     "--reviewer-model, --reviewer-followup-model")
-        p = self.strict("config", "--bogus")
+        p = self.call("config", "--bogus")
         self.assertEqual(p.returncode, 2)
         self.assertEqual(p.stderr.splitlines()[-1], "bullpen: error: unrecognized arguments: --bogus")  # argparse says it from the top
-        p = self.strict("config", "--max-running", "x")
+        p = self.call("config", "--max-running", "x")
         self.assertEqual((p.returncode, p.stderr.splitlines()[-1]),
                          (2, "bullpen config: error: argument --max-running: invalid int value: 'x'"))
-        self.assertEqual(self.strict("config", "--max-running", " 4 ", "--json").returncode, 0)  # int()'s spaces
-        p = self.strict("config", "--merge", "fast")
+        self.assertEqual(self.call("config", "--max-running", " 4 ", "--json").returncode, 0)  # int()'s spaces
+        p = self.call("config", "--merge", "fast")
         self.assertEqual(p.stderr.splitlines()[-1], "bullpen config: error: argument --merge: invalid choice: 'fast' "
                                                     "(choose from rebase, squash, merge)")
-        p = self.strict("pick")  # no terminal
+        p = self.call("pick")  # no terminal
         self.assertEqual((p.returncode, p.stderr),
                          (1, "bullpen: pick needs a terminal (--filter prints the matching tasks instead)\n"))
-        self.assertEqual(self.strict("pick", "--fil", "zzzz").returncode, 0)
+        self.assertEqual(self.call("pick", "--fil", "zzzz").returncode, 0)
 
     def test_ls_and_show_are_rusts_with_argparses_rules(self):
-        self.assertEqual(json.loads(self.strict("ls", "--js").stdout), [])
-        p = self.strict("ls", "--al")
+        self.assertEqual(json.loads(self.call("ls", "--js").stdout), [])
+        p = self.call("ls", "--al")
         self.assertEqual((p.returncode, p.stderr.splitlines()[-1]),
                          (2, "bullpen ls: error: ambiguous option: --al could match --all, --all-repos"))
-        p = self.strict("ls", "--bogus")  # argparse says it from the top
+        p = self.call("ls", "--bogus")  # argparse says it from the top
         self.assertEqual((p.returncode, p.stderr),
                          (2, "usage: bullpen COMMAND [ARGS]\nbullpen: error: unrecognized arguments: --bogus\n"))
-        p = self.strict("show", "BP-9")
+        p = self.call("show", "BP-9")
         self.assertEqual(p.returncode, 1)
         self.assertTrue(p.stderr.startswith("bullpen: no task BP-9 in "), p.stderr)
 
     def test_the_pane_commands_are_rusts_with_argparses_rules(self):
         tid = self.start_task()
-        p = self.strict("peek", tid, "--lines", "x")
+        p = self.call("peek", tid, "--lines", "x")
         self.assertEqual((p.returncode, p.stderr.splitlines()[-1]),
                          (2, "bullpen peek: error: argument --lines: invalid int value: 'x'"))
-        self.assertEqual(self.strict("peek", tid, "--li", " 1 ").stdout, "line two\n")
-        p = self.strict("go", "--all-r")
+        self.assertEqual(self.call("peek", tid, "--li", " 1 ").stdout, "line two\n")
+        p = self.call("go", "--all-r")
         self.assertEqual((p.returncode, p.stderr), (1, "bullpen: --all-repos goes with --next\n"))
-        self.assertEqual(self.strict("hide", "--from", "nosuch").returncode, 3)  # not bullpen's: the key goes through
-        p = self.strict("adopt")
+        self.assertEqual(self.call("hide", "--from", "nosuch").returncode, 3)  # not bullpen's: the key goes through
+        p = self.call("adopt")
         self.assertEqual((p.returncode, p.stderr.splitlines()[-1]),
                          (2, "bullpen adopt: error: the following arguments are required: ID"))
-        self.assertEqual(self.strict("diff", tid, "--st").stdout, f"{tid} has no commits against origin/main.\n")
+        self.assertEqual(self.call("diff", tid, "--st").stdout, f"{tid} has no commits against origin/main.\n")
 
-    def test_python_says_when_a_command_isnt_in_this_build(self):
-        # an older build hands Python a command Python no longer has (here, one Rust owns)
-        p = subprocess.run(["python3", "-S", str(ROOT / "bin" / "bullpen-py"), "_nop"], cwd=self.repo, env=self.env,
-                           text=True, capture_output=True)
-        self.assertEqual(p.returncode, 2)
-        self.assertEqual(p.stderr, "bullpen: `_nop` isn't in this build of bullpen: rebuild it with `bullpen build`\n")
-
-    def test_without_a_build_bin_bullpen_runs_the_python_which_says_to_build(self):
+    def test_without_a_build_bin_bullpen_says_to_install(self):
         home = self.tmp / "bullpen"
-        for d in ("bin", "bullpen"):
-            shutil.copytree(ROOT / d, home / d, ignore=shutil.ignore_patterns("__pycache__"))
-        run = lambda *a: subprocess.run([str(home / "bin" / "bullpen"), *a], cwd=self.repo, env=self.env,
-                                        text=True, capture_output=True)
-        for args in (["tour", "--help"], ["--help"]):  # Python has no commands of its own since T11b
-            p = run(*args)
-            self.assertEqual(p.returncode, 2)
+        shutil.copytree(ROOT / "bin", home / "bin")
+        for args in (["ls"], ["--help"]):
+            p = subprocess.run([str(home / "bin" / "bullpen"), *args], cwd=self.repo, env=self.env, text=True,
+                               capture_output=True)
+            self.assertEqual((p.returncode, p.stdout), (1, ""))
             self.assertEqual(p.stderr, f"bullpen: bullpen isn't built: run {home / 'install.sh'} (it needs cargo)\n")
 
 
 class CodeTest(unittest.TestCase):
-    """bin/bullpen and the bullpen package (docs/code.md)."""
+    """bin/bullpen and the Rust code's layout (docs/code.md)."""
 
     def test_bin_bullpen_finds_its_checkout_through_a_link(self):
         with tempfile.TemporaryDirectory() as d:
@@ -368,88 +347,14 @@ class CodeTest(unittest.TestCase):
                 self.assertEqual(p.returncode, 0, p.stderr)
                 self.assertIn("usage: bullpen COMMAND", p.stdout)
 
-    def test_the_entry_scripts_stay_small(self):
-        # sh forks nothing on the usual path; Python compiles the script it runs on every
-        # call, but caches a package's bytecode
+    def test_the_entry_script_stays_small(self):
+        # sh forks nothing on the usual path
         self.assertLess(len(BULLPEN.read_text().splitlines()), 10)
-        self.assertLess(len((ROOT / "bin" / "bullpen-py").read_text().splitlines()), 20)
 
     def test_each_module_stays_under_a_thousand_lines(self):
-        files = [*(ROOT / "bullpen").glob("*.py"), *(ROOT / "core").rglob("*.rs"), *(ROOT / "cli").rglob("*.rs")]
+        files = [*(ROOT / "core").rglob("*.rs"), *(ROOT / "cli").rglob("*.rs")]
         long = {str(f.relative_to(ROOT)): n for f in sorted(files) if (n := len(f.read_text().splitlines())) >= 1000}
         self.assertEqual(long, {})
-
-    def modules(self):
-        return {f.stem: ast.parse(f.read_text()) for f in sorted((ROOT / "bullpen").glob("*.py"))}
-
-    def test_the_modules_import_each_other_without_a_loop(self):
-        # each module imports the ones below it, at the top: none inside a function
-        deps = {}
-        for name, tree in self.modules().items():
-            deps[name] = {n.module for n in tree.body if isinstance(n, ast.ImportFrom) and n.level == 1
-                          and n.module}
-            inner = [n.lineno for f in tree.body if isinstance(f, (ast.FunctionDef, ast.ClassDef))
-                     for n in ast.walk(f) if isinstance(n, ast.ImportFrom) and n.level == 1]
-            self.assertEqual(inner, [], f"{name}.py imports a module of bullpen inside a function")
-        done, path = set(), []
-
-        def visit(name):
-            self.assertNotIn(name, path, "an import loop: " + " -> ".join(path + [name]))
-            if name in done:
-                return
-            path.append(name)
-            for d in deps.get(name, ()):
-                visit(d)
-            path.pop()
-            done.add(name)
-
-        for name in deps:
-            visit(name)
-
-    def test_only_the_parser_calls_a_command_function(self):
-        # other code calls the plain function a command runs, never cmd_...(Namespace)
-        for name, tree in self.modules().items():
-            calls = [n.func.id for n in ast.walk(tree) if isinstance(n, ast.Call)
-                     and isinstance(n.func, ast.Name) and n.func.id.startswith("cmd_")]
-            self.assertEqual(calls, [], f"{name}.py calls a command function")
-
-    def test_saving_a_task_tells_the_person_and_marks_its_pr(self):
-        from bullpen import cli, core, notifications, saves
-        cli.load_savers()
-        self.assertIn(notifications.notify, core.SAVED)
-        self.assertIn(saves.follow_saved, core.SAVED)
-
-    def test_the_save_hooks_run_in_one_order_whichever_module_loaded_first(self):
-        from bullpen import cli, core, notifications, saves
-        core.SAVED.reverse()
-        cli.load_savers()
-        self.assertEqual(core.SAVED[:3], [saves.move_queue, saves.follow_saved, notifications.notify])
-
-    def test_each_command_is_found_in_the_module_that_declares_it(self):
-        # main imports only a command's module: COMMANDS says which, in --help's order
-        from bullpen import cli
-        declared = []
-        for m in cli.MODULES:
-            sub = next(a for a in cli.parser([m])._actions if a.choices)
-            declared += [(n, m) for n in sub.choices]
-        self.assertEqual(declared, list(cli.COMMANDS.items()))
-
-    def calls(self, name):
-        """(module, function) for each call of name in the package."""
-        out = []
-        for mod, tree in self.modules().items():
-            for f in ast.walk(tree):
-                if isinstance(f, ast.FunctionDef):
-                    out += [(mod, f.name) for n in ast.walk(f) if isinstance(n, ast.Call)
-                            and getattr(n.func, "id", getattr(n.func, "attr", None)) == name]
-        return out
-
-    def test_the_run_queue_moves_only_from_a_status_change(self):
-        # no caller has to remember it: saving a task that frees a slot starts the queue
-        # (a Python save, through Rust's `_queue`, the one bridge)
-        self.assertEqual(self.calls("run_queue"), [("saves", "move_queue")])
-        from bullpen import cli, core, saves  # noqa: F401
-        self.assertIn(saves.move_queue, core.SAVED)
 
     def rust_calls(self, names):
         """(file, function called, its arguments' text) for each call of one of names in
@@ -471,15 +376,7 @@ class CodeTest(unittest.TestCase):
 
     def test_only_the_mode_adapters_push(self):
         # one way to push: quiet_git, which never waits on a prompt, in modes (and the
-        # push remote's background push); the Python pushes nothing now
-        pushes = []
-        for mod, tree in self.modules().items():
-            for n in ast.walk(tree):
-                f = isinstance(n, ast.Call) and getattr(n.func, "id", getattr(n.func, "attr", None))
-                if f in ("git", "quiet_git", "run") and any(
-                        isinstance(a, ast.Constant) and a.value == "push" for x in n.args for a in ast.walk(x)):
-                    pushes.append((mod, f))
-        self.assertEqual(pushes, [])
+        # push remote's background push)
         calls = self.rust_calls(["git", "quiet_git", "quiet_git_in", "run", "run_in", "run_with", "run_input"])
         pushes = {(f, name) for f, name, args in calls if '"push"' in args}
         self.assertEqual({f for f, _ in pushes}, {"modes.rs", "push_remote.rs"})

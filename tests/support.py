@@ -5,6 +5,7 @@ Run the tests: python3 tests/run.py (or python3 -m unittest discover -s tests).
 """
 
 import datetime as dt
+import hashlib
 import json
 import os
 import select
@@ -212,13 +213,32 @@ def sh(*cmd, cwd=None):
     return subprocess.run(cmd, cwd=cwd, check=True, text=True, capture_output=True).stdout
 
 
+def cli_source_hash():
+    """The hash of the command line's source that its build stamp (target/bullpen.json)
+    records: cli/src/build.rs's source_hash, for bullpen-cli."""
+    files = []
+    for rel in ("Cargo.toml", "Cargo.lock", "core/Cargo.toml", "core/src", "cli/Cargo.toml", "cli/src"):
+        p = ROOT / rel
+        files += sorted(f for f in p.rglob("*") if f.is_file()) if p.is_dir() else [p]
+    parts = {str(f.relative_to(ROOT)): hashlib.sha256(f.read_bytes()).hexdigest() for f in files if f.is_file()}
+    return hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()
+
+
+def cli_built():
+    """Is target/bullpen built from the command line's source as it is?"""
+    try:
+        stamp = json.loads((ROOT / "target" / "bullpen.json").read_text())
+    except (OSError, ValueError):
+        return False
+    return (ROOT / "target" / "bullpen").exists() and stamp.get("source") == cli_source_hash()
+
+
 def check_build():
     """The tests run bin/bullpen, which runs the Rust build: it must be built from the
     source as it is (tests/run.py builds it first)."""
     if os.environ.get("BULLPEN_TESTS_BUILT"):
         return
-    from bullpen import board_build as b
-    if not b.CLI.installed.exists() or b.read_json(b.CLI.stamp, {}).get("source") != b.CLI.source_hash():
+    if not cli_built():
         raise RuntimeError("bullpen's command line isn't built from its source as it is: "
                            "run the tests with tests/run.py (it builds first), or run `bin/bullpen build`")
 

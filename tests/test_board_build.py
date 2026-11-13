@@ -37,30 +37,32 @@ FAKE_CARGO = textwrap.dedent("""\
         out = home / "target" / "release" / name
         out.parent.mkdir(parents=True, exist_ok=True)
         source = " ".join((home / crate / "src" / "main.rs").read_text().split())
-        # the command line it builds runs the commands Rust owns with a copy of the real
-        # build in this checkout's target (so this checkout is its home: `board` runs this
-        # checkout's board), and hands the rest to this copy's Python
+        # the command line it builds runs bullpen's commands with a copy of the real build in
+        # this checkout's target (so this checkout is its home: `board` runs this checkout's
+        # board), and anything else too (the real build says it has no such command)
         real = out.parent / "bullpen-real"
         if name == "bullpen":  # a copy renamed into place: the old one may be running
             import shutil
             shutil.copy2(RUST_BIN, f"{real}.tmp")
             os.replace(f"{real}.tmp", real)
-        rust = f'case $1 in {RUST_OWNED}) exec "{real}" "$@" ;; esac\\n'
+        # a call an old build passed on as missing (test_self_update's old_build), caught up
+        rust = 'case $1 in _missing:*) n=${1#_missing:}; shift; set -- "$n" "$@" ;; esac\\n'
+        rust += f'case $1 in {RUST_OWNED}) exec "{real}" "$@" ;; esac\\n'
         # a command a port moved: "// moved: NAME" in its main.rs, which it answers itself
         for line in (home / crate / "src" / "main.rs").read_text().splitlines():
             if line.startswith("// moved: "):
                 rust += f'[ "$1" = {line.split()[-1]} ] && echo "$1 runs in the new build" && exit 0\\n'
-        run = rust + f'exec python3 -S "{home}/bin/bullpen-py" "$@"' if name == "bullpen" else ""
+        run = rust + f'exec "{real}" "$@"' if name == "bullpen" else ""
         out.write_text(f"#!/bin/sh\\n# built from: {source}\\n{run}\\n")
         out.chmod(0o755)
 """)
 
 
 def fake_cargo():
-    """FAKE_CARGO, with the commands the real build (target/bullpen) runs itself."""
+    """FAKE_CARGO, with the commands the real build (target/bullpen) has."""
     rust_bin = ROOT / "target" / "bullpen"
     table = json.loads(subprocess.run([str(rust_bin), "_commands"], capture_output=True, text=True).stdout)
-    owned = "|".join(c["name"] for c in table if c["owner"] == "rust")
+    owned = "|".join(c["name"] for c in table)
     return FAKE_CARGO.replace("{rust_bin}", str(rust_bin)).replace("{rust_owned}", owned)
 
 
@@ -79,8 +81,8 @@ class BoardBuildTest(unittest.TestCase):
         self.setUp_with_origin()
         self.other = self.repo  # a repository that isn't bullpen's
         home = self.tmp / "bullpen"
-        for d in ("bin", "bullpen", "lua", "prompts"):
-            shutil.copytree(ROOT / d, home / d, ignore=shutil.ignore_patterns("__pycache__"))
+        for d in ("bin", "lua", "prompts"):
+            shutil.copytree(ROOT / d, home / d)
         (home / "Cargo.toml").write_text('[workspace]\nmembers = ["core", "cli", "board"]\n')
         (home / "Cargo.lock").write_text("version = 4\n")
         for crate, main in (("core", "lib.rs"), ("cli", "main.rs"), ("board", "main.rs")):

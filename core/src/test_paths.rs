@@ -7,11 +7,10 @@ fn safe_keeps_only_file_name_characters() {
 }
 
 #[test]
-fn home_is_the_checkout_with_the_python_entry_or_the_source() {
+fn home_is_the_checkout_with_the_entry_or_the_source() {
     let h = home();
     assert!(h.join("core/Cargo.toml").is_file(), "{}", h.display());
     assert_eq!(self_bin(), h.join("bin/bullpen"));
-    assert_eq!(python_entry(), h.join("bin/bullpen-py"));
     assert_eq!(watch_lua(), h.join("lua/watch.lua"));
 }
 

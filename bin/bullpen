@@ -1,7 +1,8 @@
 #!/bin/sh
-# bullpen: the Rust build (target/bullpen); before the first build, the Python. No
-# forks on the usual path: the checkout is $0's, unless $0 is a link (install.sh's).
+# bullpen: runs the Rust build (target/bullpen), or says to build it. No forks on the
+# usual path: the checkout is $0's, unless $0 is a link (install.sh's).
 case $0 in */bin/bullpen) here=${0%/bin/bullpen} ;; *) here=/nowhere ;; esac
-[ -f "$here/bin/bullpen-py" ] || here=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+[ -f "$here/bin/bullpen-cargo" ] || here=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
 [ -x "$here/target/bullpen" ] && exec "$here/target/bullpen" "$@"
-exec python3 -S "$here/bin/bullpen-py" "$@"
+echo "bullpen: bullpen isn't built: run $here/install.sh (it needs cargo)" >&2
+exit 1

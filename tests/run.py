@@ -24,7 +24,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))  # the test modules import by name, here and in each process
-sys.path.insert(0, str(HERE.parent))  # the bullpen package, which builds the command line
 CHUNK = 3  # tests of one class run together: few enough to keep every CPU busy at the end
 JOBS = os.cpu_count() or 1  # every CPU: nice 10 already gives way to everything else
 NICE = 10
@@ -104,16 +103,31 @@ def run_chunk(names):
 
 
 def build():
-    """Build the command line the tests run, unless it's built from its source as it is.
+    """Build the command line the tests run, unless it's built from its source as it is,
+    and put it in place with its stamp, as `bullpen build` does (holding the build lock).
     Exits with cargo's error when the build fails."""
-    from bullpen import board_build as b
-    st = b.read_json(b.CLI.stamp, {})
-    if b.CLI.installed.exists() and st.get("source") == b.CLI.source_hash():
+    import fcntl
+    import json
+    import shutil
+    import subprocess
+    import support
+    if support.cli_built():
         return
-    with b.lock_build(wait=True):
-        failed, why, _ = b.build([b.CLI], nice=True)
-    if failed:
-        sys.exit(f"bullpen's command line didn't build: {why}\n\n{b.BUILD_LOG.read_text()}")
+    root = HERE.parent
+    target = root / "target"
+    target.mkdir(exist_ok=True)
+    argv = [str(root / "bin" / "bullpen-cargo"), "build", "--release", "--manifest-path", str(root / "Cargo.toml"),
+            "-p", "bullpen-cli"]
+    with (target / "build.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        source = support.cli_source_hash()
+        p = subprocess.run(["nice", *argv], cwd=root, stdin=subprocess.DEVNULL, text=True, capture_output=True)
+        if p.returncode != 0:
+            sys.exit(f"bullpen's command line didn't build:\n\n{p.stdout}{p.stderr}")
+        tmp = target / f".bullpen.{os.getpid()}"  # a copy, renamed into place
+        shutil.copy2(target / "release" / "bullpen", tmp)
+        os.replace(tmp, target / "bullpen")
+        (target / "bullpen.json").write_text(json.dumps({"source": source}, indent=2) + "\n")
 
 
 def main():

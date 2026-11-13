@@ -99,18 +99,14 @@ fn the_help_fits_its_width_and_lists_every_group() {
     for (title, _) in GROUPS {
         assert!(out.contains(&format!("\n{title}:\n")));
     }
-    assert!(!out.contains("build-board") && !out.contains("_nop"));
+    assert!(!out.contains("_nop"));
 }
 
 #[test]
 fn test_every_command_is_in_one_help_group() {
-    // test_helpers.py's, from Python's parser, until its last command moved (T11b)
+    // once test_helpers.py's, over Python's parser
     let titles: Vec<&str> = GROUPS.iter().map(|(t, _)| *t).collect();
     for c in crate::commands::COMMANDS {
-        if matches!(c.owner, crate::commands::Alias(_)) {
-            assert!(c.group.is_none() && c.help.is_empty(), "{}", c.name);
-            continue;
-        }
         assert_eq!(c.group.is_none(), c.name.starts_with('_'), "{}", c.name);
         assert_eq!(c.help.is_empty(), c.name.starts_with('_'), "{}", c.name);
         assert!(c.group.is_none_or(|g| titles.contains(&g)), "{}", c.name);

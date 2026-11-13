@@ -1,8 +1,7 @@
 //! bullpen's entry (bin/bullpen runs target/bullpen). It looks the command up in the
-//! table (commands.rs): no command or `--help` prints the help, a name bullpen doesn't
-//! have is one line, a Rust command runs here, and a Python one is handed over whole
-//! (`exec` of bin/bullpen-py, never bin/bullpen, so it can't loop) before anything is
-//! read or written.
+//! table (commands.rs): no command or `--help` prints the help, a command runs, and a
+//! name bullpen doesn't have is one line (an internal one first catches up with a newer
+//! build: build::catch_up).
 
 mod accept;
 mod agents;
@@ -51,29 +50,9 @@ mod up;
 mod watcher;
 
 use bullpen_core::paths;
-use commands::Owner;
 use std::ffi::OsString;
-use std::os::unix::process::CommandExt;
 
-/// Exec the Python bullpen with these arguments; returns only when that fails.
-/// BULLPEN_RUST_STRICT=1 (cli/check/compare.sh) fails instead, so what it compares is Rust's.
-fn hand_to_python(argv: &[OsString]) -> i32 {
-    if std::env::var_os("BULLPEN_RUST_STRICT").is_some_and(|v| !v.is_empty()) {
-        let words: Vec<_> = argv.iter().map(|a| a.to_string_lossy()).collect();
-        eprintln!("bullpen-rust: not in Rust: {}", words.join(" "));
-        return 3;
-    }
-    let py = paths::python_entry();
-    let err = std::process::Command::new("python3")
-        .arg("-S")
-        .arg(&py)
-        .args(argv)
-        .exec();
-    eprintln!("bullpen: couldn't run {}: {err}", py.display());
-    1
-}
-
-/// Run a Rust command: its error is "bullpen: …", exit 1; what its saves set off runs after.
+/// Run a command: its error is "bullpen: …", exit 1; what its saves set off runs after.
 fn run(f: fn(&[String]) -> bullpen_core::fail::Res<i32>, argv: &[OsString]) -> i32 {
     let rest: Vec<String> = argv[1..].iter().map(|a| a.to_string_lossy().into_owned()).collect();
     let code = match f(&rest) {
@@ -92,7 +71,7 @@ fn main() {
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
     // bullpen's checkout, from this program's path while it still has one (`build` renames a new one over it)
     let _ = paths::home();
-    let mut argv: Vec<OsString> = std::env::args_os().skip(1).collect();
+    let argv: Vec<OsString> = std::env::args_os().skip(1).collect();
     let Some(first) = argv.first().map(|a| a.to_string_lossy().into_owned()) else {
         print!("{}", help::top_help(help::term_width()));
         std::process::exit(2);
@@ -101,17 +80,17 @@ fn main() {
         print!("{}", help::top_help(help::term_width()));
         std::process::exit(0);
     }
-    let Some(mut cmd) = commands::find(&first) else {
-        eprintln!("{}", help::unknown_command(&first));
+    let Some(cmd) = commands::find(&first) else {
+        // returns only when it can't run the call with a newer build
+        match build::catch_up(&argv) {
+            Ok(true) => eprintln!("{}", build::not_in_build(&first)),
+            Ok(false) => eprintln!("{}", help::unknown_command(&first)),
+            Err(e) => {
+                eprintln!("bullpen: {e}");
+                std::process::exit(1);
+            }
+        }
         std::process::exit(2);
     };
-    if let Owner::Alias(of) = cmd.owner {
-        cmd = commands::find(of).expect("an alias names a command");
-        argv[0] = of.into();
-    }
-    let code = match cmd.owner {
-        Owner::Rust(f) => run(f, &argv),
-        _ => hand_to_python(&argv),
-    };
-    std::process::exit(code);
+    std::process::exit(run(cmd.run, &argv));
 }

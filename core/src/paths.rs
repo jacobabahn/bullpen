@@ -1,4 +1,4 @@
-//! Where bullpen's things are (core.py's HOME, STATE, REX, SELF, PROMPTS, WATCH_LUA),
+//! Where bullpen's things are (its checkout, the state folder, Rex, the entry, the prompts, the watcher),
 //! and paths in words for people: $HOME as ~.
 
 use std::path::{Path, PathBuf};
@@ -8,8 +8,8 @@ pub fn user_home() -> String {
     std::env::var("HOME").unwrap_or_else(|_| "/".into())
 }
 
-/// bullpen's checkout (core.HOME): the nearest folder above this program that has
-/// bin/bullpen-py. The installed program is HOME/target/bullpen and cargo's own is
+/// bullpen's checkout: the nearest folder above this program that has bin/bullpen
+/// (the sh entry). The installed program is HOME/target/bullpen and cargo's own is
 /// HOME/target/release/bullpen; a test binary falls back to the folder above core/.
 /// Found once, at the first call: `build` renames a new program over the running one,
 /// after which this one's own path no longer resolves.
@@ -23,7 +23,7 @@ fn find_home() -> PathBuf {
         .and_then(|p| p.canonicalize())
         .unwrap_or_default();
     exe.ancestors()
-        .find(|d| d.join("bin/bullpen-py").is_file())
+        .find(|d| d.join("bin/bullpen").is_file())
         .map(Path::to_path_buf)
         .unwrap_or_else(source_home)
 }
@@ -51,11 +51,6 @@ pub fn rex() -> String {
 /// background jobs run.
 pub fn self_bin() -> PathBuf {
     home().join("bin/bullpen")
-}
-
-/// The Python bullpen's entry script.
-pub fn python_entry() -> PathBuf {
-    home().join("bin/bullpen-py")
 }
 
 /// The agents' prompts.

@@ -8,20 +8,18 @@ fn a_programs_subject_starts_a_sentence() {
 }
 
 #[test]
-fn the_source_hash_is_board_builds() {
-    // the Python twin (accept's rebuild) and this one read each other's stamps
-    let py = "import sys; sys.path.insert(0, sys.argv[1]); from bullpen import board_build as b; \
-              print(b.CLI.source_hash(), b.BOARD_PROGRAM.source_hash())";
+fn the_source_hash_is_the_tests() {
+    // tests/run.py writes the stamp of the command line it builds with its own copy
+    let py = "import sys; sys.path.insert(0, sys.argv[1]); import support; print(support.cli_source_hash())";
     let out = std::process::Command::new("python3")
-        .args(["-S", "-c", py])
-        .arg(home())
+        .args(["-c", py])
+        .arg(home().join("tests"))
         .output()
         .unwrap();
     let text = String::from_utf8(out.stdout).unwrap();
-    let want: Vec<&str> = text.split_whitespace().collect();
     assert_eq!(
-        want,
-        [CLI.source_hash().unwrap(), BOARD.source_hash().unwrap()],
+        text.trim(),
+        CLI.source_hash().unwrap(),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );

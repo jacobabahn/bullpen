@@ -1,10 +1,9 @@
-//! Starting the Rex watcher (lua/watch.lua), and replacing it when bullpen's code
-//! changes (bullpen/watcher.py). Python keeps its copy (a twin) for its catch-up's
-//! build (board_build.py); both write the same stamp.
+//! Starting the Rex watcher (lua/watch.lua), and replacing it when watch.lua or
+//! bullpen's build changes.
 
 use crate::rex::{alive, rex_api, rex_close, with_state};
 use bullpen_core::json::{read_obj, s, write_obj, Obj};
-use bullpen_core::paths::{home, rex, self_bin, state, user_home, watch_lua};
+use bullpen_core::paths::{rex, self_bin, state, user_home, watch_lua};
 use bullpen_core::proc::{file_hash, which};
 use bullpen_core::settings::TERMINAL;
 use bullpen_core::{fail, Res};
@@ -15,31 +14,13 @@ fn watcher_json() -> PathBuf {
     state().join("watcher.json")
 }
 
-/// A hash of bullpen's code: the entry scripts, the Python package's modules, and the
-/// Rust build (target/bullpen) when there is one. The same bytes as watcher.py hashes.
+/// The bullpen the watcher calls: its build's stamp (the source hash target/bullpen was
+/// built from; "" before the first `bullpen build`).
 pub fn code_hash() -> Res<String> {
-    let me = self_bin();
-    let mut data = std::fs::read(&me)?;
-    data.extend(std::fs::read(me.with_file_name("bullpen-py"))?);
-    let mut modules: Vec<PathBuf> = std::fs::read_dir(home().join("bullpen"))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "py"))
-        .collect();
-    modules.sort();
-    for m in modules {
-        data.extend(m.file_name().unwrap_or_default().as_encoded_bytes());
-        data.push(0);
-        data.extend(std::fs::read(&m)?);
-    }
-    let built = home().join("target/bullpen");
-    if built.is_file() {
-        data.extend(b"target/bullpen\0");
-        data.extend(std::fs::read(built)?);
-    }
-    Ok(bullpen_core::sha256::hex(&data))
+    Ok(s(&crate::build::CLI.stamp()?, "source").to_string())
 }
 
-/// What a watcher runs: a hash of watch.lua and of bullpen's code. A watcher started
+/// What a watcher runs: a hash of watch.lua, and bullpen's build stamp. A watcher started
 /// from other contents is stale.
 pub fn watcher_stamp() -> Res<Value> {
     Ok(json!({"watch": file_hash(watch_lua())?, "bullpen": code_hash()?}))

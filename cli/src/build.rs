@@ -1,7 +1,7 @@
 //! Building bullpen's two programs from its own checkout: the command line and the
-//! board (bullpen/board_build.py). `build` (install.sh runs it), `_build_board` (the
-//! background build `up` and accept start), and their rebuild_if_stale. Python keeps its
-//! copy (a twin) for the catch-up of a command an old build hands it.
+//! board. `build` (install.sh runs it), `_build_board` (the background build `up` and
+//! accept start), their rebuild_if_stale, and the catch-up of an internal command this
+//! build doesn't have yet (catch_up).
 //!
 //! bullpen's own checkout (HOME) is one cargo workspace (Cargo.toml): core/, cli/ (the
 //! command line, bin/bullpen runs it) and board/. Each program's source has a hash, and
@@ -27,6 +27,7 @@ use serde_json::{json, Value};
 use std::fs::File;
 use std::io::Write;
 use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 
 /// The workspace's files: both programs are built from them.
@@ -123,8 +124,8 @@ impl Program {
         out
     }
 
-    /// A hash of its source, by path: the same as board_build.py's, so either side's
-    /// stamp says what the other built.
+    /// A hash of its source, by path (the same bytes as the Python's was, so a stamp
+    /// from before T13 still says what it built).
     pub fn source_hash(&self) -> Res<String> {
         let h = home();
         let mut parts: Vec<(String, String)> = Vec::new();
@@ -245,7 +246,7 @@ fn build_wait() -> f64 {
 }
 
 /// The build lock, once the build that's running is done: never longer than build_wait().
-/// Past it, the build is stuck (or its holder isn't building): say so (board_build.py's twin).
+/// Past it, the build is stuck (or its holder isn't building): say so.
 fn wait_for_build() -> Res<File> {
     let wait = build_wait();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs_f64(wait);
@@ -600,6 +601,75 @@ pub fn cmd_build_bg(argv: &[String]) -> Res<i32> {
         say(&repo, p, &text)?;
     }
     Ok(1)
+}
+
+/// A call for an internal command (a job's, or the watcher's from a newer watch.lua)
+/// this build doesn't have, when the build is older than its source: the window between
+/// an accept's merge and its new build, or a build that never ran. Wait for the build
+/// that's running (never for ever), or build what's stale now, then run the call again
+/// with the new build (exec, so the pid stays). Returns only when it can't: Ok(true)
+/// when the build is behind its source (the call isn't in this build), Ok(false) when
+/// the build is its source's (the name is simply unknown). A person's command gets the
+/// unknown-command line at once: a typo never sets off a build.
+pub fn catch_up(argv: &[std::ffi::OsString]) -> Res<bool> {
+    let name = argv[0].to_string_lossy();
+    if no_build() || !name.starts_with('_') || !programs(false).contains(&&CLI) || !executable(&CLI.installed()) {
+        return Ok(false);
+    }
+    let src = Value::String(CLI.source_hash()?);
+    let st = CLI.stamp()?;
+    if st.get("source") == Some(&src) {
+        return Ok(false);
+    }
+    // this very call, run again: not the jobs a call that caught up starts, which may need to catch up too
+    let me = std::process::id().to_string();
+    if st.get("failed") == Some(&src) || std::env::var("BULLPEN_CAUGHT_UP").is_ok_and(|v| v == me) {
+        return Ok(true);
+    }
+    let inode = |p: &Path| std::fs::metadata(p).map(|m| std::os::unix::fs::MetadataExt::ino(&m));
+    let was = inode(&CLI.installed())?; // a new build is a new file (renamed into place)
+    let lock = match lock_build(false)? {
+        Some(lock) => lock,
+        None => {
+            eprintln!("bullpen: `{name}` is in the build that's running: waiting for it");
+            wait_for_build()?
+        }
+    };
+    if CLI.stale()? && !CLI.dirty()? {
+        eprintln!(
+            "bullpen: `{name}` is newer than this build: building it first (log: {})",
+            build_log().display()
+        );
+        mark(&lock, std::process::id())?;
+        // the board too: an accept's rebuild that finds this build running leaves it to it
+        let done = build(programs(true), true, false)?;
+        watcher_after(&done.built);
+        if done.failed.contains(&&CLI) {
+            return Ok(true);
+        }
+    }
+    drop(lock);
+    let built = CLI.stamp()?.get("source") == Some(&Value::String(CLI.source_hash()?));
+    if inode(&CLI.installed())? == was || !built {
+        return Ok(true); // no new build: it would say the same again
+    }
+    let _ = std::io::stderr().flush();
+    let err = std::process::Command::new(self_bin())
+        .args(argv)
+        .env("BULLPEN_CAUGHT_UP", &me)
+        .exec();
+    fail(format!("couldn't run {}: {err}", self_bin().display()))
+}
+
+/// What a call for a command this build doesn't have says, when the build is behind its source.
+pub fn not_in_build(name: &str) -> String {
+    let failed = CLI.stamp().is_ok_and(|st| st.contains_key("failed"));
+    let log = if failed {
+        format!(" (its last build failed: {})", build_log().display())
+    } else {
+        String::new()
+    };
+    format!("bullpen: `{name}` isn't in this build of bullpen: rebuild it with `bullpen build`{log}")
 }
 
 /// A new command line: a running watcher is replaced, so it runs the new build.

@@ -1,4 +1,5 @@
-"""The docs: every relative link in README.md, GLOSSARY.md and docs/ leads somewhere."""
+"""The docs: every relative link in README.md, GLOSSARY.md and docs/ leads somewhere, and
+the board's tables say what the board does."""
 
 import re
 import unittest
@@ -49,6 +50,37 @@ class DocsTest(unittest.TestCase):
         self.assertEqual(slug("Auto-accept"), "auto-accept")
         self.assertIn("auto-accept", anchors(ROOT / "docs" / "accept.md"))
         self.assertNotIn("after-accept", anchors(ROOT / "docs" / "review.md"))
+
+    def test_the_docs_tables_are_the_boards(self):
+        # docs/board.md's marks and keys tables say what the board's `?` list says
+        use = (ROOT / "docs" / "board.md").read_text()
+        rows = [r.split(" | ") for r in re.findall(r"^\| (.+) \|$", use, re.M)]
+        cells = {r[1]: r[0] for r in rows if len(r) == 2}
+        # every still mark (the board's mark() in board/src/model/groups.rs), each in docs/board.md beside its words
+        src = (ROOT / "board" / "src" / "model" / "groups.rs").read_text()
+        body = src[src.index("pub fn mark(status: &str)"):]
+        marks = dict(re.findall(r'"(\w+)" => "(.)"', body[:body.index("\n}\n")]))
+        self.assertGreaterEqual(len(marks), 10)
+        for st, mark in marks.items():
+            self.assertTrue(any(f"`{mark}`" in c for c in cells.values()), (st, mark))
+        for words in ("needs you", "ready to accept", "dropped", "in review", "working"):
+            self.assertIn(words, cells)
+        self.assertIn("`◐`", cells["in review"])
+        self.assertIn("`○`", cells["working"])
+        # the turning marks: the first frame of each animation in board/src/ui/mod.rs
+        ui = (ROOT / "board" / "src" / "ui" / "mod.rs").read_text()
+        for name, words in (("REVIEW", "in review"), ("WORKING", "working")):
+            first = re.search(name + r': &\[&str\] = &\["(.)"', ui).group(1)
+            self.assertIn(f"`{first}`", cells[words])
+        spin = re.search(r'SPINNER: &\[&str\] = &\["(.)"', ui).group(1)
+        self.assertTrue(any(c.startswith(f"`{spin}`") for c in cells.values()))
+        # every key of the board (BOARD_KEYS in board/src/ui/help.rs, the tour's aside), in its order
+        help = (ROOT / "board" / "src" / "ui" / "help.rs").read_text()
+        keys = help[help.index("pub const BOARD_KEYS"):help.index('("In a tour"')]
+        board = [k.split()[0] for k in re.findall(r'\("([^"]+)", "', keys)]
+        table = [re.match(r"`([^`]+)`", c).group(1) for c in cells.values() if re.match(r"`[^`]+`", c)]
+        listed = [k for k in table if k in board]
+        self.assertEqual(listed, board)
 
 
 if __name__ == "__main__":

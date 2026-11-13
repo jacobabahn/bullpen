@@ -198,9 +198,8 @@ class QueueTest(BullpenTest):
         self.assertEqual(self.show("BP-1")["status"], "needs")
         self.assertEqual(self.show("BP-3")["status"], "todo")
 
-    def test_the_queue_moves_by_bullpen_queue_for_a_rust_save(self):
-        # a Rust command's save that frees a slot runs `_queue` once it's done: the bridge
-        # to the Python queue until T6 (no Rust command frees a slot yet: a stop frees none)
+    def test_the_queue_moves_by_bullpen_queue(self):
+        # what a save that frees a slot runs once its command is done (at later-time)
         dep = self.done_dependency()  # BP-1
         self.bp("add", "Next", "--brief", "x", "--after", dep)  # BP-2: added after BP-1 was done
         self.assertEqual(self.show("BP-2")["status"], "todo")
@@ -208,13 +207,3 @@ class QueueTest(BullpenTest):
         self.assertEqual(self.show("BP-2")["status"], "working")
         log = next((self.tmp / "state" / "repos").iterdir()) / "news.log"
         self.assertIn(f"bullpen · BP-2 started ({dep} was accepted)", log.read_text())
-
-    def test_which_status_changes_move_the_queue(self):
-        from bullpen.saves import slot_freed
-        self.assertEqual(slot_freed({"status": "working"}, {"status": "review"}), "review")
-        self.assertEqual(slot_freed({"status": "ready"}, {"status": "done"}), "accepted")
-        self.assertEqual(slot_freed({"status": "finished"}, {"status": "done", "closed": True}), "closed")
-        self.assertEqual(slot_freed({"status": "todo"}, {"status": "dropped"}), "dropped")
-        for old, new in (("working", "needs"), ("working", "triage"), ("review", "ready"),
-                         ("triage", "review"), ("done", "done"), (None, "todo")):
-            self.assertIsNone(slot_freed({"status": old}, {"status": new}), (old, new))
