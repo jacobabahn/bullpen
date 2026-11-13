@@ -5,7 +5,7 @@ import re
 import shutil
 from pathlib import Path
 
-from .core import Fail, KEYS_LUA, REX, SELF, STATE, command, run
+from .core import Fail, HOME, REX, SELF, STATE, command, file_hash, run
 
 
 def keys_line():
@@ -13,6 +13,21 @@ def keys_line():
     if os.environ.get("BULLPEN_STATE"):
         opts += f', state = "{STATE}"'
     return f'dofile("{KEYS_LUA}").setup{{ {opts} }}'
+
+
+KEYS_LUA = HOME / "lua" / "keys.lua"
+
+
+KEYS_CHANGED = "Keys changed: run `rex config reload`"
+
+
+def keys_hash():
+    """keys.lua as it is, which Rex reads only when its config loads: an accept that
+    changes it says to reload."""
+    try:
+        return file_hash(KEYS_LUA)
+    except OSError:
+        return None
 
 
 def rex_config_path():

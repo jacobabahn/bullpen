@@ -7,11 +7,18 @@ import sys
 import textwrap
 
 from . import __doc__ as ABOUT
-from . import board_build, core, doctor, keys, pick, push_remote, tours
+from . import (
+    accept, answer, auto_accept, board, board_build, check, close, config, coordinators, doctor,
+    events, go, guide, keys, news, notifications, pick, prs, push_remote, ready, rules, show, start,
+    stepper, tours, triage, up,
+)
 from .core import Fail
 
 # The modules with commands, in the order `bullpen --help` lists a group's commands.
-MODULES = (core, tours, pick, push_remote, board_build, keys, doctor)
+# Importing them all also registers what saving a task sets off (core.on_save).
+MODULES = (go, board, show, answer, accept, close, stepper, tours, pick, start, triage, check,
+           news, guide, ready, auto_accept, up, config, rules, push_remote, board_build, keys, doctor,
+           coordinators, notifications, prs, events)
 
 # `bullpen --help` lists the commands in these groups, in this order: each command
 # names its group (core.command). A label in a command's help that the group's title

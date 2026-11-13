@@ -5,7 +5,8 @@ import fcntl
 import os
 import subprocess
 
-from .core import Fail, Repo, SELF, clip, command, commits, git, news, repo_root
+from .core import Fail, Repo, SELF, clip, command, commits, git, repo_root
+from .news import news
 
 
 # config --push-remote names a remote (not origin: with origin, bullpen is in PR mode

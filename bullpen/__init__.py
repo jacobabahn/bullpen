@@ -7,5 +7,5 @@ workers' program status into news lines for the coordinator: typed into its pane
 or logged for it to follow with `bullpen news --follow`.
 
 bin/bullpen is the entry script: it finds this package beside it and runs cli.main.
-cli.py builds the parser from each module's commands; core.py holds the rest.
+cli.py builds the parser from each module's commands; docs/code.md lists the modules.
 """

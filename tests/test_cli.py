@@ -1,5 +1,6 @@
 """Help, ls and doctor, and the code's layout."""
 
+import ast
 import json
 import os
 import subprocess
@@ -266,4 +267,43 @@ class CodeTest(unittest.TestCase):
     def test_each_module_stays_under_a_thousand_lines(self):
         long = {f.name: n for f in sorted((ROOT / "bullpen").glob("*.py"))
                 if (n := len(f.read_text().splitlines())) >= 1000}
-        self.assertLessEqual(set(long), {"core.py"})  # until stage 2 (BP-79) splits it
+        self.assertEqual(long, {})
+
+    def modules(self):
+        return {f.stem: ast.parse(f.read_text()) for f in sorted((ROOT / "bullpen").glob("*.py"))}
+
+    def test_the_modules_import_each_other_without_a_loop(self):
+        # each module imports the ones below it, at the top: none inside a function
+        deps = {}
+        for name, tree in self.modules().items():
+            deps[name] = {n.module for n in tree.body if isinstance(n, ast.ImportFrom) and n.level == 1
+                          and n.module}
+            inner = [n.lineno for f in tree.body if isinstance(f, (ast.FunctionDef, ast.ClassDef))
+                     for n in ast.walk(f) if isinstance(n, ast.ImportFrom) and n.level == 1]
+            self.assertEqual(inner, [], f"{name}.py imports a module of bullpen inside a function")
+        done, path = set(), []
+
+        def visit(name):
+            self.assertNotIn(name, path, "an import loop: " + " -> ".join(path + [name]))
+            if name in done:
+                return
+            path.append(name)
+            for d in deps.get(name, ()):
+                visit(d)
+            path.pop()
+            done.add(name)
+
+        for name in deps:
+            visit(name)
+
+    def test_only_the_parser_calls_a_command_function(self):
+        # other code calls the plain function a command runs, never cmd_...(Namespace)
+        for name, tree in self.modules().items():
+            calls = [n.func.id for n in ast.walk(tree) if isinstance(n, ast.Call)
+                     and isinstance(n.func, ast.Name) and n.func.id.startswith("cmd_")]
+            self.assertEqual(calls, [], f"{name}.py calls a command function")
+
+    def test_saving_a_task_tells_the_person_and_marks_its_pr(self):
+        from bullpen import cli, core, notifications, prs  # noqa: F401 (cli imports every module)
+        self.assertIn(notifications.notify, core.SAVED)
+        self.assertIn(prs.follow_saved, core.SAVED)

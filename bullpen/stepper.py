@@ -1,5 +1,6 @@
 """The stepper: reading a tour on the board, step by step, in a floating pane."""
 
+import argparse
 import codecs
 import os
 import re
@@ -8,18 +9,22 @@ import shutil
 import subprocess
 import sys
 import termios
+import time
 import tty
 from pathlib import Path
 
-from .core import (
-    Fail, SELF, TERMINAL, find_pane, find_panes, home_of, now, read_json, rex_alive, rex_api,
-    rex_close, rex_focus, rex_view, set_layer, with_state, write_json,
+from .core import Fail, Repo, SELF, TERMINAL, clip, command, now, read_json, repo_root, write_json
+from .rex import (
+    find_pane, find_panes, rex_alive, rex_api, rex_close, rex_focus, rex_view, set_layer,
+    with_state,
 )
-from .tours import (
-    add_comment, comments_path, read_comments, send_comments, start_tour, step_diff, step_files,
-    tour_diff, tour_log, tour_path, tour_stale,
-)
+from .coordinators import home_of
 from .line_edit import LineEdit, PASTE_OFF, PASTE_ON, read_keys
+from .tours import (
+    add_comment, comments_path, read_comments, send_comments, show_tour, start_tour, step_diff,
+    step_files, tour_diff, tour_failed, tour_log, tour_path, tour_stale, tour_state,
+    tour_status, write_tour,
+)
 
 
 # The board's g runs `tour <ID> --pane`: with a current tour (or a stale one, once the
@@ -457,3 +462,92 @@ def view_tour(repo, t, back=False):
         b = home_of(repo, t).get("board") or {}
         if rex_alive(b.get("session"), b.get("block")):
             rex_focus(b.get("session"), b["block"])
+
+
+def cmd_tour(args):
+    """A tour of a task's change: print the current one's path, or start writing one."""
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    if args.send:
+        return send_comments(repo, t)
+    if args.show or args.step is not None:
+        return show_tour(repo, t, args)
+    if args.view:
+        return view_tour(repo, t, args.back)
+    tour_status(t)
+    state, tour, why = tour_state(repo, t)
+    path = tour_path(repo, t)
+    if args.pane:
+        return tour_pane(repo, t, state, args)
+    # On a terminal, a written tour opens in the stepper; else (an agent, --path) its path.
+    here = not args.path and sys.stdin.isatty() and sys.stdout.isatty()
+    shown = "opens it" if here else "prints its path"
+
+    def written():
+        return view_tour(repo, repo.task(t["id"])) if here else print(path)
+
+    if state == "writing" and not args.wait:
+        print(f"{t['id']}'s tour is being written: `bullpen tour {t['id']}` {shown} once it's done")
+        return
+    if state == "writing":
+        while tour_state(repo, t)[0] == "writing":
+            time.sleep(1)
+            t = repo.task(t["id"])
+        state, tour, why = tour_state(repo, t)
+        if state == "failed":
+            raise Fail(f"{t['id']}'s tour failed: {why} (log: {tour_log(repo, t)})")
+        return written()
+    if state == "current" and not args.new:
+        return written()
+    if state == "stale" and not args.new:
+        print(f"{t['id']}'s tour is stale: {why}. `bullpen tour {t['id']} --new` writes a new "
+              f"one; this is the old one:", file=sys.stderr)
+        return written()
+    out = start_tour(repo, t, args.wait, on_written=open_when_written)
+    if out:
+        return written()
+    print(f"writing a tour of {t['id']} in the background ({repo.cfg.get('tour_model') or 'default model'}); "
+          f"`bullpen tour {t['id']}` {shown} once it's done")
+
+
+def cmd_tour_bg(args):
+    """(bullpen) write a task's tour, away from whoever asked for it."""
+    repo = Repo(repo_root())
+    t = repo.task(args.id)
+    t.setdefault("tour", {})["pid"] = os.getpid()  # this process writes it, whoever started it
+    write_json(repo.task_path(t["id"]), t)
+    try:
+        write_tour(repo, args.id, open_when_written)
+    except Fail:
+        return 1  # recorded on the task
+    except Exception as e:  # anything else is a failure too, never a tour left "writing"
+        tour_failed(repo, args.id, clip(f"{type(e).__name__}: {e}", 160))
+        return 1
+
+
+def commands(sub):
+    """This module's commands, for bullpen's parser."""
+    p = command(sub, "tour", cmd_tour, "You",
+                help="a guided tour of a ready task's change: step through it "
+                     "(its path, off a terminal), or start writing one")
+    p.add_argument("id", help="the task, like BP-3")
+    p.add_argument("--wait", action="store_true", help="write it now and print its path, not in the background")
+    p.add_argument("--new", action="store_true", help="write a new tour even though there is one")
+    p.add_argument("--show", action="store_true", help="the tour's state and steps, starting nothing")
+    p.add_argument("--step", type=int, metavar="N", help="step N's hunks from git, as a patch")
+    p.add_argument("--json", action="store_true", help="with --show or --step: as JSON (for the board)")
+    p.add_argument("--send", action="store_true",
+                   help="send your draft comments to the worker: the task goes back to working")
+    p.add_argument("--pane", action="store_true",
+                   help="step through it in a floating pane (the board's g); with no tour, write one "
+                        "and open it when it's written")
+    p.add_argument("--view", action="store_true", help="step through it on this terminal")
+    p.add_argument("--path", action="store_true",
+                   help="print a written tour's path, even on a terminal (where it opens by default)")
+    p.add_argument("--back", action="store_true", help=argparse.SUPPRESS)  # then focus the board
+    p.add_argument("--from", dest="from_block", default=os.environ.get("REX_BLOCK"),
+                   help="with --pane: the pane whose window it opens over (default: this one)")
+    p.add_argument("--session", help="with --pane: the session you're in")
+
+    p = command(sub, "_tour", cmd_tour_bg)
+    p.add_argument("id")

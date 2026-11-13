@@ -10,9 +10,10 @@ import sys
 from pathlib import Path
 
 from .core import (
-    BOARD, BOARD_LOCK, BOARD_LOG, BOARD_SRC, BOARD_STAMP, CARGO_BOARD, Fail, HOME, Repo, SELF,
-    TARGET, command, file_hash, git, news, now, read_json, repo_root, write_json,
+    Fail, HOME, Repo, SELF, command, file_hash, git, now, read_json, repo_root, write_json,
 )
+from .news import news
+from .board import BOARD, BOARD_LOCK, BOARD_LOG, BOARD_SRC, BOARD_STAMP, CARGO_BOARD, TARGET
 
 
 # bullpen's own checkout (HOME) builds the board. Its source has a hash; the build
@@ -21,6 +22,7 @@ from .core import (
 # board sees its program replaced and execs the new one. A build that fails, or one
 # skipped because board/ has uncommitted changes, is one news line per source hash, and
 # the old board keeps running.
+
 
 def board_sources():
     d = BOARD_SRC

@@ -9,11 +9,9 @@ import termios
 import tty
 from pathlib import Path
 
-from .core import (
-    CLOSED, Fail, MARK_SET, SELF, TERMINAL, board_order, command, find_pane, find_panes,
-    find_repo, fit, known_repos, mark_color, rex_api, rex_close, rex_view, set_layer, task_line,
-    with_state,
-)
+from .core import CLOSED, Fail, SELF, TERMINAL, command, find_repo, known_repos
+from .rex import find_pane, find_panes, rex_api, rex_close, rex_view, set_layer, with_state
+from .task_line import MARK_SET, board_order, fit, mark_color, task_line
 from .line_edit import LineEdit, PASTE_OFF, PASTE_ON, read_keys
 
 

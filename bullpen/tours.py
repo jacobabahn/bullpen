@@ -2,21 +2,22 @@
 comments on its steps. The stepper (stepper.py) reads them on the board.
 """
 
-import argparse
 import json
 import os
 import re
 import shlex
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 from .core import (
-    Fail, PROMPTS, Repo, SELF, clip, close_reviewer, command, git, hand_back, head, is_claude,
-    is_status, merge_base, model_in, now, patch_id, read_json, repo_root, resolve, stop,
-    task_base_ref, tell_coordinator, with_model, write_json,
+    Fail, PROMPTS, Repo, SELF, clip, command, git, head, is_claude, is_status, merge_base,
+    model_in, now, read_json, repo_root, resolve, task_base_ref, with_model, write_json,
 )
+from .news import tell_coordinator
+from .stops import stop
+from .start import hand_back
+from .review import close_reviewer, patch_id
 
 
 # On request (`bullpen tour BP-3`, the board's g), a cheap headless agent writes a
@@ -302,9 +303,10 @@ def agent_result(out):
     return out
 
 
-def write_tour(repo, tid):
+def write_tour(repo, tid, on_written=None):
     """Run the tour agent on the task's code now and write its tour. Returns the tour
-    file, or raises Fail with why it failed (the task records that)."""
+    file, or raises Fail with why it failed (the task records that). If the person
+    asked on the board to open it once written, on_written(repo, t, opener) does."""
     t = repo.task(tid)
     wt = t.get("worktree")
     log = tour_log(repo, t)
@@ -346,9 +348,8 @@ def write_tour(repo, tid):
     if (t.get("note") or "").startswith("tour failed"):
         t["note"] = None
     write_json(repo.task_path(tid), t)  # not save_task: the status didn't change
-    if opener:
-        from .stepper import open_when_written  # the stepper imports tours: not at the top
-        open_when_written(repo, t, opener)
+    if opener and on_written:
+        on_written(repo, t, opener)
     return path
 
 
@@ -462,7 +463,7 @@ def tour_status(t):
                    f"ready or in review, whose code isn't changing")
 
 
-def start_tour(repo, t, wait, opener=None):
+def start_tour(repo, t, wait, opener=None, on_written=None):
     """Write a tour of the task: now (wait), or by a process of its own in the background.
     t["tour"] says it's being written, with that process's pid, so the board can show it.
     With opener ({"session", "from"}), the stepper opens there once it's written."""
@@ -473,74 +474,12 @@ def start_tour(repo, t, wait, opener=None):
         t["note"] = None
     write_json(repo.task_path(t["id"]), t)
     if wait:
-        return write_tour(repo, t["id"])
+        return write_tour(repo, t["id"], on_written)
     p = subprocess.Popen([SELF, "_tour", t["id"]], cwd=repo.root, start_new_session=True,
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     t["tour"]["pid"] = p.pid
     write_json(repo.task_path(t["id"]), t)
     return None
-
-
-def cmd_tour(args):
-    """A tour of a task's change: print the current one's path, or start writing one."""
-    from .stepper import tour_pane, view_tour  # the stepper imports tours: not at the top
-    repo = Repo(repo_root())
-    t = repo.task(args.id)
-    if args.send:
-        return send_comments(repo, t)
-    if args.show or args.step is not None:
-        return show_tour(repo, t, args)
-    if args.view:
-        return view_tour(repo, t, args.back)
-    tour_status(t)
-    state, tour, why = tour_state(repo, t)
-    path = tour_path(repo, t)
-    if args.pane:
-        return tour_pane(repo, t, state, args)
-    # On a terminal, a written tour opens in the stepper; else (an agent, --path) its path.
-    here = not args.path and sys.stdin.isatty() and sys.stdout.isatty()
-    shown = "opens it" if here else "prints its path"
-
-    def written():
-        return view_tour(repo, repo.task(t["id"])) if here else print(path)
-
-    if state == "writing" and not args.wait:
-        print(f"{t['id']}'s tour is being written: `bullpen tour {t['id']}` {shown} once it's done")
-        return
-    if state == "writing":
-        while tour_state(repo, t)[0] == "writing":
-            time.sleep(1)
-            t = repo.task(t["id"])
-        state, tour, why = tour_state(repo, t)
-        if state == "failed":
-            raise Fail(f"{t['id']}'s tour failed: {why} (log: {tour_log(repo, t)})")
-        return written()
-    if state == "current" and not args.new:
-        return written()
-    if state == "stale" and not args.new:
-        print(f"{t['id']}'s tour is stale: {why}. `bullpen tour {t['id']} --new` writes a new "
-              f"one; this is the old one:", file=sys.stderr)
-        return written()
-    out = start_tour(repo, t, args.wait)
-    if out:
-        return written()
-    print(f"writing a tour of {t['id']} in the background ({repo.cfg.get('tour_model') or 'default model'}); "
-          f"`bullpen tour {t['id']}` {shown} once it's done")
-
-
-def cmd_tour_bg(args):
-    """(bullpen) write a task's tour, away from whoever asked for it."""
-    repo = Repo(repo_root())
-    t = repo.task(args.id)
-    t.setdefault("tour", {})["pid"] = os.getpid()  # this process writes it, whoever started it
-    write_json(repo.task_path(t["id"]), t)
-    try:
-        write_tour(repo, args.id)
-    except Fail:
-        return 1  # recorded on the task
-    except Exception as e:  # anything else is a failure too, never a tour left "writing"
-        tour_failed(repo, args.id, clip(f"{type(e).__name__}: {e}", 160))
-        return 1
 
 
 def show_tour(repo, t, args):
@@ -678,28 +617,6 @@ def send_comments(repo, t):
 
 def commands(sub):
     """This module's commands, for bullpen's parser."""
-    p = command(sub, "tour", cmd_tour, "You",
-                help="a guided tour of a ready task's change: step through it "
-                     "(its path, off a terminal), or start writing one")
-    p.add_argument("id", help="the task, like BP-3")
-    p.add_argument("--wait", action="store_true", help="write it now and print its path, not in the background")
-    p.add_argument("--new", action="store_true", help="write a new tour even though there is one")
-    p.add_argument("--show", action="store_true", help="the tour's state and steps, starting nothing")
-    p.add_argument("--step", type=int, metavar="N", help="step N's hunks from git, as a patch")
-    p.add_argument("--json", action="store_true", help="with --show or --step: as JSON (for the board)")
-    p.add_argument("--send", action="store_true",
-                   help="send your draft comments to the worker: the task goes back to working")
-    p.add_argument("--pane", action="store_true",
-                   help="step through it in a floating pane (the board's g); with no tour, write one "
-                        "and open it when it's written")
-    p.add_argument("--view", action="store_true", help="step through it on this terminal")
-    p.add_argument("--path", action="store_true",
-                   help="print a written tour's path, even on a terminal (where it opens by default)")
-    p.add_argument("--back", action="store_true", help=argparse.SUPPRESS)  # then focus the board
-    p.add_argument("--from", dest="from_block", default=os.environ.get("REX_BLOCK"),
-                   help="with --pane: the pane whose window it opens over (default: this one)")
-    p.add_argument("--session", help="with --pane: the session you're in")
-
     p = command(sub, "tour-comment", cmd_tour_comment, "You",
                 help="draft comments on a tour's steps: add, list (no STEP) or remove")
     p.add_argument("id", help="the task, like BP-3")
@@ -707,6 +624,3 @@ def commands(sub):
     p.add_argument("text", nargs="*", help="the comment (mention a line in it to point at one)")
     p.add_argument("--remove", type=int, metavar="N", help="remove draft comment N")
     p.add_argument("--json", action="store_true", help="list them as JSON")
-
-    p = command(sub, "_tour", cmd_tour_bg)
-    p.add_argument("id")

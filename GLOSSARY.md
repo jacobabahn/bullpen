@@ -1,13 +1,14 @@
 # Glossary
 
 Words bullpen's code and docs use. The code for a task's lifecycle is in the
-"task lifecycle" section of `bullpen/core.py`.
+"task lifecycle" section of `bullpen/core.py` (`set_status`), and in `bullpen/stops.py`
+for its stops.
 
 ## Where things run
 
 **Coordinator**: the agent you talk to. It turns what you ask into tasks, starts their workers and sees to their stops. A repository can have several, `c1`, `c2`, ...
 
-**Sees to**: the coordinators who see to a task: its own (the one that added it, or adopted it) while that one's pane is running, else every running coordinator, else nobody, and the task needs the person. They get its news and its triage stops, its panes go in their tab, and their boards show it. A coordinator whose pane closes is dropped, so a listed coordinator is a running one. `sees_to` in `bullpen/core.py` is the rule.
+**Sees to**: the coordinators who see to a task: its own (the one that added it, or adopted it) while that one's pane is running, else every running coordinator, else nobody, and the task needs the person. They get its news and its triage stops, its panes go in their tab, and their boards show it. A coordinator whose pane closes is dropped, so a listed coordinator is a running one. `sees_to` in `bullpen/coordinators.py` is the rule.
 
 **Worker**: the agent doing one task, in its own pane, worktree and branch. A **reviewer** is the agent that checks it after `ready`.
 
@@ -36,6 +37,8 @@ _Avoid_: reason (for the recorded stop), needs (for any stop).
 **Ok**: the coordinator has seen to a triage stop (`bullpen ok`). The task goes back to working, or to review for a reviewer's stop, and its idle agent isn't a stop again until its next turn.
 
 **Hand back**: give the worker a message to act on (review findings, a rebase conflict, PR feedback, carrying on after the usage limit), typing it into its pane or resuming it in a new one. The task is working again once the message reaches the worker.
+
+**Run queue**: the `todo` tasks that wait on others (`--after`): bullpen starts each by itself once those are all accepted, while fewer than `max_running` tasks are working. A plain `todo` task waits for the coordinator to start it. A task leaving `working` (to review, ready or finished, or accepted or dropped) frees a slot, and the queue starts the next. `start_queued` in `bullpen/start.py`.
 
 ## Reviewing a change
 

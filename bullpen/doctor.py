@@ -9,12 +9,15 @@ import tempfile
 from pathlib import Path
 
 from .core import (
-    BOARD, BOARD_LOG, BOARD_STAMP, DEFAULT_CONFIG, Fail, INTERNAL, REPO_ONLY, REX, Repo, SELF,
-    STATE, alive, command, git, global_config_path, homes, old_board, read_global_file,
-    read_json, repo_root, rex_alive, run, safe, watcher_stamp,
+    DEFAULT_CONFIG, Fail, INTERNAL, REPO_ONLY, REX, Repo, SELF, STATE, command, git,
+    global_config_path, homes, read_global_file, read_json, repo_root, run, safe,
 )
-from .push_remote import check_push
+from .rex import rex_alive
+from .coordinators import alive
+from .watcher import watcher_stamp
+from .board import BOARD, BOARD_LOG, BOARD_STAMP, old_board
 from .board_build import board_building, board_dirty, board_source_hash
+from .push_remote import check_push
 
 
 # Each check returns (state, what it found): "ok", "fail" (with the fix in the text)

@@ -7,7 +7,10 @@ import textwrap
 import unittest
 
 from support import setUpModule, tearDownModule, ROOT  # a temp folder for each module
-from bullpen import cli, core, doctor, line_edit, pick, stepper
+from bullpen import (
+    answer, check, cli, core, doctor, limit, line_edit, notifications, pick, show, stepper,
+    task_line,
+)
 
 
 class HelpersTest(unittest.TestCase):
@@ -27,11 +30,11 @@ class HelpersTest(unittest.TestCase):
     def test_board_order_puts_what_you_do_next_first(self):
         ts = [{"id": f"BP-{i}", "status": s} for i, s in
               enumerate(["todo", "working", "ready", "stopped", "needs", "triage", "done", "review", "finished"], 1)]
-        self.assertEqual([t["id"] for t in core.board_order(ts)],
+        self.assertEqual([t["id"] for t in task_line.board_order(ts)],
                          ["BP-4", "BP-5", "BP-6", "BP-3", "BP-9", "BP-8", "BP-2", "BP-1", "BP-7"])
 
     def test_the_boards_sentence(self):
-        d = lambda t, *more, **cfg: core.board_detail(self.repo(t, *more, **cfg), t)
+        d = lambda t, *more, **cfg: task_line.board_detail(self.repo(t, *more, **cfg), t)
         self.assertEqual(d({"id": "BP-1", "status": "stopped"}), "Its agent exited. r resumes it.")
         self.assertEqual(d({"id": "BP-1", "status": "finished", "summary": "# Recorded the demo\n\nmore"}),
                          "Finished, nothing to merge: Recorded the demo. a closes it.")
@@ -51,13 +54,13 @@ class HelpersTest(unittest.TestCase):
     def test_a_task_line_fits_the_width_and_keeps_its_age(self):
         t = {"id": "BP-3", "status": "needs", "title": "Fix the login redirect after sign-in",
              "why": "Asks: python3 or python? The Makefile uses both.", "since": self.ago(12)}
-        r = core.task_line(self.repo(t), t)
+        r = task_line.task_line(self.repo(t), t)
         self.assertEqual(r, "● BP-3  Fix the login redirect after sign-in  12m  Asks: python3 or python? The Makefile uses both.")
-        cut = core.task_line(self.repo(t), t, width=42)
+        cut = task_line.task_line(self.repo(t), t, width=42)
         self.assertEqual(cut, "● BP-3  Fix the login redirect after…  12m")  # no room for the sentence
-        self.assertEqual(core.task_line(self.repo(t), t, width=70),
+        self.assertEqual(task_line.task_line(self.repo(t), t, width=70),
                          "● BP-3  Fix the login redirect after sign-in  12m  Asks: python3 or p…")  # 70 wide
-        colour = core.task_line(self.repo(t), t, color=True)
+        colour = task_line.task_line(self.repo(t), t, color=True)
         self.assertTrue(colour.startswith("\x1b[1;33m●\x1b[0m "))  # the mark amber, as on the board
         self.assertIn("\x1b[1;31m12m", colour)  # needs you for over 5 minutes: the age turns red
 
@@ -67,9 +70,9 @@ class HelpersTest(unittest.TestCase):
         body = src[src.index("pub fn mark(status: &str)"):]
         body = body[:body.index("\n}\n")]
         board = dict(re.findall(r'"(\w+)" => "(.)"', body))
-        self.assertEqual(core.MARKS, board)
+        self.assertEqual(task_line.MARKS, board)
         # ready and closed are told apart
-        self.assertEqual((core.MARKS["ready"], core.MARKS["done"]), ("✔", "·"))
+        self.assertEqual((task_line.MARKS["ready"], task_line.MARKS["done"]), ("✔", "·"))
 
     def test_the_docs_tables_are_the_boards(self):
         # docs/board.md's marks and keys tables say what the board's `?` list says
@@ -77,7 +80,7 @@ class HelpersTest(unittest.TestCase):
         rows = [r.split(" | ") for r in re.findall(r"^\| (.+) \|$", use, re.M)]
         cells = {r[1]: r[0] for r in rows if len(r) == 2}
         # every still mark, each in docs/board.md beside its words
-        for st, mark in core.MARKS.items():
+        for st, mark in task_line.MARKS.items():
             self.assertTrue(any(f"`{mark}`" in c for c in cells.values()), (st, mark))
         for words in ("needs you", "ready to accept", "dropped", "in review", "working"):
             self.assertIn(words, cells)
@@ -104,25 +107,25 @@ class HelpersTest(unittest.TestCase):
              "since": self.ago(12)}
         b = {"id": "BP-16", "status": "todo", "title": "Emails: digest", "since": self.ago(1)}
         r = self.repo(a, b)
-        self.assertEqual(list(core.ls_lines(r, [b, a], 42)), [
+        self.assertEqual(list(show.ls_lines(r, [b, a], 42)), [
             "● BP-3   Fix the login redirect aft…  12m",
             "         Asks: python3 or python? The",
             "         Makefile uses both and the CI …",
             "◌ BP-16  Emails: digest                1m",
             "         Not started. s starts it."])
-        self.assertTrue(all(len(l) <= 41 for l in core.ls_lines(r, [b, a], 42)))
-        self.assertEqual(len(list(core.ls_lines(r, [b, a], 200))), 2)  # wide: one line each
-        self.assertEqual(len(list(core.ls_lines(r, [b, a]))), 2)  # piped: whole
-        wide = list(core.ls_lines(r, [b, a], 80))  # room for the sentence: one cut line each, not rows
+        self.assertTrue(all(len(l) <= 41 for l in show.ls_lines(r, [b, a], 42)))
+        self.assertEqual(len(list(show.ls_lines(r, [b, a], 200))), 2)  # wide: one line each
+        self.assertEqual(len(list(show.ls_lines(r, [b, a]))), 2)  # piped: whole
+        wide = list(show.ls_lines(r, [b, a], 80))  # room for the sentence: one cut line each, not rows
         self.assertEqual(wide, ["● BP-3   Fix the login redirect after sign-in  12m  Asks: python3 or python? T…",
                                 "◌ BP-16  Emails: digest  1m  Not started. s starts it."])
         self.assertTrue(all(len(l) <= 79 for l in wide))
         c = {"id": "BP-5", "status": "todo", "title": "Later", "note": "One two three four five six seven eight"}
-        self.assertEqual(len(core.task_rows(self.repo(c), c, width=20)), 2)  # the board's one line
-        self.assertEqual(len(core.task_rows(self.repo(c), c, width=20, lines=99)), 5)  # show's: all of it
+        self.assertEqual(len(task_line.task_rows(self.repo(c), c, width=20)), 2)  # the board's one line
+        self.assertEqual(len(task_line.task_rows(self.repo(c), c, width=20, lines=99)), 5)  # show's: all of it
 
     def test_next_says_what_you_can_do_now(self):
-        n = lambda **t: core.next_steps(self.repo(), {"id": "BP-4", **t})
+        n = lambda **t: show.next_steps(self.repo(), {"id": "BP-4", **t})
         self.assertEqual(n(status="needs", stop={"kind": "prompt"}),
                          "`bullpen answer BP-4 <option>` (`bullpen peek BP-4` shows the prompt), or i on the board")
         self.assertEqual(n(status="needs", ask=True), "`bullpen reply BP-4 <answer>`, or i on the board")
@@ -493,31 +496,31 @@ class HelpersTest(unittest.TestCase):
         """)
 
     def test_a_choice_menu_is_read_without_type_something(self):
-        p = core.read_prompt(self.CHOICE)
+        p = answer.read_prompt(self.CHOICE)
         self.assertEqual(p["question"], "Do you prefer tea or coffee?")
         self.assertEqual(p["options"], [["1", "Tea"], ["2", "Coffee"], ["4", "Chat about this"]])
 
     def test_the_boxed_layout_is_read_too(self):
-        p = core.read_prompt(self.BOXED)
+        p = answer.read_prompt(self.BOXED)
         self.assertEqual((p["question"], p["options"]),
                          ("Do you want to proceed?", [["1", "Yes"], ["2", "No, and tell Claude what to do"]]))
 
     def test_a_yes_no_question_is_answered_by_y_or_n(self):
-        p = core.read_prompt("Some output\nOverwrite it? [y/N]\n\n")
+        p = answer.read_prompt("Some output\nOverwrite it? [y/N]\n\n")
         self.assertEqual((p["question"], p["options"]), ("Overwrite it? [y/N]", [["y", "Yes"], ["n", "No"]]))
 
     def test_what_the_agent_wrote_is_no_prompt(self):
         listed = "● Two ways:\n  1. Patch it\n  2. Rewrite it\n\n────\n❯ \n────\n  ⏸ manual mode on\n"
-        self.assertIsNone(core.read_prompt(listed))  # its input box is under it
-        self.assertIsNone(core.read_prompt("● Two ways:\n  1. Patch it\n  2. Rewrite it\n"))  # no ❯ on one
-        self.assertIsNone(core.read_prompt("Do you want to proceed?\n❯ 1. Yes\n  2. No\n" + "more\n" * 4))
-        self.assertIsNone(core.read_prompt("❯ 2. Yes\n  3. No\n"))  # not counted from 1
-        self.assertIsNone(core.read_prompt(""))
+        self.assertIsNone(answer.read_prompt(listed))  # its input box is under it
+        self.assertIsNone(answer.read_prompt("● Two ways:\n  1. Patch it\n  2. Rewrite it\n"))  # no ❯ on one
+        self.assertIsNone(answer.read_prompt("Do you want to proceed?\n❯ 1. Yes\n  2. No\n" + "more\n" * 4))
+        self.assertIsNone(answer.read_prompt("❯ 2. Yes\n  3. No\n"))  # not counted from 1
+        self.assertIsNone(answer.read_prompt(""))
 
     def test_a_prompt_id_tells_one_command_from_another(self):
-        a = core.read_prompt(self.BOXED)
-        self.assertEqual(a["id"], core.read_prompt("old output\n" * 20 + self.BOXED)["id"])
-        b = core.read_prompt(self.BOXED.replace("npm test", "rm -rf /"))
+        a = answer.read_prompt(self.BOXED)
+        self.assertEqual(a["id"], answer.read_prompt("old output\n" * 20 + self.BOXED)["id"])
+        b = answer.read_prompt(self.BOXED.replace("npm test", "rm -rf /"))
         self.assertNotEqual(a["id"], b["id"])
 
     # ---------- help and ls ----------
@@ -573,7 +576,7 @@ class HelpersTest(unittest.TestCase):
         self.assertTrue(idle(self.stopped("stopped", "worker", "exited")))
 
     def test_what_a_status_change_tells_the_person(self):
-        n = core.notice
+        n = notifications.notice
         t = lambda status, **more: {"id": "BP-3", "title": "Fix it", "status": status, **more}
         self.assertEqual(n(t("needs", why="Needs you (permission): Allow rm?"), t("working")),
                          ("needs", "BP-3 needs you (permission): Allow rm?"))
@@ -604,9 +607,9 @@ class HelpersTest(unittest.TestCase):
         self.assertFalse(on(self.stopped("triage", "worker", "ended")))
         self.assertFalse(on({"status": "review"}))
         t = self.stopped("needs", "reviewer", "ended", review={"block": "blk2", "session": "s"}, block="blk1")
-        self.assertEqual(core.waited_on(t), ("reviewer", "s", "blk2"))
+        self.assertEqual(check.waited_on(t), ("reviewer", "s", "blk2"))
         t["stop"] = {"by": "worker", "kind": "failed"}
-        self.assertEqual(core.waited_on(t), ("worker", None, "blk1"))
+        self.assertEqual(check.waited_on(t), ("worker", None, "blk1"))
 
     def test_a_new_status_ends_ask_ok_and_the_stop(self):
         t = self.stopped("triage", "worker", "ended", why="Ended its turn without saying ready", ok=True)
@@ -643,28 +646,28 @@ class HelpersTest(unittest.TestCase):
 
     def test_a_working_task_only_shows_what_github_sent_it_back_for(self):
         gh = {"state": "open", "checks": "passing", "new": 0}
-        self.assertEqual(core.pr_phrase({"status": "working", "gh": gh}), "")
-        self.assertEqual(core.pr_phrase({"status": "working", "gh": {**gh, "sent": True}}), "checks passing")
-        self.assertEqual(core.pr_phrase({"status": "ready", "gh": gh}), "checks passing")
+        self.assertEqual(task_line.pr_phrase({"status": "working", "gh": gh}), "")
+        self.assertEqual(task_line.pr_phrase({"status": "working", "gh": {**gh, "sent": True}}), "checks passing")
+        self.assertEqual(task_line.pr_phrase({"status": "ready", "gh": gh}), "checks passing")
 
     def test_only_the_agent_a_task_waits_on_is_stuck_or_limited(self):
         import datetime as dt
         ago = (dt.datetime.now().astimezone() - dt.timedelta(minutes=25)).isoformat()
         t = {"status": "working", "stuck": {"who": "worker", "since": ago}}
-        self.assertTrue(core.is_stuck(t))
-        self.assertEqual(core.stuck_phrase(t), "no progress for 25 min")
-        self.assertFalse(core.is_stuck({**t, "status": "review"}))
-        self.assertFalse(core.is_stuck({"status": "working"}))
+        self.assertTrue(task_line.is_stuck(t))
+        self.assertEqual(task_line.stuck_phrase(t), "no progress for 25 min")
+        self.assertFalse(task_line.is_stuck({**t, "status": "review"}))
+        self.assertFalse(task_line.is_stuck({"status": "working"}))
         at = dt.datetime(2026, 11, 11, 13, 0).astimezone()
         lim = {"who": "worker", "resets": at.replace(hour=15).isoformat(), "text": "x"}
-        self.assertTrue(core.is_limited({"status": "working", "limit": lim}))
-        self.assertFalse(core.is_limited({"status": "ready", "limit": lim}))
-        self.assertEqual(core.limit_why(lim, at), "Usage limit, resets 3:00 PM")
+        self.assertTrue(limit.is_limited({"status": "working", "limit": lim}))
+        self.assertFalse(limit.is_limited({"status": "ready", "limit": lim}))
+        self.assertEqual(limit.limit_why(lim, at), "Usage limit, resets 3:00 PM")
 
     def test_reset_times_are_read(self):
         import datetime as dt
         at = dt.datetime(2026, 11, 11, 13, 0).astimezone()  # a Wednesday, 1 PM
-        when = lambda text: core.limit_reset(text, at)
+        when = lambda text: limit.limit_reset(text, at)
         day = lambda d, h, m=0: dt.datetime(2026, 11, d, h, m).astimezone()
         self.assertEqual(when("You've hit your 5-hour limit · resets 3pm"), day(11, 15))
         self.assertEqual(when("You've hit your session limit · resets 3:45pm"), day(11, 15, 45))
@@ -682,6 +685,6 @@ class HelpersTest(unittest.TestCase):
         for text in ("Usage limit reached", "spend limit reached · resets Aug 8", "resets in 8 minutes",
                      "resets 3", "resets 13pm", "resets 3pm (Nowhere/Land)"):
             self.assertIsNone(when(text), text)
-        self.assertEqual(core.clock(day(11, 15), at), "3:00 PM")
-        self.assertEqual(core.clock(day(16, 0), at), "Mon 12:00 AM")
-        self.assertEqual(core.clock(day(30, 9, 5), at), "Nov 30 9:05 AM")
+        self.assertEqual(limit.clock(day(11, 15), at), "3:00 PM")
+        self.assertEqual(limit.clock(day(16, 0), at), "Mon 12:00 AM")
+        self.assertEqual(limit.clock(day(30, 9, 5), at), "Nov 30 9:05 AM")
