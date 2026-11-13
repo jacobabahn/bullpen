@@ -1,4 +1,4 @@
-//! `ls` and `show` (bullpen/show.py's).
+//! `ls` and `show`.
 
 use crate::args::{flag, pos, Arg, Args, Nargs};
 use crate::coordinators::{coordinators, owner};

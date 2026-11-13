@@ -1,4 +1,4 @@
-//! A repo's coordinators, and who sees to a task (bullpen/coordinators.py): which one a
+//! A repo's coordinators, and who sees to a task: which one a
 //! pane is, which are alive, and whose a task is; adding one, and dropping those whose
 //! panes are gone (`up`), or whose pane the watcher said closed (`_coordinator_gone`).
 //!

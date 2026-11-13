@@ -1,4 +1,4 @@
-//! The watcher's other two calls (bullpen/events.py): an agent that shows no progress
+//! The watcher's other two calls: an agent that shows no progress
 //! (`_stuck`), and the usage limit's reset (`_limit`), which continues the agents that
 //! stopped at it.
 

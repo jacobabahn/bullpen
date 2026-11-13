@@ -1,4 +1,4 @@
-//! bullpen's key bindings in the Rex config (bullpen/keys.py): the line that loads
+//! bullpen's key bindings in the Rex config: the line that loads
 //! lua/keys.lua, `keys --install` adding it, and the hash accept checks to say that
 //! keys.lua changed.
 

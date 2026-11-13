@@ -209,13 +209,13 @@ pub fn programs(background: bool) -> Vec<&'static Program> {
         .collect()
 }
 
-/// A test's or a compare's fixture (tests/support.py, cli/check/) sets BULLPEN_NO_BUILD:
+/// A test's fixture (tests/support.py) sets BULLPEN_NO_BUILD:
 /// bullpen never builds, or takes the build lock in, the checkout it runs from.
 pub fn no_build() -> bool {
     std::env::var_os("BULLPEN_NO_BUILD").is_some_and(|v| !v.is_empty())
 }
 
-const NO_BUILD: &str = "builds are off here (BULLPEN_NO_BUILD is set: a test's or a compare's fixture)";
+const NO_BUILD: &str = "builds are off here (BULLPEN_NO_BUILD is set: a test's fixture)";
 
 /// The build lock's open file, locked, or None when another build holds it (wait=false).
 fn lock_build(wait: bool) -> Res<Option<File>> {

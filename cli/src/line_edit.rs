@@ -1,4 +1,4 @@
-//! Typing on a terminal (once bullpen/line_edit.py): the keys a read gives, raw mode and
+//! Typing on a terminal: the keys a read gives, raw mode and
 //! bracketed paste, and the line editor the picker and the tour stepper's comment and
 //! tell boxes use.
 

@@ -1,4 +1,4 @@
-//! `diff`: a task's changes against its base (bullpen/show.py's cmd_diff), through a
+//! `diff`: a task's changes against its base, through a
 //! pager, as `--stat` just the files, or in a pane of its own (`--pane`, the board's v).
 
 use crate::args::{flag, pos, value, Arg, Args, Nargs, SUPPRESS};

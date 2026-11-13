@@ -1,4 +1,4 @@
-//! What the watcher (lua/watch.lua) reports (bullpen/events.py): an agent's events, and a
+//! What the watcher (lua/watch.lua) reports: an agent's events, and a
 //! pane that closed. An agent that shows no progress and the usage limit's reset are in
 //! stuck.rs. `check --fix` applies the events the watcher missed through the same paths.
 

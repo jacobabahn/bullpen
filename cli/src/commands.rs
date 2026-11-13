@@ -54,7 +54,6 @@ pub const COMMANDS: &[Command] = &[
     c("resume", COORDINATOR, "restart a stopped worker, continuing its conversation", crate::start::launch::cmd_resume),
     c("tell", COORDINATOR, "type a message to a task's worker", crate::start::launch::cmd_tell),
     c("peek", COORDINATOR, "print the end of a worker's screen", crate::start::peek::cmd_peek),
-    c("_queue", INTERNAL, "", crate::start::queue::cmd_queue), // the run queue: a save's later-time runs it
     c("ask", COORDINATOR, "(coordinator) the task needs the person: the question shows on the board", crate::triage::cmd_ask),
     c("ok", COORDINATOR, "(coordinator) a task waiting on you is seen to: back to work, nothing typed", crate::triage::cmd_ok),
     c("review", COORDINATOR, "(coordinator) a new reviewer in place of one that stopped without a verdict", crate::review::cmd_review),

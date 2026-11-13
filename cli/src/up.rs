@@ -1,4 +1,4 @@
-//! `up`: a repo's coordinator, its board and the watcher (bullpen/up.py).
+//! `up`: a repo's coordinator, its board and the watcher.
 
 use crate::args::{flag, value, Arg, Args};
 use crate::board::ensure_board;

@@ -1,4 +1,4 @@
-//! Following a task's pull request after ready (bullpen/prs.py; lua/watch.lua runs
+//! Following a task's pull request after ready (lua/watch.lua runs
 //! `_prs` while <state>/prs exists): its checks and the feedback on it, a merge or close
 //! outside bullpen, and a waiting auto-accept. The save hook that marks a PR to follow is
 //! saves.rs's (`followed`, `follow_saved`).

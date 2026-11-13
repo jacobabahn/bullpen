@@ -1,4 +1,4 @@
-//! The board's program, and a coordinator's board pane beside it (bullpen/board.py):
+//! The board's program, and a coordinator's board pane beside it:
 //! `board`, and `ensure_board`, which `go` uses to start a board that was quit.
 
 use crate::args::{value, Arg, Args};

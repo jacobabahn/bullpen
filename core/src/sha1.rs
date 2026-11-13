@@ -1,5 +1,5 @@
 //! SHA-1 (FIPS 180-4), for a review's own lines (review.rs): hashlib.sha1's hex digest,
-//! with no crate. Python's twin (review.py) writes the same hashes into the same task.
+//! with no crate, so the hashes the Python wrote into a task still match.
 
 const H0: [u32; 5] = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
 

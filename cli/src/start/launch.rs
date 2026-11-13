@@ -1,7 +1,6 @@
-//! Starting a task's worker (bullpen/start.py): its worktree, setup and brief, the
+//! Starting a task's worker: its worktree, setup and brief, the
 //! agent's pane, and handing a worker a message: `start`, `resume` and `tell`, with
-//! `launch` and `hand_back`. Python keeps `launch` and `hand_back` (twins) for the
-//! commands that hand work back that it still runs (accept, verdict, events, tours, prs).
+//! `launch` and `hand_back`.
 
 use super::by_id;
 use crate::args::{flag, pos, value, Arg, Args, Nargs};

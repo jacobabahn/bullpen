@@ -1,4 +1,4 @@
-//! Guided review tours (once bullpen/tours.py): a tour's files, the diff it is written
+//! Guided review tours: a tour's files, the diff it is written
 //! on, its state, and the person's draft comments on its steps. The tour agent that
 //! writes one is in write.rs, `tour-comment` in comments.rs. The stepper (`tour`, which
 //! starts `_tour`, and reads and sends a tour) is in stepper/.

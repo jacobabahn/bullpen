@@ -1,5 +1,5 @@
 //! The coordinator's guide, and telling running coordinators when it changed
-//! (bullpen/guide.py).
+//!.
 //!
 //! A coordinator gets its guide once, in its system prompt or by reading `bullpen guide`
 //! (`up --here`), and can't load it again. Each records the hash of the guide it was

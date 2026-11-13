@@ -1,7 +1,6 @@
-//! Reviews (bullpen/review.py): what a review covers, starting a reviewer, what `ready`
+//! Reviews: what a review covers, starting a reviewer, what `ready`
 //! does with review on, and the coordinator's `review` (a new reviewer in place of one
-//! that stopped without a verdict). Python keeps review.py (a twin) for accept, events
-//! and tours.
+//! that stopped without a verdict).
 //!
 //! A review records what it looked at: the commit, the base it was on (merge-base), a
 //! patch-id of the task's diff against that base, and the task's own lines (own_lines:

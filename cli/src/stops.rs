@@ -1,7 +1,7 @@
-//! A task's worker or reviewer stopping (bullpen/stops.py): whether it goes to its
+//! A task's worker or reviewer stopping: whether it goes to its
 //! coordinator (triage) or to the person, and a triage passed on to the person once it
 //! is overdue. The watcher's events, `check` and the commands that hand a task back
-//! call these. Python keeps its own (a twin) for prs and tours.
+//! call these.
 //!
 //! A task that stopped on something its coordinator can handle (a failed turn, a turn
 //! ended without ready, a message that didn't reach its worker, a reviewer without a

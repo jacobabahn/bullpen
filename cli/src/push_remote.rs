@@ -1,4 +1,4 @@
-//! The push remote: a backup of the base branch, in local mode (bullpen/push_remote.py).
+//! The push remote: a backup of the base branch, in local mode.
 //!
 //! config --push-remote names a remote (not origin: with origin, bullpen is in remote
 //! mode and the setting does nothing). After accept merges into the local base branch,

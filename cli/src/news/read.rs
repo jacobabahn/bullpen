@@ -1,4 +1,4 @@
-//! `bullpen news` (bullpen/news.py's cmd_news): print the news logged for this
+//! `bullpen news`: print the news logged for this
 //! coordinator since the last time, once each, moving its cursor past it; `--follow`
 //! keeps going, as Claude Code's Monitor tool runs it.
 //!

@@ -1,4 +1,4 @@
-//! A worker's `ready` (bullpen/ready.py): publish the branch (pushed with a PR, or a
+//! A worker's `ready`: publish the branch (pushed with a PR, or a
 //! local branch), then review it or mark it ready; its `finish`, for a task with
 //! nothing to merge; and the summary a worker or reviewer gives.
 

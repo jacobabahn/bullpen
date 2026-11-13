@@ -197,13 +197,3 @@ class QueueTest(BullpenTest):
         self.ask("BP-1", "Which one?")
         self.assertEqual(self.show("BP-1")["status"], "needs")
         self.assertEqual(self.show("BP-3")["status"], "todo")
-
-    def test_the_queue_moves_by_bullpen_queue(self):
-        # what a save that frees a slot runs once its command is done (at later-time)
-        dep = self.done_dependency()  # BP-1
-        self.bp("add", "Next", "--brief", "x", "--after", dep)  # BP-2: added after BP-1 was done
-        self.assertEqual(self.show("BP-2")["status"], "todo")
-        self.bp("_queue", "--repo", str(self.repo), "--by", dep, "--how", "accepted")
-        self.assertEqual(self.show("BP-2")["status"], "working")
-        log = next((self.tmp / "state" / "repos").iterdir()) / "news.log"
-        self.assertIn(f"bullpen · BP-2 started ({dep} was accepted)", log.read_text())

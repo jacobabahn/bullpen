@@ -1,16 +1,14 @@
-//! The run queue (bullpen/start.py): when a task frees a slot or closes, the queue
+//! The run queue: when a task frees a slot or closes, the queue
 //! starts each todo task that has dependencies, all done, within max_running. Only
 //! working tasks take a slot: a reviewer is short and cheap. A task sent back from
 //! review works, and counts, again, even if that puts the count over max_running: it's
 //! finishing work already started, and the queue just starts nothing more until the
 //! count is under the limit.
 //!
-//! A Rust save moves it at later-time (saves.rs). Python's saves move it through
-//! `bullpen _queue` (bullpen/saves.py), which reads the tasks fresh from disk.
+//! A save that frees a slot moves it at later-time (saves.rs).
 
 use super::by_id;
 use super::launch::start_task;
-use crate::args::{value, Arg, Args};
 use crate::coordinators::session_for;
 use crate::limit::{limit_active, limit_phrase};
 use crate::news::{news, say, Opts};
@@ -18,12 +16,6 @@ use bullpen_core::json::{s, truthy, Obj};
 use bullpen_core::task::{clip, task_num};
 use bullpen_core::words::open_deps;
 use bullpen_core::{Fail, Repo, Res};
-
-const QUEUE: &[Arg] = &[
-    value("--repo", "REPO", ""),
-    value("--by", "BY", ""),
-    value("--how", "HOW", ""),
-];
 
 /// The tasks that take a max_running slot: those working (not in review).
 fn running_count(tasks: &[Obj]) -> i64 {
@@ -102,25 +94,6 @@ pub fn start_queued(repo: &Repo, by: &Obj, how: &str) -> Res<()> {
         }
     }
     Ok(())
-}
-
-/// `_queue` (internal): start what the queue can, now that task --by freed a slot
-/// (--how). Python's saves run it at later-time; it reads the tasks fresh from disk, as
-/// the save that set it off is done.
-pub fn cmd_queue(argv: &[String]) -> Res<i32> {
-    let a = Args::parse("_queue", argv, QUEUE);
-    let missing: Vec<&str> = ["--repo", "--by", "--how"]
-        .into_iter()
-        .filter(|o| a.opt(o).is_none())
-        .collect();
-    if !missing.is_empty() {
-        let msg = format!("the following arguments are required: {}", missing.join(", "));
-        crate::args::usage_error("_queue", QUEUE, &msg);
-    }
-    let repo = Repo::new(a.opt("--repo").unwrap_or(""))?;
-    let by = repo.task(a.opt("--by").unwrap_or(""))?;
-    start_queued(&repo, &by, a.opt("--how").unwrap_or(""))?;
-    Ok(0)
 }
 
 #[cfg(test)]

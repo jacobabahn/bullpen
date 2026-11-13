@@ -1,4 +1,4 @@
-//! Closing a task (bullpen/close.py): the one close step that accept, close, drop and
+//! Closing a task: the one close step that accept, close, drop and
 //! finish's auto-accept share, and the `close` and `drop` commands.
 
 use crate::agents::pane;

@@ -1,4 +1,4 @@
-//! The rules every worker and reviewer gets (bullpen/rules.py): the repo's
+//! The rules every worker and reviewer gets: the repo's
 //! .bullpen/rules.md as committed, then the person's own, and the `rules` command.
 
 use crate::args::{flag, Args};

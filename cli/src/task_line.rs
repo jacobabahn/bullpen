@@ -1,4 +1,4 @@
-//! One task line, as the board says it, for `ls` and `show` (bullpen/task_line.py, whose
+//! One task line, as the board says it, for `ls` and `show` (its
 //! words are core's words.rs): its mark, ID, title, age and the board's sentence.
 
 use bullpen_core::json::{s, Obj};

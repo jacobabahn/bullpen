@@ -1,4 +1,4 @@
-//! A worktree's hooks (bullpen/hooks.py): the repo's config.json `setup` or `teardown`,
+//! A worktree's hooks: the repo's config.json `setup` or `teardown`,
 //! else .bullpen/<name>.sh as committed on the task's base, run in the worktree: setup
 //! in a new one, teardown before it goes (remove_worktree, close's).
 

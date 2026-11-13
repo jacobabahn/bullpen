@@ -1,6 +1,6 @@
-//! News for the coordinators (bullpen/news.py): a news line, logged, and the outboxes
+//! News for the coordinators: a news line, logged, and the outboxes
 //! the watcher types into their panes. `bullpen news` (one-off and `--follow`) is in
-//! read.rs. Python keeps its own `news()` (a twin) for the commands it still runs.
+//! read.rs.
 
 pub mod read;
 

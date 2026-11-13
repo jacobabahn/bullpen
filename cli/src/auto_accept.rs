@@ -1,4 +1,4 @@
-//! A reviewer's `verdict` (bullpen/auto_accept.py): approve the task, or send its
+//! A reviewer's `verdict`: approve the task, or send its
 //! findings back to the worker. With auto-accept (`config --auto-accept on`), an
 //! approve verdict runs the normal accept itself (`_auto_accept`): the person said in
 //! advance that an approval is enough. A task's own "auto_accept" (`add`/`start

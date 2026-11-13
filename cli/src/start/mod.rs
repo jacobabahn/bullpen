@@ -1,4 +1,4 @@
-//! Tasks and what they wait on (bullpen/start.py): `add`, `after`, `model` and
+//! Tasks and what they wait on: `add`, `after`, `model` and
 //! `review-mode`, the dependencies, and how a save moves the run queue (slot_freed).
 //! Starting, resuming and telling a worker are in launch.rs; the queue in queue.rs.
 //!

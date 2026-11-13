@@ -1,5 +1,5 @@
 //! After an accept: bringing the other open tasks on the same base up to date
-//! (bullpen/accept.py's rebase_others). A working agent is told to rebase when the
+//!. A working agent is told to rebase when the
 //! accepted change meets its work, one between turns is rebased, and a running review
 //! is left be. One news line sums it up. Off with `config --rebase-others off`.
 

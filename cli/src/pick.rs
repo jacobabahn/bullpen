@@ -1,4 +1,4 @@
-//! `pick` (bullpen/pick.py): jump to any open task by typing part of it.
+//! `pick`: jump to any open task by typing part of it.
 
 use crate::args::{flag, value, Arg, Args};
 use crate::line_edit::{read_keys, term_size, Decoder, LineEdit, Raw, PASTE_OFF, PASTE_ON};

@@ -1,6 +1,5 @@
 //! A Rex restart brings panes back with new block IDs: `relink` finds bullpen's own
-//! again by their labels (go.relink). `go` runs it when the pane it would show is gone;
-//! Python's `up` keeps its own copy (go.py, a twin) until T5.
+//! again by their labels. `go` runs it when the pane it would show is gone.
 
 use crate::agents::{is_limited, whose_turn};
 use crate::coordinators::alive;

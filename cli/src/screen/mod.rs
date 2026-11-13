@@ -1,5 +1,4 @@
-//! What Claude Code's screen in a pane says (bullpen/events.py, check.py and answer.py's
-//! screen reading): a background shell of its own still running, compacting, what it is
+//! What Claude Code's screen in a pane says: a background shell of its own still running, compacting, what it is
 //! doing (a spinner, a question, its prompt), and the prompt it is at (prompt.rs). The
 //! Python's regexes are matched by hand.
 

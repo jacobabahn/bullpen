@@ -1,4 +1,4 @@
-//! `check` (bullpen/check.py): each task's status against what its agent is doing now,
+//! `check`: each task's status against what its agent is doing now,
 //! and the events it missed.
 //!
 //! A task's status follows its agent's events; a missed one (a watcher or Rex restart, a

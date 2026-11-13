@@ -1,4 +1,4 @@
-//! doctor: is everything bullpen needs in place? (bullpen/doctor.py)
+//! doctor: is everything bullpen needs in place?
 //!
 //! Each check (checks.rs) returns (state, what it found): "ok", "fail" (with the fix in
 //! the text) or "skip" (it doesn't apply, or can't be told). `doctor` runs them all; `up`

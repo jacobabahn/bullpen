@@ -1,9 +1,9 @@
-//! Local mode and remote mode (bullpen/modes.py): the steps that differ between them.
+//! Local mode and remote mode: the steps that differ between them.
 //! A task's mode is the one recorded when it was published (`local`), else the repo's
 //! (an origin remote: remote mode). Here: what a task's branch is compared with,
 //! publishing it (`ready`), merging it and what follows (`accept`), pushing it again
 //! after a rebase (refresh), withdrawing it (close and drop), and the one way to push
-//! (quiet_git, push_base). Python keeps task_base_ref in its modes.py (a twin).
+//! (quiet_git, push_base).
 
 use crate::jobs::{background, Job};
 use bullpen_core::json::{get, obj, py_str, s, truthy, Obj};

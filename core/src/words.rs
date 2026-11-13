@@ -1,5 +1,4 @@
-//! What the board says about a task, for `ls`, `show` and the board (bullpen/task_line.py's
-//! words, with what they need of agents.py and start.py): its mark, the board's order, its
+//! What the board says about a task, for `ls`, `show` and the board: its mark, the board's order, its
 //! age, and the board's sentence for where it stands. Change one, change the board's
 //! (board/src/model/), until T14 puts the board on this.
 

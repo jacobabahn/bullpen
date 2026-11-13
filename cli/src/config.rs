@@ -1,4 +1,4 @@
-//! `config` (bullpen/config.py): showing and changing settings, the repo's and the
+//! `config`: showing and changing settings, the repo's and the
 //! global ones. Its flags come from core's settings table, one per setting that has one.
 
 use crate::args::{flag, usage_error, value, Arg, Args};

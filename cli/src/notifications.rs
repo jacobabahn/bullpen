@@ -1,6 +1,5 @@
-//! The person's notifications (bullpen/notifications.py): when a task comes to need
-//! them, or (notify all) is ready or done. Python keeps its own `notify` (a twin) for
-//! the saves it still makes.
+//! The person's notifications: when a task comes to need
+//! them, or (notify all) is ready or done.
 //!
 //! A task that comes to need the person (a prompt, `ask`, a triage escalated), and with
 //! notify "all" one that is ready, finished or auto-accepted, gets a native

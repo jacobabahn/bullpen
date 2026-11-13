@@ -1,7 +1,6 @@
-//! Where a worker's, reviewer's or diff's pane lives (bullpen/panes.py): one placement
+//! Where a worker's, reviewer's or diff's pane lives: one placement
 //! each, with the same steps (place, show, hide, find), so the code that makes, shows,
-//! hides or finds a pane again never asks which one it is. Python keeps its own
-//! panes.py (a twin) for launch, review and `up`.
+//! hides or finds a pane again never asks which one it is.
 //!
 //! A view is the session's, as `rex_view` gives it (None when Rex can't say). Finding a
 //! background pane notes the session's detached blocks in it ("detached"), and making a

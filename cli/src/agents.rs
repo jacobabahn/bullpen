@@ -1,4 +1,4 @@
-//! A task's agents (bullpen/agents.py): its worker and its reviewer, where each one's
+//! A task's agents: its worker and its reviewer, where each one's
 //! pane is, and the one the task waits on. A session or block Python has as None is "".
 
 use bullpen_core::json::{obj, py_str, s, truthy, Obj};

@@ -1,6 +1,6 @@
-//! Rex (bullpen/rex.py): running its commands, and finding, typing into and closing
+//! Rex: running its commands, and finding, typing into and closing
 //! panes. A session or block that Python has as None is "" here: Rex is given `-s` only
-//! for a session there is. Python keeps its own rex.py (a twin) for its callers.
+//! for a session there is.
 
 use bullpen_core::fail::Res;
 use bullpen_core::json::{py_str, s, truthy, Obj};

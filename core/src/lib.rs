@@ -1,6 +1,6 @@
-//! bullpen-core: what bullpen's command line and its board share. The Rust twin of
-//! bullpen/core.py: paths, the settings table, a repo's config and tasks, a task's
-//! status, and Python's ways with JSON, text, time and programs, so both write the same.
+//! bullpen-core: what bullpen's command line and its board share: paths, the settings
+//! table, a repo's config and tasks, a task's status, and the Python's ways with JSON,
+//! text, time and programs (bullpen was Python first), so the files it writes stay the same.
 
 pub mod config;
 pub mod fail;

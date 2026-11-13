@@ -1,4 +1,4 @@
-//! The usage limit (bullpen/limit.py): is one in force and when it resets (for `start`
+//! The usage limit: is one in force and when it resets (for `start`
 //! and the run queue), and reading one off an agent's turn or screen, what the task
 //! and <state>/limit.json then hold until it resets (for the watcher's events).
 //!

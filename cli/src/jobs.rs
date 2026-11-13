@@ -1,4 +1,4 @@
-//! bullpen's background jobs (bullpen/jobs.py): the push, the build, an auto-accept, a
+//! bullpen's background jobs: the push, the build, an auto-accept, a
 //! tour, a gone coordinator's look. Each is started so that it outlives the command and
 //! the pane it runs in, with its output in a log and its failure in the news.
 //!

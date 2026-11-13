@@ -1,4 +1,4 @@
-//! Accepting a ready task (bullpen/accept.py): merging it, closing it, then what follows
+//! Accepting a ready task: merging it, closing it, then what follows
 //! the merge, each step on its own (a failed one is said, and the rest still run).
 //! Rebasing the other tasks onto the moved base is rebase.rs.
 //!

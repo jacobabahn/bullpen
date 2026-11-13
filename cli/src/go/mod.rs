@@ -1,4 +1,4 @@
-//! Getting around (bullpen/go.py): `go`, `hide` and `adopt`, and putting a repo's panes
+//! Getting around: `go`, `hide` and `adopt`, and putting a repo's panes
 //! where they belong (relink.rs).
 
 pub mod relink;
