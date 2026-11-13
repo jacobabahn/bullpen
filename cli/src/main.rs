@@ -41,6 +41,7 @@ mod show;
 mod start;
 mod stops;
 mod task_line;
+mod tours;
 mod triage;
 mod up;
 mod watcher;

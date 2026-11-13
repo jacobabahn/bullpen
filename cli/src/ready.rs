@@ -7,17 +7,17 @@ use crate::close::close_task;
 use crate::modes::{is_local, publish, task_base_ref};
 use crate::news::ready_news;
 use crate::news::{news, Opts};
-use crate::review::{close_reviewer, patch_id, review_at_ready, shortstat};
+use crate::review::{close_reviewer, review_at_ready, shortstat};
 use crate::saves::save;
+use crate::tours::{tour_path, tour_stale};
 use bullpen_core::json::{obj, read_obj, s, truthy, Obj};
-use bullpen_core::proc::{git, head};
+use bullpen_core::proc::git;
 use bullpen_core::repo::repo_root;
 use bullpen_core::settings::CLOSED;
 use bullpen_core::task::{auto_accepts, commits, is_status, set_status, where_};
 use bullpen_core::text::strip;
 use bullpen_core::{fail, Fail, Repo, Res};
 use serde_json::{json, Value};
-use std::path::{Path, PathBuf};
 
 pub const SUMMARY: Arg = value("--summary", "SUMMARY", "what you did, as text");
 pub const SUMMARY_FILE: Arg = value("--summary-file", "FILE", "the same, read from a file");
@@ -211,33 +211,3 @@ pub fn first_line(summary: &str) -> String {
     let line = bullpen_core::text::splitlines(summary).first().copied().unwrap_or("");
     strip(strip(line).trim_start_matches('#')).to_string()
 }
-
-/// The task's tour (tours.py's tour_path).
-fn tour_path(repo: &Repo, t: &Obj) -> PathBuf {
-    repo.dir.join("briefs").join(format!("{}.tour.json", s(t, "id")))
-}
-
-/// Why the tour no longer shows the task's code, or None while it does: the same
-/// commit, or the same patch (after a clean rebase, as approvals carry over).
-fn tour_stale(repo: &Repo, t: &Obj, tour: &Obj) -> Res<Option<String>> {
-    let wt = s(t, "worktree");
-    if wt.is_empty() || !Path::new(wt).is_dir() {
-        return Ok(None); // nothing to compare with: the tour is all there is
-    }
-    let commit = s(tour, "commit");
-    if head(wt)? == commit {
-        return Ok(None);
-    }
-    let patch = patch_id(wt, &task_base_ref(repo, t)?)?;
-    if patch.map_or(Value::Null, Value::from) == tour.get("patch").cloned().unwrap_or(Value::Null) {
-        return Ok(None);
-    }
-    let short: String = commit.chars().take(12).collect();
-    Ok(Some(format!(
-        "the code changed since the tour was written (on {short})"
-    )))
-}
-
-#[cfg(test)]
-#[path = "test_ready.rs"]
-mod tests;

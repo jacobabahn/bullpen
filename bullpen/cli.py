@@ -11,7 +11,7 @@ from . import core
 from .core import Fail, run_later
 
 # The modules with commands (cli/src/commands.rs lists their commands in `bullpen --help`'s order).
-MODULES = ("accept", "stepper", "tours",
+MODULES = ("accept", "stepper",
            "auto_accept",
            "keys", "prs")
 
@@ -21,8 +21,7 @@ MODULES = ("accept", "stepper", "tours",
 # another against the Rust entry's table (cli/src/commands.rs): a command is one side's.
 COMMANDS = {
     "accept": "accept",
-    "tour": "stepper", "_tour": "stepper",
-    "tour-comment": "tours",
+    "tour": "stepper",
     "_auto_accept": "auto_accept",
     "keys": "keys",
     "_prs": "prs",

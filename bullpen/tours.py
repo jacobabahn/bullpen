@@ -1,19 +1,16 @@
-"""Guided review tours: writing a tour of a ready task's change, and the person's
-comments on its steps. The stepper (stepper.py) reads them on the board.
+"""Guided review tours, for the stepper (stepper.py): a tour's state and diff, and the
+person's comments on its steps. The Rust bullpen writes tours (`_tour`, cli/src/tours/)
+and owns `tour-comment`; this is the stepper's twin of what it needs, until T11b.
 """
 
 import json
 import os
 import re
-import shlex
 import subprocess
 import sys
 from pathlib import Path
 
-from .core import (
-    Fail, PROMPTS, Repo, SELF, clip, command, git, head, is_claude, is_status, merge_base,
-    model_in, now, read_json, repo_root, resolve, with_model, write_json,
-)
+from .core import Fail, SELF, clip, git, head, is_status, merge_base, now, read_json, write_json
 from .jobs import background
 from .modes import task_base_ref
 from .news import tell_coordinator
@@ -34,23 +31,6 @@ from .review import close_reviewer, patch_id
 # findings-style file; its next ready gets a review of them that doesn't count toward
 # review_rounds. t["tour"] says whether a tour is being written ("writing", with the
 # pid writing it), was written, or failed (with why).
-
-TOUR_TOOLS = ["Read", "Grep", "Glob", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
-              "Bash(git status:*)", "Bash(git blame:*)", "Bash(git ls-files:*)"]
-TOUR_TIMEOUT = 20 * 60  # seconds before a tour agent counts as failed
-MAX_TOUR_DIFF_LINES = 3000  # longer, and the agent reads the diff with git itself
-TOUR_ATTEMPTS = 2  # an answer that isn't a tour is asked for once more
-# the answer's shape, for claude's structured output (--json-schema); tour_steps checks the rest
-TOUR_SCHEMA = {"type": "object", "required": ["steps"], "properties": {"steps": {
-    "type": "array", "minItems": 1, "items": {
-        "type": "object", "required": ["title", "note", "hunks"], "properties": {
-            "title": {"type": "string"}, "note": {"type": "string"}, "hunks": {
-                "type": "array", "items": {
-                    "type": "object", "required": ["file"], "properties": {
-                        "file": {"type": "string"},
-                        "lines": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2}}}}}}}}}
-OTHER_CHANGES = "Other changes"
-
 
 def tour_path(repo, t):
     return repo.dir / "briefs" / f"{t['id']}.tour.json"
@@ -119,12 +99,6 @@ def span(start_count):
     return start, start + max(count, 1) - 1
 
 
-def lines_of(f, h):
-    """The lines a hunk covers, as the tour names them: in the new file, or in the old
-    one for a deleted file."""
-    return list(span(h["old"] if f["deleted"] else h["new"]))
-
-
 def covers(ref, f, h):
     """Does a tour's hunk reference {"file", "lines"} cover hunk h of file f?"""
     if ref["file"] != f["file"]:
@@ -136,243 +110,6 @@ def covers(ref, f, h):
     if f["deleted"] or h["new"][1] == 0:
         sides.append(h["old"])  # lines it only removes are named by their old numbers
     return any(a <= hi and lo <= b for lo, hi in map(span, sides))
-
-
-def ref_lines(v):
-    """A hunk reference's lines, as [start, end]: from [a, b], [a], a or "a-b". None for
-    the whole file. Raises ValueError for anything else."""
-    if v is None:
-        return None
-    if isinstance(v, str):
-        v = [int(x) for x in v.split("-", 1)]
-    if isinstance(v, int) and not isinstance(v, bool):
-        v = [v]
-    if not isinstance(v, list) or not 1 <= len(v) <= 2 or not all(type(x) is int for x in v):
-        raise ValueError(f"lines must be [start, end], not {json.dumps(v)}")
-    a, b = v[0], v[-1]
-    return [min(a, b), max(a, b)]
-
-
-def json_objects(text):
-    """Every JSON object in text, in order, outermost ones only: an agent may wrap its
-    answer in a code fence or a sentence, or follow it with a corrected one."""
-    dec, out, i = json.JSONDecoder(), [], text.find("{")
-    while i >= 0:
-        try:
-            obj, end = dec.raw_decode(text, i)
-        except ValueError:
-            i = text.find("{", i + 1)
-            continue
-        out.append(obj)
-        i = text.find("{", end)
-    return out
-
-
-def parse_tour(answer, files):
-    """The checked steps of an agent's answer (claude's structured output, or text):
-    the text as JSON, else the last JSON object in it that is a tour. Raises ValueError
-    for an answer with no tour. Returns (steps, references dropped, a note on any text
-    around the tour, else None)."""
-    if isinstance(answer, dict):
-        return (*tour_format(answer, files), None)
-    text = answer.strip()
-    try:
-        data = json.loads(text)
-    except ValueError:
-        pass
-    else:
-        return (*tour_format(data, files), None)
-    objs = json_objects(text)
-    if not objs:
-        raise ValueError("its tour doesn't parse (no JSON object in its output)")
-    first = None
-    for obj in reversed(objs):
-        try:
-            steps, dropped = tour_format(obj, files)
-        except ValueError as e:
-            first = first or e
-            continue
-        return steps, dropped, (f"its answer had text around the tour ({len(objs)} JSON objects): "
-                                "the last one that is a tour was used")
-    raise first
-
-
-def tour_format(data, files):
-    """tour_steps, with its error saying the tour isn't in the format."""
-    try:
-        return tour_steps(data, files)
-    except ValueError as e:
-        raise ValueError(f"its tour isn't in the format: {e}")
-
-
-def tour_steps(data, files):
-    """The steps of an agent's tour, checked, with only the hunk references that match
-    the diff, then "Other changes" for each hunk no step covers. Raises ValueError for
-    a tour that isn't the format. Returns (steps, references dropped)."""
-    steps = data.get("steps") if isinstance(data, dict) else None
-    if not isinstance(steps, list) or not steps:
-        raise ValueError("it has no list of steps")
-    out, dropped, covered = [], [], set()
-    for i, s in enumerate(steps, 1):
-        if not isinstance(s, dict) or not isinstance(s.get("title"), str) or not s["title"].strip():
-            raise ValueError(f"step {i} has no title")
-        if not isinstance(s.get("note", ""), str) or not isinstance(s.get("hunks", []), list):
-            raise ValueError(f"step {i}'s note must be text and its hunks a list")
-        refs = []
-        for r in s.get("hunks", []):
-            if not isinstance(r, dict) or not isinstance(r.get("file"), str):
-                raise ValueError(f"step {i} has a hunk with no file")
-            try:
-                ref = {"file": r["file"], "lines": ref_lines(r.get("lines"))}
-            except ValueError as e:
-                raise ValueError(f"step {i}: {e}")
-            hit = {(fi, hi) for fi, f in enumerate(files) for hi, h in enumerate(f["hunks"] or [None])
-                   if (covers(ref, f, h) if h else ref["file"] == f["file"])}
-            if not hit:
-                dropped.append(f"step {i}: {r['file']} {ref['lines'] or ''}".rstrip())
-                continue
-            covered |= hit
-            refs.append(ref if ref["lines"] else {"file": ref["file"]})
-        out.append({"title": " ".join(s["title"].split()), "note": s.get("note", "").strip(), "hunks": refs})
-    rest = []
-    for fi, f in enumerate(files):
-        if not f["hunks"]:
-            if (fi, 0) not in covered:
-                rest.append({"file": f["file"]})
-            continue
-        rest += [{"file": f["file"], "lines": lines_of(f, h)} for hi, h in enumerate(f["hunks"])
-                 if (fi, hi) not in covered]
-    if rest:
-        out.append({"title": OTHER_CHANGES, "note": "The changes no step above covers.", "hunks": rest})
-    return out, dropped
-
-
-def tour_inputs(repo, t, base_ref, files):
-    """What the tour agent is given (PRD 7): the brief, the worker's summary, the review
-    findings, the diff (or how to get it) and its hunks."""
-    briefs = repo.dir / "briefs"
-    brief = briefs / f"{t['id']}.md"
-    findings = sorted(briefs.glob(f"{t['id']}.review-*.findings.md"),
-                      key=lambda p: int(re.search(r"review-(\d+)", p.name).group(1)))
-    found = "\n\n".join(f"### {p.name}\n\n{p.read_text().strip()}" for p in findings) or "(none)"
-    wt = t["worktree"]
-    diff = git(wt, "diff", "--no-color", f"{base_ref}...HEAD").stdout.rstrip("\n")
-    if len(diff.split("\n")) > MAX_TOUR_DIFF_LINES:
-        diff = f"({len(diff.splitlines())} lines, too long to include: run the command)"
-    hunks = "\n".join(f"- {f['file']}" + (" (binary)" if not f["hunks"] else
-                                          ": " + ", ".join("{}-{}".format(*lines_of(f, h)) for h in f["hunks"]))
-                      for f in files)
-    return dict(id=t["id"], title=t["title"], worktree=wt, base_ref=base_ref,
-                brief=brief.read_text().strip() if brief.exists() else "(none)",
-                summary=t.get("summary") or "(none)", findings=found, diff=diff, hunks=hunks)
-
-
-def tour_command(repo):
-    """The tour agent's argv: headless, on tour_model, with read-only tools."""
-    cmd = with_model(repo.cfg["tour"], repo.cfg["tour_model"])
-    if not is_claude(cmd):
-        return resolve(cmd)
-    return resolve(cmd) + ["-p", "--output-format", "json", "--no-session-persistence",
-                           "--permission-mode", "dontAsk", "--tools", "Read,Grep,Glob,Bash",
-                           "--allowedTools", *TOUR_TOOLS,
-                           "--json-schema", json.dumps(TOUR_SCHEMA, separators=(",", ":"))]
-
-
-def tour_answer(out):
-    """A tour agent's answer: claude's structured output (a dict) when it has one, else
-    its text. Raises ValueError for an agent error."""
-    try:
-        r = json.loads(out)
-    except ValueError:
-        r = None
-    if isinstance(r, dict) and r.get("type") == "result" and isinstance(r.get("structured_output"), dict):
-        agent_result(out)  # an error is still an error
-        return r["structured_output"]
-    return agent_result(out)
-
-
-def agent_result(out):
-    """The text of a headless claude's answer: its --output-format json result, or the
-    output as it is from another agent. Raises ValueError for an agent error."""
-    try:
-        r = json.loads(out)
-    except ValueError:
-        return out
-    if isinstance(r, dict) and r.get("type") == "result":
-        if r.get("is_error"):
-            raise ValueError(f"the agent failed: {clip(str(r.get('result') or r.get('subtype')), 160)}")
-        return r.get("result") or ""
-    return out
-
-
-def write_tour(repo, tid, on_written=None):
-    """Run the tour agent on the task's code now and write its tour. Returns the tour
-    file, or raises Fail with why it failed (the task records that). If the person
-    asked on the board to open it once written, on_written(repo, t, opener) does."""
-    t = repo.task(tid)
-    wt = t.get("worktree")
-    log = tour_log(repo, t)
-    try:
-        if not wt or not Path(wt).is_dir():
-            raise ValueError("the task has no worktree")
-        base_ref = task_base_ref(repo, t)
-        commit, base = head(wt), merge_base(wt, base_ref)
-        files = diff_files(wt, base, commit)
-        if not files:
-            raise ValueError(f"it has no changes against {base_ref}")
-        prompt = (PROMPTS / "tour.md").read_text().format(**tour_inputs(repo, t, base_ref, files))
-        argv = tour_command(repo)
-        for attempt in range(1, TOUR_ATTEMPTS + 1):
-            answer = tour_answer(run_tour_agent(argv, prompt, wt, log, attempt))
-            try:
-                steps, dropped, extra = parse_tour(answer, files)
-                break
-            except ValueError as e:
-                if attempt == TOUR_ATTEMPTS:
-                    raise
-                with log.open("a") as f:
-                    f.write(f"{now()} attempt {attempt}: {e}; asking again\n\n")
-        with log.open("a") as f:
-            if extra:
-                f.write(extra + "\n")
-            if dropped:
-                f.write("hunks that match nothing in the diff, left out: " + "; ".join(dropped) + "\n")
-    except ValueError as e:
-        tour_failed(repo, tid, str(e))
-        raise Fail(f"{tid}'s tour failed: {e} (log: {log})")
-    path = tour_path(repo, t)
-    write_json(path, {"task": t["id"], "commit": commit, "base": base, "base_ref": base_ref,
-                      "patch": patch_id(wt, base_ref), "written": now(),
-                      "model": model_in(tour_command(repo)), "steps": steps})
-    t = repo.task(tid)  # read again: it may have changed while the agent ran
-    opener = (t.get("tour") or {}).get("open")
-    t["tour"] = {"state": "written", "at": now(), "commit": commit}
-    if (t.get("note") or "").startswith("tour failed"):
-        t["note"] = None
-    write_json(repo.task_path(tid), t)  # not save_task: the status didn't change
-    if opener and on_written:
-        on_written(repo, t, opener)
-    return path
-
-
-def run_tour_agent(argv, prompt, wt, log, attempt):
-    """Run the tour agent once, its output in the log (a new log on the first attempt).
-    Returns its stdout, or raises ValueError if it didn't finish."""
-    with log.open("w" if attempt == 1 else "a") as f:
-        f.write(f"{now()} attempt {attempt}: {shlex.join(argv)}\n(the prompt on stdin: {len(prompt)} characters)\n\n")
-    try:
-        p = subprocess.run(argv, cwd=wt, input=prompt, text=True, capture_output=True,
-                           timeout=TOUR_TIMEOUT)
-    except FileNotFoundError:
-        raise ValueError(f"{argv[0]} isn't installed")
-    except subprocess.TimeoutExpired:
-        raise ValueError(f"the agent took over {TOUR_TIMEOUT // 60} minutes")
-    with log.open("a") as f:
-        f.write(f"exit {p.returncode}\n--- stdout\n{p.stdout}\n--- stderr\n{p.stderr}\n")
-    if p.returncode != 0:
-        last = (p.stderr or p.stdout).strip().splitlines()
-        raise ValueError(f"the agent exited with {p.returncode}: {clip(last[-1] if last else 'no output', 120)}")
-    return p.stdout
 
 
 def tour_failed(repo, tid, why):
@@ -465,10 +202,10 @@ def tour_status(t):
                    f"ready or in review, whose code isn't changing")
 
 
-def start_tour(repo, t, wait, opener=None, on_written=None):
-    """Write a tour of the task: now (wait), or by a process of its own in the background.
-    t["tour"] says it's being written, with that process's pid, so the board can show it.
-    With opener ({"session", "from"}), the stepper opens there once it's written."""
+def start_tour(repo, t, wait, opener=None):
+    """Write a tour of the task (`_tour`): now (wait), or by a process of its own in the
+    background. t["tour"] says it's being written, with that process's pid, so the board
+    can show it. With opener ({"session", "from"}), the stepper opens there once it's written."""
     if not t.get("worktree") or not Path(t["worktree"]).is_dir():
         raise Fail(f"{t['id']} has no worktree, so there's nothing to tour")
     t["tour"] = {"state": "writing", "at": now(), "pid": os.getpid(), **({"open": opener} if opener else {})}
@@ -476,7 +213,15 @@ def start_tour(repo, t, wait, opener=None, on_written=None):
         t["note"] = None
     write_json(repo.task_path(t["id"]), t)
     if wait:
-        return write_tour(repo, t["id"], on_written)
+        subprocess.run([SELF, "_tour", t["id"]], cwd=repo.root, stdin=subprocess.DEVNULL)
+        run_ = repo.task(t["id"]).get("tour") or {}
+        if run_.get("state") == "written":
+            return tour_path(repo, t)
+        why = run_.get("why")
+        if run_.get("state") != "failed":
+            why = "its writer stopped before the tour was written"
+            tour_failed(repo, t["id"], why)
+        raise Fail(f"{t['id']}'s tour failed: {why} (log: {tour_log(repo, t)})")
     t["tour"]["pid"] = background([SELF, "_tour", t["id"]], repo.root, repo.dir / "jobs.log",
                                   f"Writing {t['id']}'s tour", t["id"])
     write_json(repo.task_path(t["id"]), t)
@@ -519,34 +264,6 @@ def show_tour(repo, t, args):
 
 def read_comments(repo, t):
     return read_json(comments_path(repo, t)) or {"next": 1, "comments": []}
-
-
-def cmd_tour_comment(args):
-    """Draft comments on a tour's steps: add one, list them, or remove one."""
-    repo = Repo(repo_root())
-    t = repo.task(args.id)
-    c = read_comments(repo, t)
-    if args.remove is not None:
-        left = [x for x in c["comments"] if x["id"] != args.remove]
-        if len(left) == len(c["comments"]):
-            raise Fail(f"{t['id']} has no draft comment {args.remove}")
-        c["comments"] = left
-        write_json(comments_path(repo, t), c)
-        print(f"removed comment {args.remove} from {t['id']}")
-        return
-    if args.step is None:
-        if args.json:
-            print(json.dumps(c["comments"], indent=2))
-            return
-        for x in c["comments"]:
-            print(f"{x['id']:>3}. step {x['step']} ({x['title']}): {x['text']}")
-        if not c["comments"]:
-            print(f"{t['id']} has no draft comments")
-        return
-    text = " ".join(args.text or []).strip()
-    if not text:
-        raise Fail("say what the comment is")
-    print(add_comment(repo, t, args.step, text))
 
 
 def add_comment(repo, t, step, text):
@@ -614,14 +331,3 @@ def send_comments(repo, t):
         return
     tell_coordinator(repo, t, "tour-sent", f"{t['id']} sent back by the person after the tour: {said}")
     print(f"sent {said} to {t['id']}'s worker ({path})")
-
-
-def commands(sub):
-    """This module's commands, for bullpen's parser."""
-    p = command(sub, "tour-comment", cmd_tour_comment, "You",
-                help="draft comments on a tour's steps: add, list (no STEP) or remove")
-    p.add_argument("id", help="the task, like BP-3")
-    p.add_argument("step", nargs="?", type=int, help="the step the comment is on")
-    p.add_argument("text", nargs="*", help="the comment (mention a line in it to point at one)")
-    p.add_argument("--remove", type=int, metavar="N", help="remove draft comment N")
-    p.add_argument("--json", action="store_true", help="list them as JSON")

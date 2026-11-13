@@ -13,7 +13,7 @@ import time
 import tty
 from pathlib import Path
 
-from .core import (Fail, Repo, SELF, TERMINAL, clip, command, load_savers, now, read_json, repo_root,
+from .core import (Fail, Repo, SELF, TERMINAL, command, load_savers, now, read_json, repo_root,
                    write_json)
 from .rex import (
     find_pane, find_panes, rex_alive, rex_api, rex_close, rex_focus, rex_view, set_layer,
@@ -23,8 +23,7 @@ from .coordinators import home_of
 from .line_edit import LineEdit, PASTE_OFF, PASTE_ON, read_keys
 from .tours import (
     add_comment, comments_path, read_comments, send_comments, show_tour, start_tour, step_diff,
-    step_files, tour_diff, tour_failed, tour_log, tour_path, tour_stale, tour_state,
-    tour_status, write_tour,
+    step_files, tour_diff, tour_log, tour_path, tour_stale, tour_state, tour_status,
 )
 
 
@@ -79,15 +78,6 @@ def open_stepper(repo, t, session, from_block=None):
         spec["window_id"] = where[0]
     r = rex_api(session, "session.new_layer", spec)
     set_layer(session, r["layer_id"], "normal", focus=True)
-
-
-def open_when_written(repo, t, opener):
-    """The tour the person asked for on the board is written: open it where they asked."""
-    try:
-        open_stepper(repo, t, opener.get("session"), opener.get("from"))
-    except Exception as e:  # the tour is written all the same: g opens it
-        with tour_log(repo, t).open("a") as f:
-            f.write(f"{now()} couldn't open the tour: {e}\n")
 
 
 STEP_NEXT = ("n", "l", "\x1b[C", "\x1bOC")  # n, l, →
@@ -507,26 +497,11 @@ def cmd_tour(args):
         print(f"{t['id']}'s tour is stale: {why}. `bullpen tour {t['id']} --new` writes a new "
               f"one; this is the old one:", file=sys.stderr)
         return written()
-    out = start_tour(repo, t, args.wait, on_written=open_when_written)
+    out = start_tour(repo, t, args.wait)
     if out:
         return written()
     print(f"writing a tour of {t['id']} in the background ({repo.cfg.get('tour_model') or 'default model'}); "
           f"`bullpen tour {t['id']}` {shown} once it's done")
-
-
-def cmd_tour_bg(args):
-    """(bullpen) write a task's tour, away from whoever asked for it."""
-    repo = Repo(repo_root())
-    t = repo.task(args.id)
-    t.setdefault("tour", {})["pid"] = os.getpid()  # this process writes it, whoever started it
-    write_json(repo.task_path(t["id"]), t)
-    try:
-        write_tour(repo, args.id, open_when_written)
-    except Fail:
-        return 1  # recorded on the task
-    except Exception as e:  # anything else is a failure too, never a tour left "writing"
-        tour_failed(repo, args.id, clip(f"{type(e).__name__}: {e}", 160))
-        return 1
 
 
 def commands(sub):
@@ -552,6 +527,3 @@ def commands(sub):
     p.add_argument("--from", dest="from_block", default=os.environ.get("REX_BLOCK"),
                    help="with --pane: the pane whose window it opens over (default: this one)")
     p.add_argument("--session", help="with --pane: the session you're in")
-
-    p = command(sub, "_tour", cmd_tour_bg)
-    p.add_argument("id")
