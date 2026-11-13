@@ -54,7 +54,9 @@ pub fn cmd_ok(argv: &[String]) -> Res<i32> {
             ));
         }
     } else if !running(&t, None)? {
-        return fail(format!("{id}'s worker isn't running: `bullpen resume {id}` restarts it"));
+        return fail(format!(
+            "{id}'s worker isn't running: `bullpen resume {id}` restarts it"
+        ));
     }
     ok(&mut t); // `check` leaves its agent idle; its next turn clears that
     save(&repo, &mut t)?;

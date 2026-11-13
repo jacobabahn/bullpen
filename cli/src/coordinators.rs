@@ -72,7 +72,11 @@ pub fn sees_to<'a>(repo: &'a Repo, t: &Obj) -> Res<Vec<&'a Obj>> {
 /// with its owner, else the primary coordinator.
 pub fn home_of(repo: &Repo, t: &Obj) -> Res<Obj> {
     let sees = sees_to(repo, t)?;
-    let c = sees.first().copied().or_else(|| owner(repo, t)).or_else(|| primary(repo));
+    let c = sees
+        .first()
+        .copied()
+        .or_else(|| owner(repo, t))
+        .or_else(|| primary(repo));
     Ok(c.cloned().unwrap_or_default())
 }
 

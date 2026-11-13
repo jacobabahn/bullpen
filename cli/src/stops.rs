@@ -19,6 +19,9 @@ use bullpen_core::timeutil::{seconds_since, Stamp};
 use bullpen_core::{Repo, Res};
 use serde_json::{json, Value};
 
+/// How a stop's news is worded for whoever has the task now.
+type Say = Box<dyn Fn(&str) -> String>;
+
 /// The task's worker or reviewer (by) stopped (kind; why in words). A prompt needs the
 /// person. A worker whose pane is gone is stopped: resume restarts it. Anything else
 /// waits on its coordinator, or on the person when no coordinator is running to see to
@@ -34,7 +37,7 @@ pub fn stop(
     event: &str,
 ) -> Res<&'static str> {
     let m = py_str(triage_minutes(repo));
-    let (status, say_it): (&'static str, Box<dyn Fn(&str) -> String>) = if kind == "prompt" {
+    let (status, say_it): (&'static str, Say) = if kind == "prompt" {
         t.shift_remove("ask"); // the prompt is what it needs the person for now
         ("needs", Box::new(|line: &str| line.to_string()))
     } else if by == "worker" && matches!(kind, "exited" | "pane_gone") {
@@ -57,7 +60,11 @@ pub fn stop(
 /// Pass a task its coordinator didn't settle on to the person, with one news line.
 /// late: (what its why gets, why it goes now), from overdue.
 pub fn escalate(repo: &Repo, t: &mut Obj, late: &(String, String)) -> Res<()> {
-    let why = format!("{}{}", Some(s(t, "why")).filter(|w| !w.is_empty()).unwrap_or("Stopped"), late.0);
+    let why = format!(
+        "{}{}",
+        Some(s(t, "why")).filter(|w| !w.is_empty()).unwrap_or("Stopped"),
+        late.0
+    );
     set_status(t, "needs", Some(&why), None);
     save(repo, t)?;
     say(repo, t, "needs-you", &format!("{} needs the person: {why}", s(t, "id")))
@@ -74,7 +81,10 @@ pub fn overdue(repo: &Repo, t: &Obj, at: Option<Stamp>) -> Res<Option<(String, S
         return Ok(None);
     }
     if sees_to(repo, t)?.is_empty() {
-        return Ok(Some((" (no coordinator is running)".into(), "no coordinator is running".into())));
+        return Ok(Some((
+            " (no coordinator is running)".into(),
+            "no coordinator is running".into(),
+        )));
     }
     let m = triage_minutes(repo);
     let since = stamp(t).map_or_else(bullpen_core::timeutil::iso_now, String::from);

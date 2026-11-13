@@ -68,7 +68,11 @@ pub fn cmd_news(argv: &[String]) -> Res<i32> {
         }
         return fail(NOT_A_COORDINATOR);
     }
-    let name = if cid.is_empty() { "news.lock".into() } else { format!("news-{}.lock", safe(&cid)) };
+    let name = if cid.is_empty() {
+        "news.lock".into()
+    } else {
+        format!("news-{}.lock", safe(&cid))
+    };
     // One reader at a time, or lines would come twice. A second follower waits for the
     // first to go (a monitor being replaced); a one-off read doesn't.
     let Some(_lock) = bullpen_core::lock::take(&repo.dir.join(name), follow)? else {
@@ -120,7 +124,9 @@ fn say(line: &str) {
 /// Whose news it prints: the coordinator in whose pane it runs, else the primary one;
 /// "" (all news) when the repo has none.
 fn news_reader(repo: &Repo) -> String {
-    calling_coordinator(repo).or_else(|| primary(repo)).map_or(String::new(), |c| s(c, "id").to_string())
+    calling_coordinator(repo)
+        .or_else(|| primary(repo))
+        .map_or(String::new(), |c| s(c, "id").to_string())
 }
 
 /// Is `bullpen news` running in a Rex pane other than coordinator cid's? Each line is
@@ -142,7 +148,11 @@ fn news_by_monitor(repo: &Repo) -> Res<bool> {
 }
 
 pub fn cursor_path(repo: &Repo, cid: &str) -> PathBuf {
-    repo.dir.join(if cid.is_empty() { "news.cursor".into() } else { format!("news-{}.cursor", safe(cid)) })
+    repo.dir.join(if cid.is_empty() {
+        "news.cursor".into()
+    } else {
+        format!("news-{}.cursor", safe(cid))
+    })
 }
 
 /// How far into news.log (in bytes) coordinator cid has read with `bullpen news`, or
@@ -154,7 +164,9 @@ fn news_cursor(repo: &Repo, cid: &str) -> Res<Option<u64>> {
         paths.push(cursor_path(repo, ""));
     }
     for path in paths {
-        let Ok(text) = std::fs::read_to_string(&path) else { continue };
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
         if let Some(n) = py_int(&text) {
             return match u64::try_from(n) {
                 Ok(n) => Ok(Some(n)),
@@ -186,7 +198,10 @@ pub fn py_int(text: &str) -> Option<i64> {
 pub fn set_news_cursor(repo: &Repo, offset: u64, cid: &str) -> Res<()> {
     std::fs::create_dir_all(&repo.dir)?;
     let path = cursor_path(repo, cid);
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let tmp = path.with_file_name(format!(".{name}.tmp"));
     std::fs::write(&tmp, format!("{offset}\n"))?;
     std::fs::rename(&tmp, &path)?;

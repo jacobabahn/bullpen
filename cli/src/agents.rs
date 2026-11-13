@@ -16,7 +16,11 @@ fn text(v: Option<&Value>) -> String {
 pub fn pane(t: &Obj, who: &str) -> (String, String) {
     if who == "reviewer" {
         let r = obj(t, "review");
-        let session = if truthy(r.get("session")) { text(r.get("session")) } else { text(t.get("session")) };
+        let session = if truthy(r.get("session")) {
+            text(r.get("session"))
+        } else {
+            text(t.get("session"))
+        };
         return (session, text(r.get("block")));
     }
     (text(t.get("session")), text(t.get("block")))
@@ -35,7 +39,11 @@ pub fn is_limited(t: &Obj) -> bool {
     if !truthy(t.get("limit")) {
         return false;
     }
-    let waits = if s(lim, "who") == "reviewer" { "review" } else { "working" };
+    let waits = if s(lim, "who") == "reviewer" {
+        "review"
+    } else {
+        "working"
+    };
     s(t, "status") == waits
 }
 
@@ -79,7 +87,9 @@ pub fn waited_on(t: &Obj) -> Option<(&'static str, String, String)> {
 
 /// Is the pane of the task's worker or reviewer (by default the one it waits on) alive?
 pub fn running(t: &Obj, who: Option<&str>) -> Res<bool> {
-    let Some(who) = who.or_else(|| waits_on(t)) else { return Ok(false) };
+    let Some(who) = who.or_else(|| waits_on(t)) else {
+        return Ok(false);
+    };
     let (session, block) = pane(t, who);
     crate::rex::alive(&session, &block)
 }

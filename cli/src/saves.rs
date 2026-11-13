@@ -28,7 +28,9 @@ pub fn save(repo: &Repo, t: &mut Obj) -> Res<()> {
 /// slot or closes, the queue starts the next queued tasks once the command's own work
 /// is done: through the Python's `_queue` until T6.
 fn move_queue(repo: &Repo, t: &Obj, old: &Obj) {
-    let Some(how) = crate::start::slot_freed(old, t) else { return };
+    let Some(how) = crate::start::slot_freed(old, t) else {
+        return;
+    };
     let (root, by) = (repo.root_str(), s(t, "id").to_string());
     later(&format!("queue {root}"), move || run_queue(&root, &by, how));
 }

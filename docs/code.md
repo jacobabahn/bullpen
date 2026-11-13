@@ -29,8 +29,12 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
 - Python code that still calls code that moved keeps its own copy, a twin: library
   code, frozen, deleted with its last Python caller. `bullpen/core.py` is `core/`'s
   twin, and `task_line.py` is `core/src/words.rs`' and `cli/src/task_line.rs`' (for
-  `pick` and `config`). There are no bridges yet (the plan has one, the run queue, from
-  T3).
+  `pick` and `config`); `news.py` (`news`, `tell_coordinator`, `ready_news`, the outboxes),
+  `notifications.py` (`notify`), `stops.py`, `agents.py`, `coordinators.py`, `modes.py`
+  and `rex.py` are twins of `cli/src/`'s for the Python commands. There is one bridge,
+  the run queue: a Rust save that frees a slot runs `bullpen _queue` (Python's
+  `start_queued`, reading the tasks fresh) once the command is done, until T6 moves the
+  queue to Rust.
 - `cli/check/compare.sh` runs each case of `cli/check/cases-*.txt` with the Python and
   the Rust build in a fresh fixture, and compares stdout, stderr, exit code and the
   state folder, byte for byte. Each port adds cases for what it moves, and runs them
@@ -62,13 +66,24 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
 - `commands.rs`: the table, in `--help`'s order, one line per command
 - `args.rs`: a command's arguments by argparse's rules, and its usage and help
 - `help.rs`: the top-level help and the unknown-command line, as the Python wrote them
-- `saves.rs`: saving a task and what it sets off (`save`), `later` and `run_later`. No
-  Rust command saves a task yet: the hooks are stubs.
 - `show.rs`: `ls` and `show`
 - `task_line.rs`: one task line, as the board says it (or its rows, on a narrow
   terminal), cut to the terminal's width and coloured there
-- `coordinators.rs`, `rex.rs`: what the commands moved so far need of a repo's
-  coordinators and of Rex
+- `saves.rs`: saving a task and what it sets off (`save`): the run queue (through
+  `bullpen _queue`), the person's notification, the PR to follow; `later` and `run_later`
+- `rex.rs`: Rex: whether a pane is there, typing into one, the session's view, a pane's
+  terminal
+- `agents.rs`: a task's worker and reviewer, and the one it waits on
+- `coordinators.rs`: a repo's coordinators, and who sees to a task (reading them)
+- `news/`: `mod.rs`: a news line (`news`, `tell_coordinator`), the outboxes and typing
+  them into coordinators' panes (`deliver`, `has_draft`); `read.rs`: `news` and
+  `news --follow`
+- `notifications.rs`: the person's notifications (the save hook) and `_flush`
+- `stops.rs`: a worker or reviewer stopping (its callers move from T6 on)
+- `modes.rs`: the task's base ref (the adapters move in T8)
+- `start/mod.rs`: `add`, `after`, `model`, `review-mode`, what a task waits on, and
+  which saves move the run queue (`slot_freed`)
+- `triage.rs`: `ask`, `ok` and `note`
 
 ## The Python
 
@@ -87,18 +102,19 @@ importing the one with the command being run, or all of them for `--help`):
 - `coordinators.py`: a repo's coordinators, and who sees to a task (`sees_to`)
 - `panes.py`: where a worker's, reviewer's or diff's pane lives: making, showing,
   hiding and finding it again, and keeping it there (`gather`)
-- `news.py`: news lines, the outboxes typed into coordinators' panes, `bullpen news`
+- `news.py`: news lines, and the outboxes typed into coordinators' panes
 - `notifications.py`: the person's notifications
 - `guide.py`: the coordinator's guide, and telling running coordinators it changed
 - `limit.py`: the usage limit
 - `stops.py`: a worker or reviewer stopping: triage, or the person
 - `hooks.py`: a worktree's setup and teardown hooks
 - `rules.py`: the rules every worker and reviewer gets
-- `start.py`: adding and starting tasks: what a task waits on, the run queue (which
-  moves by itself, from a status change), an agent's pane, handing a worker a message
+- `start.py`: starting tasks: what a task waits on, the run queue (which moves by
+  itself, from a status change; `_queue` for a Rust save), an agent's pane, handing a
+  worker a message
 - `review.py`: what a review covers, starting a reviewer
 - `answer.py`: answering a prompt from the board, `reply`
-- `triage.py`: the coordinator's `ask`, `ok`, `review` and `note`
+- `triage.py`: the coordinator's `review`
 - `watcher.py`: starting the watcher, and replacing it when the code changes
 - `close.py`: the one close step (`close`) that accept, close, drop and auto-accept
   share, and the `close` and `drop` commands

@@ -88,10 +88,15 @@ impl Arg {
         match self.kind {
             Kind::Flag => format!("[{}]", self.name),
             Kind::Value(m) => format!("[{} {}]", self.name, self.metavar(m)),
-            Kind::Pos(Nargs::One) => self.name.into(),
-            Kind::Pos(Nargs::Maybe) => format!("[{}]", self.name),
-            Kind::Pos(Nargs::Any) => format!("[{} ...]", self.name),
-            Kind::Pos(Nargs::Some) => format!("{0} [{0} ...]", self.name),
+            Kind::Pos(n) => {
+                let name = self.metavar(self.name);
+                match n {
+                    Nargs::One => name,
+                    Nargs::Maybe => format!("[{name}]"),
+                    Nargs::Any => format!("[{name} ...]"),
+                    Nargs::Some => format!("{name} [{name} ...]"),
+                }
+            }
         }
     }
 

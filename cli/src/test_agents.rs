@@ -15,7 +15,12 @@ fn stopped(status: &str, by: &str, kind: &str, more: Value) -> Obj {
 fn a_task_is_on_its_reviewer_by_its_stop() {
     assert!(on_reviewer(&stopped("needs", "reviewer", "prompt", json!({}))));
     assert!(on_reviewer(&stopped("triage", "reviewer", "exited", json!({}))));
-    assert!(on_reviewer(&stopped("needs", "reviewer", "ended", json!({"ask": true}))));
+    assert!(on_reviewer(&stopped(
+        "needs",
+        "reviewer",
+        "ended",
+        json!({"ask": true})
+    )));
     assert!(!on_reviewer(&stopped("triage", "reviewer", "limit", json!({})))); // seen to as its worker's
     assert!(!on_reviewer(&stopped("triage", "worker", "ended", json!({}))));
     assert!(!on_reviewer(&t(json!({"status": "review"}))));
@@ -29,9 +34,18 @@ fn a_task_is_on_its_reviewer_by_its_stop() {
 #[test]
 fn a_task_waits_on_its_reviewer_in_review_or_for_its_stop() {
     assert_eq!(waits_on(&t(json!({"status": "review"}))), Some("reviewer"));
-    assert_eq!(waits_on(&stopped("needs", "reviewer", "prompt", json!({}))), Some("reviewer"));
-    assert_eq!(waits_on(&stopped("triage", "reviewer", "limit", json!({}))), Some("worker"));
-    assert_eq!(waits_on(&stopped("triage", "worker", "exited", json!({}))), Some("worker"));
+    assert_eq!(
+        waits_on(&stopped("needs", "reviewer", "prompt", json!({}))),
+        Some("reviewer")
+    );
+    assert_eq!(
+        waits_on(&stopped("triage", "reviewer", "limit", json!({}))),
+        Some("worker")
+    );
+    assert_eq!(
+        waits_on(&stopped("triage", "worker", "exited", json!({}))),
+        Some("worker")
+    );
     assert_eq!(waits_on(&stopped("stopped", "worker", "pane_gone", json!({}))), None); // its pane is gone
     assert_eq!(waits_on(&t(json!({"status": "working"}))), Some("worker"));
     for status in ["todo", "ready", "finished", "done", "dropped"] {
@@ -39,7 +53,10 @@ fn a_task_waits_on_its_reviewer_in_review_or_for_its_stop() {
     }
     let lim = json!({"who": "reviewer", "text": "limit"});
     assert_eq!(waits_on(&t(json!({"status": "review", "limit": lim}))), None); // waits on the usage limit
-    assert_eq!(whose_turn(&t(json!({"status": "review", "limit": lim}))), Some("reviewer"));
+    assert_eq!(
+        whose_turn(&t(json!({"status": "review", "limit": lim}))),
+        Some("reviewer")
+    );
     let worker_lim = json!({"who": "worker", "text": "limit"});
     assert_eq!(waits_on(&t(json!({"status": "working", "limit": worker_lim}))), None);
 }
@@ -53,7 +70,8 @@ fn a_reviewer_pane_falls_back_to_its_workers_session() {
     assert_eq!(pane(&x, "reviewer"), ("s2".into(), "b2".into()));
     assert_eq!(pane(&t(json!({"status": "todo"})), "reviewer"), ("".into(), "".into()));
     assert_eq!(waited_on(&t(json!({"status": "review", "block": "b1"}))), None); // no reviewer pane
-    assert!(!running(&t(json!({"status": "ready", "block": "b1"})), None).unwrap()); // waits on no agent
+    assert!(!running(&t(json!({"status": "ready", "block": "b1"})), None).unwrap());
+    // waits on no agent
 }
 
 #[test]

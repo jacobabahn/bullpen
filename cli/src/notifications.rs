@@ -44,7 +44,9 @@ fn needs_you(why: &str) -> Option<(bool, usize)> {
         Some(r) if r.starts_with("Needs you") || r.starts_with("needs you") => (true, r),
         _ => (false, why),
     };
-    let after = rest.strip_prefix("Needs you").or_else(|| rest.strip_prefix("needs you"))?;
+    let after = rest
+        .strip_prefix("Needs you")
+        .or_else(|| rest.strip_prefix("needs you"))?;
     if after.chars().next().is_some_and(|c| c.is_alphanumeric() || c == '_') {
         return None; // \b
     }
@@ -62,9 +64,16 @@ pub fn notice(t: &Obj, old: &Obj) -> Option<(Kind, String)> {
     let asked = truthy(t.get("ask")) && !(truthy(old.get("ask")) && same_why);
     let id = s(t, "id");
     if st == "needs" && (was != Some("needs") || asked) {
-        let why = t.get("why").filter(|w| truthy(Some(w))).map_or("it is stopped".into(), json::py_str);
+        let why = t
+            .get("why")
+            .filter(|w| truthy(Some(w)))
+            .map_or("it is stopped".into(), json::py_str);
         if let Some((reviewer, at)) = needs_you(&why) {
-            let who = if reviewer { format!("{id}'s reviewer") } else { id.to_string() };
+            let who = if reviewer {
+                format!("{id}'s reviewer")
+            } else {
+                id.to_string()
+            };
             let rest = &why[at..];
             let tail = if rest.starts_with('(') {
                 format!(" {rest}")
@@ -166,7 +175,10 @@ fn held(repo: &Repo, t: &Obj, text: &str) -> Res<bool> {
         let mut ids = ids_of(st);
         if now - num(st, "at") < NOTIFY_BURST && ids.iter().any(|i| *i != id) {
             let held = st.get("held").and_then(Value::as_array).cloned().unwrap_or_default();
-            let mut held: Vec<Value> = held.into_iter().filter(|h| h.get(0).and_then(Value::as_str) != Some(&id)).collect();
+            let mut held: Vec<Value> = held
+                .into_iter()
+                .filter(|h| h.get(0).and_then(Value::as_str) != Some(&id))
+                .collect();
             held.push(json!([id, text]));
             st.insert("held".into(), Value::Array(held));
             if !ids.contains(&id) {
@@ -221,7 +233,10 @@ fn flush_notifications(repo: &Repo) -> Res<bool> {
     };
     let sent = repo.task(&last).and_then(|t| send_notification(repo, &t, &text));
     if let Err(e) = sent {
-        append(&repo.dir.join("notify.log"), &format!("{} {last} not sent: {e}: {text}\n", iso_now()))?;
+        append(
+            &repo.dir.join("notify.log"),
+            &format!("{} {last} not sent: {e}: {text}\n", iso_now()),
+        )?;
     }
     Ok(true)
 }
@@ -250,8 +265,16 @@ fn notify_panes(repo: &Repo, t: &Obj) -> Res<Vec<(String, String)>> {
 fn looking(repo: &Repo, t: &Obj) -> Res<bool> {
     let c = home_of(repo, t)?;
     let b = obj(&c, "board");
-    let panes = [pane(t, "worker"), pane(t, "reviewer"), (s(b, "session").into(), s(b, "block").into())];
-    let blocks: Vec<&str> = panes.iter().filter(|(_, b)| !b.is_empty()).map(|(_, b)| b.as_str()).collect();
+    let panes = [
+        pane(t, "worker"),
+        pane(t, "reviewer"),
+        (s(b, "session").into(), s(b, "block").into()),
+    ];
+    let blocks: Vec<&str> = panes
+        .iter()
+        .filter(|(_, b)| !b.is_empty())
+        .map(|(_, b)| b.as_str())
+        .collect();
     let mut sessions: Vec<&str> = Vec::new();
     for (session, block) in &panes {
         if !block.is_empty() && !sessions.contains(&session.as_str()) {
@@ -289,17 +312,27 @@ use std::os::unix::fs::OpenOptionsExt;
 /// The OSC 777 sequence: the title ends at the first ";", so it has none; the body may.
 pub fn osc(title: &str, body: &str) -> String {
     let clean = |text: &str, n: usize, also: char| {
-        let text: String = text.chars().map(|c| if c < ' ' || c == '\x7f' || c == also { ' ' } else { c }).collect();
+        let text: String = text
+            .chars()
+            .map(|c| if c < ' ' || c == '\x7f' || c == also { ' ' } else { c })
+            .collect();
         clip(&text, n)
     };
-    format!("\x1b]777;notify;{};{}\x07", clean(title, 60, ';'), clean(body, 240, '\0'))
+    format!(
+        "\x1b]777;notify;{};{}\x07",
+        clean(title, 60, ';'),
+        clean(body, 240, '\0')
+    )
 }
 
 /// An OSError as Python words it: "[Errno 11] Resource temporarily unavailable".
 fn py_os_error(e: std::io::Error) -> Fail {
     let said = e.to_string();
     match e.raw_os_error() {
-        Some(n) => Fail(format!("[Errno {n}] {}", said.trim_end_matches(&format!(" (os error {n})")))),
+        Some(n) => Fail(format!(
+            "[Errno {n}] {}",
+            said.trim_end_matches(&format!(" (os error {n})"))
+        )),
         None => Fail(said),
     }
 }
@@ -311,13 +344,19 @@ fn append(path: &Path, text: &str) -> Res<()> {
 }
 
 fn log_notify(repo: &Repo, tid: &str, text: &str, how: &str) -> Res<()> {
-    append(&repo.dir.join("notify.log"), &format!("{} {tid} {how}: {text}\n", iso_now()))
+    append(
+        &repo.dir.join("notify.log"),
+        &format!("{} {tid} {how}: {text}\n", iso_now()),
+    )
 }
 
 /// The repo whose state folder is d: its root from its config, its folder d.
 fn repo_at(d: &Path) -> Res<Repo> {
     let cfg = json::read_obj(&d.join("config.json"))?.unwrap_or_default();
-    let root = cfg.get("root").filter(|r| truthy(Some(r))).map_or("/".into(), json::py_str);
+    let root = cfg
+        .get("root")
+        .filter(|r| truthy(Some(r)))
+        .map_or("/".into(), json::py_str);
     let mut repo = Repo::new(root)?;
     repo.dir = d.to_path_buf();
     repo.cfg = load_config(d)?;
@@ -326,13 +365,17 @@ fn repo_at(d: &Path) -> Res<Repo> {
 
 /// The state folders (<state>/repos/*) that have a file matching want.
 fn folders_with(want: impl Fn(&str) -> bool) -> Vec<PathBuf> {
-    let Ok(repos) = std::fs::read_dir(state().join("repos")) else { return Vec::new() };
+    let Ok(repos) = std::fs::read_dir(state().join("repos")) else {
+        return Vec::new();
+    };
     let mut out: Vec<PathBuf> = repos
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|d| {
             std::fs::read_dir(d).is_ok_and(|files| {
-                files.filter_map(|f| f.ok()).any(|f| f.file_name().to_str().is_some_and(&want))
+                files
+                    .filter_map(|f| f.ok())
+                    .any(|f| f.file_name().to_str().is_some_and(&want))
             })
         })
         .collect();

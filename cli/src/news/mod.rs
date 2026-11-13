@@ -56,7 +56,11 @@ pub fn news(repo: &Repo, task: &Obj, event: &str, text: &str, o: Opts) -> Res<()
         }
     }
     std::fs::create_dir_all(&repo.dir)?;
-    let whom = if to.is_empty() { String::new() } else { format!(" [{}]", to.join(",")) };
+    let whom = if to.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", to.join(","))
+    };
     let mut record = format!("{}{whom} {} {event}: {line}\n", iso_now(), s(task, "id"));
     for l in &o.more {
         record += &format!("\t{l}\n");
@@ -103,7 +107,16 @@ pub fn news_to(repo: &Repo, task: &Obj, everyone: bool) -> Res<(Vec<String>, boo
 pub fn tell_coordinator(repo: &Repo, task: &Obj, event: &str, text: &str) -> Res<()> {
     let me = calling_coordinator(repo).map(|c| s(c, "id").to_string());
     let skip = me.as_deref().filter(|m| !m.is_empty());
-    news(repo, task, event, text, Opts { skip, ..Opts::default() })
+    news(
+        repo,
+        task,
+        event,
+        text,
+        Opts {
+            skip,
+            ..Opts::default()
+        },
+    )
 }
 
 /// Append text to a file, made when missing.
@@ -131,7 +144,9 @@ pub fn outbox_path(repo: &Repo, cid: Option<&str>) -> PathBuf {
 
 /// The outboxes in a repo's state folder, in order (glob outbox*.txt, sorted).
 pub fn outboxes(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
     let mut out: Vec<PathBuf> = entries
         .filter_map(|e| e.ok())
         .map(|e| e.path())
@@ -201,7 +216,10 @@ pub fn deliver(repo: &Repo) -> Res<bool> {
         return Ok(false);
     }
     for path in &files {
-        let stem = path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let stem = path
+            .file_stem()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let cid: Option<String> = (stem != "outbox").then(|| stem.chars().skip("outbox-".len()).collect());
         if cid.as_deref().is_some_and(|cid| live.iter().any(|c| s(c, "id") == cid)) {
             continue;
@@ -240,7 +258,10 @@ pub fn has_draft(session: &str, block: &str) -> Res<bool> {
 /// has_draft, for a captured screen.
 pub fn draft_in(screen: &str) -> bool {
     let mut faint = false;
-    let lines: Vec<Vec<(String, bool)>> = splitlines(screen).into_iter().map(|l| styled_line(l, &mut faint)).collect();
+    let lines: Vec<Vec<(String, bool)>> = splitlines(screen)
+        .into_iter()
+        .map(|l| styled_line(l, &mut faint))
+        .collect();
     let joined = |l: &[(String, bool)]| l.iter().map(|(t, _)| t.as_str()).collect::<String>();
     let lines: Vec<&Vec<(String, bool)>> = lines.iter().filter(|l| !strip(&joined(l)).is_empty()).collect();
     for line in lines[lines.len().saturating_sub(10)..].iter().rev() {
@@ -270,7 +291,10 @@ fn vt_esc(text: &str) -> Option<(usize, Esc)> {
     }
     if b.get(1) == Some(&b'[') {
         let body = &text[2..];
-        let n = body.bytes().take_while(|c| c.is_ascii_digit() || *c == b';' || *c == b':').count();
+        let n = body
+            .bytes()
+            .take_while(|c| c.is_ascii_digit() || *c == b';' || *c == b':')
+            .count();
         if body.as_bytes().get(n) == Some(&b'm') {
             return Some((2 + n + 1, Esc::Sgr(body[..n].into())));
         }
@@ -284,7 +308,9 @@ fn vt_esc(text: &str) -> Option<(usize, Esc)> {
             return Some((2 + i + 1, Esc::Other));
         }
     }
-    b.get(1).is_some_and(|c| (0x40..=0x5f).contains(c)).then_some((2, Esc::Other))
+    b.get(1)
+        .is_some_and(|c| (0x40..=0x5f).contains(c))
+        .then_some((2, Esc::Other))
 }
 
 /// One line of a `rex capture --format=vt` screen as (text, faint) pieces. Faint (SGR
@@ -304,7 +330,11 @@ pub fn styled_line(raw: &str, faint: &mut bool) -> Vec<(String, bool)> {
         match esc {
             Esc::Sgr(params) => *faint = sgr_faint(&params, *faint),
             Esc::Forward(digits) => {
-                let n = if digits.is_empty() { 1 } else { digits.parse().unwrap_or(0) };
+                let n = if digits.is_empty() {
+                    1
+                } else {
+                    digits.parse().unwrap_or(0)
+                };
                 out.push((" ".repeat(n), *faint)); // cursor forward: a gap
             }
             Esc::Other => {}
@@ -317,7 +347,11 @@ pub fn styled_line(raw: &str, faint: &mut bool) -> Vec<(String, bool)> {
 
 /// Is text faint after this SGR (`\x1b[<params>m`)?
 pub fn sgr_faint(params: &str, mut faint: bool) -> bool {
-    let ps: Vec<&str> = if params.is_empty() { vec!["0"] } else { params.split(';').collect() };
+    let ps: Vec<&str> = if params.is_empty() {
+        vec!["0"]
+    } else {
+        params.split(';').collect()
+    };
     let mut i = 0;
     while i < ps.len() {
         let p = ps[i].split(':').next().unwrap_or("");

@@ -49,32 +49,52 @@ const ADD: &[Arg] = &[
         "--auto-accept",
         "accept it by itself once review approves it, whatever config --auto-accept says",
     ),
-    flag("--no-auto-accept", "keep it for you to accept even with config --auto-accept on"),
+    flag(
+        "--no-auto-accept",
+        "keep it for you to accept even with config --auto-accept on",
+    ),
     value("--pane", "PANE", PANE).choices(&PLACES),
 ];
 
 const AFTER: &[Arg] = &[
     ID,
-    pos("ID", Nargs::Any, "the tasks it waits on: it starts once they're accepted"),
+    pos(
+        "ID",
+        Nargs::Any,
+        "the tasks it waits on: it starts once they're accepted",
+    ),
     flag("--none", "it waits on nothing"),
 ];
 
 const MODEL: &[Arg] = &[
     ID,
-    pos("model", Nargs::Maybe, "an alias like opus, or a model ID; default: let Claude Code pick"),
+    pos(
+        "model",
+        Nargs::Maybe,
+        "an alias like opus, or a model ID; default: let Claude Code pick",
+    ),
     flag("--clear", "use the config's worker model again"),
 ];
 
 const REVIEW_MODE: &[Arg] = &[
     ID,
-    pos("mode", Nargs::One, "light: a quick look; auto: light for a small or docs-only change").choices(&REVIEW_MODES),
+    pos(
+        "mode",
+        Nargs::One,
+        "light: a quick look; auto: light for a small or docs-only change",
+    )
+    .choices(&REVIEW_MODES),
 ];
 
 /// The tasks by ID.
 type Tasks = HashMap<String, Obj>;
 
 fn by_id(repo: &Repo) -> Res<Tasks> {
-    Ok(repo.tasks()?.into_iter().map(|t| (s(&t, "id").to_string(), t)).collect())
+    Ok(repo
+        .tasks()?
+        .into_iter()
+        .map(|t| (s(&t, "id").to_string(), t))
+        .collect())
 }
 
 /// IDs from --after values, each one or several: "BP-8", "8,9", "BP-8 BP-9".
@@ -100,13 +120,19 @@ fn check_after(repo: &Repo, tid: &str, after: Vec<String>) -> Res<Vec<String>> {
             return fail(format!("{tid} can't wait on itself"));
         }
         let Some(t) = tasks.get(d) else {
-            return fail(format!("no task {d} in {}: `bullpen ls --all` lists them", home_path(&repo.root)));
+            return fail(format!(
+                "no task {d} in {}: `bullpen ls --all` lists them",
+                home_path(&repo.root)
+            ));
         };
         if s(t, "status") == "dropped" {
             return fail(format!("{d} was dropped: {tid} would wait on it forever"));
         }
         if let Some(path) = dep_path(&tasks, d, tid, &mut HashSet::new()) {
-            return fail(format!("{d} already waits on {tid} ({}): that would be a cycle", path.join(" → ")));
+            return fail(format!(
+                "{d} already waits on {tid} ({}): that would be a cycle",
+                path.join(" → ")
+            ));
         }
     }
     Ok(after)
@@ -159,7 +185,10 @@ fn read_text(path: &str) -> Res<String> {
     let bytes = std::fs::read(path).map_err(|e| {
         let n = e.raw_os_error().unwrap_or(0);
         let said = e.to_string();
-        bullpen_core::Fail(format!("[Errno {n}] {}: '{path}'", said.trim_end_matches(&format!(" (os error {n})"))))
+        bullpen_core::Fail(format!(
+            "[Errno {n}] {}: '{path}'",
+            said.trim_end_matches(&format!(" (os error {n})"))
+        ))
     })?;
     let text = String::from_utf8(bytes).map_err(|e| bullpen_core::Fail(format!("{path}: {e}")))?;
     Ok(text.replace("\r\n", "\n").replace('\r', "\n"))
@@ -177,7 +206,11 @@ pub fn cmd_add(argv: &[String]) -> Res<i32> {
         return fail("give the task's brief with --brief or --brief-file");
     }
     let next = repo.cfg.get("next").cloned().unwrap_or(Value::Null);
-    let tid = format!("{}-{}", py_str(repo.cfg.get("prefix").unwrap_or(&Value::Null)), py_str(&next));
+    let tid = format!(
+        "{}-{}",
+        py_str(repo.cfg.get("prefix").unwrap_or(&Value::Null)),
+        py_str(&next)
+    );
     let after = check_after(&repo, &tid, dep_ids(&repo, &a.all("--after")))?;
     repo.cfg.insert("next".into(), json!(next.as_i64().unwrap_or(0) + 1));
     repo.save()?;
@@ -195,7 +228,10 @@ pub fn cmd_add(argv: &[String]) -> Res<i32> {
         t.insert(k.into(), Value::Null);
     }
     // who hears its news
-    if let Some(c) = calling_coordinator(&repo).or_else(|| primary(&repo)).filter(|c| !c.is_empty()) {
+    if let Some(c) = calling_coordinator(&repo)
+        .or_else(|| primary(&repo))
+        .filter(|c| !c.is_empty())
+    {
         t.insert("coordinator".into(), c.get("id").cloned().unwrap_or(Value::Null));
     }
     if !after.is_empty() {
@@ -207,7 +243,11 @@ pub fn cmd_add(argv: &[String]) -> Res<i32> {
     if let Some(mode) = a.opt("--review").filter(|m| !m.is_empty() && *m != "auto") {
         t.insert("review_mode".into(), json!(mode));
     }
-    set_auto_accept(&mut t, a.last(&["--auto-accept", "--no-auto-accept"]).map(|f| f == "--auto-accept"));
+    set_auto_accept(
+        &mut t,
+        a.last(&["--auto-accept", "--no-auto-accept"])
+            .map(|f| f == "--auto-accept"),
+    );
     if let Some(pane) = a.opt("--pane").filter(|p| !p.is_empty()) {
         t.insert("placement".into(), json!(pane)); // over the workers setting, from its next start
     }
@@ -245,7 +285,11 @@ pub fn cmd_after(argv: &[String]) -> Res<i32> {
     }
     not_closed(&t)?;
     let tid = s(&t, "id").to_string();
-    let after = if none { Vec::new() } else { check_after(&repo, &tid, dep_ids(&repo, &deps))? };
+    let after = if none {
+        Vec::new()
+    } else {
+        check_after(&repo, &tid, dep_ids(&repo, &deps))?
+    };
     if after.is_empty() {
         t.shift_remove("after");
     } else {
@@ -285,7 +329,10 @@ pub fn cmd_model(argv: &[String]) -> Res<i32> {
         _ => format!("{id} uses {model}"),
     };
     if crate::rex::alive(s(&t, "session"), s(&t, "block"))? {
-        let on = t.get("model").filter(|v| truthy(Some(v))).map_or("its model".into(), py_str);
+        let on = t
+            .get("model")
+            .filter(|v| truthy(Some(v)))
+            .map_or("its model".into(), py_str);
         said += &format!("; its worker keeps running on {on}: this takes effect at its next start or resume");
     }
     println!("{said}");

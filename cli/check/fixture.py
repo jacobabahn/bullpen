@@ -296,6 +296,19 @@ def main(d, now):
     if "nocoord" in extras:  # the repo has no coordinators
         cfg.update(coordinators=[], next_coordinator=1)
         (sdir / "config.json").write_text(json.dumps(cfg, indent=2) + "\n")
+    if "typed" in extras:  # news is typed into the coordinators' panes (config --news type)
+        cfg.update(news="type")
+        (sdir / "config.json").write_text(json.dumps(cfg, indent=2) + "\n")
+    if "outbox" in extras:  # typed news waiting: for everyone, for c2, and for a gone coordinator
+        (sdir / "outbox.txt").write_text("bullpen · shared news\n")
+        (sdir / "outbox-c2.txt").write_text("bullpen · for c2\x1f\tdocs.md | 1 +\n")
+        (sdir / "outbox-c9.txt").write_text("bullpen · for a gone one\n")
+        (state / "outbox").write_text("")
+    if "held" in extras:  # notifications held from a burst, quiet for a while now
+        (sdir / "notify.json").write_text(json.dumps(
+            {"at": now - 60, "ids": ["BP-12", "BP-13"], "held": [["BP-13", "BP-13 needs you: x"]],
+             "last": now - 30}, indent=2) + "\n")
+        (state / "outbox").write_text("")
     if "oldcursor" in extras:  # the one cursor from before several coordinators
         (sdir / "news-c1.cursor").unlink()
         (sdir / "news.cursor").write_text(f"{first}\n")
