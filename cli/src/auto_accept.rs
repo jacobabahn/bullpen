@@ -291,8 +291,8 @@ pub fn run_auto_accept(repo: &Repo, t: &mut Obj) -> Res<()> {
 }
 
 /// An auto-accept that didn't merge the task, on its timeline: reason is "conflict",
-/// "checks" or "other".
-fn refused(repo: &Repo, t: &Obj, reason: &str, why: &str) {
+/// "checks", "comments" (new on its PR while it waited for checks) or "other".
+pub(crate) fn refused(repo: &Repo, t: &Obj, reason: &str, why: &str) {
     let fields = json!({"reason": reason, "why": clip(why, 160)});
     bullpen_core::timeline::record(&repo.dir, s(t, "id"), "accept_refused", fields);
 }

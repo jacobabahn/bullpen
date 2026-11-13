@@ -179,11 +179,12 @@ fn follow_pr(repo: &Repo, t: &Obj) -> Res<()> {
     g.insert("new".into(), json!(new));
     if truthy(t.get("auto_wait")) && (!failed.is_empty() || !new_notes.is_empty()) {
         t.shift_remove("auto_wait"); // the person (or the worker) has something to look at first
-        let why = if failed.is_empty() {
-            "its PR has new comments"
+        let (why, reason) = if failed.is_empty() {
+            ("its PR has new comments", "comments")
         } else {
-            "its PR's checks failed"
+            ("its PR's checks failed", "checks")
         };
+        crate::auto_accept::refused(repo, &t, reason, why);
         news(
             repo,
             &t,

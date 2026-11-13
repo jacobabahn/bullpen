@@ -33,7 +33,7 @@ bullpen stats BP-3 --json       # as JSON, for a coordinator or a script (both f
   - pr: comments on its PR
   - other: its worker took a new turn of its own after `ready`
 - **Stalls**, **questions** and **turns** (each time its worker ended a turn).
-- **Auto-accept refusals**, by reason (conflict, checks, other).
+- **Auto-accept refusals**, by reason (conflict, checks, comments, other).
 - **Changes**: its commits and lines added and removed, as its last `ready` counted them.
 
 An open task's time counts up to now.
@@ -69,7 +69,7 @@ Every line has `at` (a stamp) and `event`:
 | `turn_ended` | its worker ended a turn | |
 | `review_started` | a reviewer started | `round`, `kind` |
 | `review_finished` | it gave its verdict | `round`, `kind`, `verdict` |
-| `accept_refused` | an auto-accept didn't merge it | `reason` (`conflict`, `checks`, `other`), `why` |
+| `accept_refused` | an auto-accept didn't merge it | `reason` (`conflict`, `checks`, `comments`: new on its PR while it waited for checks, `other`), `why` |
 
 Saving a task writes it: the save compares the task with what it was, so commands
 that only read tasks (`ls`, the board) write nothing. A trip back gets its reason

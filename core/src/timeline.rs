@@ -12,7 +12,7 @@
 //!   turn_ended       its worker ended a turn
 //!   review_started   a reviewer started: round, kind (full, light, followup, rebase, tour)
 //!   review_finished  a reviewer gave its verdict: round, kind, verdict
-//!   accept_refused   an auto-accept didn't merge it: reason (conflict, checks, other), why
+//!   accept_refused   an auto-accept didn't merge it: reason (conflict, checks, comments, other), why
 //!
 //! accept_refused changes nothing a save sees, so the auto-accept records it itself.
 

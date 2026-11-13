@@ -137,6 +137,9 @@ class AcceptTest(BullpenTest):
         self.assertNotIn("auto_wait", t)
         self.assertIn("bullpen · BP-1 not auto-accepted: its PR's checks failed", self.news_lines())
         self.assertFalse(any(a[:2] == ["pr", "merge"] for a in self.merges()))
+        timeline = next((self.tmp / "state").rglob(f"timeline/{tid}.jsonl")).read_text().splitlines()
+        refused = [json.loads(l) for l in timeline if '"accept_refused"' in l]
+        self.assertEqual([(e["reason"], e["why"]) for e in refused], [("checks", "its PR's checks failed")])
 
     def test_a_waiting_auto_accept_ends_when_the_task_leaves_ready(self):
         self.github(statusCheckRollup=self.RUNNING)
