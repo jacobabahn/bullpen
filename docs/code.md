@@ -8,7 +8,7 @@ compiles a script it runs on every call, so keeping the script small makes every
 and bullpen's own background jobs still run `bin/bullpen`.
 
 The modules, each importing only the ones above it in this list (and `cli.py`
-importing all of them):
+importing the one with the command being run, or all of them for `--help`):
 
 - `core.py`: the base: paths, the settings table (`SETTINGS`, at the top), small
   helpers, a repo's config and tasks (`Repo`), a task's status (`set_status`) and the
@@ -57,13 +57,15 @@ importing all of them):
   progress, the usage limit's reset
 - `check.py`: `check`, which applies the events the watcher missed
 - `cli.py`: the parser and `main`. It keeps only the `--help` groups' titles and
-  their order (`GROUPS`), and the modules with commands (`MODULES`).
+  their order (`GROUPS`), the modules with commands (`MODULES`), and which module
+  declares each command (`COMMANDS`).
 
 Each module with commands declares them in its own `commands(sub)`, with
 `core.command(sub, name, fn, group, help=...)`; the group is a title in `cli.GROUPS`,
 and internal commands (the watcher's and bullpen's own, named `_...`) have none.
 `bullpen --help` lists a group's commands in `MODULES` order, then in the order each
-module declares them. A new command touches only its own module.
+module declares them. A new command touches its own module, and `cli.COMMANDS`
+(a test checks that it says what the modules declare).
 
 A command function (`cmd_...`) only reads its arguments and calls plain functions;
 no other code calls it. Auto-accept calls `accept.accept`, and `check --fix` calls
@@ -91,18 +93,37 @@ remote), with the same six verbs: `publish` (at ready), `merge`, `after_merge`,
 remote, the base new work starts from). Every push goes through `quiet_git`, which
 never lets git wait on a prompt.
 
+## Start-up
+
+Most of a call's time is Python starting up and importing, and agents, hooks, the
+board and the watcher call bullpen all the time, so a call imports only what it
+needs (BP-94 took `ls` from about 72 ms to 37 ms):
+
+- `cli.main` imports only the module with the command being run (`cli.COMMANDS`)
+  and builds only its parser. `--help` and no command build them all.
+- `cli.Formatter` loads argparse's colours (Python 3.14's `_colorize`, about 13 ms)
+  and the terminal's width (`shutil`) only when it formats help or usage.
+- `bin/bullpen` runs `python3 -S`: `site` adds nothing to a standard-library program.
+- A standard module that takes over a millisecond to import and that most calls never
+  use (`shutil`, `hashlib`, `tempfile`, `textwrap`) is imported in the function that
+  needs it, with a comment saying why. A module compiles its patterns on first use
+  (re caches them), not on import. `python3 -X importtime bin/bullpen ls` shows what
+  a call imports.
+
 ## No import loops
 
-A module imports the ones it needs at the top, never inside a function, and the
-imports never loop back: `tests/test_cli.py` checks both. Where a lower module has
-to set something off in a higher one, the higher one registers with the lower:
+A module imports the bullpen modules it needs at the top, never inside a function
+(`cli.py` imports a command's module by name), and the imports never loop back:
+`tests/test_cli.py` checks both. Where a lower module has to set something off in a
+higher one, the higher one registers with the lower:
 
 - Saving a task (`Repo.save_task`) calls each function registered with
   `core.on_save(fn)`, as `fn(repo, t, old)`, `old` the task as it was saved before.
   `notifications.py` registers the person's notification, `prs.py` marks a PR
   for the watcher to follow, and `start.py` moves the run queue when a task leaves
-  `working` or closes (`move_queue`). `cli.py` imports every module, so they're all
-  registered before a command runs.
+  `working` or closes (`move_queue`). A command imports only its own module, so
+  `cli.main` has the first save import these three (`core.LOAD_SAVERS`), and their
+  functions run in one order (`cli.SAVERS`) whichever the command imported first.
 - What a save sets off that should wait for the command's own work (the run queue,
   whose news follows the command's) goes to `core.later(key, fn)`. `cli.main` runs
   it when the command returns (`core.run_later`), and a command that closes the pane
