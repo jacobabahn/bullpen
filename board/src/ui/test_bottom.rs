@@ -9,13 +9,12 @@ use ratatui::Terminal;
 
 #[test]
 fn a_risky_confirm_names_the_risk_in_red() {
-    use crate::model::{Gh, Review};
-    let review = |v: &str| Some(Review { round: Some(1), verdict: Some(v.into()), kind: None, block: None });
-    let gh = |c: &str| Some(Gh { checks: Some(c.into()), ..Default::default() });
-    let pr = |n: u32| Some(format!("https://x/pull/{n}"));
-    let safe = Task { pr: pr(41), review: review("approved"), gh: gh("passing"), ..ready("BP-7") };
-    let risky = Task { pr: pr(42), review: review("changes"), gh: gh("failing"), ..ready("BP-8") };
-    let working = Task { pr: pr(43), status: "working".into(), block: Some("w9".into()), ..ready("BP-9") };
+    let t = |id: &str, n: u32, verdict: &str, checks: &str| {
+        ready(id).with(json!({"pr": format!("https://x/pull/{n}"), "review": {"round": 1, "verdict": verdict}, "gh": {"checks": checks}}))
+    };
+    let safe = t("BP-7", 41, "approved", "passing");
+    let risky = t("BP-8", 42, "changes", "failing");
+    let working = ready("BP-9").with(json!({"pr": "https://x/pull/43", "status": "working", "block": "w9"}));
     let mut a = app(vec![safe, risky, working], 1, Layout::Grouped);
 
     a.pending = Some((Action::Accept, "BP-8".into()));
@@ -156,7 +155,7 @@ fn the_key_line_never_drops_its_question_mark() {
         a.sel = Some("BP-1".into());
         row(&screen(&mut a, w, 12), 0).to_string()
     };
-    let t = Task { status: "ready".into(), worktree: Some("/w".into()), ..ready("BP-1") };
+    let t = ready("BP-1").with(json!({"worktree": "/w"}));
     assert_eq!(keys(&t, 60), format!(" a accept  g tour  d drop  ⏎ open  v diff{}? keys", " ".repeat(12)));
     // no room for "? keys": a bare ? at the right edge
     assert_eq!(keys(&t, 46), " a accept  g tour  d drop  ⏎ open  v diff   ?");

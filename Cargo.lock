@@ -53,12 +53,12 @@ name = "bullpen-board"
 version = "0.1.0"
 dependencies = [
  "ansi-to-tui",
+ "bullpen-core",
  "chrono",
  "notify",
  "ratatui",
  "serde",
  "serde_json",
- "unicode-width 0.2.0",
 ]
 
 [[package]]

@@ -470,14 +470,12 @@ class ConfigTest(BullpenTest):
 
 
 class SettingsCopiesTest(unittest.TestCase):
-    """The board and the watcher keep their own short copies of some settings: they
-    must agree with the table in core/src/settings.rs."""
+    """The watcher keeps its own short copies of some settings: they must agree with
+    the table in core/src/settings.rs. (The board reads core's.)"""
 
     @classmethod
     def setUpClass(cls):
         src = (ROOT / "core" / "src" / "settings.rs").read_text()
-        m = re.search(r"pub const REPO_ONLY: \[&str; \d+\] = \[([^\]]*)\]", src)
-        cls.REPO_ONLY = re.findall(r'"(\w+)"', m.group(1))
         consts = {"AGENT": ["claude", "--permission-mode", "auto"]}
         def val(v):
             kind, _, arg = v.partition("(")
@@ -489,23 +487,6 @@ class SettingsCopiesTest(unittest.TestCase):
         rows = re.findall(r'base\("(\w+)", (Null|Bool\(\w+\)|Int\(\d+\)|Str\("[^"]*"\)|List\([^)]*\))', src)
         cls.DEFAULT_CONFIG = {k: val(v) for k, v in rows}
         assert len(cls.DEFAULT_CONFIG) == int(re.search(r"SETTINGS: \[Setting; (\d+)\]", src).group(1))
-
-    def test_the_boards_repo_only_settings_agree(self):
-        src = (ROOT / "board" / "src" / "model" / "config.rs").read_text()
-        m = re.search(r"const REPO_ONLY: \[&str; \d+\] = \[([^\]]*)\]", src)
-        self.assertEqual(sorted(re.findall(r'"(\w+)"', m.group(1))), sorted(self.REPO_ONLY))
-
-    def test_the_boards_defaults_agree(self):
-        src = (ROOT / "board" / "src" / "model" / "config.rs").read_text()
-        body = src[src.index("pub fn from_value"):]
-        body = body[:body.index("\n    }\n")]
-        found = re.findall(r'v\["(\w+)"\]\.as_(\w+)\(\)\.unwrap_or\(([^)]*)\)', body)
-        self.assertGreaterEqual(len(found), 7)
-        for key, kind, default in found:
-            want = self.DEFAULT_CONFIG[key]
-            got = {"bool": lambda s: s == "true", "str": lambda s: json.loads(s),
-                   "u64": int}[kind](default)
-            self.assertEqual(got, want, key)
 
     def test_the_watchers_stuck_after_agrees(self):
         src = (ROOT / "lua" / "watch.lua").read_text()

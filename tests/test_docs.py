@@ -56,8 +56,8 @@ class DocsTest(unittest.TestCase):
         use = (ROOT / "docs" / "board.md").read_text()
         rows = [r.split(" | ") for r in re.findall(r"^\| (.+) \|$", use, re.M)]
         cells = {r[1]: r[0] for r in rows if len(r) == 2}
-        # every still mark (the board's mark() in board/src/model/groups.rs), each in docs/board.md beside its words
-        src = (ROOT / "board" / "src" / "model" / "groups.rs").read_text()
+        # every still mark (core's mark() in core/src/words.rs, which the board shows), each in docs/board.md beside its words
+        src = (ROOT / "core" / "src" / "words.rs").read_text()
         body = src[src.index("pub fn mark(status: &str)"):]
         marks = dict(re.findall(r'"(\w+)" => "(.)"', body[:body.index("\n}\n")]))
         self.assertGreaterEqual(len(marks), 10)

@@ -1,6 +1,8 @@
-//! Fitting text to columns: width, fit, pad, wrap.
+//! Fitting text to columns: width, fit, pad, wrap. The width is bullpen-core's, which
+//! `ls` cuts by too.
 
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use bullpen_core::text::char_width;
+pub use bullpen_core::text::width;
 
 /// The first of the texts that fits the width, else the last one cut.
 pub fn first_fit(texts: &[String], w: usize) -> String {
@@ -10,31 +12,9 @@ pub fn first_fit(texts: &[String], w: usize) -> String {
     }
 }
 
-/// Columns the text takes on screen.
-pub fn width(text: &str) -> usize {
-    UnicodeWidthStr::width(text)
-}
-
 /// Cut text to width, with an ellipsis when it doesn't fit.
 pub fn fit(text: &str, w: usize) -> String {
-    if w == 0 {
-        return String::new();
-    }
-    if width(text) <= w {
-        return text.into();
-    }
-    let mut out = String::new();
-    let mut used = 0;
-    for c in text.chars() {
-        let cw = c.width().unwrap_or(0);
-        if used + cw > w - 1 {
-            break;
-        }
-        out.push(c);
-        used += cw;
-    }
-    out.push('…');
-    out
+    bullpen_core::text::fit(text, w as i64)
 }
 
 /// Pad text with spaces to width columns.
@@ -87,7 +67,7 @@ pub fn wrap(text: &str, w: usize, lines: usize) -> Vec<String> {
 pub fn split_at_width(s: &str, w: usize) -> (String, String) {
     let mut used = 0;
     for (i, c) in s.char_indices() {
-        let cw = c.width().unwrap_or(0);
+        let cw = char_width(c);
         if used + cw > w {
             return (s[..i].into(), s[i..].into());
         }

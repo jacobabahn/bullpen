@@ -54,7 +54,8 @@ mod tests;
 and its tests are in `board/src/model/test_detail.rs`. The test file is a child of its
 module, so it can use the module's private items. Helpers several test files share are
 in the folder's `testing.rs` (`board/src/model/testing.rs`: `task()`,
-`Config::default_for_test()`, ...). Add a test to the end of its module's
+`Config::default_for_test()`, ...). A test task is built from JSON, as bullpen writes
+it: `task("BP-1", "ready").with(json!({"pr": "..."}))`. Add a test to the end of its module's
 `test_<module>.rs`. The `test_` name means bullpen treats the file as a test file when
 it rebases: two tasks that both added tests at the end of it keep both.
 

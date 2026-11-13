@@ -4,7 +4,7 @@
 use super::jobs::{last_line, run};
 use super::{App, Job, Kind, Mode, Note};
 use crate::edit::LineEdit;
-use crate::model::{self, Action, Layout, Question, Task, TourShow};
+use crate::model::{Action, Layout, Question, Task, TourShow};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::time::Instant;
 
@@ -97,7 +97,7 @@ impl App {
             args.push("--new");
         }
         let (ok, out) = self.bp(&args);
-        self.msg = Note::of(ok, format!("{}.", model::capitalize(&out)), out);
+        self.msg = Note::of(ok, format!("{}.", bullpen_core::text::upper_first(&out)), out);
     }
 
     /// A key while g asks about a stale tour.

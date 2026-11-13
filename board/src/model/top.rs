@@ -1,5 +1,7 @@
 //! The top line's counts: this repo's and the other repositories'.
 
+use bullpen_core::config::{read_own, task_files};
+use bullpen_core::json;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
@@ -54,7 +56,7 @@ impl OtherRepos {
         let mut counts = Vec::new();
         let mut seen = HashMap::new();
         for dir in dirs {
-            let cfg = read_object(&dir.join("config.json"));
+            let cfg = read_own(&dir).unwrap_or_default();
             let Some(root) = cfg.get("root").and_then(|r| r.as_str()).map(PathBuf::from) else { continue };
             if !root.is_dir() {
                 continue; // its checkout is gone
@@ -65,7 +67,7 @@ impl OtherRepos {
             let settled = changed.elapsed().is_ok_and(|a| a > Duration::from_secs(2));
             let (needs, ready) = match self.seen.get(&dir) {
                 Some(&(t, n, r)) if t == changed && settled => (n, r),
-                _ => count_tasks(&dir.join("tasks")),
+                _ => count_tasks(&dir),
             };
             seen.insert(dir, (changed, needs, ready));
             if needs + ready > 0 {
@@ -78,14 +80,11 @@ impl OtherRepos {
     }
 }
 
-/// How many tasks in a tasks folder need you, and how many are ready or finished.
-fn count_tasks(tasks: &Path) -> (usize, usize) {
+/// How many tasks in a repo's state folder need you, and how many are ready or finished.
+fn count_tasks(dir: &Path) -> (usize, usize) {
     let (mut needs, mut ready) = (0, 0);
-    for p in std::fs::read_dir(tasks).into_iter().flatten().flatten().map(|e| e.path()) {
-        if p.extension().is_none_or(|x| x != "json") {
-            continue;
-        }
-        match read_object(&p).get("status").and_then(|s| s.as_str()) {
+    for p in task_files(dir) {
+        match json::read_obj(&p).ok().flatten().as_ref().map(|t| json::s(t, "status")) {
             Some("needs" | "stopped") => needs += 1,
             Some("ready" | "finished") => ready += 1,
             _ => {}

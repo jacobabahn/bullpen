@@ -4,7 +4,7 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::cell::Cell;
-use unicode_width::UnicodeWidthChar;
+use bullpen_core::text::char_width;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct LineEdit {
@@ -119,7 +119,7 @@ impl LineEdit {
     /// What's shown in `room` columns, and the cursor's column in it. The shown part
     /// moves only when the cursor would leave it, as a shell's line does.
     pub fn view(&self, room: usize) -> (String, usize) {
-        let w = |cs: &[char]| cs.iter().map(|c| c.width().unwrap_or(0)).sum::<usize>();
+        let w = |cs: &[char]| cs.iter().map(|&c| char_width(c)).sum::<usize>();
         // the cursor takes a column of its own at the end
         let room = room.max(1);
         let mut from = self.from.get().min(self.at);

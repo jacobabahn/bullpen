@@ -111,19 +111,10 @@ fn test_the_boards_sentence() {
 
 #[test]
 fn test_the_marks_are_the_boards() {
-    // one mark per status everywhere: the board's mark() in board/src/model/groups.rs
-    let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../board/src/model/groups.rs")).unwrap();
-    let body = &src[src.find("pub fn mark(status: &str)").unwrap()..];
-    let body = &body[..body.find("\n}\n").unwrap()];
-    let mut board = Vec::new();
-    for line in body.lines() {
-        let parts: Vec<&str> = line.split('"').collect();
-        if parts.len() >= 5 && parts[2].trim() == "=>" {
-            board.push((parts[1].to_string(), parts[3].to_string()));
-        }
-    }
-    let ours: Vec<(String, String)> = MARKED.iter().map(|st| (st.to_string(), mark(st).to_string())).collect();
-    assert_eq!(ours, board);
+    // one mark per status, the board's too (it shows mark()): each its own
+    let marks: std::collections::HashSet<&str> = MARKED.iter().map(|st| mark(st)).collect();
+    assert_eq!(marks.len(), MARKED.len());
+    assert!(!marks.contains(" "));
     // ready and closed are told apart
     assert_eq!((mark("ready"), mark("done")), ("✔", "·"));
 }
@@ -153,4 +144,7 @@ fn test_only_the_agent_a_task_waits_on_is_stuck_or_limited() {
     let lim = json!({"who": "worker", "resets": "2026-11-11T15:00:00-06:00", "text": "x"});
     assert!(is_limited(&task(json!({"status": "working", "limit": lim}))));
     assert!(!is_limited(&task(json!({"status": "ready", "limit": lim}))));
+    // a record of the wrong shape is none
+    assert!(!is_stuck(&task(json!({"status": "working", "stuck": 1}))));
+    assert!(!is_limited(&task(json!({"status": "working", "limit": "x"}))));
 }

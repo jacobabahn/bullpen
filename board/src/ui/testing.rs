@@ -1,5 +1,6 @@
 //! Helpers the board's drawing tests share.
 
+pub(crate) use crate::model::testing::{json, task};
 use crate::model::{Config, Layout, Task};
 use crate::ui::draw;
 use crate::App;
@@ -9,12 +10,12 @@ use ratatui::Terminal;
 
 pub(crate) fn app(tasks: Vec<Task>, gap: usize, layout: Layout) -> App {
     let mut a = App::for_test(tasks);
-    a.cfg = Config { bottom_gap: gap, layout, ..Config::default_for_test() };
+    a.cfg = Config::default_for_test().with(json!({"board_bottom_gap": gap, "board_layout": layout.name()}));
     a
 }
 
 pub(crate) fn ready(id: &str) -> Task {
-    Task { id: id.into(), title: format!("Task {id}"), status: "ready".into(), ..Default::default() }
+    task(id, "ready").with(json!({"title": format!("Task {id}")}))
 }
 
 /// The board's rows as text, trailing spaces cut.
@@ -45,9 +46,9 @@ pub(crate) fn tone_of(app: &mut App, w: u16, h: u16, text: &str) -> Option<Color
 pub(crate) const QUESTION: &str = "Pick: candidate 4 (one rule for who sees to a task), 3 (reviews that ask before they block), or both. 4 changes how triage works for every coordinator; 3 only touches the reviewer's prompt and is easy to undo.";
 
 pub(crate) fn asking(id: &str) -> Task {
-    Task { status: "needs".into(), ask: Some(true), why: Some(QUESTION.into()), title: "Architecture round 2: review".into(), ..ready(id) }
+    ready(id).with(json!({"status": "needs", "ask": true, "why": QUESTION, "title": "Architecture round 2: review"}))
 }
 
 pub(crate) fn asks(id: &str) -> Task {
-    Task { status: "needs".into(), why: Some("Asks: python3 or python?".into()), ..ready(id) }
+    ready(id).with(json!({"status": "needs", "why": "Asks: python3 or python?"}))
 }

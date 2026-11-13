@@ -321,7 +321,7 @@ fn t_i_a_d_in_a_peek_go_back_and_act_on_the_peeked_task() {
 fn enter_and_v_in_a_peek_go_back_and_open_the_pane_or_diff() {
     let d = Scratch::new("peek-acts");
     let exe = fake_bullpen(&d, "current");
-    let mut a = App::for_test(vec![Task { block: Some("b1".into()), ..task("BP-1", "working") }]);
+    let mut a = App::for_test(vec![task("BP-1", "working").with(json!({"block": "b1"}))]);
     (a.bullpen, a.root) = (exe, d.0.clone());
     peek_at(&mut a, "BP-1");
     a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -396,8 +396,7 @@ fn g_opens_a_current_tour_or_has_one_written() {
     }
     // being written: no need to look, `--pane` opens it once it's done
     let d = Scratch::new("g-writing");
-    let writing = Some(model::TourRun { state: "writing".into(), ..Default::default() });
-    let mut a = App::for_test(vec![Task { tour: writing, ..task("BP-1", "review") }]);
+    let mut a = App::for_test(vec![task("BP-1", "review").with(json!({"tour": {"state": "writing"}}))]);
     (a.bullpen, a.root) = (fake_bullpen(&d, "writing"), d.0.clone());
     a.settle();
     press(&mut a, 'g');

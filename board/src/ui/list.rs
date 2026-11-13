@@ -197,7 +197,7 @@ fn build_rows<'a>(
                 };
                 let text = if doing.is_empty() { model::detail_with_auto(t, &app.cfg, now) } else { doing };
                 // on a narrow board the age starts the first line, off the title's
-                let age = if age_on_detail { model::ago(t.stamp(), now) } else { String::new() };
+                let age = if age_on_detail { model::ago(t, now) } else { String::new() };
                 let text = match (age.is_empty(), text.is_empty()) {
                     (true, _) => text,
                     (false, true) => age.clone(),
@@ -307,7 +307,7 @@ fn title_line(
 
     let age = match asked {
         Some(_) => "y / n".to_string(),
-        None if with_age => model::ago(t.stamp(), now),
+        None if with_age => model::ago(t, now),
         None => String::new(),
     };
     let room = width_all.saturating_sub(idw + width(gap) + if age.is_empty() { 0 } else { width(&age) + 2 });

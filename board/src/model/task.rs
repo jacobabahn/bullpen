@@ -1,6 +1,8 @@
-//! Tasks as bullpen stores them: the JSON types, what a task is waiting on, and
-//! loading a repo's tasks.
+//! Tasks as bullpen-core reads them, with the board's typed view of each, what a
+//! task is waiting on, and loading a repo's tasks.
 
+use bullpen_core::json::{self, Obj};
+use bullpen_core::{config, paths, task as core, words};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer};
 use std::path::Path;
@@ -16,42 +18,12 @@ fn lenient<'de, D: Deserializer<'de>, T: DeserializeOwned>(d: D) -> Result<Optio
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Gh {
     #[serde(default, deserialize_with = "lenient")]
-    pub state: Option<String>,
-    #[serde(default, deserialize_with = "lenient")]
     pub checks: Option<String>,
-    #[serde(default, deserialize_with = "lenient")]
-    pub new: Option<u64>,
-    /// its worker is fixing what GitHub sent it back for (cleared by its next `ready`)
-    #[serde(default, deserialize_with = "lenient")]
-    pub sent: Option<bool>,
-}
-
-/// An agent that has said it's working, and nothing else, for a while.
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct Stuck {
-    /// "worker" or "reviewer"
-    pub who: String,
-    pub since: String,
-}
-
-/// An agent stopped at the usage limit.
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct Limit {
-    /// "worker" or "reviewer"
-    pub who: String,
-    /// when the limit resets, if its message said
-    #[serde(default, deserialize_with = "lenient")]
-    pub resets: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Review {
-    pub round: Option<u32>,
     pub verdict: Option<String>,
-    /// "full", "light", "followup", "tour" (of the person's comments after a tour) or
-    /// "rebase" (a check of a conflict resolution after a rebase)
-    #[serde(default, deserialize_with = "lenient")]
-    pub kind: Option<String>,
     /// the reviewer's pane
     #[serde(default, deserialize_with = "lenient")]
     pub block: Option<String>,
@@ -142,36 +114,13 @@ impl Prompt {
     }
 }
 
-/// What an agent last said it's doing: the watcher writes it to
-/// <state>/doing/<block>.json from the pane's "working: ..." status.
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct Doing {
-    /// the pane's state when it was written: only "working" has news
-    #[serde(default)]
-    pub state: String,
-    #[serde(default)]
-    pub text: String,
-    /// when it was written, in seconds since 1970
-    #[serde(default)]
-    pub at: i64,
-}
-
-impl Review {
-    /// "light review", "follow-up review", or plain "review" from before kinds.
-    pub fn kind_words(&self) -> &'static str {
-        match self.kind.as_deref() {
-            Some("full") => "full review",
-            Some("light") => "light review",
-            Some("followup") => "follow-up review",
-            Some("tour") => "review of your comments",
-            Some("rebase") => "rebase check",
-            _ => "review",
-        }
-    }
-}
-
+/// A task: the object bullpen-core read, which bullpen-core's sentences read, and the
+/// board's typed view of it (the fields below, read from it once).
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Task {
+    /// the task as its file has it
+    #[serde(skip)]
+    obj: Obj,
     pub id: String,
     #[serde(default)]
     pub title: String,
@@ -180,18 +129,12 @@ pub struct Task {
     pub why: Option<String>,
     pub pr: Option<String>,
     pub review: Option<Review>,
-    pub since: Option<String>,
-    pub updated: Option<String>,
     pub block: Option<String>,
     /// no PR: its branch is merged locally
     #[serde(default, deserialize_with = "lenient")]
     pub local: Option<bool>,
     #[serde(default, deserialize_with = "lenient")]
-    pub branch: Option<String>,
-    #[serde(default, deserialize_with = "lenient")]
     pub base: Option<String>,
-    #[serde(default, deserialize_with = "lenient")]
-    pub merged: Option<String>,
     #[serde(default, deserialize_with = "lenient")]
     pub worktree: Option<String>,
     /// the size of its change: "3 files, +120 −14"
@@ -199,34 +142,12 @@ pub struct Task {
     pub diffstat: Option<String>,
     #[serde(default, deserialize_with = "lenient")]
     pub gh: Option<Gh>,
-    #[serde(default, deserialize_with = "lenient")]
-    pub stuck: Option<Stuck>,
-    #[serde(default, deserialize_with = "lenient")]
-    pub limit: Option<Limit>,
-    /// the base it was rebased onto after another task's accept, until its next ready
-    #[serde(default, deserialize_with = "lenient")]
-    pub rebased: Option<String>,
-    /// the tasks it waits on (`bullpen add --after`, `bullpen after`)
-    #[serde(default, deserialize_with = "lenient")]
-    pub after: Option<Vec<String>>,
-    /// its own say over config's auto_accept (`--auto-accept`, `--no-auto-accept`)
-    #[serde(default, deserialize_with = "lenient")]
-    pub auto_accept: Option<bool>,
-    /// approved, and auto-accepts once its PR's checks pass
-    #[serde(default, deserialize_with = "lenient")]
-    pub auto_wait: Option<bool>,
     /// the ID of the coordinator that owns it: its news goes there
     #[serde(default, deserialize_with = "lenient")]
     pub coordinator: Option<String>,
-    /// its own worker model, over the config's (`add --model`, `start --model`, `model`)
-    #[serde(default, deserialize_with = "lenient")]
-    pub worker_model: Option<String>,
     /// what its worker said it did (`ready`, `finish`)
     #[serde(default, deserialize_with = "lenient")]
     pub summary: Option<String>,
-    /// done by `close`: it finished with nothing to merge
-    #[serde(default, deserialize_with = "lenient")]
-    pub closed: Option<bool>,
     /// its coordinator asked the person about it (`bullpen ask`): the question is its why
     #[serde(default, deserialize_with = "lenient")]
     pub ask: Option<bool>,
@@ -236,18 +157,40 @@ pub struct Task {
     /// its guided review tour, once one was asked for
     #[serde(default, deserialize_with = "lenient")]
     pub tour: Option<TourRun>,
-    /// those not done yet, worked out from the other tasks: "BP-8", "BP-9 (dropped)"
+    /// what it waits on, from the other tasks: "Waits on BP-8, BP-9 (dropped)", or ""
     #[serde(skip)]
-    pub waits: Vec<String>,
-    /// what the agent it waits on (worker, or reviewer in review) last said it's doing
+    pub waits: String,
+    /// what the agent it waits on (worker, or reviewer in review) last said it's doing:
+    /// <state>/doing/<block>.json, as the watcher writes it
     #[serde(skip)]
-    pub doing: Option<Doing>,
+    pub doing: Option<Obj>,
 }
 
 impl Task {
+    /// The task in this object, or None when it has no id or status (or one of the
+    /// wrong shape): the board can't show it.
+    pub fn from_obj(obj: Obj) -> Option<Task> {
+        let mut t: Task = serde_json::from_value(serde_json::Value::Object(obj.clone())).ok()?;
+        t.obj = obj;
+        Some(t)
+    }
+
+    /// The task as its file has it, for bullpen-core.
+    pub fn obj(&self) -> &Obj {
+        &self.obj
+    }
+
+    /// The task with these keys set too (for tests).
+    #[cfg(test)]
+    pub fn with(self, more: serde_json::Value) -> Task {
+        let mut obj = self.obj.clone();
+        obj.extend(more.as_object().cloned().unwrap_or_default());
+        Task { waits: self.waits, doing: self.doing, ..Task::from_obj(obj).expect("a task") }
+    }
+
     /// The number after the prefix: tasks sort by it.
-    pub fn num(&self) -> u64 {
-        self.id.rsplit('-').next().and_then(|n| n.parse().ok()).unwrap_or(0)
+    pub fn num(&self) -> i64 {
+        core::task_num(&self.obj)
     }
 
     pub fn needs_you(&self) -> bool {
@@ -265,7 +208,7 @@ impl Task {
     }
 
     pub fn closed(&self) -> bool {
-        matches!(self.status.as_str(), "done" | "dropped")
+        core::is_closed(&self.status)
     }
 
     /// The question the person can answer from the board, if any: its coordinator's
@@ -286,20 +229,15 @@ impl Task {
         self.local == Some(true)
     }
 
-    /// The status a task has while it waits on this agent ("worker" or "reviewer").
-    fn waits_on(&self, who: &str) -> bool {
-        self.status == if who == "reviewer" { "review" } else { "working" }
-    }
-
     /// Has the agent the task is waiting on (its worker, or its reviewer in review)
     /// shown no progress for too long?
     pub fn is_stuck(&self) -> bool {
-        self.stuck.as_ref().is_some_and(|s| self.waits_on(&s.who))
+        words::is_stuck(&self.obj)
     }
 
     /// Is the agent the task is waiting on stopped at the usage limit?
     pub fn is_limited(&self) -> bool {
-        self.limit.as_ref().is_some_and(|l| self.waits_on(&l.who))
+        words::is_limited(&self.obj)
     }
 
     /// Does it get the amber (or red) bar: it needs you, or its agent has gone quiet.
@@ -307,18 +245,9 @@ impl Task {
         self.needs_you() || self.is_stuck()
     }
 
-    /// Is the worker fixing failed checks or comments from its PR?
-    pub fn sent_back_by_github(&self) -> bool {
-        self.gh.as_ref().and_then(|g| g.sent) == Some(true)
-    }
-
     /// The pane of the agent it waits on now: the reviewer's in review, else the worker's.
-    pub fn agent_block(&self) -> Option<&str> {
-        match self.status.as_str() {
-            "review" => self.review.as_ref().and_then(|r| r.block.as_deref()),
-            "working" => self.block.as_deref(),
-            _ => None,
-        }
+    pub fn agent_block(&self) -> Option<String> {
+        words::agent_block(&self.obj)
     }
 
     /// Can it have a tour: ready or in review, so its code isn't changing.
@@ -340,19 +269,16 @@ impl Task {
 
     /// When it entered its current status.
     pub fn stamp(&self) -> Option<&str> {
-        self.since.as_deref().or(self.updated.as_deref())
+        core::stamp(&self.obj)
     }
 }
 
 /// The repo's tasks, by ID. A file caught half-written is skipped until next time.
 pub fn load_tasks(dir: &Path) -> Vec<Task> {
-    let mut out: Vec<Task> = std::fs::read_dir(dir.join("tasks"))
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "json"))
-        .filter_map(|p| serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok())
+    let mut out: Vec<Task> = config::task_files(dir)
+        .iter()
+        .filter_map(|p| json::read_obj(p).ok().flatten())
+        .filter_map(Task::from_obj)
         .collect();
     out.sort_by_key(Task::num);
     link_waits(&mut out);
@@ -363,37 +289,19 @@ pub fn load_tasks(dir: &Path) -> Vec<Task> {
     out
 }
 
-/// A pane's name as a file name, as bullpen and the watcher write it.
-fn safe(name: &str) -> String {
-    name.chars().map(|c| if c.is_ascii_alphanumeric() || "._-".contains(c) { c } else { '_' }).collect()
-}
-
 /// Fill in what the agent each working or in-review task waits on last said.
 pub fn link_doing(tasks: &mut [Task], dir: &Path) {
     for t in tasks.iter_mut() {
-        t.doing = t
-            .agent_block()
-            .and_then(|b| std::fs::read_to_string(dir.join(format!("{}.json", safe(b)))).ok())
-            .and_then(|s| serde_json::from_str(&s).ok());
+        let note = t.agent_block().map(|b| dir.join(format!("{}.json", paths::safe(&b))));
+        t.doing = note.and_then(|p| json::read_obj(&p).ok().flatten());
     }
 }
 
 /// Fill in what each task waits on: the tasks in its `after` that aren't done.
 pub fn link_waits(tasks: &mut [Task]) {
-    let status: std::collections::HashMap<String, String> =
-        tasks.iter().map(|t| (t.id.clone(), t.status.clone())).collect();
+    let every = words::every(&tasks.iter().map(|t| t.obj.clone()).collect::<Vec<_>>());
     for t in tasks.iter_mut() {
-        t.waits = t
-            .after
-            .iter()
-            .flatten()
-            .filter_map(|d| match status.get(d).map(String::as_str) {
-                Some("done") => None,
-                Some("dropped") => Some(format!("{d} (dropped)")),
-                Some(_) => Some(d.clone()),
-                None => Some(format!("{d} (missing)")),
-            })
-            .collect();
+        t.waits = words::waits_phrase(&t.obj, &every);
     }
 }
 

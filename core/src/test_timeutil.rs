@@ -33,3 +33,15 @@ fn ages_count_from_the_stamp() {
     assert_eq!(seconds_since("2026-11-13T03:42:21+00:00", Some(later)), 60.25);
     assert_eq!(seconds_since("not a stamp", Some(later)), 0.0);
 }
+
+fn local(d: u32, h: u32, m: u32) -> Stamp {
+    Local.with_ymd_and_hms(2026, 11, d, h, m, 0).unwrap().fixed_offset()
+}
+
+#[test]
+fn clock_says_the_day_when_it_isnt_today() {
+    let at = Some(local(11, 13, 0)); // a Wednesday, 1 PM
+    assert_eq!(clock(local(11, 15, 0), at), "3:00 PM");
+    assert_eq!(clock(local(16, 0, 0), at), "Mon 12:00 AM");
+    assert_eq!(clock(local(30, 9, 5), at), "Nov 30 9:05 AM");
+}

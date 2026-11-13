@@ -1,7 +1,7 @@
 //! Helpers the app's tests share.
 
 use super::*;
-pub(crate) use crate::model::testing::task;
+pub(crate) use crate::model::testing::{json, task};
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -21,12 +21,12 @@ pub(crate) fn press(a: &mut App, c: char) {
 }
 
 pub(crate) fn owned(id: &str, status: &str, c: &str) -> Task {
-    Task { coordinator: Some(c.into()), ..task(id, status) }
+    task(id, status).with(json!({"coordinator": c}))
 }
 
 pub(crate) fn needs(id: &str, ask: bool, kind: &str) -> Task {
-    let stop = Some(model::Stop { by: "worker".into(), kind: kind.into() });
-    Task { ask: ask.then_some(true), stop, ..task(id, "needs") }
+    let t = task(id, "needs").with(json!({"stop": {"by": "worker", "kind": kind}}));
+    if ask { t.with(json!({"ask": true})) } else { t }
 }
 
 pub(crate) fn prompt(options: &[(&str, &str)]) -> Prompt {

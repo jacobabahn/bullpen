@@ -36,8 +36,8 @@ fn the_last_row_is_left_for_rexs_capsules() {
 
 #[test]
 fn the_working_and_review_marks_turn_five_times_a_second_and_a_command_spinner_fast() {
-    let working = Task { status: "working".into(), ..ready("BP-1") };
-    let review = Task { status: "review".into(), ..ready("BP-2") };
+    let working = ready("BP-1").with(json!({"status": "working"}));
+    let review = ready("BP-2").with(json!({"status": "review"}));
     let mut a = app(vec![working, review, ready("BP-3")], 0, Layout::Grouped);
     let marks = |a: &mut App, ms: u64| {
         a.started = Instant::now() - std::time::Duration::from_millis(ms);

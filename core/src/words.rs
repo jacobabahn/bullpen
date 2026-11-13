@@ -98,9 +98,10 @@ pub fn stale(t: &Obj, at: Option<Stamp>) -> bool {
 }
 
 /// Is the record at key (stuck, limit) about the agent the task waits on now: its
-/// reviewer in review, its worker while working?
+/// reviewer in review, its worker while working? One of the wrong shape (not an
+/// object) counts as none.
 fn on_waited(t: &Obj, key: &str) -> bool {
-    truthy(t.get(key))
+    !obj(t, key).is_empty()
         && s(t, "status")
             == if s(obj(t, key), "who") == "reviewer" {
                 "review"

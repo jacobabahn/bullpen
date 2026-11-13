@@ -59,7 +59,7 @@ fn a_page_in_the_grouped_layout_counts_the_tasks_with_their_details() {
 
 #[test]
 fn the_header_says_what_is_hidden_and_o_labels_them() {
-    let c = |id: &str, who: &str| Task { coordinator: Some(who.into()), ..ready(id) };
+    let c = |id: &str, who: &str| ready(id).with(json!({"coordinator": who}));
     let mut a = app(vec![c("BP-1", "c1"), c("BP-2", "c2"), c("BP-3", "c2")], 1, Layout::Grouped);
     a.cfg.coordinators = vec!["c1".into(), "c2".into()];
     a.me = Some("c1".into());
@@ -98,7 +98,7 @@ fn the_header_counts_the_other_repos_in_the_room_left() {
 #[test]
 fn a_crowded_top_line_drops_o_shows_before_the_counts() {
     // c1's board at 42 columns, with c3's tasks hidden and another repo ready
-    let c = |id: &str, who: &str, status: &str| Task { coordinator: Some(who.into()), status: status.into(), ..ready(id) };
+    let c = |id: &str, who: &str, status: &str| ready(id).with(json!({"coordinator": who, "status": status}));
     let tasks = vec![c("BP-1", "c1", "needs"), c("BP-2", "c1", "ready"), c("BP-3", "c3", "working"), c("BP-4", "c3", "ready")];
     let mut a = app(tasks, 1, Layout::Grouped);
     a.repo_name = "bullpen".into();
@@ -117,9 +117,10 @@ fn a_crowded_top_line_drops_o_shows_before_the_counts() {
 
 fn busy(id: &str, status: &str, text: &str) -> Task {
     let at = model::now().timestamp() - 5;
-    let doing = Some(model::Doing { state: "working".into(), text: text.into(), at });
-    let review = Some(model::Review { round: Some(1), ..Default::default() });
-    Task { since: Some(model::now().to_rfc3339()), doing, review, status: status.into(), ..ready(id) }
+    let doing = json!({"state": "working", "text": text, "at": at}).as_object().cloned();
+    let mut t = ready(id).with(json!({"since": model::now().to_rfc3339(), "review": {"round": 1}, "status": status}));
+    t.doing = doing;
+    t
 }
 
 #[test]
@@ -127,7 +128,7 @@ fn a_working_task_shows_what_its_agent_is_doing() {
     let tasks = vec![
         busy("BP-1", "working", "Running the board's tests with cargo test in board/"),
         busy("BP-2", "review", "Reading the diff"),
-        Task { doing: None, ..busy("BP-3", "working", "") },
+        { let mut t = busy("BP-3", "working", ""); t.doing = None; t },
     ];
     let mut a = app(tasks.clone(), 0, Layout::Grouped);
     let s = screen(&mut a, 44, 16);
@@ -162,21 +163,22 @@ fn a_working_task_shows_what_its_agent_is_doing() {
 
 #[test]
 fn a_ready_task_says_whether_its_toured_and_a_tour_being_written_spins() {
-    let run = |state: &str, commit: &str, opened: Option<&str>| {
-        Some(model::TourRun { state: state.into(), commit: Some(commit.into()), opened: opened.map(String::from), ..Default::default() })
+    let run = |id: &str, state: &str, commit: &str, opened: Option<&str>| {
+        ready(id).with(json!({"tour": {"state": state, "commit": commit, "opened": opened}}))
     };
     let tasks = vec![
-        Task { diffstat: Some("3 files, +12 −1".into()), ..ready("BP-1") },
-        Task { tour: run("written", "abc", Some("abc")), ..ready("BP-2") },
-        Task { tour: run("written", "def", Some("abc")), ..ready("BP-3") },
-        Task { tour: run("writing", "", None), ..ready("BP-4") },
-        Task { tour: run("failed", "", None), note: Some("tour failed: its tour doesn't parse".into()), ..ready("BP-5") },
+        ready("BP-1").with(json!({"diffstat": "3 files, +12 −1"})),
+        run("BP-2", "written", "abc", Some("abc")),
+        run("BP-3", "written", "def", Some("abc")),
+        run("BP-4", "writing", "", None),
+        run("BP-5", "failed", "", None).with(json!({"note": "tour failed: its tour doesn't parse"})),
     ];
+    let stale = |opened: Option<&str>| ready("BP-6").with(json!({"tour": {"state": "written", "commit": "abc", "opened": opened, "stale": true}}));
     // a tour of code the worker has changed since is no tour of this code
-    let old = Task { tour: Some(model::TourRun { stale: Some(true), ..run("written", "abc", None).unwrap() }), ..ready("BP-6") };
+    let old = stale(None);
     assert_eq!(model::stat_line(&old), "Not toured yet");
     // even once its old tour is opened anyway
-    let opened = Task { tour: Some(model::TourRun { stale: Some(true), ..run("written", "abc", Some("abc")).unwrap() }), ..ready("BP-6") };
+    let opened = stale(Some("abc"));
     assert_eq!(model::stat_line(&opened), "Not toured yet");
     let mut a = app(tasks, 0, Layout::Grouped);
     let s = screen(&mut a, 60, 24);
@@ -206,7 +208,7 @@ fn a_ready_task_says_whether_its_toured_and_a_tour_being_written_spins() {
 
 #[test]
 fn the_selected_task_says_all_it_has_to_say_from_under_its_id() {
-    let stopped = Task { status: "stopped".into(), ..ready("BP-2") };
+    let stopped = ready("BP-2").with(json!({"status": "stopped"}));
     let mut a = app(vec![asking("BP-1"), stopped, asking("BP-3"), ready("BP-4")], 0, Layout::Grouped);
     a.sel = Some("BP-1".into());
     let mut term = Terminal::new(TestBackend::new(42, 24)).unwrap();
@@ -251,7 +253,7 @@ fn the_selected_task_says_all_it_has_to_say_from_under_its_id() {
 
 #[test]
 fn another_coordinators_question_stays_dim() {
-    let c = |id: &str, who: &str| Task { coordinator: Some(who.into()), ..asking(id) };
+    let c = |id: &str, who: &str| asking(id).with(json!({"coordinator": who}));
     let mut a = app(vec![c("BP-1", "c1"), c("BP-2", "c2"), ready("BP-3")], 0, Layout::Grouped);
     a.cfg.coordinators = vec!["c1".into(), "c2".into()];
     a.cfg.board_others = vec!["c1".into()];
@@ -340,13 +342,10 @@ fn a_selected_task_low_on_the_board_scrolls_its_details_into_view() {
 #[test]
 fn the_details_at_42_columns_say_when_a_task_comes_to_you_and_open_for_needs() {
     let ago = |m| (model::now() - chrono::Duration::minutes(m)).to_rfc3339();
-    let t = |id: &str, st: &str, title: &str, why: &str, m| Task {
-        title: title.into(),
-        why: Some(why.into()).filter(|w: &String| !w.is_empty()),
-        since: Some(ago(m)),
-        ..Task { id: id.into(), status: st.into(), ..Default::default() }
+    let t = |id: &str, st: &str, title: &str, why: &str, m| {
+        task(id, st).with(json!({"title": title, "why": Some(why).filter(|w| !w.is_empty()), "since": ago(m)}))
     };
-    let finished = Task { summary: Some("# Recorded the demo video".into()), ..t("BP-64", "finished", "Record the demo video", "", 30) };
+    let finished = t("BP-64", "finished", "Record the demo video", "", 30).with(json!({"summary": "# Recorded the demo video"}));
     let mut a = app(vec![
         t("BP-61", "needs", "Fix the login redirect", "Failed (coordinator didn't resolve it)", 4),
         t("BP-62", "triage", "Retry flaky upload test", "Ended its turn without saying ready", 3),
@@ -369,11 +368,9 @@ fn the_details_at_42_columns_say_when_a_task_comes_to_you_and_open_for_needs() {
 #[test]
 fn only_background_details_are_dim_and_a_stopped_tasks_age_turns_red() {
     let ago = |m| (model::now() - chrono::Duration::minutes(m)).to_rfc3339();
-    let t = |id: &str, st: &str, m| Task {
-        title: format!("Task {id}"),
-        why: matches!(st, "stopped" | "needs" | "triage").then(|| "Failed (exit 1)".into()),
-        since: Some(ago(m)),
-        ..Task { id: id.into(), status: st.into(), ..Default::default() }
+    let t = |id: &str, st: &str, m| {
+        let why = matches!(st, "stopped" | "needs" | "triage").then_some("Failed (exit 1)");
+        task(id, st).with(json!({"title": format!("Task {id}"), "why": why, "since": ago(m)}))
     };
     let mut a = app(vec![
         t("BP-1", "needs", 2),
@@ -381,7 +378,7 @@ fn only_background_details_are_dim_and_a_stopped_tasks_age_turns_red() {
         t("BP-3", "stopped", 4),
         t("BP-4", "ready", 9),
         t("BP-5", "finished", 9),
-        Task { since: Some(ago(9)), ..busy("BP-6", "working", "Running the tests") },
+        busy("BP-6", "working", "Running the tests").with(json!({"since": ago(9)})),
         t("BP-7", "todo", 9),
         t("BP-8", "triage", 1),
         t("BP-9", "review", 9),
@@ -419,7 +416,7 @@ fn only_background_details_are_dim_and_a_stopped_tasks_age_turns_red() {
 
 #[test]
 fn a_board_with_tasks_but_none_shown_says_why() {
-    let closed = |id: &str| Task { status: "done".into(), ..ready(id) };
+    let closed = |id: &str| ready(id).with(json!({"status": "done"}));
     let mut a = app(vec![closed("BP-1"), closed("BP-2")], 1, Layout::Grouped);
     let s = screen(&mut a, 42, 12);
     assert_eq!(s[2..4], [" Nothing open.", " f shows 2 closed."].map(String::from), "{s:#?}");
@@ -428,8 +425,8 @@ fn a_board_with_tasks_but_none_shown_says_why() {
     assert_eq!(s[2], " Closed  2", "{s:#?}");
 
     // only another coordinator's: o shows them
-    let c3 = |id: &str| Task { coordinator: Some("c3".into()), ..ready(id) };
-    let mut a = app(vec![c3("BP-3"), c3("BP-4"), Task { coordinator: Some("c1".into()), ..closed("BP-5") }], 1, Layout::Grouped);
+    let c3 = |id: &str| ready(id).with(json!({"coordinator": "c3"}));
+    let mut a = app(vec![c3("BP-3"), c3("BP-4"), closed("BP-5").with(json!({"coordinator": "c1"}))], 1, Layout::Grouped);
     a.cfg.coordinators = vec!["c1".into(), "c3".into()];
     a.me = Some("c1".into());
     let s = screen(&mut a, 42, 12);
@@ -445,8 +442,8 @@ fn a_board_with_tasks_but_none_shown_says_why() {
 fn a_narrow_board_puts_one_space_after_the_id_and_the_age_on_the_detail() {
     let old = (model::now() - chrono::Duration::minutes(12)).to_rfc3339();
     let tasks = vec![
-        Task { title: "Fix the login redirect after sign-in".into(), since: Some(old), ..asks("BP-3") },
-        Task { title: "Paginate the orders list".into(), why: None, ..ready("BP-10") },
+        asks("BP-3").with(json!({"title": "Fix the login redirect after sign-in", "since": old})),
+        ready("BP-10").with(json!({"title": "Paginate the orders list", "why": null})),
     ];
     let mut a = app(tasks.clone(), 0, Layout::Grouped);
     let s = screen(&mut a, 30, 16);
@@ -476,7 +473,7 @@ fn a_narrow_board_puts_one_space_after_the_id_and_the_age_on_the_detail() {
 
 #[test]
 fn the_compact_layout_names_its_groups_dim() {
-    let tasks = vec![asks("BP-1"), ready("BP-2"), Task { status: "working".into(), ..ready("BP-3") }];
+    let tasks = vec![asks("BP-1"), ready("BP-2"), ready("BP-3").with(json!({"status": "working"}))];
     let mut a = app(tasks, 0, Layout::Compact);
     a.sel = Some("BP-2".into());
     let s = screen(&mut a, 42, 20);

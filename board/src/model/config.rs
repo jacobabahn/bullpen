@@ -1,13 +1,19 @@
-//! The settings the board reads: the repo's config.json over the global one.
+//! The settings the board reads, as bullpen-core layers them: the repo's config.json
+//! over the global one, over the defaults.
 
-use std::path::{Path, PathBuf};
+use bullpen_core::config::{load_config, read_own};
+use bullpen_core::json::Obj;
+use bullpen_core::settings::defaults;
+use serde_json::Value;
+use std::path::Path;
 use super::*;
 
-/// The settings the board reads from the repo's config.json.
+/// The repo's settings, and the board's typed view of the ones it reads itself.
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// every setting, for bullpen-core's sentences
+    obj: Obj,
     pub layout: Layout,
-    pub review_rounds: u32,
     pub merge: String,
     /// approved tasks accept themselves (`bullpen config --auto-accept on`)
     pub auto_accept: bool,
@@ -16,8 +22,6 @@ pub struct Config {
     /// the coordinators whose boards show the other coordinators' tasks too
     /// (their entry's `board_others`, set by the board's `o`)
     pub board_others: Vec<String>,
-    /// the worker model for all tasks (`bullpen config --worker-model`)
-    pub worker_model: Option<String>,
     /// rows the board leaves empty at its bottom, for Rex's minimized-pane capsules
     /// (`bullpen config --board-bottom-gap`; 0: none; unset: default_gap)
     pub bottom_gap: usize,
@@ -77,86 +81,65 @@ impl Layout {
     }
 }
 
-/// A JSON file's object, or an empty one when it is missing or doesn't parse.
-pub(super) fn read_object(path: &Path) -> serde_json::Map<String, serde_json::Value> {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v.as_object().cloned())
-        .unwrap_or_default()
-}
-
-/// The config.json with every repository's defaults: $XDG_CONFIG_HOME/bullpen/config.json,
-/// else ~/.config/bullpen/config.json.
-pub fn global_config_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("bullpen").join("config.json"))
-}
-
-/// Settings only a repository can have: the global config.json's are ignored.
-/// A copy of core/src/settings.rs's repo-only settings: a test in tests/test_config.py holds it to its table.
-const REPO_ONLY: [&str; 7] = ["prefix", "next", "base", "push_remote", "news", "coordinators", "next_coordinator"];
-
-/// The repo's settings over the global ones, as bullpen layers them.
-pub fn layered(
-    global: serde_json::Map<String, serde_json::Value>,
-    repo: serde_json::Map<String, serde_json::Value>,
-) -> serde_json::Value {
-    let mut out: serde_json::Map<String, serde_json::Value> =
-        global.into_iter().filter(|(k, _)| !REPO_ONLY.contains(&k.as_str())).collect();
-    out.extend(repo);
-    serde_json::Value::Object(out)
-}
-
 impl Config {
+    /// The repo's settings. A config.json that doesn't parse counts as empty: the board
+    /// shows what it can (bullpen's commands say what's wrong).
     pub fn load(dir: &Path) -> Config {
-        let global = global_config_path().map(|p| read_object(&p)).unwrap_or_default();
-        Config::from_value(&layered(global, read_object(&dir.join("config.json"))))
+        Config::from_obj(load_config(dir).unwrap_or_else(|_| {
+            let mut cfg = defaults();
+            cfg.extend(read_own(dir).unwrap_or_default());
+            cfg
+        }))
     }
 
-    /// The defaults here are copies of core/src/settings.rs's: a test in tests/test_config.py holds them to its table.
-    pub fn from_value(v: &serde_json::Value) -> Config {
+    /// The board's view of these settings. A value of the wrong shape counts as the
+    /// default (bullpen-core's settings table has them).
+    pub fn from_obj(obj: Obj) -> Config {
+        let d = defaults();
+        let get = |k: &str| [obj.get(k), d.get(k)];
+        let flag = |k: &str| get(k).into_iter().flatten().find_map(Value::as_bool).unwrap_or(false);
+        let num = |k: &str| get(k).into_iter().flatten().find_map(Value::as_u64).unwrap_or(0);
+        let text = |k: &str| get(k).into_iter().flatten().find_map(Value::as_str).unwrap_or("").to_string();
+        let coordinators = obj.get("coordinators").and_then(Value::as_array).cloned().unwrap_or_default();
+        let ids = |only_others: bool| {
+            coordinators
+                .iter()
+                .filter(|c| !only_others || c["board_others"].as_bool() == Some(true))
+                .filter_map(|c| c["id"].as_str().map(String::from))
+                .collect()
+        };
         Config {
-            layout: if v["board_layout"].as_str().unwrap_or("grouped") == "compact" {
-                Layout::Compact
-            } else {
-                Layout::Grouped
-            },
-            review_rounds: v["review_rounds"].as_u64().unwrap_or(2) as u32,
-            merge: v["merge"].as_str().unwrap_or("rebase").to_string(),
-            auto_accept: v["auto_accept"].as_bool().unwrap_or(false),
-            coordinators: v["coordinators"]
-                .as_array()
-                .map(|cs| cs.iter().filter_map(|c| c["id"].as_str().map(String::from)).collect())
-                .unwrap_or_default(),
-            board_others: v["coordinators"]
-                .as_array()
-                .map(|cs| {
-                    cs.iter()
-                        .filter(|c| c["board_others"].as_bool() == Some(true))
-                        .filter_map(|c| c["id"].as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default(),
-            worker_model: v["worker_model"].as_str().map(String::from),
-            bottom_gap: v["board_bottom_gap"].as_u64().map_or_else(|| default_gap(v), |n| n as usize),
-            other_repos: v["board_repos"].as_bool().unwrap_or(true),
-            review: v["review"].as_bool().unwrap_or(true),
-            triage_minutes: v["triage_minutes"].as_u64().unwrap_or(10),
+            layout: if text("board_layout") == "compact" { Layout::Compact } else { Layout::Grouped },
+            merge: text("merge"),
+            auto_accept: flag("auto_accept"),
+            coordinators: ids(false),
+            board_others: ids(true),
+            bottom_gap: obj.get("board_bottom_gap").and_then(Value::as_u64).map_or_else(|| default_gap(&text), |n| n as usize),
+            other_repos: flag("board_repos"),
+            review: flag("review"),
+            triage_minutes: num("triage_minutes"),
+            obj,
         }
+    }
+
+    /// Every setting, as bullpen-core reads them.
+    pub fn obj(&self) -> &Obj {
+        &self.obj
+    }
+
+    /// These settings with these set too (for tests).
+    #[cfg(test)]
+    pub fn with(&self, more: Value) -> Config {
+        let mut obj = self.obj.clone();
+        obj.extend(more.as_object().cloned().unwrap_or_default());
+        Config::from_obj(obj)
     }
 }
 
 /// The bottom gap when the config sets none: a row while workers or reviewers float as
-/// capsules over the board's tab, else none. The defaults (workers float, reviewers
-/// in the background) are core/src/settings.rs's.
-fn default_gap(v: &serde_json::Value) -> usize {
-    let workers = v["workers"].as_str().unwrap_or("float");
-    let reviewers = v["reviewers"].as_str().unwrap_or("background");
-    usize::from(workers == "float" || reviewers == "float")
+/// capsules over the board's tab, else none.
+fn default_gap(text: &dyn Fn(&str) -> String) -> usize {
+    usize::from(text("workers") == "float" || text("reviewers") == "float")
 }
 
 #[cfg(test)]

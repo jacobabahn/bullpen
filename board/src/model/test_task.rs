@@ -1,22 +1,29 @@
 use super::*;
 use crate::model::testing::*;
 
+fn read(text: &str) -> Option<Task> {
+    Task::from_obj(serde_json::from_str(text).unwrap())
+}
+
 #[test]
 fn a_field_of_the_wrong_shape_reads_as_missing() {
-    let t: Task = serde_json::from_str(r#"{"id":"BP-1","status":"ready","merged":true,"gh":"?","diffstat":3}"#).unwrap();
-    assert_eq!((t.merged, t.diffstat, t.gh.is_none()), (None, None, true));
+    let t = read(r#"{"id":"BP-1","status":"ready","base":true,"gh":"?","diffstat":3}"#).unwrap();
+    assert_eq!((&t.base, &t.diffstat, t.gh.is_none()), (&None, &None, true));
+    assert_eq!(t.obj()["diffstat"], 3); // as its file has it
+    assert!(read(r#"{"id":"BP-1"}"#).is_none()); // no status: not a task the board can show
 }
 
 #[test]
 fn a_task_that_needs_you_says_what_i_answers() {
-    let stop = |kind: &str| Some(Stop { by: "worker".into(), kind: kind.into() });
-    let t = |status: &str, ask: Option<bool>, kind: &str| Task { ask, stop: stop(kind), ..task("BP-1", status) };
+    let t = |status: &str, ask: Option<bool>, kind: &str| {
+        task("BP-1", status).with(json!({"ask": ask, "stop": {"by": "worker", "kind": kind}}))
+    };
     assert_eq!(t("needs", None, "prompt").question(), Some(Question::Prompt));
     assert_eq!(t("needs", Some(true), "prompt").question(), Some(Question::Ask)); // the coordinator's first
     assert_eq!(t("needs", Some(true), "ended").question(), Some(Question::Ask));
     assert_eq!(t("needs", None, "ended").question(), None); // an escalated triage: open its pane
     assert_eq!(t("working", None, "prompt").question(), None);
-    let read: Task = serde_json::from_str(r#"{"id":"BP-1","status":"needs","ask":true,"stop":{"by":"reviewer","kind":"prompt"}}"#).unwrap();
+    let read = read(r#"{"id":"BP-1","status":"needs","ask":true,"stop":{"by":"reviewer","kind":"prompt"}}"#).unwrap();
     assert_eq!((read.question(), read.stop.unwrap().by.as_str()), (Some(Question::Ask), "reviewer"));
 }
 
@@ -36,6 +43,6 @@ fn a_prompt_is_read_from_what_bullpen_prompt_prints() {
 
 #[test]
 fn stuck_and_limit_of_the_wrong_shape_read_as_missing() {
-    let t: Task = serde_json::from_str(r#"{"id":"BP-1","status":"working","stuck":1,"limit":"x"}"#).unwrap();
+    let t = read(r#"{"id":"BP-1","status":"working","stuck":1,"limit":"x"}"#).unwrap();
     assert!(!t.is_stuck() && !t.is_limited());
 }

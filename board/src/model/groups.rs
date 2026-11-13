@@ -17,24 +17,9 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ("Closed", &["done", "dropped"]),
 ];
 
-/// Seconds a task can need you before its age turns red.
-pub const STALE: i64 = 300;
-
-pub fn mark(status: &str) -> &'static str {
-    match status {
-        "needs" => "●",
-        "stopped" => "■",
-        "triage" => "◎",
-        "ready" => "✔",
-        "finished" => "◆",
-        "done" => "·", // dim, unlike ready's bold ✔
-        "review" => "◐",
-        "working" => "○",
-        "todo" => "◌", // a dotted circle: not started yet
-        "dropped" => "–",
-        _ => " ",
-    }
-}
+/// Seconds a task can need you before its age turns red; each status's mark. `ls`
+/// shows the same marks.
+pub use bullpen_core::words::{mark, STALE};
 
 /// The groups that have tasks, each sorted by ID; the closed ones only with `closed`.
 pub fn board_groups(tasks: &[Task], closed: bool) -> Vec<(&'static str, Vec<&Task>)> {

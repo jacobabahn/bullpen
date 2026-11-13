@@ -28,13 +28,16 @@ Python (`tests/`, docs/tests.md).
 - The Rust is one cargo workspace (`Cargo.toml`, one `Cargo.lock`, built into
   `target/`): `core/` (`bullpen-core`: tasks, config, wording, what the command line
   and the board share), `cli/` (`bullpen-cli`, the program `bullpen`) and `board/`.
-  `core` never depends on `cli`. The crates are `serde_json` (with `preserve_order`),
-  `chrono` and `libc`; ask before adding one. Rust tests sit beside each module as
+  `core` never depends on `cli`; the board depends on `core`. The crates are `serde_json`
+  (with `preserve_order`), `chrono`, `libc` and `unicode-width` (the board's too, and
+  ratatui's); ask before adding one. Rust tests sit beside each module as
   `test_<module>.rs`. rustfmt with `max_width = 120` (`rustfmt.toml`) for `core` and
   `cli`; the board isn't formatted yet.
 - The files bullpen writes (tasks, config, news, stamps) are as the Python wrote them:
   JSON as Python's `json` (indent 2, ASCII only, keys in order), stamps as `isoformat`,
-  widths and cuts as Python's. Comments that say "as Python's" name what's kept.
+  cuts as Python's. Comments that say "as Python's" name what's kept. The width of text
+  on screen is `unicode-width`'s, as the board and ratatui measure it; it differs from
+  Python's `unicodedata` only on zero-width characters, which take no column.
 
 ## Commands
 
@@ -52,17 +55,18 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `fail.rs`: `Fail`, a command's error ("bullpen: ...", exit 1), and `Res`
 - `paths.rs`: bullpen's checkout (from the program's own resolved path), the state
   folder, Rex, `bin/bullpen`
-- `settings.rs`: the settings table, in `config`'s order (watch.lua's and the board's
-  copies of some defaults are held to it by tests/test_config.py)
+- `settings.rs`: the settings table, in `config`'s order (watch.lua's copies of some
+  defaults are held to it by tests/test_config.py)
 - `config.rs`: the defaults, the global config, a repo's, and the migrations
 - `repo.rs`: `Repo`: its config and tasks, `save_task` (which returns the task as it
   was: the cli runs what a save sets off), the repo a command runs in
 - `task.rs`: a task's status (`set_status`), stops, and the board's words for it
 - `json.rs`: JSON as Python's `json` writes it (indent 2, ASCII only, keys in order)
-- `text.rs`, `widths.rs`, `printable.rs`: widths and cuts as Python's, textwrap,
-  `isprintable` and `shlex.join`
+- `text.rs`, `printable.rs`: the width of text (`unicode-width`'s, one function for
+  `ls` and the board), cuts as Python's, textwrap, `isprintable` and `shlex.join`
 - `words.rs`: what the board says about a task, for `ls`, `show` and the board: its
-  mark, the board's order, its age, and the board's sentence (`board_detail`)
+  mark, the board's order, its age, and the board's sentence (`board_detail`, and its
+  parts: `status_detail`, `with_gh`, `auto_detail`, `model_detail`, `doing_said`)
 - `timeutil.rs`: ISO stamps as Python's `isoformat`, ages, the clock
 - `proc.rs`: running a program, `git`, `file_hash` (`sha256.rs`)
 - `sha1.rs`: SHA-1, for a review's own lines (hashlib's)
@@ -168,6 +172,21 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   `send_comments`); `screen.rs`: the stepper's keys and screen (`Stepper`), apart from
   the terminal; `view.rs`: the stepper on a terminal (`--view`), and what its keys ask
   for (a comment saved, a line told, send, accept, the task's pane or diff)
+
+`board/src/` (`bullpen-board`) reads tasks and settings through `core`:
+
+- `model/task.rs`: a `Task` is the object core read (`obj()`, which core's sentences
+  read) and the board's typed view of the fields it reads itself; `load_tasks` (core's
+  `task_files`), what a queued task waits on and what its agent is doing
+- `model/config.rs`: the repo's settings as core layers them (`load_config`), with the
+  board's typed view; a setting of the wrong shape counts as its default
+- `model/detail.rs`: the sentences under a task, core's `words.rs` but for the board's
+  own: a finished task's (no "a closes it."; the key row says it), when a task its
+  coordinator is on comes to you, and where a ready task's tour stands
+- `model/groups.rs`, `top.rs`, `confirm.rs`, `text.rs`: the groups and what a board
+  hides, the top line's counts (other repos read through core too), the confirm
+  questions, and fitting text (core's width)
+- `app/` (keys, background jobs, reloading), `ui/` (drawing), `edit.rs` (a line editor)
 
 ## Closing a task
 

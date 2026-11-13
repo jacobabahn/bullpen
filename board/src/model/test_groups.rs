@@ -10,7 +10,7 @@ fn ready_and_closed_have_marks_you_tell_apart() {
 #[test]
 fn another_coordinators_task_is_theirs_only_while_it_is_listed() {
     let mut cfg = Config::default_for_test();
-    let owned = |o: Option<&str>| Task { coordinator: o.map(String::from), ..task("BP-1", "working") };
+    let owned = |o: Option<&str>| task("BP-1", "working").with(json!({"coordinator": o}));
     cfg.coordinators = vec!["c1".into()];
     assert!(!cfg.theirs(&owned(Some("c2")), Some("c1"))); // one coordinator: all are its
     cfg.coordinators = vec!["c1".into(), "c2".into()];
@@ -25,7 +25,7 @@ fn another_coordinators_task_is_theirs_only_while_it_is_listed() {
 fn two_boards() -> (Config, Vec<Task>) {
     let mut cfg = Config::default_for_test();
     cfg.coordinators = vec!["c1".into(), "c2".into()];
-    let owned = |id: &str, status: &str, o: Option<&str>| Task { coordinator: o.map(String::from), ..task(id, status) };
+    let owned = |id: &str, status: &str, o: Option<&str>| task(id, status).with(json!({"coordinator": o}));
     let tasks = vec![
         owned("BP-1", "working", Some("c1")),
         owned("BP-2", "needs", Some("c2")),
@@ -99,7 +99,7 @@ fn the_header_counts_what_is_hidden() {
     // several others
     cfg.coordinators.push("c3".into());
     let mut more = tasks.clone();
-    more.push(Task { coordinator: Some("c3".into()), ..task("BP-7", "working") });
+    more.push(task("BP-7", "working").with(json!({"coordinator": "c3"})));
     assert_eq!(hidden_hint(&hidden(&more, &cfg, Some("c1"), false), true), "+3 in c2, c3 · o shows");
     // nothing hidden: nothing said
     let mine: Vec<Task> = tasks.iter().filter(|t| t.coordinator.as_deref() != Some("c2")).cloned().collect();
