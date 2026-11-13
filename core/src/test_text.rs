@@ -1,6 +1,5 @@
 use super::*;
 
-
 #[test]
 fn widths_as_python() {
     assert_eq!(width("幅の広い"), 8);
@@ -10,7 +9,10 @@ fn widths_as_python() {
 
 #[test]
 fn splitlines_as_python() {
-    assert_eq!(splitlines("a\r\nb\rc\n\nd\u{2028}e\n"), vec!["a", "b", "c", "", "d", "e"]);
+    assert_eq!(
+        splitlines("a\r\nb\rc\n\nd\u{2028}e\n"),
+        vec!["a", "b", "c", "", "d", "e"]
+    );
     assert_eq!(splitlines(""), Vec::<&str>::new());
 }
 

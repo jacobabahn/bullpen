@@ -121,12 +121,19 @@ pub fn task_num(t: &Obj) -> i64 {
 
 /// When it entered its current status.
 pub fn stamp(t: &Obj) -> Option<&str> {
-    [t.get("since"), t.get("updated")].into_iter().flatten().find(|v| truthy(Some(v))).and_then(Value::as_str)
+    [t.get("since"), t.get("updated")]
+        .into_iter()
+        .flatten()
+        .find(|v| truthy(Some(v)))
+        .and_then(Value::as_str)
 }
 
 /// Of a repo's tasks, the ones `ls` lists: the open ones, or all with --all.
 pub fn listed(tasks: Vec<Obj>, all: bool) -> Vec<Obj> {
-    tasks.into_iter().filter(|t| all || !is_closed(s(t, "status"))).collect()
+    tasks
+        .into_iter()
+        .filter(|t| all || !is_closed(s(t, "status")))
+        .collect()
 }
 
 // ---------- its own settings ----------
@@ -156,7 +163,8 @@ pub fn auto_accepts(repo: &Repo, t: &Obj) -> bool {
 
 /// Does the command run claude?
 pub fn is_claude(cmd: &[String]) -> bool {
-    cmd.first().is_some_and(|c| Path::new(c).file_name().is_some_and(|n| n == "claude"))
+    cmd.first()
+        .is_some_and(|c| Path::new(c).file_name().is_some_and(|n| n == "claude"))
 }
 
 /// The --model a command gives, if any.
@@ -248,7 +256,10 @@ pub const BOARD_WORDS: [(&str, &str); 10] = [
 /// The board's words for a status, with the status itself when they don't say it:
 /// "needs you", "needs you (stopped)", "coordinator on it (triage)".
 pub fn status_words(status: &str) -> String {
-    let words = BOARD_WORDS.iter().find(|(st, _)| *st == status).map_or(status, |(_, w)| *w);
+    let words = BOARD_WORDS
+        .iter()
+        .find(|(st, _)| *st == status)
+        .map_or(status, |(_, w)| *w);
     if words.contains(status) {
         words.into()
     } else {

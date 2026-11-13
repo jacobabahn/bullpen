@@ -66,7 +66,11 @@ pub fn run_with<S: AsRef<str>>(argv: &[S], cwd: Option<&Path>, input: Option<&st
         stderr: text(&out.stderr),
     };
     if check && !done.ok() {
-        let said = if done.stderr.is_empty() { &done.stdout } else { &done.stderr };
+        let said = if done.stderr.is_empty() {
+            &done.stdout
+        } else {
+            &done.stderr
+        };
         return fail(format!("`{}` failed: {}", argv.join(" "), crate::text::strip(said)));
     }
     Ok(done)
@@ -139,10 +143,18 @@ pub fn which(name: &str) -> Option<String> {
         return runnable(Path::new(name)).then(|| name.into());
     }
     let path = std::env::var("PATH").unwrap_or_else(|_| "/bin:/usr/bin".into());
-    path.split(':').map(|dir| if dir.is_empty() { name.to_string() } else { format!("{dir}/{name}") }).find(|p| {
-        // an empty entry is the current folder, which os.path.join("", name) names
-        runnable(Path::new(p))
-    })
+    path.split(':')
+        .map(|dir| {
+            if dir.is_empty() {
+                name.to_string()
+            } else {
+                format!("{dir}/{name}")
+            }
+        })
+        .find(|p| {
+            // an empty entry is the current folder, which os.path.join("", name) names
+            runnable(Path::new(p))
+        })
 }
 
 /// A file (not a folder) we may run.
@@ -151,7 +163,9 @@ fn runnable(path: &Path) -> bool {
     if !path.exists() || path.is_dir() {
         return false;
     }
-    let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) else { return false };
+    let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
     // SAFETY: c is a valid NUL-terminated path for the length of the call
     unsafe { libc::access(c.as_ptr(), libc::X_OK) == 0 }
 }

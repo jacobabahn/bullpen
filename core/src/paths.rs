@@ -12,8 +12,13 @@ pub fn user_home() -> String {
 /// bin/bullpen-py. The installed program is HOME/target/bullpen and cargo's own is
 /// HOME/target/release/bullpen; a test binary falls back to the folder above core/.
 pub fn home() -> PathBuf {
-    let exe = std::env::current_exe().and_then(|p| p.canonicalize()).unwrap_or_default();
-    exe.ancestors().find(|d| d.join("bin/bullpen-py").is_file()).map(Path::to_path_buf).unwrap_or_else(source_home)
+    let exe = std::env::current_exe()
+        .and_then(|p| p.canonicalize())
+        .unwrap_or_default();
+    exe.ancestors()
+        .find(|d| d.join("bin/bullpen-py").is_file())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(source_home)
 }
 
 /// The checkout this crate was built from: the folder above core/.
@@ -58,7 +63,15 @@ pub fn watch_lua() -> PathBuf {
 
 /// A name made safe for a file name: each character but A-Z a-z 0-9 . _ - becomes _.
 pub fn safe(name: &str) -> String {
-    name.chars().map(|c| if c.is_ascii_alphanumeric() || "._-".contains(c) { c } else { '_' }).collect()
+    name.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || "._-".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 /// A path with $HOME as ~, for people to read (core.home).
@@ -88,7 +101,10 @@ pub fn homes(text: &str) -> String {
     let mut rest = text;
     while let Some(i) = rest.find(&h) {
         let after = &rest[i + h.len()..];
-        let ends = after.chars().next().is_none_or(|c| !(is_word(c) || c == '.' || c == '-'));
+        let ends = after
+            .chars()
+            .next()
+            .is_none_or(|c| !(is_word(c) || c == '.' || c == '-'));
         if ends {
             out.push_str(&rest[..i]);
             out.push('~');

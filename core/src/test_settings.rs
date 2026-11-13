@@ -118,8 +118,14 @@ fn repo_only_is_the_tables() {
 #[test]
 fn settings_by_name_and_kind() {
     let s = setting("max_running").unwrap();
-    assert_eq!((s.kind, s.kind.as_str(), s.least, s.metavar), (Kind::Number, "number", Some(1), Some("N")));
-    assert_eq!(setting("reviewers").unwrap().choices.unwrap(), ["same", "float", "tab", "tabs", "background"]);
+    assert_eq!(
+        (s.kind, s.kind.as_str(), s.least, s.metavar),
+        (Kind::Number, "number", Some(1), Some("N"))
+    );
+    assert_eq!(
+        setting("reviewers").unwrap().choices.unwrap(),
+        ["same", "float", "tab", "tabs", "background"]
+    );
     assert_eq!(setting("rebase_others").unwrap().kind.as_str(), "on/off");
     assert!(setting("nope").is_none());
 }

@@ -55,13 +55,19 @@ fn which_finds_programs_on_path() {
     assert_eq!(which("/"), None);
     let cmd = resolve(&["sh".into(), "-c".into()]);
     assert_eq!(cmd, vec![sh, "-c".into()]);
-    assert_eq!(resolve(&["no-such-program-here".into()]), vec!["no-such-program-here".to_string()]);
+    assert_eq!(
+        resolve(&["no-such-program-here".into()]),
+        vec!["no-such-program-here".to_string()]
+    );
 }
 
 #[test]
 fn file_hash_is_sha256_hex() {
     let path = std::env::temp_dir().join(format!("bullpen-core-hash-{}", std::process::id()));
     std::fs::write(&path, "abc").unwrap();
-    assert_eq!(file_hash(&path).unwrap(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    assert_eq!(
+        file_hash(&path).unwrap(),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
     let _ = std::fs::remove_file(&path);
 }

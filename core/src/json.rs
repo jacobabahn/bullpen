@@ -156,7 +156,11 @@ pub fn float_repr(f: f64) -> String {
         };
         return format!("{sign}{body}");
     }
-    let mant = if digits.len() > 1 { format!("{}.{}", &digits[..1], &digits[1..]) } else { digits };
+    let mant = if digits.len() > 1 {
+        format!("{}.{}", &digits[..1], &digits[1..])
+    } else {
+        digits
+    };
     format!("{sign}{mant}e{}{:02}", if exp < 0 { '-' } else { '+' }, exp.abs())
 }
 
@@ -185,7 +189,9 @@ pub fn read_obj(path: &Path) -> Res<Option<Obj>> {
     match read(path) {
         Ok(None) => Ok(None),
         Ok(Some(Value::Object(o))) => Ok(Some(o)),
-        Ok(Some(_)) => Err(Fail(format!("{shown} isn't a JSON object ({{...}}): fix it, or move it away"))),
+        Ok(Some(_)) => Err(Fail(format!(
+            "{shown} isn't a JSON object ({{...}}): fix it, or move it away"
+        ))),
         Err(e) => Err(Fail(format!("{shown} doesn't parse ({e}): fix it, or move it away"))),
     }
 }
@@ -202,11 +208,18 @@ pub fn write_obj(path: &Path, o: &Obj) -> io::Result<()> {
 }
 
 fn write_text(path: &Path, text: &str) -> io::Result<()> {
-    let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let dir = path
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir)?;
     let tmp = dir.join(format!(".tmp-{}", tmp_suffix()));
     // mkstemp's mode, which the file keeps after the rename, as Python's does
-    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&tmp)?;
     let written = f.write_all(text.as_bytes()).and_then(|_| f.write_all(b"\n"));
     drop(f);
     if let Err(e) = written.and_then(|_| std::fs::rename(&tmp, path)) {
@@ -219,8 +232,14 @@ fn write_text(path: &Path, text: &str) -> io::Result<()> {
 /// A name no other writer uses at the same time: the process, the clock and a count.
 fn tmp_suffix() -> String {
     static COUNT: AtomicU64 = AtomicU64::new(0);
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-    format!("{}-{nanos}-{}", std::process::id(), COUNT.fetch_add(1, Ordering::Relaxed))
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    format!(
+        "{}-{nanos}-{}",
+        std::process::id(),
+        COUNT.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 // ---------- reading values as Python does ----------
@@ -250,13 +269,20 @@ pub fn s<'a>(o: &'a Obj, key: &str) -> &'a str {
 /// `o.get(key) or {}`: the object at key, or an empty one.
 pub fn obj<'a>(o: &'a Obj, key: &str) -> &'a Obj {
     static EMPTY: std::sync::OnceLock<Obj> = std::sync::OnceLock::new();
-    o.get(key).and_then(Value::as_object).unwrap_or_else(|| EMPTY.get_or_init(Obj::new))
+    o.get(key)
+        .and_then(Value::as_object)
+        .unwrap_or_else(|| EMPTY.get_or_init(Obj::new))
 }
 
 /// The strings of the list at key (a command, say); what isn't a string is left out.
 pub fn strs(o: &Obj, key: &str) -> Vec<String> {
     let items = o.get(key).and_then(Value::as_array);
-    items.into_iter().flatten().filter_map(Value::as_str).map(String::from).collect()
+    items
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(String::from)
+        .collect()
 }
 
 /// Python's str() of a value: a string as it is, others as Python prints them.
@@ -279,7 +305,10 @@ pub fn py_repr(v: &Value) -> String {
         Value::String(s) => str_repr(s),
         Value::Array(a) => format!("[{}]", a.iter().map(py_repr).collect::<Vec<_>>().join(", ")),
         Value::Object(o) => {
-            let items: Vec<String> = o.iter().map(|(k, v)| format!("{}: {}", str_repr(k), py_repr(v))).collect();
+            let items: Vec<String> = o
+                .iter()
+                .map(|(k, v)| format!("{}: {}", str_repr(k), py_repr(v)))
+                .collect();
             format!("{{{}}}", items.join(", "))
         }
     }
@@ -287,7 +316,11 @@ pub fn py_repr(v: &Value) -> String {
 
 /// Python's repr() of a str: in single quotes unless it has one and no double quote.
 fn str_repr(s: &str) -> String {
-    let q = if s.contains('\'') && !s.contains('"') { '"' } else { '\'' };
+    let q = if s.contains('\'') && !s.contains('"') {
+        '"'
+    } else {
+        '\''
+    };
     let mut out = String::from(q);
     for c in s.chars() {
         match c {

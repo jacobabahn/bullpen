@@ -18,7 +18,11 @@ const ABOUT: &str = "bullpen: a coordinator and its worker agents, each in its o
 
 /// shutil.get_terminal_size().columns: $COLUMNS, else stdout's terminal, else 80.
 pub fn term_width() -> usize {
-    if let Some(n) = std::env::var("COLUMNS").ok().and_then(|v| v.trim().parse::<i64>().ok()).filter(|n| *n > 0) {
+    if let Some(n) = std::env::var("COLUMNS")
+        .ok()
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .filter(|n| *n > 0)
+    {
         return n as usize;
     }
     let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
@@ -32,13 +36,21 @@ pub fn term_width() -> usize {
 
 /// The commands `--help` lists in a group, in the table's order.
 fn listed(group: &str) -> impl Iterator<Item = &'static Command> + '_ {
-    COMMANDS.iter().filter(move |c| c.group == Some(group) && !matches!(c.owner, Owner::Alias(_)))
+    COMMANDS
+        .iter()
+        .filter(move |c| c.group == Some(group) && !matches!(c.owner, Owner::Alias(_)))
 }
 
 /// The top-level help for a terminal `cols` wide.
 pub fn top_help(cols: usize) -> String {
     let width = (cols as i64 - 2).max(40) as usize;
-    let name_w = GROUPS.iter().flat_map(|(g, _)| listed(g)).map(|c| c.name.chars().count()).max().unwrap_or(0) + 2;
+    let name_w = GROUPS
+        .iter()
+        .flat_map(|(g, _)| listed(g))
+        .map(|c| c.name.chars().count())
+        .max()
+        .unwrap_or(0)
+        + 2;
     let mut out = format!("{USAGE}\n{}\n", wrap(ABOUT, width, "", ""));
     for (title, label) in GROUPS {
         out += &format!("\n{title}:\n");
@@ -57,8 +69,12 @@ pub fn unknown_command(name: &str) -> String {
     if name.starts_with('-') {
         return format!("bullpen: `{name}` goes after a command. `bullpen --help` lists them.");
     }
-    let offered = COMMANDS.iter().filter(|c| !c.name.starts_with('_') && !matches!(c.owner, Owner::Alias(_)));
-    let hint = close_match(name, offered.map(|c| c.name)).map(|m| format!(" Did you mean `{m}`?")).unwrap_or_default();
+    let offered = COMMANDS
+        .iter()
+        .filter(|c| !c.name.starts_with('_') && !matches!(c.owner, Owner::Alias(_)));
+    let hint = close_match(name, offered.map(|c| c.name))
+        .map(|m| format!(" Did you mean `{m}`?"))
+        .unwrap_or_default();
     format!("bullpen: no command `{name}`.{hint} `bullpen --help` lists them.")
 }
 
@@ -98,7 +114,10 @@ fn chunks(t: &[char]) -> Vec<String> {
     while p < t.len() {
         let end = if is_ws(t[p]) {
             p + t[p..].iter().take_while(|&&c| is_ws(c)).count()
-        } else if let Some(n) = (p > 0 && is_word_punct(t[p - 1])).then(|| dashes_then_word(t, p)).flatten() {
+        } else if let Some(n) = (p > 0 && is_word_punct(t[p - 1]))
+            .then(|| dashes_then_word(t, p))
+            .flatten()
+        {
             p + n
         } else {
             let mut e = p + 1;
@@ -106,8 +125,8 @@ fn chunks(t: &[char]) -> Vec<String> {
                 if at(e) == Some('-') {
                     let behind = (letter(e.checked_sub(2)) && letter(e.checked_sub(1)))
                         || (letter(e.checked_sub(3)) && at(e.wrapping_sub(2)) == Some('-') && letter(e.checked_sub(1)));
-                    let ahead = letter(Some(e + 1))
-                        && (letter(Some(e + 2)) || (at(e + 2) == Some('-') && letter(Some(e + 3))));
+                    let ahead =
+                        letter(Some(e + 1)) && (letter(Some(e + 2)) || (at(e + 2) == Some('-') && letter(Some(e + 3))));
                     if e >= 1 && behind && ahead {
                         break e + 1;
                     }

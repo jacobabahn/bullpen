@@ -289,7 +289,7 @@ class EntryTest(BullpenTest):
         self.assertEqual(p.stderr.splitlines()[-1], "bullpen ls: error: ambiguous option: --al could match --all, --all-repos")
         p = self.bp("ls", "--bogus", ok=False)
         self.assertEqual(p.returncode, 2)
-        self.assertEqual(p.stderr.splitlines()[-1], "bullpen ls: error: unrecognized arguments: --bogus")
+        self.assertEqual(p.stderr.splitlines()[-1], "bullpen: error: unrecognized arguments: --bogus")  # argparse says it from the top
         # the old name of build is build, as Python owns it
         self.assertTrue(self.bp("build-board", "--help").stdout.startswith("usage: bullpen build [-h]"))
 

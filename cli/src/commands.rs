@@ -35,12 +35,22 @@ const SETUP: Option<&str> = Some("Setup");
 const INTERNAL: Option<&str> = None;
 
 const fn c(name: &'static str, group: Option<&'static str>, help: &'static str, owner: Owner) -> Command {
-    Command { name, group, help, owner }
+    Command {
+        name,
+        group,
+        help,
+        owner,
+    }
 }
 
 /// A hidden other name: not in the help, never offered as "Did you mean".
 const fn alias(name: &'static str, of: &'static str) -> Command {
-    Command { name, group: None, help: "", owner: Alias(of) }
+    Command {
+        name,
+        group: None,
+        help: "",
+        owner: Alias(of),
+    }
 }
 
 #[rustfmt::skip]
@@ -108,13 +118,13 @@ pub fn find(name: &str) -> Option<&'static Command> {
 
 /// `_nop`: does nothing (the benchmark times start-up with it).
 fn cmd_nop(argv: &[String]) -> Res<i32> {
-    Args::parse("_nop", argv, &[])?;
+    Args::parse("_nop", argv, &[]);
     Ok(0)
 }
 
 /// `_commands`: this table as JSON, for test_cli.
 fn cmd_commands(argv: &[String]) -> Res<i32> {
-    Args::parse("_commands", argv, &[])?;
+    Args::parse("_commands", argv, &[]);
     let rows: Vec<serde_json::Value> = COMMANDS
         .iter()
         .map(|c| {

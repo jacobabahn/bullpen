@@ -39,15 +39,30 @@ pub struct Arg {
 }
 
 pub const fn flag(name: &'static str, help: &'static str) -> Arg {
-    Arg { name, kind: Kind::Flag, help, choices: &[] }
+    Arg {
+        name,
+        kind: Kind::Flag,
+        help,
+        choices: &[],
+    }
 }
 
 pub const fn value(name: &'static str, metavar: &'static str, help: &'static str) -> Arg {
-    Arg { name, kind: Kind::Value(metavar), help, choices: &[] }
+    Arg {
+        name,
+        kind: Kind::Value(metavar),
+        help,
+        choices: &[],
+    }
 }
 
 pub const fn pos(name: &'static str, nargs: Nargs, help: &'static str) -> Arg {
-    Arg { name, kind: Kind::Pos(nargs), help, choices: &[] }
+    Arg {
+        name,
+        kind: Kind::Pos(nargs),
+        help,
+        choices: &[],
+    }
 }
 
 impl Arg {
@@ -123,12 +138,20 @@ impl Args {
 
     /// The option's last value.
     pub fn opt(&self, name: &str) -> Option<&str> {
-        self.opts.iter().rev().find(|(n, _)| *n == name).map(|(_, v)| v.as_str())
+        self.opts
+            .iter()
+            .rev()
+            .find(|(n, _)| *n == name)
+            .map(|(_, v)| v.as_str())
     }
 
     /// Every value of a repeated option, in order (argparse's append).
     pub fn all(&self, name: &str) -> Vec<&str> {
-        self.opts.iter().filter(|(n, _)| *n == name).map(|(_, v)| v.as_str()).collect()
+        self.opts
+            .iter()
+            .filter(|(n, _)| *n == name)
+            .map(|(_, v)| v.as_str())
+            .collect()
     }
 
     /// A positional's value (its first, for one with several).
@@ -138,7 +161,11 @@ impl Args {
 
     /// Every value of a positional with nargs * or +.
     pub fn args(&self, name: &str) -> Vec<&str> {
-        self.pos.iter().filter(|(n, _)| *n == name).map(|(_, v)| v.as_str()).collect()
+        self.pos
+            .iter()
+            .filter(|(n, _)| *n == name)
+            .map(|(_, v)| v.as_str())
+            .collect()
     }
 }
 
@@ -153,7 +180,9 @@ enum Stop {
 fn negative_number(a: &str) -> bool {
     let Some(b) = a.strip_prefix('-') else { return false };
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit());
-    digits(b) || b.split_once('.').is_some_and(|(i, f)| (i.is_empty() || digits(i)) && digits(f))
+    digits(b)
+        || b.split_once('.')
+            .is_some_and(|(i, f)| (i.is_empty() || digits(i)) && digits(f))
 }
 
 fn looks_like_option(a: &str) -> bool {
@@ -180,7 +209,10 @@ fn option<'a>(name: &str, spec: &'a [Arg]) -> Result<Option<&'a Arg>, Stop> {
         [] => Ok(None),
         ["--help"] => Err(Stop::Help),
         [one] => Ok(opts().find(|a| a.name == *one)),
-        many => Err(Stop::Usage(format!("ambiguous option: {name} could match {}", many.join(", ")))),
+        many => Err(Stop::Usage(format!(
+            "ambiguous option: {name} could match {}",
+            many.join(", ")
+        ))),
     }
 }
 
@@ -188,7 +220,11 @@ fn check_choice(a: &Arg, v: &str) -> Result<(), Stop> {
     if a.choices.is_empty() || a.choices.contains(&v) {
         return Ok(());
     }
-    Err(Stop::Usage(format!("argument {}: invalid choice: '{v}' (choose from {})", a.name, a.choices.join(", "))))
+    Err(Stop::Usage(format!(
+        "argument {}: invalid choice: '{v}' (choose from {})",
+        a.name,
+        a.choices.join(", ")
+    )))
 }
 
 fn read(argv: &[String], spec: &[Arg]) -> Result<Args, Stop> {
@@ -219,7 +255,10 @@ fn read(argv: &[String], spec: &[Arg]) -> Result<Args, Stop> {
         match o.kind {
             Kind::Flag => {
                 if let Some(v) = given {
-                    return Err(Stop::Usage(format!("argument {}: ignored explicit argument '{v}'", o.name)));
+                    return Err(Stop::Usage(format!(
+                        "argument {}: ignored explicit argument '{v}'",
+                        o.name
+                    )));
                 }
                 a.flags.push(o.name);
             }
@@ -259,7 +298,10 @@ fn assign<'a>(
 ) -> Result<(), Stop> {
     let wanted: Vec<&Arg> = spec.iter().filter(|s| !s.is_option()).collect();
     let need = |from: usize| -> usize {
-        wanted[from..].iter().filter(|w| matches!(w.kind, Kind::Pos(Nargs::One | Nargs::Some))).count()
+        wanted[from..]
+            .iter()
+            .filter(|w| matches!(w.kind, Kind::Pos(Nargs::One | Nargs::Some)))
+            .count()
     };
     let mut at = 0;
     let mut missing = Vec::new();
@@ -282,7 +324,10 @@ fn assign<'a>(
         at += take;
     }
     if !missing.is_empty() {
-        return Err(Stop::Usage(format!("the following arguments are required: {}", missing.join(", "))));
+        return Err(Stop::Usage(format!(
+            "the following arguments are required: {}",
+            missing.join(", ")
+        )));
     }
     extras.extend(given[at..].iter().map(|(i, s)| (*i, s.as_str())));
     Ok(())
@@ -296,7 +341,10 @@ pub fn usage(cmd: &str, spec: &[Arg], width: usize) -> String {
     opts.extend(spec.iter().filter(|a| a.is_option()).map(Arg::usage));
     let poss: Vec<String> = spec.iter().filter(|a| !a.is_option()).map(Arg::usage).collect();
     let all: Vec<&String> = opts.iter().chain(poss.iter()).collect();
-    let line = format!("{prog} {}", all.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" "));
+    let line = format!(
+        "{prog} {}",
+        all.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" ")
+    );
     const PREFIX: &str = "usage: ";
     if PREFIX.len() + line.chars().count() <= width || (PREFIX.len() + prog.len()) as f64 > 0.75 * width as f64 {
         return format!("{PREFIX}{line}\n");
@@ -346,9 +394,16 @@ pub fn help(cmd: &str, about: &str, spec: &[Arg], cols: usize) -> String {
         out += &format!("\n{}\n", wrap(about, width, "", ""));
     }
     let help_arg = flag("-h, --help", "show this help message and exit");
-    let opts: Vec<&Arg> = std::iter::once(&help_arg).chain(spec.iter().filter(|a| a.is_option())).collect();
+    let opts: Vec<&Arg> = std::iter::once(&help_arg)
+        .chain(spec.iter().filter(|a| a.is_option()))
+        .collect();
     let poss: Vec<&Arg> = spec.iter().filter(|a| !a.is_option()).collect();
-    let longest = opts.iter().chain(poss.iter()).map(|a| a.invocation().chars().count() + 2).max().unwrap_or(0);
+    let longest = opts
+        .iter()
+        .chain(poss.iter())
+        .map(|a| a.invocation().chars().count() + 2)
+        .max()
+        .unwrap_or(0);
     let at = (longest + 2).min(24.min((width.saturating_sub(20)).max(4)));
     for (title, args) in [("positional arguments", &poss), ("options", &opts)] {
         if args.is_empty() {

@@ -63,10 +63,25 @@ fn floats_as_python_writes_them() {
 
 #[test]
 fn truth_as_python_sees_it() {
-    for v in [json!(null), json!(false), json!(0), json!(0.0), json!(""), json!([]), json!({})] {
+    for v in [
+        json!(null),
+        json!(false),
+        json!(0),
+        json!(0.0),
+        json!(""),
+        json!([]),
+        json!({}),
+    ] {
         assert!(!truthy(Some(&v)), "{v}");
     }
-    for v in [json!(true), json!(1), json!(-0.5), json!("x"), json!([0]), json!({"a": null})] {
+    for v in [
+        json!(true),
+        json!(1),
+        json!(-0.5),
+        json!("x"),
+        json!([0]),
+        json!({"a": null}),
+    ] {
         assert!(truthy(Some(&v)), "{v}");
     }
     assert!(!truthy(None));
@@ -88,8 +103,14 @@ fn getters() {
 #[test]
 fn str_and_repr_as_python() {
     assert_eq!(py_str(&json!("it's")), "it's");
-    assert_eq!(py_str(&json!(["claude", "--model", "it's"])), r#"['claude', '--model', "it's"]"#);
-    assert_eq!(py_str(&json!({"a": [true, null, 1.0, 2]})), "{'a': [True, None, 1.0, 2]}");
+    assert_eq!(
+        py_str(&json!(["claude", "--model", "it's"])),
+        r#"['claude', '--model', "it's"]"#
+    );
+    assert_eq!(
+        py_str(&json!({"a": [true, null, 1.0, 2]})),
+        "{'a': [True, None, 1.0, 2]}"
+    );
     assert_eq!(py_repr(&json!("a\nb\\")), r"'a\nb\\'");
 }
 
@@ -98,16 +119,29 @@ fn files_are_written_whole_with_a_newline() {
     let dir = std::env::temp_dir().join(format!("bullpen-core-json-{}", std::process::id()));
     let path = dir.join("sub/t.json");
     write(&path, &json!({"id": "BP-1", "n": [1]})).unwrap();
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\n  \"id\": \"BP-1\",\n  \"n\": [\n    1\n  ]\n}\n");
-    let left: Vec<_> = std::fs::read_dir(dir.join("sub")).unwrap().flatten().map(|e| e.file_name()).collect();
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "{\n  \"id\": \"BP-1\",\n  \"n\": [\n    1\n  ]\n}\n"
+    );
+    let left: Vec<_> = std::fs::read_dir(dir.join("sub"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
     assert_eq!(left, vec!["t.json"]); // no .tmp-* left behind
     assert_eq!(read(&path).unwrap(), Some(json!({"id": "BP-1", "n": [1]})));
     assert_eq!(read(&dir.join("none.json")).unwrap(), None);
     std::fs::write(dir.join("bad.json"), "{").unwrap();
     assert!(read(&dir.join("bad.json")).is_err());
     let err = read_obj(&dir.join("bad.json")).unwrap_err().0;
-    assert!(err.ends_with("doesn't parse (EOF while parsing an object at line 1 column 1): fix it, or move it away"), "{err}");
+    assert!(
+        err.ends_with("doesn't parse (EOF while parsing an object at line 1 column 1): fix it, or move it away"),
+        "{err}"
+    );
     std::fs::write(dir.join("list.json"), "[]").unwrap();
-    assert!(read_obj(&dir.join("list.json")).unwrap_err().0.ends_with("isn't a JSON object ({...}): fix it, or move it away"));
+    assert!(read_obj(&dir.join("list.json"))
+        .unwrap_err()
+        .0
+        .ends_with("isn't a JSON object ({...}): fix it, or move it away"));
     let _ = std::fs::remove_dir_all(&dir);
 }

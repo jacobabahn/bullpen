@@ -24,7 +24,18 @@ fn err(args: &[&str]) -> String {
 
 #[test]
 fn prefixes_values_and_the_last_wins() {
-    let a = p(&["BP-3", "--lines", "-28", "--all-r", "--after=x", "--after", "y", "BP-4", "--lines=5"]).unwrap();
+    let a = p(&[
+        "BP-3",
+        "--lines",
+        "-28",
+        "--all-r",
+        "--after=x",
+        "--after",
+        "y",
+        "BP-4",
+        "--lines=5",
+    ])
+    .unwrap();
     assert_eq!(a.arg("tid"), Some("BP-3"));
     assert_eq!(a.args("more"), ["BP-4"]);
     assert_eq!(a.opt("--lines"), Some("5"));
@@ -37,12 +48,26 @@ fn prefixes_values_and_the_last_wins() {
 
 #[test]
 fn usage_errors_in_argparses_words() {
-    assert_eq!(err(&["--al", "BP-1"]), "ambiguous option: --al could match --all, --all-repos");
+    assert_eq!(
+        err(&["--al", "BP-1"]),
+        "ambiguous option: --al could match --all, --all-repos"
+    );
     assert_eq!(err(&["BP-1", "--lines"]), "argument --lines: expected one argument");
-    assert_eq!(err(&["BP-1", "--lines", "--all"]), "argument --lines: expected one argument");
-    assert_eq!(err(&["BP-1", "--all=1"]), "argument --all: ignored explicit argument '1'");
+    assert_eq!(
+        err(&["BP-1", "--lines", "--all"]),
+        "argument --lines: expected one argument"
+    );
+    assert_eq!(
+        err(&["BP-1", "--all=1"]),
+        "argument --all: ignored explicit argument '1'"
+    );
     assert_eq!(err(&["--all"]), "the following arguments are required: tid");
-    assert_eq!(err(&["BP-1", "--nope", "u", "-q"]), "unrecognized arguments: --nope u -q");
+    assert_eq!(err(&["BP-1", "--nope", "u", "-q"]), "unrecognized arguments: --nope -q");
+    let one: Vec<String> = ["BP-1", "--nope", "u", "-q"].iter().map(|s| s.to_string()).collect();
+    assert_eq!(
+        read(&one, &SPEC[..6]).err(),
+        Some(Stop::Usage("unrecognized arguments: --nope u -q".into()))
+    );
     assert_eq!(
         err(&["BP-1", "--review", "sometimes"]),
         "argument --review: invalid choice: 'sometimes' (choose from full, light, auto)"
@@ -63,5 +88,8 @@ fn usage_and_help_in_argparses_layout() {
         "usage: bullpen x [-h] [--all] [--all-repos] [--lines N]\n                 [--after TID] [--review {full,light,auto}]\n                 tid [more ...]\n"
     );
     let h = help("x", "", &SPEC[..3], 80);
-    assert!(h.contains("\noptions:\n  -h, --help   show this help message and exit\n  --all        every task\n"), "{h}");
+    assert!(
+        h.contains("\noptions:\n  -h, --help   show this help message and exit\n  --all        every task\n"),
+        "{h}"
+    );
 }

@@ -9,14 +9,27 @@ const NAMES: [&str; 16] = [
 fn textwrap_as_python() {
     // each expected value is Python's textwrap.wrap(text, width, initial_indent, subsequent_indent)
     assert_eq!(
-        wrap_with("build bullpen and the board now and put them in place (install.sh runs it)", 30, "  build  ", "         "),
-        ["  build  build bullpen and the", "         board now and put", "         them in place", "         (install.sh runs it)"]
+        wrap_with(
+            "build bullpen and the board now and put them in place (install.sh runs it)",
+            30,
+            "  build  ",
+            "         "
+        ),
+        [
+            "  build  build bullpen and the",
+            "         board now and put",
+            "         them in place",
+            "         (install.sh runs it)"
+        ]
     );
     assert_eq!(
         wrap_with("a well-known self-contained thing--really, x--y", 12, "", ""),
         ["a well-known", "self-", "contained", "thing--", "really, x--y"]
     );
-    assert_eq!(wrap_with("abcdefghij-klmnop qrs", 7, "", ""), ["abcdefg", "hij-", "klmnop", "qrs"]);
+    assert_eq!(
+        wrap_with("abcdefghij-klmnop qrs", 7, "", ""),
+        ["abcdefg", "hij-", "klmnop", "qrs"]
+    );
     assert_eq!(
         wrap_with(
             "merge a ready task's PR, or its local branch without a remote (config --merge), and clean up",
@@ -35,8 +48,14 @@ fn textwrap_as_python() {
         wrap_with("supercalifragilistic", 5, "> ", "  "),
         ["> sup", "  erc", "  ali", "  fra", "  gil", "  ist", "  ic"]
     );
-    assert_eq!(wrap_with("tab\there and\tthere", 10, "", ""), ["tab", "here and", "there"]);
-    assert_eq!(wrap_with("one-two-three-four-five", 9, "", ""), ["one-two-", "three-", "four-five"]);
+    assert_eq!(
+        wrap_with("tab\there and\tthere", 10, "", ""),
+        ["tab", "here and", "there"]
+    );
+    assert_eq!(
+        wrap_with("one-two-three-four-five", 9, "", ""),
+        ["one-two-", "three-", "four-five"]
+    );
     assert!(wrap_with("   ", 10, "", "").is_empty());
 }
 
@@ -58,9 +77,18 @@ fn close_matches_as_difflib() {
 
 #[test]
 fn an_unknown_command_never_offers_an_internal_one_or_an_alias() {
-    assert_eq!(unknown_command("_evnt"), "bullpen: no command `_evnt`. `bullpen --help` lists them.");
-    assert_eq!(unknown_command("build-bord"), "bullpen: no command `build-bord`. Did you mean `build`? `bullpen --help` lists them.");
-    assert_eq!(unknown_command("--bogus"), "bullpen: `--bogus` goes after a command. `bullpen --help` lists them.");
+    assert_eq!(
+        unknown_command("_evnt"),
+        "bullpen: no command `_evnt`. `bullpen --help` lists them."
+    );
+    assert_eq!(
+        unknown_command("build-bord"),
+        "bullpen: no command `build-bord`. Did you mean `build`? `bullpen --help` lists them."
+    );
+    assert_eq!(
+        unknown_command("--bogus"),
+        "bullpen: `--bogus` goes after a command. `bullpen --help` lists them."
+    );
 }
 
 #[test]

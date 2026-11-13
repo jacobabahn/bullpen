@@ -6,7 +6,17 @@ use crate::widths::{COMBINING, WIDE};
 
 fn in_table(table: &[(u32, u32)], c: char) -> bool {
     let c = c as u32;
-    table.binary_search_by(|&(a, b)| if b < c { std::cmp::Ordering::Less } else if a > c { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Equal }).is_ok()
+    table
+        .binary_search_by(|&(a, b)| {
+            if b < c {
+                std::cmp::Ordering::Less
+            } else if a > c {
+                std::cmp::Ordering::Greater
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .is_ok()
 }
 
 /// task_line.text_width of one character: 2 East Asian Wide or Full, 0 combining, else 1.
@@ -95,7 +105,10 @@ pub fn splitlines(s: &str) -> Vec<&str> {
     let mut start = 0;
     let mut it = s.char_indices().peekable();
     while let Some((i, c)) = it.next() {
-        if matches!(c, '\n' | '\r' | '\x0b' | '\x0c' | '\x1c' | '\x1d' | '\x1e' | '\u{85}' | '\u{2028}' | '\u{2029}') {
+        if matches!(
+            c,
+            '\n' | '\r' | '\x0b' | '\x0c' | '\x1c' | '\x1d' | '\x1e' | '\u{85}' | '\u{2028}' | '\u{2029}'
+        ) {
             out.push(&s[start..i]);
             let mut end = i + c.len_utf8();
             if c == '\r' && it.peek().is_some_and(|&(_, n)| n == '\n') {
@@ -210,7 +223,9 @@ pub fn wrap(text: &str, w: i64, lines: usize) -> Vec<String> {
 /// Capitalize the first character (Python's `s[0].upper() + s[1:]`).
 pub fn upper_first(s: &str) -> String {
     let mut c = s.chars();
-    c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
+    c.next()
+        .map(|f| f.to_uppercase().chain(c).collect())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

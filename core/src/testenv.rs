@@ -2,8 +2,8 @@
 //! whole process's and tests run in threads, so one test at a time holds it.
 
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
 static ENV: Mutex<()> = Mutex::new(());
 static NEXT: AtomicU32 = AtomicU32::new(0);

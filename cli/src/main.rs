@@ -4,6 +4,7 @@
 //! (`exec` of bin/bullpen-py, never bin/bullpen, so it can't loop) before anything is
 //! read or written.
 
+#[allow(dead_code)] // what commands read their arguments with: T2 on
 mod args;
 mod commands;
 mod help;
@@ -23,7 +24,11 @@ fn hand_to_python(argv: &[OsString]) -> i32 {
         return 3;
     }
     let py = paths::python_entry();
-    let err = std::process::Command::new("python3").arg("-S").arg(&py).args(argv).exec();
+    let err = std::process::Command::new("python3")
+        .arg("-S")
+        .arg(&py)
+        .args(argv)
+        .exec();
     eprintln!("bullpen: couldn't run {}: {err}", py.display());
     1
 }

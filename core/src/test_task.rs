@@ -24,7 +24,9 @@ fn test_status_words_are_the_boards() {
     assert_eq!(w("dropped"), "closed (dropped)");
     let mut statuses: Vec<&str> = BOARD_WORDS.iter().map(|(s, _)| *s).collect();
     statuses.sort();
-    let mut want = ["todo", "working", "review", "ready", "finished", "triage", "needs", "stopped", "done", "dropped"];
+    let mut want = [
+        "todo", "working", "review", "ready", "finished", "triage", "needs", "stopped", "done", "dropped",
+    ];
     want.sort();
     assert_eq!(statuses, want);
 }
@@ -52,8 +54,15 @@ fn test_whether_a_worker_is_between_turns_goes_by_its_stop() {
     assert!(!idle(&stopped("triage", "worker", "failed", none.clone())));
     assert!(!idle(&stopped("triage", "reviewer", "limit", none.clone())));
     // the person asked about it: the question is its why, the stop still counts
-    assert!(!idle(&stopped("needs", "worker", "prompt", json!({"why": "Delete it?", "ask": true}))));
-    assert!(idle(&task(json!({"status": "needs", "why": "Delete it?", "ask": true}))));
+    assert!(!idle(&stopped(
+        "needs",
+        "worker",
+        "prompt",
+        json!({"why": "Delete it?", "ask": true})
+    )));
+    assert!(idle(&task(
+        json!({"status": "needs", "why": "Delete it?", "ask": true})
+    )));
     assert!(idle(&stopped("stopped", "worker", "exited", none)));
 }
 
@@ -64,7 +73,12 @@ fn test_a_new_status_ends_ask_ok_and_the_stop() {
     ask(&mut t, "Delete it?");
     assert_eq!(
         (&t["status"], &t["why"], &t["ask"], &t["stop"]),
-        (&json!("needs"), &json!("Delete it?"), &json!(true), &json!({"by": "worker", "kind": "ended"}))
+        (
+            &json!("needs"),
+            &json!("Delete it?"),
+            &json!(true),
+            &json!({"by": "worker", "kind": "ended"})
+        )
     );
     assert!(!t.contains_key("ok"));
     ask(&mut t, "Or keep it?"); // asked again: still asked
@@ -95,7 +109,12 @@ fn an_asked_task_remembers_where_it_was_asked_from() {
     assert_eq!(t["status"], json!("working"));
     assert!(!t.contains_key("from_ready") && !t.contains_key("asked_from"));
     // a stop given replaces the one it had; a status that keeps it stopped keeps it
-    set_status(&mut s, "triage", Some("x"), Some(json!({"by": "worker", "kind": "failed"})));
+    set_status(
+        &mut s,
+        "triage",
+        Some("x"),
+        Some(json!({"by": "worker", "kind": "failed"})),
+    );
     assert_eq!(s["stop"], json!({"by": "worker", "kind": "failed"}));
     set_status(&mut s, "needs", Some("y"), None);
     assert_eq!(s["stop"], json!({"by": "worker", "kind": "failed"}));
@@ -134,7 +153,10 @@ fn statuses_and_numbers() {
 fn test_news_doesnt_say_local_branch_in_local_mode() {
     assert_eq!(where_(&task(json!({"status": "ready", "pr": null, "local": true}))), "");
     assert_eq!(where_(&task(json!({"pr": "https://github.com/o/r/pull/12"}))), "PR #12");
-    assert_eq!(where_(&task(json!({"pr": "https://github.com/o/r/pull/12", "local": true}))), "");
+    assert_eq!(
+        where_(&task(json!({"pr": "https://github.com/o/r/pull/12", "local": true}))),
+        ""
+    );
 }
 
 #[test]
@@ -150,7 +172,10 @@ fn a_tasks_own_settings() {
     let _env = Env::new();
     let mut repo = Repo::new("/x/y").unwrap();
     repo.cfg.insert("worker_model".into(), json!("opus"));
-    assert_eq!(own_model(&repo, &task(json!({"worker_model": "sonnet"}))), Some("sonnet"));
+    assert_eq!(
+        own_model(&repo, &task(json!({"worker_model": "sonnet"}))),
+        Some("sonnet")
+    );
     assert_eq!(own_model(&repo, &task(json!({"worker_model": "opus"}))), None);
     assert_eq!(own_model(&repo, &task(json!({}))), None);
     let mut t = task(json!({}));
@@ -178,14 +203,26 @@ fn models_in_agent_commands() {
     assert_eq!(model_in(&c), Some("opus".into()));
     assert_eq!(model_in(&cmd(&["claude", "--model=haiku"])), Some("haiku".into()));
     assert_eq!(model_in(&cmd(&["claude", "--model"])), None);
-    assert_eq!(with_model(&c, Some("sonnet")), cmd(&["/usr/bin/claude", "-p", "--model", "sonnet"]));
+    assert_eq!(
+        with_model(&c, Some("sonnet")),
+        cmd(&["/usr/bin/claude", "-p", "--model", "sonnet"])
+    );
     assert_eq!(with_model(&c, Some("default")), cmd(&["/usr/bin/claude", "-p"]));
     assert_eq!(with_model(&c, None), c);
-    assert_eq!(with_model(&cmd(&["codex", "--model", "x"]), Some("y")), cmd(&["codex", "--model", "x"]));
+    assert_eq!(
+        with_model(&cmd(&["codex", "--model", "x"]), Some("y")),
+        cmd(&["codex", "--model", "x"])
+    );
     assert_eq!(model_phrase(&cmd(&["claude"]), Some("opus")), "opus");
     assert_eq!(model_phrase(&cmd(&["claude"]), None), "default (Claude Code picks)");
-    assert_eq!(model_phrase(&cmd(&["codex"]), None), "not set by bullpen: the command is codex, not claude");
-    assert_eq!(model_phrase(&[], None), "not set by bullpen: the command is empty, not claude");
+    assert_eq!(
+        model_phrase(&cmd(&["codex"]), None),
+        "not set by bullpen: the command is codex, not claude"
+    );
+    assert_eq!(
+        model_phrase(&[], None),
+        "not set by bullpen: the command is empty, not claude"
+    );
 }
 
 #[test]

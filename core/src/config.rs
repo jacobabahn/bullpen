@@ -29,7 +29,9 @@ pub fn read_global_file() -> Res<Obj> {
     match json::read(&path) {
         Ok(None) => Ok(Obj::new()),
         Ok(Some(Value::Object(o))) => Ok(o),
-        Ok(Some(_)) => fail(format!("{shown} isn't a JSON object ({{...}}): fix it, or move it away")),
+        Ok(Some(_)) => fail(format!(
+            "{shown} isn't a JSON object ({{...}}): fix it, or move it away"
+        )),
         Err(e) => fail(format!("{shown} doesn't parse ({e}): fix it, or move it away")),
     }
 }
@@ -37,7 +39,10 @@ pub fn read_global_file() -> Res<Obj> {
 /// The settings the global config.json gives every repository: what it holds,
 /// without the keys only a repository can have.
 pub fn read_global() -> Res<Obj> {
-    Ok(read_global_file()?.into_iter().filter(|(k, _)| !is_repo_only(k) && !is_internal(k)).collect())
+    Ok(read_global_file()?
+        .into_iter()
+        .filter(|(k, _)| !is_repo_only(k) && !is_internal(k))
+        .collect())
 }
 
 /// What a repository gets when its own config.json doesn't say: the global settings
@@ -78,12 +83,20 @@ pub fn config_source(repo: &Repo, key: &str) -> Res<&'static str> {
         // always written down: it is the repo's own once it isn't the default
         let default = defaults().get(key).cloned();
         let differs = repo.cfg.get(key).cloned() != default;
-        return Ok(if repo.own.contains(key) && differs { "repo" } else { "default" });
+        return Ok(if repo.own.contains(key) && differs {
+            "repo"
+        } else {
+            "default"
+        });
     }
     if repo.own.contains(key) {
         return Ok("repo");
     }
-    Ok(if read_global()?.contains_key(key) { "global" } else { "default" })
+    Ok(if read_global()?.contains_key(key) {
+        "global"
+    } else {
+        "default"
+    })
 }
 
 // ---------- the migrations ----------
@@ -150,8 +163,10 @@ pub const OLD_STOPS: [(&str, &str, &str); 11] = [
 /// The stop an old task's why says it had ({"by", "kind"}), or None.
 pub fn stop_from_why(why: Option<&str>) -> Option<Value> {
     let why = why.filter(|w| !w.is_empty())?;
-    let (by, kind) =
-        OLD_STOPS.iter().find(|(prefix, _, _)| why.starts_with(prefix)).map_or(("worker", "other"), |s| (s.1, s.2));
+    let (by, kind) = OLD_STOPS
+        .iter()
+        .find(|(prefix, _, _)| why.starts_with(prefix))
+        .map_or(("worker", "other"), |s| (s.1, s.2));
     Some(json!({"by": by, "kind": kind}))
 }
 
@@ -163,7 +178,11 @@ pub fn migrate_stops(repo: &Repo) -> Res<()> {
             continue;
         }
         // an asked task's why is the question: ask_of kept what stopped it
-        let why = if truthy(t.get("ask")) { t.get("ask_of") } else { t.get("why") };
+        let why = if truthy(t.get("ask")) {
+            t.get("ask_of")
+        } else {
+            t.get("why")
+        };
         let stop = stop_from_why(why.and_then(Value::as_str));
         t.shift_remove("ask_of");
         if let Some(stop) = stop {

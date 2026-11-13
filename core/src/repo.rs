@@ -42,7 +42,9 @@ impl Repo {
         let cfg = load_config(&dir)?;
         let own = read_own(&dir)?.keys().cloned().collect();
         let mut repo = Repo { root, dir, cfg, own };
-        let done = ["triage_migrated", "stops_migrated", "layered"].iter().all(|k| truthy(repo.cfg.get(*k)));
+        let done = ["triage_migrated", "stops_migrated", "layered"]
+            .iter()
+            .all(|k| truthy(repo.cfg.get(*k)));
         if repo.dir.join("config.json").exists() && !done {
             if !truthy(repo.cfg.get("triage_migrated")) {
                 config::migrate_triage(&repo)?;
@@ -65,7 +67,10 @@ impl Repo {
 
     /// The repo folder's name.
     pub fn name(&self) -> String {
-        self.root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+        self.root
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
     }
 
     /// A setting's text ("" when it isn't text).
@@ -138,7 +143,11 @@ impl Repo {
         if truthy(self.cfg.get("base")) {
             return Ok(json::py_str(&self.cfg["base"]));
         }
-        let p = git(&self.root, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], false)?;
+        let p = git(
+            &self.root,
+            &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+            false,
+        )?;
         if p.ok() {
             let b = strip(&p.stdout);
             return Ok(b.split_once('/').map_or(b, |(_, rest)| rest).into());
@@ -167,7 +176,10 @@ impl Repo {
         let tid = self.norm(tid);
         match json::read_obj(&self.task_path(&tid))? {
             Some(t) => Ok(t),
-            None => fail(format!("no task {tid} in {}: `bullpen ls --all` lists them", home_path(&self.root))),
+            None => fail(format!(
+                "no task {tid} in {}: `bullpen ls --all` lists them",
+                home_path(&self.root)
+            )),
         }
     }
 
@@ -217,14 +229,26 @@ impl Repo {
 /// The repo a command runs in: the main checkout of the git repo around the current
 /// folder (a worktree's too).
 pub fn repo_root() -> Res<PathBuf> {
-    let cwd = std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_else(|_| ".".into());
+    let cwd = std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| ".".into());
     repo_root_of(Path::new(&cwd))
 }
 
 /// repo_root, for the git repo around path.
 pub fn repo_root_of(path: &Path) -> Res<PathBuf> {
     let path = path.display().to_string();
-    let p = run(&["git", "-C", &path, "rev-parse", "--path-format=absolute", "--git-common-dir"], false)?;
+    let p = run(
+        &[
+            "git",
+            "-C",
+            &path,
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        ],
+        false,
+    )?;
     if !p.ok() {
         return fail("not in a git repository");
     }
@@ -258,7 +282,10 @@ pub fn reindex(repo: &Repo) -> Res<()> {
     for p in json_files(&state().join("blocks")) {
         let mut entry = json::read_obj(&p)?.unwrap_or_default();
         if s(&entry, "repo") == root {
-            entry.insert("stuck_after".into(), repo.cfg.get("stuck_after").cloned().unwrap_or(Value::Null));
+            entry.insert(
+                "stuck_after".into(),
+                repo.cfg.get("stuck_after").cloned().unwrap_or(Value::Null),
+            );
             json::write_obj(&p, &entry)?;
         }
     }
@@ -268,7 +295,10 @@ pub fn reindex(repo: &Repo) -> Res<()> {
 /// The *.json files in dir (dot-files too, as pathlib's glob).
 fn json_files(dir: &Path) -> Vec<PathBuf> {
     let entries = std::fs::read_dir(dir).into_iter().flatten().flatten();
-    entries.map(|e| e.path()).filter(|p| p.to_string_lossy().ends_with(".json")).collect()
+    entries
+        .map(|e| e.path())
+        .filter(|p| p.to_string_lossy().ends_with(".json"))
+        .collect()
 }
 
 /// Note in the pane's index entry that its agent is compacting (on), or no longer,
@@ -334,13 +364,22 @@ pub fn find_repo(from_block: Option<&str>) -> Res<Repo> {
     for cfg in config_files()? {
         let Some(dir) = cfg.parent() else { continue };
         let coordinators = load_config(dir)?.get("coordinators").cloned().unwrap_or(Value::Null);
-        for c in coordinators.as_array().into_iter().flatten().filter_map(Value::as_object) {
+        for c in coordinators
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_object)
+        {
             if !truthy(c.get("block")) {
                 continue;
             }
             let idx = block_path(&json::py_str(&c["block"]));
-            let Some(entry) = json::read_obj(&idx)?.filter(|e| !e.is_empty()) else { continue };
-            let Ok(mtime) = std::fs::metadata(&idx).and_then(|m| m.modified()) else { continue };
+            let Some(entry) = json::read_obj(&idx)?.filter(|e| !e.is_empty()) else {
+                continue;
+            };
+            let Ok(mtime) = std::fs::metadata(&idx).and_then(|m| m.modified()) else {
+                continue;
+            };
             if best.as_ref().is_none_or(|(t, _)| mtime > *t) {
                 best = Some((mtime, s(&entry, "repo").into()));
             }
@@ -355,7 +394,10 @@ pub fn find_repo(from_block: Option<&str>) -> Res<Repo> {
 /// <state>/repos/*/config.json, sorted.
 fn config_files() -> Res<Vec<PathBuf>> {
     let dirs = std::fs::read_dir(state().join("repos")).into_iter().flatten().flatten();
-    let mut out: Vec<PathBuf> = dirs.map(|e| e.path().join("config.json")).filter(|p| p.is_file()).collect();
+    let mut out: Vec<PathBuf> = dirs
+        .map(|e| e.path().join("config.json"))
+        .filter(|p| p.is_file())
+        .collect();
     out.sort();
     Ok(out)
 }
@@ -366,7 +408,9 @@ pub fn known_repos() -> Res<Vec<Repo>> {
     let mut out = Vec::new();
     for cfg in config_files()? {
         // a config.json caught half-written, or broken: that repo's own commands say so
-        let Ok(Some(Value::Object(o))) = json::read(&cfg) else { continue };
+        let Ok(Some(Value::Object(o))) = json::read(&cfg) else {
+            continue;
+        };
         let root = s(&o, "root");
         if !root.is_empty() && Path::new(root).is_dir() {
             out.push(Repo::new(root)?);

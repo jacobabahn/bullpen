@@ -45,7 +45,12 @@ pub fn parse(stamp: &str) -> Option<Stamp> {
     if let Ok(t) = DateTime::parse_from_rfc3339(stamp) {
         return Some(t);
     }
-    for f in ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%dT%H:%M"] {
+    for f in [
+        "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S%.f",
+        "%Y-%m-%dT%H:%M",
+    ] {
         if let Ok(t) = NaiveDateTime::parse_from_str(stamp, f) {
             return Local.from_local_datetime(&t).single().map(|t| t.fixed_offset());
         }

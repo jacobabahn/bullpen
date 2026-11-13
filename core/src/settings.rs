@@ -25,7 +25,15 @@ pub const WAITING: [&str; 2] = ["needs", "triage"];
 pub const STOPPED: [&str; 3] = ["needs", "triage", "stopped"];
 
 /// Settings that belong to one repository: the global config.json can't hold them.
-pub const REPO_ONLY: [&str; 7] = ["prefix", "next", "base", "push_remote", "news", "coordinators", "next_coordinator"];
+pub const REPO_ONLY: [&str; 7] = [
+    "prefix",
+    "next",
+    "base",
+    "push_remote",
+    "news",
+    "coordinators",
+    "next_coordinator",
+];
 /// What bullpen notes for itself in a repo's config.json.
 pub const INTERNAL: [&str; 4] = ["root", "triage_migrated", "stops_migrated", "layered"];
 
@@ -202,7 +210,10 @@ pub fn setting(name: &str) -> Option<&'static Setting> {
 
 /// DEFAULT_CONFIG: every setting's default, in the table's order.
 pub fn defaults() -> Obj {
-    SETTINGS.iter().map(|s| (s.name.to_string(), s.default_value())).collect()
+    SETTINGS
+        .iter()
+        .map(|s| (s.name.to_string(), s.default_value()))
+        .collect()
 }
 
 pub fn is_repo_only(key: &str) -> bool {

@@ -36,8 +36,11 @@ const NEW_CONFIG: &str = r#"{
 }
 "#;
 const TASKS: [(&str, &str, &str); 6] = [
-    ("XY-1", r#"{"id": "XY-1", "status": "needs", "why": "Failed: boom", "updated": "u"}
-"#, r#"{
+    (
+        "XY-1",
+        r#"{"id": "XY-1", "status": "needs", "why": "Failed: boom", "updated": "u"}
+"#,
+        r#"{
   "id": "XY-1",
   "status": "triage",
   "why": "Failed: boom",
@@ -47,9 +50,13 @@ const TASKS: [(&str, &str, &str); 6] = [
     "kind": "failed"
   }
 }
-"#),
-    ("XY-2", r#"{"id": "XY-2", "status": "needs", "why": "Needs you (permission): Allow?"}
-"#, r#"{
+"#,
+    ),
+    (
+        "XY-2",
+        r#"{"id": "XY-2", "status": "needs", "why": "Needs you (permission): Allow?"}
+"#,
+        r#"{
   "id": "XY-2",
   "status": "needs",
   "why": "Needs you (permission): Allow?",
@@ -58,9 +65,13 @@ const TASKS: [(&str, &str, &str); 6] = [
     "kind": "prompt"
   }
 }
-"#),
-    ("XY-3", r#"{"id": "XY-3", "status": "needs", "why": "Delete it?", "ask": true, "ask_of": "Ended its turn without saying ready"}
-"#, r#"{
+"#,
+    ),
+    (
+        "XY-3",
+        r#"{"id": "XY-3", "status": "needs", "why": "Delete it?", "ask": true, "ask_of": "Ended its turn without saying ready"}
+"#,
+        r#"{
   "id": "XY-3",
   "status": "needs",
   "why": "Delete it?",
@@ -70,20 +81,33 @@ const TASKS: [(&str, &str, &str); 6] = [
     "kind": "ended"
   }
 }
-"#),
-    ("XY-10", r#"{"id": "XY-10", "status": "working", "why": null}
-"#, r#"{"id": "XY-10", "status": "working", "why": null}
-"#),
-    ("XY-4", r#"{"id": "XY-4", "status": "stopped", "why": "Its pane was gone", "stop": {"by": "worker", "kind": "pane_gone"}}
-"#, r#"{"id": "XY-4", "status": "stopped", "why": "Its pane was gone", "stop": {"by": "worker", "kind": "pane_gone"}}
-"#),
-    ("XY-5", r#"{"id": "XY-5", "status": "triage", "why": null, "ask_of": "x"}
-"#, r#"{
+"#,
+    ),
+    (
+        "XY-10",
+        r#"{"id": "XY-10", "status": "working", "why": null}
+"#,
+        r#"{"id": "XY-10", "status": "working", "why": null}
+"#,
+    ),
+    (
+        "XY-4",
+        r#"{"id": "XY-4", "status": "stopped", "why": "Its pane was gone", "stop": {"by": "worker", "kind": "pane_gone"}}
+"#,
+        r#"{"id": "XY-4", "status": "stopped", "why": "Its pane was gone", "stop": {"by": "worker", "kind": "pane_gone"}}
+"#,
+    ),
+    (
+        "XY-5",
+        r#"{"id": "XY-5", "status": "triage", "why": null, "ask_of": "x"}
+"#,
+        r#"{
   "id": "XY-5",
   "status": "triage",
   "why": null
 }
-"#),
+"#,
+    ),
 ];
 
 fn repo_dir(env: &Env) -> std::path::PathBuf {
@@ -103,15 +127,25 @@ fn an_old_repo_is_migrated_as_python_migrates_it() {
     let repo = Repo::new("/nonexistent/proj").unwrap();
     assert_eq!(std::fs::read_to_string(dir.join("config.json")).unwrap(), NEW_CONFIG);
     for (id, _, after) in TASKS {
-        assert_eq!(std::fs::read_to_string(dir.join(format!("tasks/{id}.json"))).unwrap(), after, "{id}");
+        assert_eq!(
+            std::fs::read_to_string(dir.join(format!("tasks/{id}.json"))).unwrap(),
+            after,
+            "{id}"
+        );
     }
-    let sources: Vec<&str> =
-        ["merge", "max_running", "prefix", "review", "base"].iter().map(|k| config_source(&repo, k).unwrap()).collect();
+    let sources: Vec<&str> = ["merge", "max_running", "prefix", "review", "base"]
+        .iter()
+        .map(|k| config_source(&repo, k).unwrap())
+        .collect();
     assert_eq!(sources, ["repo", "global", "repo", "default", "default"]);
     let ids: Vec<String> = repo.tasks().unwrap().iter().map(|t| s(t, "id").to_string()).collect();
     assert_eq!(ids, ["XY-1", "XY-2", "XY-3", "XY-4", "XY-5", "XY-10"]);
     // a migrated repo isn't migrated again: its tasks are left as they are
-    std::fs::write(dir.join("tasks/XY-7.json"), r#"{"id": "XY-7", "status": "needs", "why": "Failed"}"#).unwrap();
+    std::fs::write(
+        dir.join("tasks/XY-7.json"),
+        r#"{"id": "XY-7", "status": "needs", "why": "Failed"}"#,
+    )
+    .unwrap();
     Repo::new("/nonexistent/proj").unwrap();
     let t7 = std::fs::read_to_string(dir.join("tasks/XY-7.json")).unwrap();
     assert_eq!(t7, r#"{"id": "XY-7", "status": "needs", "why": "Failed"}"#);
@@ -124,7 +158,11 @@ fn settings_layer_defaults_then_global_then_the_repo() {
     env.global(r#"{"merge": "squash", "review_rounds": 4, "prefix": "ZZ", "next": 9, "layered": false}"#);
     let dir = repo_dir(&env);
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("config.json"), r#"{"review_rounds": 1, "prefix": "AB", "layered": true}"#).unwrap();
+    std::fs::write(
+        dir.join("config.json"),
+        r#"{"review_rounds": 1, "prefix": "AB", "layered": true}"#,
+    )
+    .unwrap();
     let cfg = load_config(&dir).unwrap();
     assert_eq!(cfg["merge"], json!("squash")); // global over the default
     assert_eq!(cfg["review_rounds"], json!(1)); // the repo's over the global
@@ -135,9 +173,15 @@ fn settings_layer_defaults_then_global_then_the_repo() {
     assert_eq!(keys.first().map(|k| k.as_str()), Some("prefix")); // the table's order, the repo's extras after
     assert_eq!(keys.last().map(|k| k.as_str()), Some("layered"));
     let global = read_global().unwrap();
-    assert_eq!(dumps_obj(&global), "{\n  \"merge\": \"squash\",\n  \"review_rounds\": 4\n}");
+    assert_eq!(
+        dumps_obj(&global),
+        "{\n  \"merge\": \"squash\",\n  \"review_rounds\": 4\n}"
+    );
     let inherited = inherited_config().unwrap();
-    assert_eq!((&inherited["merge"], &inherited["prefix"]), (&json!("squash"), &json!("BP")));
+    assert_eq!(
+        (&inherited["merge"], &inherited["prefix"]),
+        (&json!("squash"), &json!("BP"))
+    );
 }
 
 #[test]
@@ -186,7 +230,10 @@ fn the_old_coordinator_becomes_c1() {
     std::fs::write(dir.join("config.json"), old).unwrap();
     let cfg = load_config(&dir).unwrap();
     assert!(!cfg.contains_key("coordinator") && !cfg.contains_key("board"));
-    assert_eq!(cfg["coordinators"], json!([{"id": "c1", "block": "b1", "session": "s1", "board": {"block": "b2"}}]));
+    assert_eq!(
+        cfg["coordinators"],
+        json!([{"id": "c1", "block": "b1", "session": "s1", "board": {"block": "b2"}}])
+    );
     assert_eq!(cfg["next_coordinator"], json!(2));
     // one that has coordinators already keeps them; a board alone goes
     let both = r#"{"coordinator": {"block": "b1"}, "coordinators": [{"id": "c3"}], "board": null}"#;
@@ -202,14 +249,23 @@ fn a_broken_global_config_says_so() {
     let env = Env::new();
     let path = env.dir.join("config/bullpen/config.json").display().to_string();
     env.global("[1]");
-    assert_eq!(read_global_file().unwrap_err().0, format!("{path} isn't a JSON object ({{...}}): fix it, or move it away"));
+    assert_eq!(
+        read_global_file().unwrap_err().0,
+        format!("{path} isn't a JSON object ({{...}}): fix it, or move it away")
+    );
     env.global("{oops");
     let err = read_global_file().unwrap_err().0;
-    assert!(err.starts_with(&format!("{path} doesn't parse (")) && err.ends_with("): fix it, or move it away"), "{err}");
+    assert!(
+        err.starts_with(&format!("{path} doesn't parse (")) && err.ends_with("): fix it, or move it away"),
+        "{err}"
+    );
     std::fs::remove_file(&path).unwrap();
     assert!(read_global_file().unwrap().is_empty());
     std::fs::create_dir_all(&path).unwrap();
-    assert_eq!(read_global_file().unwrap_err().0, format!("{path} is a folder, not a file: move it away"));
+    assert_eq!(
+        read_global_file().unwrap_err().0,
+        format!("{path} is a folder, not a file: move it away")
+    );
 }
 
 #[test]
@@ -218,10 +274,16 @@ fn test_old_whys_say_the_stop() {
     let stop = |by: &str, kind: &str| Some(json!({"by": by, "kind": kind}));
     assert_eq!(f(Some("Needs you (permission): Allow?")), stop("worker", "prompt"));
     assert_eq!(f(Some("Reviewer needs you (input)")), stop("reviewer", "prompt"));
-    assert_eq!(f(Some("Failed (coordinator didn't resolve it)")), stop("worker", "failed"));
+    assert_eq!(
+        f(Some("Failed (coordinator didn't resolve it)")),
+        stop("worker", "failed")
+    );
     assert_eq!(f(Some("Reviewer exited without a verdict")), stop("reviewer", "exited"));
     assert_eq!(f(Some("Its pane was gone")), stop("worker", "pane_gone"));
-    assert_eq!(f(Some("Couldn't be continued after the usage limit: x")), stop("worker", "limit"));
+    assert_eq!(
+        f(Some("Couldn't be continued after the usage limit: x")),
+        stop("worker", "limit")
+    );
     assert_eq!(f(Some("Something else")), stop("worker", "other"));
     assert_eq!(f(None), None);
     assert_eq!(f(Some("")), None);
