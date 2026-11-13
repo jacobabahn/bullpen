@@ -270,7 +270,7 @@ class EntryTest(BullpenTest):
                 self.assertEqual((c["group"], c["help"] or None),
                                  (sub.choices[c["name"]].group, helps.get(c["name"])), c["name"])
         self.assertEqual({c["name"]: c["owner"] for c in table if c["owner"] != "python"},
-                         {"build-board": "alias of build", "_nop": "rust", "_commands": "rust"})
+                         {"build-board": "alias of build", "_nop": "rust", "_commands": "rust", "ls": "rust", "show": "rust"})
 
     def test_help_and_an_unknown_command_come_from_rust(self):
         p = self.strict("--help")
@@ -280,18 +280,31 @@ class EntryTest(BullpenTest):
         self.assertEqual((p.returncode, p.stderr), (2, "bullpen: no command `acept`. Did you mean `accept`? "
                                                        "`bullpen --help` lists them.\n"))
         self.assertEqual(self.strict("_nop").returncode, 0)
-        p = self.strict("ls")  # Python's: handed over, which strict mode refuses
-        self.assertEqual((p.returncode, p.stderr), (3, "bullpen-rust: not in Rust: ls\n"))
+        p = self.strict("config")  # Python's: handed over, which strict mode refuses
+        self.assertEqual((p.returncode, p.stderr), (3, "bullpen-rust: not in Rust: config\n"))
 
     def test_a_python_command_reaches_python_whole(self):
-        self.assertEqual(json.loads(self.bp("ls", "--js").stdout), [])  # argparse's prefix rules
-        p = self.bp("ls", "--al", ok=False)
-        self.assertEqual(p.stderr.splitlines()[-1], "bullpen ls: error: ambiguous option: --al could match --all, --all-repos")
-        p = self.bp("ls", "--bogus", ok=False)
+        self.assertIn("worker_model", json.loads(self.bp("config", "--js").stdout))  # argparse's prefix rules
+        p = self.bp("config", "--reviewer-", ok=False)
+        self.assertEqual(p.stderr.splitlines()[-1], "bullpen config: error: ambiguous option: --reviewer- could match "
+                                                    "--reviewer-model, --reviewer-followup-model")
+        p = self.bp("config", "--bogus", ok=False)
         self.assertEqual(p.returncode, 2)
         self.assertEqual(p.stderr.splitlines()[-1], "bullpen: error: unrecognized arguments: --bogus")  # argparse says it from the top
         # the old name of build is build, as Python owns it
         self.assertTrue(self.bp("build-board", "--help").stdout.startswith("usage: bullpen build [-h]"))
+
+    def test_ls_and_show_are_rusts_with_argparses_rules(self):
+        self.assertEqual(json.loads(self.strict("ls", "--js").stdout), [])
+        p = self.strict("ls", "--al")
+        self.assertEqual((p.returncode, p.stderr.splitlines()[-1]),
+                         (2, "bullpen ls: error: ambiguous option: --al could match --all, --all-repos"))
+        p = self.strict("ls", "--bogus")  # argparse says it from the top
+        self.assertEqual((p.returncode, p.stderr),
+                         (2, "usage: bullpen COMMAND [ARGS]\nbullpen: error: unrecognized arguments: --bogus\n"))
+        p = self.strict("show", "BP-9")
+        self.assertEqual(p.returncode, 1)
+        self.assertTrue(p.stderr.startswith("bullpen: no task BP-9 in "), p.stderr)
 
     def test_python_says_when_a_command_isnt_in_this_build(self):
         # an older build hands Python a command Python no longer has (here, one Rust owns)
@@ -306,8 +319,9 @@ class EntryTest(BullpenTest):
             shutil.copytree(ROOT / d, home / d, ignore=shutil.ignore_patterns("__pycache__"))
         run = lambda *a: subprocess.run([str(home / "bin" / "bullpen"), *a], cwd=self.repo, env=self.env,
                                         text=True, capture_output=True)
-        p = run("ls", "--json")
-        self.assertEqual((p.returncode, p.stdout), (0, "[]\n"))
+        p = run("config", "--json")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("worker_model", json.loads(p.stdout))
         p = run("--help")
         self.assertEqual(p.returncode, 2)
         self.assertEqual(p.stderr, f"bullpen: bullpen isn't built: run `{home / 'bin' / 'bullpen'} build` "

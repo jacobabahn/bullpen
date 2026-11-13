@@ -16,6 +16,7 @@ pub mod text;
 pub mod timeutil;
 #[rustfmt::skip]
 pub mod widths;
+pub mod words;
 
 #[cfg(test)]
 mod testenv;

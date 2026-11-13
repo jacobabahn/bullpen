@@ -147,7 +147,7 @@ def main(d, now):
     task(25, "Merged PR", "done", 3000, pr="https://github.com/me/proj/pull/25", gh={"state": "merged"})
     task(26, "Dropped one", "dropped", 4000, coordinator="c9")
     task(27, "Own model", "working", 20, worker_model="opus", block="blk12", session="session:1", model="opus")
-    task(28, "Kept for you", "todo", 21, auto_accept=False, review_mode="full")
+    task(28, "Kept for you", "todo", 21, auto_accept=False, review_mode="full", placement="tab")
     task(29, "Needs you, stale", "needs", 9, why="Reviewer needs you: approve the plan?",
          stop={"by": "reviewer", "kind": "prompt"})
     task(30, "幅の広い題名のタスク — wide title with ünïcödé and a long tail that goes on and on for the cut",

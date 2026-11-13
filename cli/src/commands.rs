@@ -5,6 +5,7 @@
 //! Keep one line per command, so tasks that add rows merge without thinking.
 
 use crate::args::Args;
+use crate::show;
 use bullpen_core::fail::Res;
 
 /// What runs a command.
@@ -59,8 +60,8 @@ pub const COMMANDS: &[Command] = &[
     c("hide", YOU, "put the worker pane you're in away (into its capsule, or the background)", Python),
     c("adopt", COORDINATOR, "(coordinator) make tasks yours: their news comes to this pane", Python),
     c("board", YOU, "a live list of tasks to switch between", Python),
-    c("ls", YOU, "list tasks", Python),
-    c("show", YOU, "one task", Python),
+    c("ls", YOU, "list tasks", Rust(show::cmd_ls)),
+    c("show", YOU, "one task", Rust(show::cmd_show)),
     c("diff", YOU, "a task's changes against its base, in a pager (delta if installed)", Python),
     c("answer", YOU, "press an option of the prompt a task's agent is at", Python),
     c("reply", YOU, "answer what the coordinator asked about a task: it goes to the coordinator", Python),

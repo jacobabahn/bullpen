@@ -17,6 +17,7 @@ fn p(args: &[&str]) -> Result<Args, Stop> {
 fn err(args: &[&str]) -> String {
     match p(args) {
         Err(Stop::Usage(m)) => m,
+        Err(Stop::Unrecognized(w)) => format!("unrecognized arguments: {w}"),
         Err(Stop::Help) => "help".into(),
         Ok(_) => "ok".into(),
     }
@@ -66,7 +67,7 @@ fn usage_errors_in_argparses_words() {
     let one: Vec<String> = ["BP-1", "--nope", "u", "-q"].iter().map(|s| s.to_string()).collect();
     assert_eq!(
         read(&one, &SPEC[..6]).err(),
-        Some(Stop::Usage("unrecognized arguments: --nope u -q".into()))
+        Some(Stop::Unrecognized("--nope u -q".into()))
     );
     assert_eq!(
         err(&["BP-1", "--review", "sometimes"]),

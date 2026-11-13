@@ -28,7 +28,9 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   `cli`; the board isn't formatted yet.
 - Python code that still calls code that moved keeps its own copy, a twin: library
   code, frozen, deleted with its last Python caller. `bullpen/core.py` is `core/`'s
-  twin. There are no bridges yet (the plan has one, the run queue, from T3).
+  twin, and `task_line.py` is `core/src/words.rs`' and `cli/src/task_line.rs`' (for
+  `pick` and `config`). There are no bridges yet (the plan has one, the run queue, from
+  T3).
 - `cli/check/compare.sh` runs each case of `cli/check/cases-*.txt` with the Python and
   the Rust build in a fresh fixture, and compares stdout, stderr, exit code and the
   state folder, byte for byte. Each port adds cases for what it moves, and runs them
@@ -48,6 +50,8 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
 - `task.rs`: a task's status (`set_status`), stops, and the board's words for it
 - `json.rs`: JSON as Python's `json` writes it (indent 2, ASCII only, keys in order)
 - `text.rs`, `widths.rs`: widths and cuts as Python's, and textwrap
+- `words.rs`: what the board says about a task, for `ls`, `show` and the board: its
+  mark, the board's order, its age, and the board's sentence (`board_detail`)
 - `timeutil.rs`: ISO stamps as Python's `isoformat`, ages, the clock
 - `proc.rs`: running a program, `git`, `file_hash` (`sha256.rs`)
 - `lock.rs`: flock, the same lock as Python's `fcntl.flock`
@@ -60,6 +64,11 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
 - `help.rs`: the top-level help and the unknown-command line, as the Python wrote them
 - `saves.rs`: saving a task and what it sets off (`save`), `later` and `run_later`. No
   Rust command saves a task yet: the hooks are stubs.
+- `show.rs`: `ls` and `show`
+- `task_line.rs`: one task line, as the board says it (or its rows, on a narrow
+  terminal), cut to the terminal's width and coloured there
+- `coordinators.rs`, `rex.rs`: what the commands moved so far need of a repo's
+  coordinators and of Rex
 
 ## The Python
 
@@ -93,7 +102,7 @@ importing the one with the command being run, or all of them for `--help`):
 - `watcher.py`: starting the watcher, and replacing it when the code changes
 - `close.py`: the one close step (`close`) that accept, close, drop and auto-accept
   share, and the `close` and `drop` commands
-- `task_line.py`: one task line, as the board says it
+- `task_line.py`: one task line, as the board says it (a twin, for `pick` and `config`)
 - `line_edit.py`: typing on a terminal, for the picker and the stepper
 - `tours.py`: guided review tours and the person's comments on them
 - `stepper.py`: reading a tour on the board, and the `tour` command that opens it
@@ -109,7 +118,7 @@ importing the one with the command being run, or all of them for `--help`):
 - `config.py`: `config`
 - `go.py`: `go`, `hide`, `adopt`, and finding a repo's panes again after a Rex restart
   (`relink`)
-- `show.py`: `ls`, `show` and `diff`
+- `show.py`: `diff`
 - `doctor.py`: `bullpen doctor`
 - `pick.py`: the jump picker
 - `up.py`: `up`
@@ -192,7 +201,7 @@ needs (BP-94 took `ls` from about 72 ms to 37 ms):
 - A standard module that takes over a millisecond to import and that most calls never
   use (`shutil`, `hashlib`, `tempfile`, `textwrap`) is imported in the function that
   needs it, with a comment saying why. A module compiles its patterns on first use
-  (re caches them), not on import. `python3 -X importtime bin/bullpen-py ls` shows what
+  (re caches them), not on import. `python3 -X importtime bin/bullpen-py diff BP-1` shows what
   a call imports.
 
 ## No import loops

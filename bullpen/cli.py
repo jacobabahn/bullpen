@@ -23,7 +23,7 @@ MODULES = ("go", "board", "show", "answer", "accept", "close", "stepper", "tours
 COMMANDS = {
     "go": "go", "hide": "go", "adopt": "go",
     "board": "board",
-    "ls": "show", "show": "show", "diff": "show",
+    "diff": "show",
     "answer": "answer", "reply": "answer", "prompt": "answer",
     "accept": "accept",
     "close": "close", "drop": "close",

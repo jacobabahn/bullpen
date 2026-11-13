@@ -1,0 +1,427 @@
+//! What the board says about a task, for `ls`, `show` and the board (bullpen/task_line.py's
+//! words, with what they need of agents.py and start.py): its mark, the board's order, its
+//! age, and the board's sentence for where it stands. Change one, change the board's
+//! (board/src/model/), until T14 puts the board on this.
+
+use crate::json::{self, get, obj, py_str, s, truthy, Obj};
+use crate::paths::{safe, state};
+use crate::repo::Repo;
+use crate::task::{is_closed, own_model, pr_short, stamp, task_num};
+use crate::text::{splitlines, squash, strip, upper_first};
+use crate::timeutil::{self, clock, seconds_since, Stamp};
+use crate::{Fail, Res};
+use serde_json::Value;
+use std::collections::HashMap;
+
+/// Every task of a repo by ID, for what a task waits on.
+pub type Every = HashMap<String, Obj>;
+
+pub fn every(tasks: &[Obj]) -> Every {
+    tasks.iter().map(|t| (s(t, "id").to_string(), t.clone())).collect()
+}
+
+/// Seconds a task can need you before its age turns red, as on the board.
+pub const STALE: f64 = 300.0;
+/// How old a note of what an agent is doing can be and still show.
+pub const DOING_FOR: f64 = 30.0 * 60.0;
+
+/// The status's mark, as on the board (board/src/model/groups.rs's mark()).
+pub fn mark(status: &str) -> &'static str {
+    match status {
+        "needs" => "●",
+        "stopped" => "■",
+        "triage" => "◎",
+        "ready" => "✔",
+        "finished" => "◆",
+        "done" => "·",
+        "review" => "◐",
+        "working" => "○",
+        "todo" => "◌",
+        "dropped" => "–",
+        _ => " ",
+    }
+}
+
+/// Every status with a mark, in task_line.MARKS' order.
+pub const MARKED: [&str; 10] = [
+    "needs", "stopped", "triage", "ready", "finished", "done", "review", "working", "todo", "dropped",
+];
+
+/// The board's groups, in order: what you do next first.
+fn board_group(status: &str) -> u8 {
+    match status {
+        "needs" | "stopped" => 0,
+        "triage" => 1,
+        "ready" => 2,
+        "finished" => 3,
+        "review" => 4,
+        "working" => 5,
+        "todo" => 6,
+        "done" | "dropped" => 7,
+        _ => 8,
+    }
+}
+
+/// Tasks as the board lists them: by group (needs you first), then by number.
+pub fn board_order(mut tasks: Vec<Obj>) -> Vec<Obj> {
+    tasks.sort_by_key(|t| (board_group(s(t, "status")), task_num(t)));
+    tasks
+}
+
+/// The SGR colour of a task's mark: a quiet agent's in the colour of one that needs you.
+pub fn mark_color(t: &Obj) -> &'static str {
+    if is_stuck(t) {
+        return "1;33";
+    }
+    match s(t, "status") {
+        "needs" => "1;33",
+        "stopped" => "1;31",
+        "ready" | "finished" => "1;32",
+        "review" => "1;34",
+        _ => "2",
+    }
+}
+
+/// "3m", "2h", "1d", "now", or "" with no time.
+pub fn ago(t: &Obj, at: Option<Stamp>) -> String {
+    let Some(st) = stamp(t) else { return String::new() };
+    let secs = (seconds_since(st, at) as i64).max(0);
+    for (unit, n) in [("d", 86400), ("h", 3600), ("m", 60)] {
+        if secs >= n {
+            return format!("{}{unit}", secs / n);
+        }
+    }
+    "now".into()
+}
+
+/// Has it needed you long enough for its age to turn red?
+pub fn stale(t: &Obj, at: Option<Stamp>) -> bool {
+    s(t, "status") == "needs" && stamp(t).is_some_and(|st| seconds_since(st, at) >= STALE)
+}
+
+/// Is the record at key (stuck, limit) about the agent the task waits on now: its
+/// reviewer in review, its worker while working?
+fn on_waited(t: &Obj, key: &str) -> bool {
+    truthy(t.get(key))
+        && s(t, "status")
+            == if s(obj(t, key), "who") == "reviewer" {
+                "review"
+            } else {
+                "working"
+            }
+}
+
+/// Has the agent the task waits on (its worker, or its reviewer in review) shown no
+/// progress for too long?
+pub fn is_stuck(t: &Obj) -> bool {
+    on_waited(t, "stuck")
+}
+
+/// agents.is_limited: is the agent the task waits on stopped at the usage limit?
+pub fn is_limited(t: &Obj) -> bool {
+    on_waited(t, "limit")
+}
+
+/// "no progress for 25 min", or "" for a task that isn't stuck.
+pub fn stuck_phrase(t: &Obj, at: Option<Stamp>) -> String {
+    if !is_stuck(t) {
+        return String::new();
+    }
+    let m = (seconds_since(s(obj(t, "stuck"), "since"), at) / 60.0).floor() as i64;
+    if m < 120 {
+        format!("no progress for {m} min")
+    } else {
+        format!("no progress for {} h", m.div_euclid(60))
+    }
+}
+
+/// Is the worker fixing failed checks or comments from its PR?
+pub fn sent_back_by_github(t: &Obj) -> bool {
+    truthy(obj(t, "gh").get("sent"))
+}
+
+/// The PR's latest state in a few words, for the board and `show`, or "". A working
+/// task only shows what GitHub sent it back for: anything else is about the old push.
+pub fn pr_phrase(t: &Obj) -> String {
+    let g = obj(t, "gh");
+    let state = s(g, "state");
+    if state == "merged" || state == "closed" {
+        return format!("{state} on GitHub");
+    }
+    if s(t, "status") == "working" && !sent_back_by_github(t) {
+        return String::new();
+    }
+    let mut parts = Vec::new();
+    if let Some(c) = get(g, "checks").filter(|v| truthy(Some(v))) {
+        parts.push(format!("checks {}", py_str(c)));
+    }
+    if let Some(n) = get(g, "new").filter(|v| truthy(Some(v))) {
+        let one = n.as_f64() == Some(1.0) || n == &Value::Bool(true);
+        parts.push(format!("{} new comment{}", py_str(n), if one { "" } else { "s" }));
+    }
+    parts.join(", ")
+}
+
+/// start.open_deps: the tasks t waits on that aren't done, with their status (None: no such task).
+pub fn open_deps<'a>(t: &'a Obj, every: &'a Every) -> Vec<(String, Option<&'a str>)> {
+    let after = t
+        .get("after")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    after
+        .iter()
+        .map(py_str)
+        .map(|d| {
+            let st = every.get(&d).and_then(|o| o.get("status")).and_then(Value::as_str);
+            (d, st)
+        })
+        .filter(|(_, st)| *st != Some("done"))
+        .collect()
+}
+
+/// start.waits_phrase: "Waits on BP-8, BP-9 (dropped)" for a todo task with open
+/// dependencies, else "".
+pub fn waits_phrase(t: &Obj, every: &Every) -> String {
+    if s(t, "status") != "todo" {
+        return String::new();
+    }
+    let deps = open_deps(t, every);
+    if deps.is_empty() {
+        return String::new();
+    }
+    let words: Vec<String> = deps
+        .iter()
+        .map(|(d, st)| match st {
+            Some("dropped") => format!("{d} (dropped)"),
+            None => format!("{d} (missing)"),
+            _ => d.clone(),
+        })
+        .collect();
+    format!("Waits on {}", words.join(", "))
+}
+
+/// What the agent the task waits on last said it's doing, on one line, as the board
+/// shows it in place of its sentence: "" when it hasn't said, isn't working, said it
+/// before the task's status (less 30 s), over DOING_FOR ago, or is quiet or limited.
+pub fn doing_now(t: &Obj, at: Option<Stamp>) -> Res<String> {
+    let block = match s(t, "status") {
+        "review" => obj(t, "review").get("block"),
+        "working" => t.get("block"),
+        _ => None,
+    };
+    let Some(block) = block.filter(|b| truthy(Some(b))) else {
+        return Ok(String::new());
+    };
+    if is_stuck(t) || is_limited(t) || truthy(t.get("note")) {
+        return Ok(String::new());
+    }
+    let path = state().join("doing").join(format!("{}.json", safe(&py_str(block))));
+    let d = match json::read(&path) {
+        Ok(Some(Value::Object(o))) => o,
+        Ok(_) => return Ok(String::new()),
+        Err(e) => {
+            return Err(Fail(format!(
+                "{} doesn't parse ({e}): fix it, or move it away",
+                path.display()
+            )))
+        }
+    };
+    let when = match d.get("at") {
+        Some(Value::Number(n)) => n.as_f64().unwrap_or(0.0),
+        Some(Value::Bool(b)) => *b as u8 as f64,
+        _ => return Ok(String::new()),
+    };
+    if s(&d, "state") != "working" {
+        return Ok(String::new());
+    }
+    let secs = |x: Stamp| x.timestamp_micros() as f64 / 1e6;
+    let since = stamp(t)
+        .and_then(timeutil::parse)
+        .map_or(f64::NEG_INFINITY, |x| secs(x) - 30.0);
+    let now = secs(at.unwrap_or_else(timeutil::now));
+    if when < since || now - when > DOING_FOR {
+        return Ok(String::new());
+    }
+    Ok(squash(
+        &get(&d, "text")
+            .filter(|v| truthy(Some(v)))
+            .map(py_str)
+            .unwrap_or_default(),
+    ))
+}
+
+/// The board's words for a review's kind.
+pub fn board_kind(kind: Option<&Value>) -> Option<&'static str> {
+    Some(match kind?.as_str()? {
+        "full" => "full review",
+        "light" => "light review",
+        "followup" => "follow-up review",
+        "tour" => "review of your comments",
+        "rebase" => "rebase check",
+        _ => return None,
+    })
+}
+
+/// "Recorded the demo." from "# Recorded the demo", or "" when there's none.
+pub fn first_sentence(summary: &str) -> String {
+    for line in splitlines(summary) {
+        let line = strip(strip(line).trim_start_matches('#'));
+        if !line.is_empty() {
+            return if line.ends_with(['.', '!', '?']) {
+                line.into()
+            } else {
+                format!("{line}.")
+            };
+        }
+    }
+    String::new()
+}
+
+fn limit_detail(lim: &Obj, at: Option<Stamp>) -> String {
+    let reviewer = s(lim, "who") == "reviewer";
+    let who = if reviewer {
+        "Reviewer stopped at the usage limit"
+    } else {
+        "Usage limit"
+    };
+    if let Some(resets) = get(lim, "resets").filter(|v| truthy(Some(v))) {
+        let when = timeutil::parse(&py_str(resets)).unwrap_or_else(timeutil::now);
+        return format!("{who}, resets {}. Continues by itself then.", clock(when, at));
+    }
+    format!(
+        "{who}, reset time unknown. {}",
+        if reviewer {
+            "⏎ opens it."
+        } else {
+            "t tells it to continue."
+        }
+    )
+}
+
+/// A value as an f-string shows it: Python's str(), "" for a missing or false one (`x or ""`).
+fn or_empty(t: &Obj, key: &str) -> String {
+    t.get(key).filter(|v| truthy(Some(v))).map(py_str).unwrap_or_default()
+}
+
+/// The board's sentence for where the task stands.
+pub fn status_detail(repo: &Repo, t: &Obj, every: &Every, at: Option<Stamp>) -> String {
+    let r = obj(t, "review");
+    let rnd = r.get("round").filter(|v| truthy(Some(v))).map_or("1".into(), py_str);
+    let why = or_empty(t, "why");
+    let st = s(t, "status");
+    let mut pr = pr_short(s(t, "pr"));
+    if pr.is_empty() && truthy(t.get("local")) {
+        pr = format!("Local branch {}", or_empty(t, "branch"));
+    }
+    if truthy(t.get("note")) {
+        return py_str(&t["note"]);
+    }
+    if is_stuck(t) {
+        let quiet = stuck_phrase(t, at);
+        if s(obj(t, "stuck"), "who") == "reviewer" {
+            return format!("Reviewer has shown {quiet}. ⏎ opens it.");
+        }
+        return format!("{}. p shows its screen.", upper_first(&quiet));
+    }
+    if is_limited(t) {
+        return limit_detail(obj(t, "limit"), at);
+    }
+    let ended = why == "Ended its turn without saying ready";
+    match st {
+        "needs" if ended => "Stopped mid-task, probably with a question. p shows its screen.".into(),
+        "triage" if ended => "Ended its turn without ready.".into(),
+        "needs" if why.is_empty() => "Waiting for you.".into(),
+        "triage" if why.is_empty() => "Waiting for its coordinator.".into(),
+        "needs" | "triage" => why,
+        "stopped" => "Its agent exited. r resumes it.".into(),
+        "review" => {
+            let kind = board_kind(r.get("kind")).unwrap_or(if truthy(r.get("kind")) { "review" } else { "reviewer" });
+            let rounds = repo.cfg.get("review_rounds").map_or("None".into(), py_str);
+            format!("{} on round {rnd} of {rounds}.", upper_first(kind))
+        }
+        "ready" if why.starts_with("Nothing to merge") => "Done, with nothing to merge.".into(),
+        "finished" => match first_sentence(&or_empty(t, "summary")).as_str() {
+            "" => "Finished, nothing to merge. a closes it.".into(),
+            line => format!("Finished, nothing to merge: {line} a closes it."),
+        },
+        "ready" => {
+            let text = match s(r, "verdict") {
+                "approved" => format!("{pr}, approved by {}.", board_kind(r.get("kind")).unwrap_or("review")),
+                "changes" => format!("{pr}. Review still asks for changes."),
+                _ if !pr.is_empty() => format!("{pr}."),
+                _ => "Done.".into(),
+            };
+            match get(t, "rebased").filter(|v| truthy(Some(v))) {
+                Some(b) => format!("{text} Rebased onto {}.", py_str(b)),
+                None => text,
+            }
+        }
+        "working" if sent_back_by_github(t) => "Fixing what GitHub said.".into(),
+        "working" if s(r, "verdict") == "changes" => format!("Fixing what review round {rnd} found."),
+        "todo" => match waits_phrase(t, every).as_str() {
+            "" => "Not started. s starts it.".into(),
+            w => format!("{w}."),
+        },
+        "done" if truthy(t.get("local")) && !truthy(t.get("pr")) => {
+            if truthy(t.get("merged")) && truthy(t.get("base")) {
+                format!("Accepted. Merged into {}.", py_str(&t["base"]))
+            } else {
+                "Accepted.".into()
+            }
+        }
+        "done" if truthy(t.get("closed")) => "Closed, nothing to merge.".into(),
+        "done" if !pr.is_empty() => format!("Accepted. {pr} merged."),
+        "done" => "Accepted.".into(),
+        "dropped" => "Dropped.".into(),
+        _ => String::new(),
+    }
+}
+
+/// What auto-accept does with it, when that isn't what the config says for all.
+pub fn auto_detail(repo: &Repo, t: &Obj) -> &'static str {
+    let on = truthy(repo.cfg.get("auto_accept"));
+    let st = s(t, "status");
+    if is_closed(st) {
+        ""
+    } else if truthy(t.get("auto_wait")) && st == "ready" {
+        "Auto-accepts once its checks pass."
+    } else if on && t.get("auto_accept") == Some(&Value::Bool(false)) {
+        "Kept for you: no auto-accept."
+    } else if !on && t.get("auto_accept") == Some(&Value::Bool(true)) {
+        "Auto-accepts once approved."
+    } else {
+        ""
+    }
+}
+
+/// The board's sentence for a task: what its agent is doing now, else where it stands,
+/// what GitHub said, what auto-accept does with it and its own model.
+pub fn board_detail(repo: &Repo, t: &Obj, every: &Every, at: Option<Stamp>) -> Res<String> {
+    let doing = doing_now(t, at)?;
+    if !doing.is_empty() {
+        return Ok(doing);
+    }
+    let mut text = status_detail(repo, t, every, at);
+    let closed = is_closed(s(t, "status"));
+    let gh = if closed || truthy(t.get("note")) {
+        String::new()
+    } else {
+        pr_phrase(t)
+    };
+    if !gh.is_empty() {
+        text = strip(&format!("{text} {}.", upper_first(&gh))).to_string();
+    }
+    let model = if closed { None } else { own_model(repo, t) }.map(|m| format!("Model: {m}."));
+    let parts = [text.as_str(), auto_detail(repo, t), model.as_deref().unwrap_or("")];
+    Ok(parts
+        .iter()
+        .filter(|p| !p.is_empty())
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" "))
+}
+
+#[cfg(test)]
+#[path = "test_words.rs"]
+mod tests;

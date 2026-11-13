@@ -8,7 +8,7 @@ import unittest
 
 from support import setUpModule, tearDownModule, ROOT  # a temp folder for each module
 from bullpen import (
-    agents, answer, check, cli, core, doctor, limit, line_edit, notifications, pick, show, stepper,
+    agents, answer, check, cli, core, doctor, limit, line_edit, notifications, pick, stepper,
     task_line,
 )
 
@@ -100,39 +100,6 @@ class HelpersTest(unittest.TestCase):
         table = [re.match(r"`([^`]+)`", c).group(1) for c in cells.values() if re.match(r"`[^`]+`", c)]
         listed = [k for k in table if k in board]
         self.assertEqual(listed, board)
-
-    def test_a_narrow_terminal_gets_the_boards_rows(self):
-        a = {"id": "BP-3", "status": "needs", "title": "Fix the login redirect after sign-in",
-             "why": "Asks: python3 or python? The Makefile uses both and the CI image only has python3.",
-             "since": self.ago(12)}
-        b = {"id": "BP-16", "status": "todo", "title": "Emails: digest", "since": self.ago(1)}
-        r = self.repo(a, b)
-        self.assertEqual(list(show.ls_lines(r, [b, a], 42)), [
-            "● BP-3   Fix the login redirect aft…  12m",
-            "         Asks: python3 or python? The",
-            "         Makefile uses both and the CI …",
-            "◌ BP-16  Emails: digest                1m",
-            "         Not started. s starts it."])
-        self.assertTrue(all(len(l) <= 41 for l in show.ls_lines(r, [b, a], 42)))
-        self.assertEqual(len(list(show.ls_lines(r, [b, a], 200))), 2)  # wide: one line each
-        self.assertEqual(len(list(show.ls_lines(r, [b, a]))), 2)  # piped: whole
-        wide = list(show.ls_lines(r, [b, a], 80))  # room for the sentence: one cut line each, not rows
-        self.assertEqual(wide, ["● BP-3   Fix the login redirect after sign-in  12m  Asks: python3 or python? T…",
-                                "◌ BP-16  Emails: digest  1m  Not started. s starts it."])
-        self.assertTrue(all(len(l) <= 79 for l in wide))
-        c = {"id": "BP-5", "status": "todo", "title": "Later", "note": "One two three four five six seven eight"}
-        self.assertEqual(len(task_line.task_rows(self.repo(c), c, width=20)), 2)  # the board's one line
-        self.assertEqual(len(task_line.task_rows(self.repo(c), c, width=20, lines=99)), 5)  # show's: all of it
-
-    def test_next_says_what_you_can_do_now(self):
-        n = lambda **t: show.next_steps(self.repo(), {"id": "BP-4", **t})
-        self.assertEqual(n(status="needs", stop={"kind": "prompt"}),
-                         "`bullpen answer BP-4 <option>` (`bullpen peek BP-4` shows the prompt), or i on the board")
-        self.assertEqual(n(status="needs", ask=True), "`bullpen reply BP-4 <answer>`, or i on the board")
-        self.assertIn("`bullpen accept BP-4`", n(status="ready"))
-        self.assertIn("`bullpen close BP-4`", n(status="finished"))
-        self.assertIn("`bullpen resume BP-4`", n(status="stopped"))
-        self.assertEqual(n(status="done"), "nothing: it's closed")
 
     def test_the_picker_shows_marks_in_colour(self):
         p = pick.Picker(["● BP-1  Fix login", "◌ BP-2  Cover logout"], ["1;33", "2"])

@@ -1,8 +1,10 @@
 //! A command's arguments, read by argparse's rules: long options by any unambiguous
 //! prefix, `--opt value` and `--opt=value`, `--` before positionals, negative numbers as
 //! values, the last of a repeated option winning, and `-h`/`--help`. A usage error is
-//! argparse's two lines (`usage: …` and `bullpen CMD: error: …`) on stderr, exit 2; the
-//! help is in argparse's layout, though not its every byte (the plan's hard spot 1).
+//! argparse's two lines (`usage: …` and `bullpen CMD: error: …`) on stderr, exit 2, but
+//! for unrecognized arguments, which argparse says from the top parser (`usage: bullpen
+//! COMMAND [ARGS]`, `bullpen: error: …`). The help is in argparse's layout, though not
+//! its every byte (the plan's hard spot 1).
 
 use crate::help::{term_width, wrap};
 
@@ -124,6 +126,13 @@ impl Args {
                 std::process::exit(0)
             }
             Err(Stop::Usage(msg)) => usage_error(cmd, spec, &msg),
+            Err(Stop::Unrecognized(words)) => {
+                eprint!(
+                    "{}bullpen: error: unrecognized arguments: {words}\n",
+                    crate::help::USAGE
+                );
+                std::process::exit(2)
+            }
         }
     }
 
@@ -174,6 +183,8 @@ impl Args {
 enum Stop {
     Help,
     Usage(String),
+    /// Arguments no option or positional takes: argparse says so from the top parser.
+    Unrecognized(String),
 }
 
 /// argparse's test for a negative number, which it reads as a value, not an option.
@@ -283,7 +294,7 @@ fn read(argv: &[String], spec: &[Arg]) -> Result<Args, Stop> {
     if !extras.is_empty() {
         extras.sort();
         let words: Vec<&str> = extras.iter().map(|(_, w)| *w).collect();
-        return Err(Stop::Usage(format!("unrecognized arguments: {}", words.join(" "))));
+        return Err(Stop::Unrecognized(words.join(" ")));
     }
     Ok(a)
 }

@@ -8,7 +8,15 @@ fn a_held_lock_isnt_taken_twice() {
     assert!(try_lock(&path).unwrap().is_none()); // another open file can't have it
     assert!(take(&path, false).unwrap().is_none());
     drop(held);
-    let again = try_lock(&path).unwrap();
+    // another test's fork can hold the lock's fd for a moment, until its exec closes it
+    let mut again = None;
+    for _ in 0..100 {
+        again = try_lock(&path).unwrap();
+        if again.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     assert!(again.is_some());
     // what Python's flock says of it: held, while ours is
     let py = "import fcntl,sys\nf=open(sys.argv[1],'a')\ntry:\n fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)\n print('free')\nexcept BlockingIOError:\n print('held')";
