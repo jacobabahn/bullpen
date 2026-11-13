@@ -138,10 +138,10 @@ pub fn listed(tasks: Vec<Obj>, all: bool) -> Vec<Obj> {
 
 // ---------- its own settings ----------
 
-/// The worker model a task chose for itself, if it isn't the config's.
-pub fn own_model<'a>(repo: &Repo, t: &'a Obj) -> Option<&'a str> {
+/// The worker model a task chose for itself, if it isn't the config's (cfg: the repo's settings).
+pub fn own_model<'a>(cfg: &Obj, t: &'a Obj) -> Option<&'a str> {
     let m = t.get("worker_model").filter(|v| truthy(Some(v)))?;
-    (repo.cfg.get("worker_model") != Some(m)).then(|| m.as_str()).flatten()
+    (cfg.get("worker_model") != Some(m)).then(|| m.as_str()).flatten()
 }
 
 /// The task's own auto-accept (on: true or false), over the config's; None leaves it.

@@ -5,6 +5,9 @@ fn widths_as_python() {
     assert_eq!(width("幅の広い"), 8);
     assert_eq!(width("ünïcödé"), 7);
     assert_eq!(width("e\u{301}"), 1);
+    // where unicode-width and Python's unicodedata differ: a zero-width character takes no column
+    assert_eq!(width("a\u{200b}b"), 2);
+    assert_eq!(char_width('\u{200b}'), 0);
 }
 
 #[test]

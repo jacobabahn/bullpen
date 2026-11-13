@@ -153,7 +153,7 @@ fn ls_repos(all: bool, as_json: bool) -> Res<i32> {
 
 /// "opus (its own, over the config's sonnet)", and what runs now if that's another.
 fn model_line(repo: &Repo, t: &Obj) -> Res<String> {
-    let own = own_model(repo, t).unwrap_or("");
+    let own = own_model(&repo.cfg, t).unwrap_or("");
     let cfg = repo.cfg.get("worker_model").filter(|v| truthy(Some(v))).map(py_str);
     let mut line = format!(
         "{own} (its own, over the config's{})",
@@ -199,7 +199,7 @@ pub fn cmd_show(argv: &[String]) -> Res<i32> {
         return Ok(0);
     }
     let every = every(&repo.tasks()?);
-    let detail = board_detail(&repo, &t, &every, None)?;
+    let detail = board_detail(&repo.cfg, &t, &every, None)?;
     let cols = term_width();
     let mut out = Vec::new();
     let line = task_line(&repo, &t, &every, 0, None, false)?;
@@ -212,7 +212,7 @@ pub fn cmd_show(argv: &[String]) -> Res<i32> {
     for k in [
         "why", "base", "branch", "worktree", "block", "model", "pr", "diffstat", "summary",
     ] {
-        if k == "model" && own_model(&repo, &t).is_some() {
+        if k == "model" && own_model(&repo.cfg, &t).is_some() {
             out.push(format!("{}: {}", rjust(k, 9), model_line(&repo, &t)?));
         } else if k == "why" && truthy(t.get(k)) && detail.contains(&py_str(&t[k])) {
             continue; // the first line says it

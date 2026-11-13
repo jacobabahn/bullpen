@@ -13,3 +13,5 @@ path = "src/lib.rs"
 serde_json = { version = "1", features = ["preserve_order"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 libc = "0.2"
+# the width of text on screen: the board's, and the one ratatui lays it out by
+unicode-width = "0.2"

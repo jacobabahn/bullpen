@@ -49,7 +49,7 @@ fn age_code(t: &Obj) -> &'static str {
 pub fn task_line(repo: &Repo, t: &Obj, every: &Every, idw: usize, cut: Option<i64>, color: bool) -> Res<String> {
     let tid = ljust(s(t, "id"), idw);
     let when = ago(t, None);
-    let mut text = board_detail(repo, t, every, None)?;
+    let mut text = board_detail(&repo.cfg, t, every, None)?;
     let head_w = (2 + len(&tid) + 2) as i64;
     let age_room = if when.is_empty() { 0 } else { len(&when) as i64 + 2 };
     let title = match cut {
@@ -98,7 +98,7 @@ pub fn task_rows(
         head(t, &tid, &title, color),
         sgr(age_code(t), &when, color)
     )];
-    let text = board_detail(repo, t, every, None)?;
+    let text = board_detail(&repo.cfg, t, every, None)?;
     let two =
         matches!(st, "needs" | "stopped" | "finished") || is_stuck(t) || is_limited(t) || !pr_phrase(t).is_empty();
     let n = lines.unwrap_or(if two { 2 } else { 1 });

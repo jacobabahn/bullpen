@@ -1,9 +1,9 @@
-//! Text as Python measures and cuts it: task_line's width, fit and wrap (textwrap),
-//! and str's strip, split and splitlines, whose whitespace and line breaks are
-//! Python's, not Rust's.
+//! Text as bullpen measures and cuts it: its width on screen (unicode-width's, which
+//! the board and ratatui use too), fit and wrap (Python's textwrap), and str's strip,
+//! split and splitlines, whose whitespace and line breaks are Python's, not Rust's.
 
 use crate::printable::NOT_PRINTABLE;
-use crate::widths::{COMBINING, WIDE};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 fn in_table(table: &[(u32, u32)], c: char) -> bool {
     let c = c as u32;
@@ -20,19 +20,15 @@ fn in_table(table: &[(u32, u32)], c: char) -> bool {
         .is_ok()
 }
 
-/// task_line.text_width of one character: 2 East Asian Wide or Full, 0 combining, else 1.
+/// Columns one character takes on screen: 2 East Asian Wide or Full, 0 combining,
+/// zero-width or a control character, else 1 (unicode-width's, as ratatui lays out).
 pub fn char_width(c: char) -> usize {
-    if in_table(&WIDE, c) {
-        2
-    } else if in_table(&COMBINING, c) {
-        0
-    } else {
-        1
-    }
+    c.width().unwrap_or(0)
 }
 
+/// Columns the text takes on screen.
 pub fn width(text: &str) -> usize {
-    text.chars().map(char_width).sum()
+    text.width()
 }
 
 /// Python's len(): code points.

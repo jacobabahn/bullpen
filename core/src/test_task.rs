@@ -173,11 +173,11 @@ fn a_tasks_own_settings() {
     let mut repo = Repo::new("/x/y").unwrap();
     repo.cfg.insert("worker_model".into(), json!("opus"));
     assert_eq!(
-        own_model(&repo, &task(json!({"worker_model": "sonnet"}))),
+        own_model(&repo.cfg, &task(json!({"worker_model": "sonnet"}))),
         Some("sonnet")
     );
-    assert_eq!(own_model(&repo, &task(json!({"worker_model": "opus"}))), None);
-    assert_eq!(own_model(&repo, &task(json!({}))), None);
+    assert_eq!(own_model(&repo.cfg, &task(json!({"worker_model": "opus"}))), None);
+    assert_eq!(own_model(&repo.cfg, &task(json!({}))), None);
     let mut t = task(json!({}));
     assert!(!auto_accepts(&repo, &t));
     set_auto_accept(&mut t, None);

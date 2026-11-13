@@ -3,23 +3,16 @@
 use super::*;
 use chrono::Duration;
 use serde_json::json;
-use std::collections::BTreeSet;
-use std::path::PathBuf;
 
 fn task(v: Value) -> Obj {
     v.as_object().unwrap().clone()
 }
 
-/// A repo with only a config (review_rounds 2, and cfg's), as test_helpers' repo() is.
-pub fn repo(cfg: Value) -> Repo {
+/// A repo's settings: review_rounds 2, and cfg's, as test_helpers' repo() had them.
+fn config(cfg: Value) -> Obj {
     let mut c = task(json!({"review_rounds": 2}));
     c.extend(task(cfg));
-    Repo {
-        root: PathBuf::from("/r"),
-        dir: PathBuf::from("/nowhere"),
-        cfg: c,
-        own: BTreeSet::new(),
-    }
+    c
 }
 
 /// A stamp `minutes` ago.
@@ -50,7 +43,7 @@ fn test_the_boards_sentence() {
         let t = task(t);
         let mut tasks = vec![t.clone()];
         tasks.extend(more.iter().map(|m| task(m.clone())));
-        board_detail(&repo(cfg), &t, &every(&tasks), None).unwrap()
+        board_detail(&config(cfg), &t, &every(&tasks), None).unwrap()
     };
     let none = json!({});
     assert_eq!(

@@ -1,10 +1,9 @@
 //! What the board says about a task, for `ls`, `show` and the board: its mark, the board's order, its
-//! age, and the board's sentence for where it stands. Change one, change the board's
-//! (board/src/model/), until T14 puts the board on this.
+//! age, and the board's sentence for where it stands. The board (board/src/model/detail.rs)
+//! says these too, and keeps its own words only where they differ on purpose.
 
 use crate::json::{self, get, obj, py_str, s, truthy, Obj};
 use crate::paths::{safe, state};
-use crate::repo::Repo;
 use crate::task::{is_closed, own_model, pr_short, stamp, task_num};
 use crate::text::{splitlines, squash, strip, upper_first};
 use crate::timeutil::{self, clock, seconds_since, Stamp};
@@ -24,7 +23,7 @@ pub const STALE: f64 = 300.0;
 /// How old a note of what an agent is doing can be and still show.
 pub const DOING_FOR: f64 = 30.0 * 60.0;
 
-/// The status's mark, as on the board (board/src/model/groups.rs's mark()).
+/// The status's mark, on the board and in `ls`.
 pub fn mark(status: &str) -> &'static str {
     match status {
         "needs" => "●",
@@ -32,10 +31,10 @@ pub fn mark(status: &str) -> &'static str {
         "triage" => "◎",
         "ready" => "✔",
         "finished" => "◆",
-        "done" => "·",
+        "done" => "·", // dim, unlike ready's bold ✔
         "review" => "◐",
         "working" => "○",
-        "todo" => "◌",
+        "todo" => "◌", // a dotted circle: not started yet
         "dropped" => "–",
         _ => " ",
     }
@@ -200,39 +199,51 @@ pub fn waits_phrase(t: &Obj, every: &Every) -> String {
     format!("Waits on {}", words.join(", "))
 }
 
-/// What the agent the task waits on last said it's doing, on one line, as the board
-/// shows it in place of its sentence: "" when it hasn't said, isn't working, said it
-/// before the task's status (less 30 s), over DOING_FOR ago, or is quiet or limited.
-pub fn doing_now(t: &Obj, at: Option<Stamp>) -> Res<String> {
+/// The pane of the agent the task waits on now: its reviewer's in review, its worker's
+/// while working.
+pub fn agent_block(t: &Obj) -> Option<String> {
     let block = match s(t, "status") {
         "review" => obj(t, "review").get("block"),
         "working" => t.get("block"),
         _ => None,
     };
-    let Some(block) = block.filter(|b| truthy(Some(b))) else {
+    block.filter(|b| truthy(Some(b))).map(py_str)
+}
+
+/// What the agent the task waits on last said it's doing, on one line, as the board
+/// shows it in place of its sentence: "" when it hasn't said, isn't working, said it
+/// before the task's status (less 30 s), over DOING_FOR ago, or is quiet or limited.
+pub fn doing_now(t: &Obj, at: Option<Stamp>) -> Res<String> {
+    let Some(block) = agent_block(t) else {
         return Ok(String::new());
     };
     if is_stuck(t) || is_limited(t) || truthy(t.get("note")) {
         return Ok(String::new());
     }
-    let path = state().join("doing").join(format!("{}.json", safe(&py_str(block))));
-    let d = match json::read(&path) {
-        Ok(Some(Value::Object(o))) => o,
-        Ok(_) => return Ok(String::new()),
-        Err(e) => {
-            return Err(Fail(format!(
-                "{} doesn't parse ({e}): fix it, or move it away",
-                path.display()
-            )))
-        }
-    };
+    let path = state().join("doing").join(format!("{}.json", safe(&block)));
+    match json::read(&path) {
+        Ok(Some(Value::Object(d))) => Ok(doing_said(t, &d, at)),
+        Ok(_) => Ok(String::new()),
+        Err(e) => Err(Fail(format!(
+            "{} doesn't parse ({e}): fix it, or move it away",
+            path.display()
+        ))),
+    }
+}
+
+/// doing_now with the agent's note read (<state>/doing/<block>.json: {"state", "text",
+/// "at"}): what it says, or "" when it doesn't count.
+pub fn doing_said(t: &Obj, d: &Obj, at: Option<Stamp>) -> String {
+    if is_stuck(t) || is_limited(t) || truthy(t.get("note")) {
+        return String::new();
+    }
     let when = match d.get("at") {
         Some(Value::Number(n)) => n.as_f64().unwrap_or(0.0),
         Some(Value::Bool(b)) => *b as u8 as f64,
-        _ => return Ok(String::new()),
+        _ => return String::new(),
     };
-    if s(&d, "state") != "working" {
-        return Ok(String::new());
+    if s(d, "state") != "working" {
+        return String::new();
     }
     let secs = |x: Stamp| x.timestamp_micros() as f64 / 1e6;
     let since = stamp(t)
@@ -240,14 +251,14 @@ pub fn doing_now(t: &Obj, at: Option<Stamp>) -> Res<String> {
         .map_or(f64::NEG_INFINITY, |x| secs(x) - 30.0);
     let now = secs(at.unwrap_or_else(timeutil::now));
     if when < since || now - when > DOING_FOR {
-        return Ok(String::new());
+        return String::new();
     }
-    Ok(squash(
-        &get(&d, "text")
+    squash(
+        &get(d, "text")
             .filter(|v| truthy(Some(v)))
             .map(py_str)
             .unwrap_or_default(),
-    ))
+    )
 }
 
 /// The board's words for a review's kind.
@@ -277,7 +288,8 @@ pub fn first_sentence(summary: &str) -> String {
     String::new()
 }
 
-fn limit_detail(lim: &Obj, at: Option<Stamp>) -> String {
+/// The sentence for a task stopped at the usage limit.
+pub fn limit_detail(lim: &Obj, at: Option<Stamp>) -> String {
     let reviewer = s(lim, "who") == "reviewer";
     let who = if reviewer {
         "Reviewer stopped at the usage limit"
@@ -303,8 +315,9 @@ fn or_empty(t: &Obj, key: &str) -> String {
     t.get(key).filter(|v| truthy(Some(v))).map(py_str).unwrap_or_default()
 }
 
-/// The board's sentence for where the task stands.
-pub fn status_detail(repo: &Repo, t: &Obj, every: &Every, at: Option<Stamp>) -> String {
+/// The board's sentence for where the task stands, by the repo's settings (cfg). waits:
+/// what a queued task waits on (waits_phrase).
+pub fn status_detail(cfg: &Obj, t: &Obj, waits: &str, at: Option<Stamp>) -> String {
     let r = obj(t, "review");
     let rnd = r.get("round").filter(|v| truthy(Some(v))).map_or("1".into(), py_str);
     let why = or_empty(t, "why");
@@ -336,7 +349,7 @@ pub fn status_detail(repo: &Repo, t: &Obj, every: &Every, at: Option<Stamp>) -> 
         "stopped" => "Its agent exited. r resumes it.".into(),
         "review" => {
             let kind = board_kind(r.get("kind")).unwrap_or(if truthy(r.get("kind")) { "review" } else { "reviewer" });
-            let rounds = repo.cfg.get("review_rounds").map_or("None".into(), py_str);
+            let rounds = cfg.get("review_rounds").map_or("None".into(), py_str);
             format!("{} on round {rnd} of {rounds}.", upper_first(kind))
         }
         "ready" if why.starts_with("Nothing to merge") => "Done, with nothing to merge.".into(),
@@ -358,10 +371,8 @@ pub fn status_detail(repo: &Repo, t: &Obj, every: &Every, at: Option<Stamp>) -> 
         }
         "working" if sent_back_by_github(t) => "Fixing what GitHub said.".into(),
         "working" if s(r, "verdict") == "changes" => format!("Fixing what review round {rnd} found."),
-        "todo" => match waits_phrase(t, every).as_str() {
-            "" => "Not started. s starts it.".into(),
-            w => format!("{w}."),
-        },
+        "todo" if waits.is_empty() => "Not started. s starts it.".into(),
+        "todo" => format!("{waits}."),
         "done" if truthy(t.get("local")) && !truthy(t.get("pr")) => {
             if truthy(t.get("merged")) && truthy(t.get("base")) {
                 format!("Accepted. Merged into {}.", py_str(&t["base"]))
@@ -377,9 +388,31 @@ pub fn status_detail(repo: &Repo, t: &Obj, every: &Every, at: Option<Stamp>) -> 
     }
 }
 
+/// A task's sentence, then what GitHub last said of its PR (not for a closed task, or
+/// one with a note).
+pub fn with_gh(t: &Obj, text: String) -> String {
+    let gh = if is_closed(s(t, "status")) || truthy(t.get("note")) {
+        String::new()
+    } else {
+        pr_phrase(t)
+    };
+    if gh.is_empty() {
+        return text;
+    }
+    strip(&format!("{text} {}.", upper_first(&gh))).to_string()
+}
+
+/// "Model: opus." for an open task with a worker model of its own, else "".
+pub fn model_detail(cfg: &Obj, t: &Obj) -> String {
+    match own_model(cfg, t) {
+        Some(m) if !is_closed(s(t, "status")) => format!("Model: {m}."),
+        _ => String::new(),
+    }
+}
+
 /// What auto-accept does with it, when that isn't what the config says for all.
-pub fn auto_detail(repo: &Repo, t: &Obj) -> &'static str {
-    let on = truthy(repo.cfg.get("auto_accept"));
+pub fn auto_detail(cfg: &Obj, t: &Obj) -> &'static str {
+    let on = truthy(cfg.get("auto_accept"));
     let st = s(t, "status");
     if is_closed(st) {
         ""
@@ -396,23 +429,14 @@ pub fn auto_detail(repo: &Repo, t: &Obj) -> &'static str {
 
 /// The board's sentence for a task: what its agent is doing now, else where it stands,
 /// what GitHub said, what auto-accept does with it and its own model.
-pub fn board_detail(repo: &Repo, t: &Obj, every: &Every, at: Option<Stamp>) -> Res<String> {
+pub fn board_detail(cfg: &Obj, t: &Obj, every: &Every, at: Option<Stamp>) -> Res<String> {
     let doing = doing_now(t, at)?;
     if !doing.is_empty() {
         return Ok(doing);
     }
-    let mut text = status_detail(repo, t, every, at);
-    let closed = is_closed(s(t, "status"));
-    let gh = if closed || truthy(t.get("note")) {
-        String::new()
-    } else {
-        pr_phrase(t)
-    };
-    if !gh.is_empty() {
-        text = strip(&format!("{text} {}.", upper_first(&gh))).to_string();
-    }
-    let model = if closed { None } else { own_model(repo, t) }.map(|m| format!("Model: {m}."));
-    let parts = [text.as_str(), auto_detail(repo, t), model.as_deref().unwrap_or("")];
+    let text = with_gh(t, status_detail(cfg, t, &waits_phrase(t, every), at));
+    let model = model_detail(cfg, t);
+    let parts = [text.as_str(), auto_detail(cfg, t), model.as_str()];
     Ok(parts
         .iter()
         .filter(|p| !p.is_empty())
