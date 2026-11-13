@@ -1,12 +1,17 @@
 # Tests
 
 ```sh
-python3 tests/run.py                  # the whole suite, across CPUs: about 75 s on 16
+python3 tests/run.py                  # the whole suite, across CPUs: about 78 s on 16
+python3 tests/run.py -j 8             # on 8 processes instead
 python3 tests/run.py tour local_mode  # only tests whose module, class or name has one of these
 python3 tests/run.py --slowest 20     # and list the 20 slowest
 python3 -m unittest discover -s tests # the same tests one at a time: about 9 minutes
 cd board && cargo test                # the board's: well under a second once built
 ```
+
+The test processes run at low priority (nice 10), as does everything they start, so
+several agents can run the suite at once and the machine stays responsive. They use
+every CPU, and give way when anything else wants one.
 
 There's a module per area (`tests/test_tour.py`, `tests/test_news.py`, ...); what they
 share is in `tests/support.py`. Run the tests for what you're changing while you work,

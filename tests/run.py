@@ -6,7 +6,9 @@
     python3 tests/run.py -j 4            # 4 processes (default: one per CPU)
 
 Each process runs a few tests at a time, in a temp folder of its own (setUpModule), so
-tests that share nothing but the machine run side by side. Exits 1 if any test fails.
+tests that share nothing but the machine run side by side. The processes run at low
+priority (nice 10), and so does everything they start, so several agents running the
+suite at once leave the machine responsive. Exits 1 if any test fails.
 """
 
 import argparse
@@ -21,6 +23,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))  # the test modules import by name, here and in each process
 CHUNK = 3  # tests of one class run together: few enough to keep every CPU busy at the end
+JOBS = os.cpu_count() or 1  # every CPU: nice 10 already gives way to everything else
+NICE = 10
 
 
 def ids(suite):
@@ -77,6 +81,15 @@ class Result(unittest.TestResult):
         self.bad.append(("UNEXPECTED SUCCESS", str(test), ""))
 
 
+def lower_priority():
+    """Each pool process starts here: it, and what it starts (bullpen, git, rex), only
+    take spare CPU."""
+    try:
+        os.nice(NICE)
+    except (AttributeError, OSError):
+        pass  # no nice here (Windows): run at normal priority
+
+
 def run_chunk(names):
     try:
         suite = unittest.defaultTestLoader.loadTestsFromNames(names)
@@ -90,7 +103,8 @@ def run_chunk(names):
 def main():
     ap = argparse.ArgumentParser(description="Run the tests across CPUs.")
     ap.add_argument("only", nargs="*", help="run only tests whose ID has one of these words")
-    ap.add_argument("-j", "--jobs", type=int, default=os.cpu_count() or 1)
+    ap.add_argument("-j", "--jobs", type=int, default=JOBS,
+                    help=f"processes to run (default: one per CPU, {JOBS} here)")
     ap.add_argument("--slowest", type=int, default=0, metavar="N", help="list the N slowest tests")
     args = ap.parse_args()
     loader = unittest.TestLoader()
@@ -104,7 +118,7 @@ def main():
     ran = skipped = 0
     bad, times = [], {}
     with multiprocessing.get_context("fork" if hasattr(os, "fork") else "spawn").Pool(
-            min(args.jobs, len(names))) as pool:
+            min(args.jobs, len(names)), initializer=lower_priority) as pool:
         for n, s, b, t in pool.imap_unordered(run_chunk, chunks(names)):
             ran, skipped = ran + n, skipped + s
             bad += b
