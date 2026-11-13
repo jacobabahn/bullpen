@@ -385,6 +385,7 @@ class CodeTest(unittest.TestCase):
 
     def test_close_accept_and_drop_share_one_close_step(self):
         rust = [(f, args.split(",")[0]) for f, _, args in self.rust_calls(["close"])]
-        # accept's, close_task's and drop's
-        self.assertEqual(rust, [("accept/mod.rs", "repo"), ("close.rs", "repo"), ("close.rs", "&repo")])
+        # accept's, close_task's, drop's and close --keep-branch's
+        self.assertEqual(rust, [("accept/mod.rs", "repo"), ("close.rs", "repo"), ("close.rs", "&repo"),
+                                ("keep.rs", "repo")])
         self.assertEqual([f for f, _, _ in self.rust_calls(["remove_worktree"])], ["close.rs"])

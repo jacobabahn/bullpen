@@ -5,7 +5,7 @@
 //! close step, keeping the branch: the task is done, with `kept` saying where.
 
 use crate::close::{close, waiting_dep};
-use crate::modes::{push_remote, quiet_git, task_base_ref, withdraw};
+use crate::modes::{push_branch, push_remote, task_base_ref, withdraw};
 use crate::news::tell_coordinator;
 use crate::push_remote::push_reason;
 use bullpen_core::json::{obj, s, Obj};
@@ -100,8 +100,7 @@ fn push(repo: &Repo, id: &str, branch: &str, name: &str, remote: &str) -> Res<()
             "{id} isn't closed: the push remote {remote} isn't a remote here (`git remote -v`)"
         ));
     }
-    let refspec = format!("refs/heads/{branch}:refs/heads/{name}");
-    let p = quiet_git(repo, &["push", "-q", remote, &refspec], 60)?;
+    let p = push_branch(repo, remote, branch, name)?;
     if p.ok() {
         return Ok(());
     }

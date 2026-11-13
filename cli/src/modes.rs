@@ -158,6 +158,12 @@ pub fn push_remote(repo: &Repo) -> Res<Option<String>> {
     Ok(Some(name.to_string()))
 }
 
+/// Push a kept branch (`close --keep-branch`) to remote as name, never forced.
+pub fn push_branch(repo: &Repo, remote: &str, branch: &str, name: &str) -> Res<Done> {
+    let refspec = format!("refs/heads/{branch}:refs/heads/{name}");
+    quiet_git(repo, &["push", "-q", remote, &refspec], 60)
+}
+
 /// Push base to the push remote in the background (`_push`). Says what it started, or
 /// None when there's no push remote.
 pub fn push_base(repo: &Repo, base: &str, tid: Option<&str>) -> Res<Option<String>> {
