@@ -1,0 +1,7 @@
+# One bullpen command line per line, checked by compare.sh. `tty ` runs it on a 100-column terminal.
+ls --json
+ls --all --json
+ls --all-repos --json
+show BP-3 --json
+show 17 --json
+show BP-404

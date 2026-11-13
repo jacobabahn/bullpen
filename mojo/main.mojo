@@ -3,10 +3,11 @@ other one to the Python bullpen (bin/bullpen beside it), so it can stand in for 
 
 from std.sys import argv, stderr, exit
 from std.ffi import external_call, c_int
+from std.os import getenv
 
 from bullpen.args import Args, parse
 from bullpen.core import python_self
-from bullpen import show
+from bullpen import show, rex, coordinators
 
 
 def dispatch(av: List[String]) raises -> Int:
@@ -22,7 +23,11 @@ def dispatch(av: List[String]) raises -> Int:
 
 
 def hand_to_python(av: List[String]) raises -> Int:
-    """Exec the Python bullpen with the same arguments; returns only if that fails."""
+    """Exec the Python bullpen with the same arguments; returns only if that fails.
+    BULLPEN_MOJO_STRICT=1 (check/compare.sh) says so and fails instead."""
+    if getenv("BULLPEN_MOJO_STRICT"):
+        print("bullpen-mojo: not ported: " + String(" ").join(av), file=stderr)
+        return 3
     var path = python_self()
     var all: List[String] = [path]
     all += av.copy()
