@@ -42,18 +42,20 @@ rebased, keeping both sides of a conflict in README.md; its approval carried ove
 
 Once the task is merged and saved as done, `accept` (and auto-accept) goes on in this
 order: the news line, the merge's follow-up (the branch deleted on origin, or the push
-to the push remote in local mode), the other tasks rebased, the run queue, telling the
-coordinators their guide changed, the watcher refreshed, the board rebuilt (in
-bullpen's own repository), and the news that the keys changed. Each step runs whatever
+to the push remote in local mode), bullpen and the board rebuilt (in bullpen's own
+repository: docs/rebuilds.md), the other tasks rebased, the run queue, telling the
+coordinators their guide changed, the watcher refreshed, and the news that the keys
+changed. Each step runs whatever
 another did: one that fails is said on stderr and in a news line, `BP-4 was accepted,
 but the run queue failed: ...`, and the rest still run.
 
 In local mode, accepting a task in bullpen's own repository merges into the checkout
-bullpen runs from, so the merge replaces the code of the accept that's running. The
-accept loads every module it can still need before it merges (the save's modules, the
-only ones a command imports later), so it runs the old code to the end and never mixes
-old and new. What it starts after the merge runs the new code: the background push,
-the watcher's calls, a rebuilt board.
+bullpen runs from, so the merge replaces the source under the accept that's running,
+and its rebuild may put a new `target/bullpen` in place before the accept is done.
+The accept is one compiled program, and the new build is renamed into place (the
+running one keeps its old file), so it runs its own code to the end and never mixes old
+and new. What it starts after the merge runs the new code: the background push, the
+watcher's calls, a rebuilt board, the next call.
 
 What an accept starts in the background (the push, the rebuild, an auto-accept, a
 tour, ...) leaves the command's process tree at once (a double fork), so it outlives

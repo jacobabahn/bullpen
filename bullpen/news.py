@@ -6,11 +6,9 @@ their panes. A twin of cli/src/news/ for the Python commands; `bullpen news` (an
 import os
 import re
 import shlex
-from pathlib import Path
 
-from .core import Fail, REX, Repo, SELF, STATE, merge_base, now, repo_root, run, safe, write_json
+from .core import Fail, REX, Repo, SELF, STATE, now, repo_root, run, safe
 from . import jobs
-from .modes import task_base_ref
 from .rex import rex_type, with_state
 from .coordinators import alive, calling_coordinator, sees_to
 
@@ -31,40 +29,6 @@ def job_failed(cwd, tid, line):
 
 
 jobs.FAILED.append(job_failed)
-
-
-def ready_news(repo, t, facts=(), then="", again=False):
-    """The news that the task is ready: `BP-3 is ready: <title> (<facts>)<then>`, the
-    title second, where a long line is cut last. A task that was ready before is
-    "ready again", "after a rebase" if its base moved since; a line word for word the
-    one before it about the task isn't sent again."""
-    wt = t.get("worktree")
-    base = merge_base(wt, task_base_ref(repo, t)) if wt and Path(wt).is_dir() else None
-    told = t.get("ready_told")
-    if told is not None or again:
-        again = " again after a rebase" if told and base and told != base else " again"
-    t["ready_told"] = base or ""
-    write_json(repo.task_path(t["id"]), t)  # not save_task: the status didn't change here
-    facts = ", ".join(f for f in facts if f)
-    text = f"{t['id']} is ready{again or ''}: {t['title']}" + (f" ({facts})" if facts else "") + then
-    if last_news(repo, t["id"]) == NEWS_MARK + " ".join(text.split()):
-        return
-    news(repo, t, "ready", text)
-
-
-def last_news(repo, tid):
-    """The last line of news about task tid, as it was logged, or None."""
-    log = repo.dir / "news.log"
-    if not log.exists():
-        return None
-    with log.open("rb") as f:
-        f.seek(max(0, log.stat().st_size - 65536))
-        lines = f.read().decode(errors="replace").splitlines()
-    for line in reversed(lines):
-        m = re.match(r"\S+(?: \[[^\]]*\])? (\S+) [^ :]+: (.*)$", line)
-        if m and m.group(1) == tid:
-            return m.group(2)
-    return None
 
 
 def news(repo, task, event, text, everyone=False, skip=None, typed=None, to=None, more=()):

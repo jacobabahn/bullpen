@@ -1,7 +1,7 @@
 //! Building bullpen's two programs from its own checkout: the command line and the
 //! board (bullpen/board_build.py). `build` (install.sh runs it), `_build_board` (the
-//! background build `up` starts), and `up`'s rebuild_if_stale. Python keeps its copy
-//! (a twin) for accept's rebuild and the catch-up of a command an old build hands it.
+//! background build `up` and accept start), and their rebuild_if_stale. Python keeps its
+//! copy (a twin) for the catch-up of a command an old build hands it.
 //!
 //! bullpen's own checkout (HOME) is one cargo workspace (Cargo.toml): core/, cli/ (the
 //! command line, bin/bullpen runs it) and board/. Each program's source has a hash, and

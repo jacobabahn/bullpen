@@ -1,0 +1,58 @@
+# T9: accept (with rebasing the others), _auto_accept, _prs and keys. The fixture is in local mode; a PR (BP-18, BP-20, BP-35, BP-41) is remote mode's, and the fake gh answers for GitHub (pr.json by the pr* extras). Commits made now get a fixed date, so both runs make the same ones.
+env:GIT_COMMITTER_DATE=2026-01-02T00:00:00 env:GIT_AUTHOR_DATE=2026-01-02T00:00:00 accept BP-17
+env:GIT_COMMITTER_DATE=2026-01-02T00:00:00 env:GIT_AUTHOR_DATE=2026-01-02T00:00:00 env:FIXTURE=squash accept BP-17
+env:GIT_COMMITTER_DATE=2026-01-02T00:00:00 env:GIT_AUTHOR_DATE=2026-01-02T00:00:00 env:FIXTURE=mergecommit accept BP-17
+env:GIT_COMMITTER_DATE=2026-01-02T00:00:00 env:GIT_AUTHOR_DATE=2026-01-02T00:00:00 env:FIXTURE=norebase accept BP-17
+env:GIT_COMMITTER_DATE=2026-01-02T00:00:00 env:GIT_AUTHOR_DATE=2026-01-02T00:00:00 env:FIXTURE=conflicting,squash accept BP-17
+env:GIT_COMMITTER_DATE=2026-01-02T00:00:00 env:GIT_AUTHOR_DATE=2026-01-02T00:00:00 env:FIXTURE=conflicting accept BP-17
+env:GIT_COMMITTER_DATE=2026-01-02T00:00:00 env:GIT_AUTHOR_DATE=2026-01-02T00:00:00 env:FIXTURE=docsmoved accept BP-17
+env:GIT_COMMITTER_DATE=2026-01-02T00:00:00 env:GIT_AUTHOR_DATE=2026-01-02T00:00:00 env:FIXTURE=docsmoved,squash accept BP-17
+env:GIT_COMMITTER_DATE=2026-01-02T00:00:00 env:GIT_AUTHOR_DATE=2026-01-02T00:00:00 env:FIXTURE=teardown accept BP-17
+env:GIT_COMMITTER_DATE=2026-01-02T00:00:00 env:GIT_AUTHOR_DATE=2026-01-02T00:00:00 env:FIXTURE=badteardown accept BP-17
+env:GIT_COMMITTER_DATE=2026-01-02T00:00:00 env:GIT_AUTHOR_DATE=2026-01-02T00:00:00 env:FIXTURE=queued accept BP-17
+env:GIT_COMMITTER_DATE=2026-01-02T00:00:00 env:GIT_AUTHOR_DATE=2026-01-02T00:00:00 env:FIXTURE=pushremote env:BULLPEN_PUSH_WAIT=1 accept BP-17
+accept BP-19
+accept BP-21
+accept BP-22
+accept BP-20
+accept BP-18
+accept BP-35
+accept BP-41
+accept BP-25
+accept BP-3
+accept BP-1
+accept BP-404
+env:FIXTURE=prmerged accept BP-20
+usage accept
+accept --help
+env:GIT_COMMITTER_DATE=2026-01-02T00:00:00 env:GIT_AUTHOR_DATE=2026-01-02T00:00:00 env:FIXTURE=autoaccept _auto_accept BP-17
+env:FIXTURE=autoaccept _auto_accept BP-20
+env:FIXTURE=autoaccept,prpassing _auto_accept BP-20
+env:FIXTURE=autoaccept,prrunning _auto_accept BP-20
+env:FIXTURE=autoaccept,prfailing _auto_accept BP-20
+env:FIXTURE=autoaccept,prbadjson _auto_accept BP-20
+env:GIT_COMMITTER_DATE=2026-01-02T00:00:00 env:GIT_AUTHOR_DATE=2026-01-02T00:00:00 env:FIXTURE=autoaccept,conflicting,squash _auto_accept BP-17
+_auto_accept BP-18
+_auto_accept BP-3
+_auto_accept BP-404
+_prs
+env:FIXTURE=prpassing _prs
+env:FIXTURE=prrunning _prs
+env:FIXTURE=prfailing _prs
+env:FIXTURE=prcomments _prs
+env:FIXTURE=prmerged _prs
+env:FIXTURE=prclosed _prs
+env:FIXTURE=prbadjson _prs
+env:FIXTURE=autoaccept,prpassing _prs
+env:FIXTURE=autoaccept,prfailing _prs
+env:FIXTURE=autoaccept,prcomments _prs
+env:FIXTURE=deadcoords,prfailing _prs
+keys
+env:BULLPEN_STATE= keys
+keys --install
+env:FIXTURE=rexinit keys --install
+env:FIXTURE=otherkeys keys --install
+env:FIXTURE=reloadfails keys --install
+env:BULLPEN_REX=/nowhere/rex keys --install
+usage keys --instal
+keys --help

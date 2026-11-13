@@ -1,7 +1,11 @@
-//! A reviewer's `verdict` (bullpen/auto_accept.py's cmd_verdict): approve the task, or
-//! send its findings back to the worker. With auto-accept, an approval runs Python's
-//! `_auto_accept` (the accept, or its wait on the PR's checks) until T9 moves it.
+//! A reviewer's `verdict` (bullpen/auto_accept.py): approve the task, or send its
+//! findings back to the worker. With auto-accept (`config --auto-accept on`), an
+//! approve verdict runs the normal accept itself (`_auto_accept`): the person said in
+//! advance that an approval is enough. A task's own "auto_accept" (`add`/`start
+//! --no-auto-accept`, or `--auto-accept`) wins over the config's. In remote mode it
+//! waits for the PR's checks ("auto_wait"), which the PR follow-up (prs.rs) looks at.
 
+use crate::accept::accept;
 use crate::agents::pane;
 use crate::args::{pos, Arg, Args, Nargs};
 use crate::jobs::{background, Job};
@@ -12,10 +16,12 @@ use crate::rex::close_last;
 use crate::saves::save;
 use crate::start::launch::hand_back;
 use crate::stops::stop;
-use bullpen_core::json::{obj, py_str, s, truthy};
+use bullpen_core::json::{obj, py_str, s, truthy, write_obj, Obj};
 use bullpen_core::paths::self_bin;
+use bullpen_core::proc::run_in;
 use bullpen_core::repo::{repo_root, unindex_block};
 use bullpen_core::settings::WAITING;
+use bullpen_core::task::pr_short;
 use bullpen_core::task::{auto_accepts, clip, commits, set_status, where_};
 use bullpen_core::{fail, Repo, Res};
 use serde_json::{json, Value};
@@ -135,7 +141,7 @@ pub fn cmd_verdict(argv: &[String]) -> Res<i32> {
     Ok(0)
 }
 
-/// An approved task with auto-accept: Python's `_auto_accept` accepts it now, or once
+/// An approved task with auto-accept: `_auto_accept` accepts it now, or once
 /// its PR's checks pass. It runs here, as a job (its output in jobs.log, a failure it
 /// doesn't say itself in the news), and the verdict waits for it: the verdict closes
 /// the reviewer's pane only after, and the accept closes the worker's, not this one.
@@ -151,3 +157,134 @@ fn auto_accept(repo: &Repo, id: &str) {
     };
     background(&job, true);
 }
+
+// ---------- auto-accept ----------
+
+const AUTO_ACCEPT: &[Arg] = &[pos("id", Nargs::One, "the task, like BP-3")];
+
+/// `_auto_accept` (bullpen): the auto-accept of an approval, away from the worker's and
+/// the reviewer's panes.
+pub fn cmd_auto_accept(argv: &[String]) -> Res<i32> {
+    let a = Args::parse("_auto_accept", argv, AUTO_ACCEPT);
+    let repo = Repo::new(repo_root()?)?;
+    let mut t = repo.task(a.arg("id").unwrap_or(""))?;
+    if s(&t, "status") == "ready" && s(obj(&t, "review"), "verdict") == "approved" {
+        accept_approved(&repo, &mut t)?;
+    }
+    Ok(0)
+}
+
+/// An approved task: accept it now, or, with a PR whose checks are still running, once
+/// they pass. Anything that stops it leaves the task ready, with news.
+fn accept_approved(repo: &Repo, t: &mut Obj) -> Res<()> {
+    if truthy(t.get("pr")) && !truthy(t.get("local")) {
+        let facts = [pr_short(&py_str(&t["pr"])), "approved by review".to_string()];
+        match pr_checks_now(repo, t)? {
+            "failing" => {
+                let then = ", but not auto-accepted: its PR's checks are failing";
+                return ready_news(repo, t, &facts, then, false);
+            }
+            "running" => {
+                t.insert("auto_wait".into(), json!(true));
+                write_obj(&repo.task_path(s(t, "id")), t)?; // not a save: the status didn't change
+                return ready_news(repo, t, &facts, "; it auto-accepts once its PR's checks pass", false);
+            }
+            _ => {}
+        }
+    }
+    run_auto_accept(repo, t)
+}
+
+/// "failing", "running", or "passing" (no checks counts as passing). Unsure (gh failed)
+/// counts as running: the PR follow-up looks again.
+fn pr_checks_now(repo: &Repo, t: &Obj) -> Res<&'static str> {
+    let Some(pr) = pr_view(repo, t)? else {
+        return Ok("running");
+    };
+    Ok(checks(&pr).0.unwrap_or("passing"))
+}
+
+/// The task's PR as `gh pr view` gives it, or None when gh failed or said no JSON.
+pub fn pr_view(repo: &Repo, t: &Obj) -> Res<Option<Obj>> {
+    let pr = py_str(t.get("pr").unwrap_or(&Value::Null));
+    let argv = [
+        repo.gh(),
+        "pr".into(),
+        "view".into(),
+        pr,
+        "--json".into(),
+        PR_FIELDS.into(),
+    ];
+    let p = run_in(&argv, &repo.root, false)?;
+    if !p.ok() {
+        return Ok(None);
+    }
+    Ok(match serde_json::from_str::<Value>(&p.stdout) {
+        Ok(Value::Object(o)) => Some(o),
+        Ok(_) => Some(Obj::new()),
+        Err(_) => None,
+    })
+}
+
+/// The normal accept, as if the person ran it. A refused merge leaves the task ready.
+pub fn run_auto_accept(repo: &Repo, t: &mut Obj) -> Res<()> {
+    std::env::set_current_dir(&repo.root)?; // we may be running in the worktree accept removes
+    let Err(e) = accept(repo, t, true) else {
+        return Ok(());
+    };
+    let mut t = repo.task(s(t, "id"))?;
+    t.shift_remove("auto_wait");
+    write_obj(&repo.task_path(s(&t, "id")), &t)?;
+    let facts = [where_(&t), "approved by review".to_string()];
+    let then = format!(", but the auto-accept was refused: {e}. Send it back to rebase");
+    ready_news(repo, &mut t, &facts, &then, false)
+}
+
+const FAILED_CHECK: [&str; 6] = [
+    "FAILURE",
+    "ERROR",
+    "TIMED_OUT",
+    "CANCELLED",
+    "ACTION_REQUIRED",
+    "STARTUP_FAILURE",
+];
+pub const PR_FIELDS: &str = "state,headRefOid,statusCheckRollup,reviews,comments";
+
+/// The first of these keys with a truthy value, as text, else or.
+pub fn first_of(o: &Obj, keys: &[&str], or: &str) -> String {
+    keys.iter()
+        .find_map(|k| o.get(*k).filter(|v| truthy(Some(v))))
+        .map_or(or.to_string(), py_str)
+}
+
+/// (summary, names of failed checks) from a PR's statusCheckRollup.
+pub fn checks(pr: &Obj) -> (Option<&'static str>, Vec<String>) {
+    let (mut failed, mut running, mut total) = (Vec::new(), false, 0);
+    let (none, empty) = (Vec::new(), Obj::new());
+    for c in pr.get("statusCheckRollup").and_then(Value::as_array).unwrap_or(&none) {
+        total += 1;
+        let c = c.as_object().unwrap_or(&empty);
+        let name = first_of(c, &["name", "context"], "check");
+        let result = first_of(c, &["conclusion", "state"], "");
+        let pending = matches!(result.as_str(), "PENDING" | "EXPECTED");
+        if FAILED_CHECK.contains(&result.as_str()) {
+            failed.push(name);
+        } else if first_of(c, &["status"], "COMPLETED") != "COMPLETED" || pending {
+            running = true;
+        }
+    }
+    let summary = if !failed.is_empty() {
+        Some("failing")
+    } else if running {
+        Some("running")
+    } else if total > 0 {
+        Some("passing")
+    } else {
+        None
+    };
+    (summary, failed)
+}
+
+#[cfg(test)]
+#[path = "test_auto_accept.rs"]
+mod tests;

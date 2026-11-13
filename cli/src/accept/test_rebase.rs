@@ -1,0 +1,69 @@
+use super::*;
+
+fn set(files: &[&str]) -> BTreeSet<String> {
+    files.iter().map(|f| f.to_string()).collect()
+}
+
+#[test]
+fn lines_both_sides_added_at_one_place_are_kept_base_first() {
+    let file = "a\n<<<<<<< HEAD\nfrom main\n||||||| base\n=======\nfrom the task\n>>>>>>> task\nb\n";
+    assert_eq!(both_sides(file).as_deref(), Some("a\nfrom main\nfrom the task\nb\n"));
+}
+
+#[test]
+fn a_conflict_over_lines_in_the_base_is_left_be() {
+    let file = "<<<<<<< HEAD\nmain's\n||||||| base\nold\n=======\ntask's\n>>>>>>> task\n";
+    assert_eq!(both_sides(file), None);
+}
+
+#[test]
+fn markers_out_of_place_or_none_are_left_be() {
+    assert_eq!(both_sides("just\nlines\n"), None); // no conflict
+    assert_eq!(both_sides("<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> t\n"), None); // no base part
+    assert_eq!(both_sides("<<<<<<< HEAD\nx\n||||||| b\n=======\ny\n"), None); // not ended
+}
+
+#[test]
+fn a_marker_is_seven_of_one_character_then_a_space_or_the_end() {
+    assert_eq!(marker("<<<<<<< HEAD"), Some('<'));
+    assert_eq!(marker("======="), Some('='));
+    assert_eq!(marker("||||||| merged common ancestors"), Some('|'));
+    assert_eq!(marker("<<<<<<<< eight"), None);
+    assert_eq!(marker("=======x"), None);
+    assert_eq!(marker("<<<<<<"), None);
+    // outside a conflict, "=======" is just a line
+    assert_eq!(
+        both_sides("a\n=======\nb\n<<<<<<< H\n||||||| b\n=======\nc\n>>>>>>> t\n").as_deref(),
+        Some("a\n=======\nb\nc\n")
+    );
+}
+
+#[test]
+fn lines_keep_their_ends() {
+    assert_eq!(lines_with_ends("a\r\nb\n\nc"), ["a\r\n", "b\n", "\n", "c"]);
+    assert_eq!(lines_with_ends("x\u{2028}y\r"), ["x\u{2028}", "y\r"]);
+    assert!(lines_with_ends("").is_empty());
+}
+
+#[test]
+fn what_a_working_task_is_told() {
+    assert_eq!(conflict_or(set(&[]), true, vec![]), Need::Alone("no overlap"));
+    assert_eq!(
+        conflict_or(set(&["b", "a"]), false, vec!["c".into()]),
+        Need::Conflict(vec!["a".into(), "b".into()])
+    );
+    assert_eq!(
+        conflict_or(set(&[]), false, vec!["c".into()]),
+        Need::Uncommitted(vec!["c".into()])
+    );
+    assert_eq!(conflict_or(set(&[]), false, vec![]), Need::Alone("no conflict"));
+}
+
+#[test]
+fn a_remote_base_is_fetched_first() {
+    assert_eq!(
+        onto("origin/main"),
+        "run `git fetch origin`, then rebase your branch onto origin/main"
+    );
+    assert_eq!(onto("main"), "rebase your branch onto main");
+}

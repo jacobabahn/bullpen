@@ -278,7 +278,8 @@ class EntryTest(BullpenTest):
                                            "tell", "_queue", "rules", "pick", "config", "ready", "review",
                                            "verdict", "close", "drop", "finish", "_push", "answer", "reply",
                                            "prompt", "check", "_event", "_stuck", "_limit", "_gone",
-                                           "_coordinator_gone", "_tour", "tour-comment"],
+                                           "_coordinator_gone", "_tour", "tour-comment", "accept",
+                                           "_auto_accept", "keys", "_prs"],
                                           "rust")})
 
     def test_help_and_an_unknown_command_come_from_rust(self):
@@ -289,8 +290,8 @@ class EntryTest(BullpenTest):
         self.assertEqual((p.returncode, p.stderr), (2, "bullpen: no command `acept`. Did you mean `accept`? "
                                                        "`bullpen --help` lists them.\n"))
         self.assertEqual(self.strict("_nop").returncode, 0)
-        p = self.strict("keys")  # Python's: handed over, which strict mode refuses
-        self.assertEqual((p.returncode, p.stderr), (3, "bullpen-rust: not in Rust: keys\n"))
+        p = self.strict("tour")  # Python's: handed over, which strict mode refuses
+        self.assertEqual((p.returncode, p.stderr), (3, "bullpen-rust: not in Rust: tour\n"))
 
     def test_a_python_command_reaches_python_whole(self):
         # the old name of build is build, as Python owns it
@@ -355,9 +356,9 @@ class EntryTest(BullpenTest):
             shutil.copytree(ROOT / d, home / d, ignore=shutil.ignore_patterns("__pycache__"))
         run = lambda *a: subprocess.run([str(home / "bin" / "bullpen"), *a], cwd=self.repo, env=self.env,
                                         text=True, capture_output=True)
-        p = run("keys")
+        p = run("tour", "--help")
         self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertIn("keys.lua", p.stdout)
+        self.assertIn("usage: bullpen tour", p.stdout)
         p = run("--help")
         self.assertEqual(p.returncode, 2)
         self.assertEqual(p.stderr, f"bullpen: bullpen isn't built: run {home / 'install.sh'} (it needs cargo)\n")
@@ -421,16 +422,16 @@ class CodeTest(unittest.TestCase):
             self.assertEqual(calls, [], f"{name}.py calls a command function")
 
     def test_saving_a_task_tells_the_person_and_marks_its_pr(self):
-        from bullpen import cli, core, notifications, prs
+        from bullpen import cli, core, notifications, saves
         cli.load_savers()
         self.assertIn(notifications.notify, core.SAVED)
-        self.assertIn(prs.follow_saved, core.SAVED)
+        self.assertIn(saves.follow_saved, core.SAVED)
 
     def test_the_save_hooks_run_in_one_order_whichever_module_loaded_first(self):
-        from bullpen import cli, core, notifications, prs, saves
+        from bullpen import cli, core, notifications, saves
         core.SAVED.reverse()
         cli.load_savers()
-        self.assertEqual(core.SAVED[:3], [saves.move_queue, notifications.notify, prs.follow_saved])
+        self.assertEqual(core.SAVED[:3], [saves.move_queue, saves.follow_saved, notifications.notify])
 
     def test_each_command_is_found_in_the_module_that_declares_it(self):
         # main imports only a command's module: COMMANDS says which, in --help's order
@@ -442,16 +443,15 @@ class CodeTest(unittest.TestCase):
         self.assertEqual(declared, list(cli.COMMANDS.items()))
 
     def test_a_command_imports_only_what_it_needs(self):
-        code = ("import sys; sys.argv = ['bullpen', 'keys', '--help']\n"
+        code = ("import sys; sys.argv = ['bullpen', 'tour', '--help']\n"
                 "from bullpen import cli\n"
                 "try: cli.main()\n"
                 "except SystemExit: pass\n"
                 "print(' '.join(m for m in sys.modules if m.startswith('bullpen.')))")
         p = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True)
         loaded = set(p.stdout.split())
-        self.assertIn("bullpen.keys", loaded)
-        self.assertNotIn("bullpen.accept", loaded)
-        self.assertNotIn("bullpen.board", loaded)
+        self.assertIn("bullpen.stepper", loaded)
+        self.assertNotIn("bullpen.board_build", loaded)
 
     def calls(self, name):
         """(module, function) for each call of name in the package."""
@@ -490,7 +490,7 @@ class CodeTest(unittest.TestCase):
 
     def test_only_the_mode_adapters_push(self):
         # one way to push: quiet_git, which never waits on a prompt, in modes (and the
-        # push remote's background push); the Python twin and the Rust alike
+        # push remote's background push); the Python pushes nothing now
         pushes = []
         for mod, tree in self.modules().items():
             for n in ast.walk(tree):
@@ -498,8 +498,7 @@ class CodeTest(unittest.TestCase):
                 if f in ("git", "quiet_git", "run") and any(
                         isinstance(a, ast.Constant) and a.value == "push" for x in n.args for a in ast.walk(x)):
                     pushes.append((mod, f))
-        self.assertEqual({m for m, _ in pushes}, {"modes"})
-        self.assertEqual({f for _, f in pushes}, {"quiet_git"})
+        self.assertEqual(pushes, [])
         calls = self.rust_calls(["git", "quiet_git", "quiet_git_in", "run", "run_in", "run_with", "run_input"])
         pushes = {(f, name) for f, name, args in calls if '"push"' in args}
         self.assertEqual({f for f, _ in pushes}, {"modes.rs", "push_remote.rs"})
@@ -507,9 +506,7 @@ class CodeTest(unittest.TestCase):
         self.assertNotIn('"push"', "".join(args for _, name, args in calls if name in ("git", "run_with")))
 
     def test_close_accept_and_drop_share_one_close_step(self):
-        self.assertEqual(sorted(f for m, f in self.calls("close") if m in ("accept", "close")),
-                         ["accept", "close_task"])
-        self.assertEqual(self.calls("remove_worktree"), [("close", "close")])
         rust = [(f, args.split(",")[0]) for f, _, args in self.rust_calls(["close"])]
-        self.assertEqual(rust, [("close.rs", "repo"), ("close.rs", "&repo")])  # close_task's and drop's
+        # accept's, close_task's and drop's
+        self.assertEqual(rust, [("accept/mod.rs", "repo"), ("close.rs", "repo"), ("close.rs", "&repo")])
         self.assertEqual([f for f, _, _ in self.rust_calls(["remove_worktree"])], ["close.rs"])

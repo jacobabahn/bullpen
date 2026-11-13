@@ -11,25 +11,19 @@ from . import core
 from .core import Fail, run_later
 
 # The modules with commands (cli/src/commands.rs lists their commands in `bullpen --help`'s order).
-MODULES = ("accept", "stepper",
-           "auto_accept",
-           "keys", "prs")
+MODULES = ("stepper",)
 
 # Each command Python owns and the module that declares it, in --help's order. A call
 # imports only its command's module (and what that imports), not all of them: start-up
 # is most of a call's time. A test checks this against what the modules declare, and
 # another against the Rust entry's table (cli/src/commands.rs): a command is one side's.
 COMMANDS = {
-    "accept": "accept",
     "tour": "stepper",
-    "_auto_accept": "auto_accept",
-    "keys": "keys",
-    "_prs": "prs",
 }
 
 # The modules that register what saving a task sets off (core.on_save), in the order
-# their hooks run: the run queue, the person's notification, the PR to follow.
-SAVERS = ("saves", "notifications", "prs")
+# their hooks run: the run queue and the PR to follow, then the person's notification.
+SAVERS = ("saves", "notifications")
 
 # The groups a command's help may name (core.command). The Rust entry lists them in
 # `bullpen --help`, from its own table (cli/src/help.rs).
@@ -91,10 +85,11 @@ def module(name):
 
 
 def load_savers():
-    """Import the modules that act on a save, and run their hooks in SAVERS' order,
-    whichever of them the command imported first."""
+    """Import the modules that act on a save, and run their hooks in SAVERS' order (a
+    module's own in the order it defines them), whichever of them the command imported first."""
     order = [module(m).__name__ for m in SAVERS]
-    core.SAVED.sort(key=lambda fn: order.index(fn.__module__) if fn.__module__ in order else len(order))
+    core.SAVED.sort(key=lambda fn: (order.index(fn.__module__) if fn.__module__ in order else len(order),
+                                    fn.__code__.co_firstlineno))
 
 
 def parser(modules=MODULES):

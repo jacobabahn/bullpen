@@ -1,7 +1,5 @@
-//! Closing a task (bullpen/close.py): the one close step that close, drop, finish's
-//! auto-accept (and, from T9, accept) share, and the `close` and `drop` commands.
-//! Python keeps close.py's `close` and `close_task` (a twin) for its accept and
-//! auto-accept until T9.
+//! Closing a task (bullpen/close.py): the one close step that accept, close, drop and
+//! finish's auto-accept share, and the `close` and `drop` commands.
 
 use crate::agents::pane;
 use crate::args::{flag, pos, Arg, Args, Nargs};

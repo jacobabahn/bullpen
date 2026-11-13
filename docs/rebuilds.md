@@ -101,7 +101,7 @@ compare run caught up, built main's checkout, failed, and the accept's rebuild f
 its lock held and skipped). So `tests/support.py`, `cli/check/fixture.py` and
 `compare.sh` set `BULLPEN_NO_BUILD=1` for every bullpen they run. With it set, bullpen
 never builds, or takes the build lock in, its checkout: no catch-up (a command its
-Python doesn't have fails with the plain `` `keys` isn't in this build of bullpen ``
+Python doesn't have fails with the plain `` `tour` isn't in this build of bullpen ``
 line), no background rebuild from `up` or accept, and `bullpen build` says `builds are
 off here`. The tests that are about building (`tests/test_board_build.py` and the
 modules that use its setup) build a copy of bullpen, without it.

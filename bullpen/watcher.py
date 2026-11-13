@@ -1,4 +1,5 @@
-"""Starting the Rex watcher (lua/watch.lua), and replacing it when bullpen's code changes."""
+"""Replacing the Rex watcher (lua/watch.lua) after the catch-up's build (board_build.py):
+cli/src/watcher.rs's twin, which writes the same stamp."""
 
 import hashlib
 import shutil
@@ -7,7 +8,6 @@ from pathlib import Path
 
 from .core import Fail, REX, SELF, STATE, TERMINAL, WATCH_LUA, file_hash, read_json, write_json
 from .rex import rex_alive, rex_api, rex_close, with_state
-from .coordinators import session_for
 
 
 def code_hash():
@@ -55,17 +55,6 @@ def ensure_watcher(session, said=None):
         print(f"watcher {what}: {block}")
     else:
         said.append((what, "watcher", block))
-
-
-def refresh_watcher(repo):
-    """After a merge that may have changed the watcher: make sure a current one runs.
-    Never fails the command that called it."""
-    try:
-        session = session_for(repo)
-        if session:
-            ensure_watcher(session)
-    except Fail as e:
-        print(f"bullpen: {e}", file=sys.stderr)
 
 
 def restart_watcher():

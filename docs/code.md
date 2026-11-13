@@ -37,18 +37,13 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   `cli`; the board isn't formatted yet.
 - Python code that still calls code that moved keeps its own copy, a twin: library
   code, frozen, deleted with its last Python caller. `bullpen/core.py` is `core/`'s
-  twin, and `line_edit.py` is `cli/src/line_edit.rs`' (for the stepper); `news.py` (`news`, `tell_coordinator`, `ready_news`, the outboxes),
-  `notifications.py` (`notify`), `stops.py`, `agents.py`, `coordinators.py`, `modes.py`,
-  `rex.py` and `panes.py` (for launch and review) are twins of `cli/src/`'s for the
-  Python commands, and so are, for accept: `guide.py` (`tell_guide_changes`),
-  `watcher.py` (`refresh_watcher`), `board_build.py` (`rebuild_if_stale`, and the
-  catch-up of a command an old build hands over), `board.py` (the board's paths, for
-  board_build) and `jobs.py`; and `start.py` (`launch` and `hand_back` for accept,
-  prs and tours; `waits_phrase` for task_line),
-  `rules.py` (`task_rules`, for review), `hooks.py` (the teardown, for close), `tours.py` (for the stepper),
-  `review.py` (what a review covers, `start_review`,
-  `keep_approval`, `close_reviewer`, for accept, prs, tours and close)
-  and `close.py` (`close`, `close_task`, for accept and auto-accept). There is one bridge, the run queue: a Python save that frees a
+  twin, and `line_edit.py` is `cli/src/line_edit.rs`' (for the stepper); `news.py` (`news`, `tell_coordinator`, the outboxes),
+  `notifications.py` (`notify`), `stops.py`, `agents.py`, `coordinators.py`, `modes.py`
+  (`task_base_ref`), `rex.py`, `panes.py`, `start.py` (`launch`, `hand_back`),
+  `review.py` (`patch_id`, `close_reviewer`) and `jobs.py` are twins of `cli/src/`'s
+  for the stepper and `tours.py` (itself a twin, for the stepper); `board_build.py` and `watcher.py` (`restart_watcher`)
+  are, for the catch-up of a command an old build hands over (`cli.py`), and
+  `saves.py`'s `follow_saved` is `saves.rs`'. There is one bridge, the run queue: a Python save that frees a
   slot runs Rust's `bullpen _queue` (`saves.py`'s `move_queue`, which reads the tasks
   fresh) once the command is done.
 - `cli/check/compare.sh` runs each case of `cli/check/cases-*.txt` with the Python and
@@ -118,17 +113,18 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   `limit_phrase`), and read off an agent's turn or screen for the watcher (`limit_hit`,
   `limit_over`, `limit_reset`, with Python's patterns matched by hand)
 - `modes.rs`: the task's and the repo's base ref, the task's mode (`is_local`), `ready`'s
-  `publish`, `withdraw` (close and drop), and the one way to push (`quiet_git`,
-  `push_base`); `merge`, `after_merge` and `refresh` move with accept (T9)
+  `publish`, accept's `merge` (the PR on GitHub, or the branch into the local base
+  branch) and `after_merge`, `refresh` (a rebased branch pushed to its PR), `withdraw`
+  (close and drop), and the one way to push (`quiet_git`, `push_base`)
 - `jobs.rs`: starting a background job so it outlives the command and its pane (a
   double fork), with its output in `jobs.log` and its failure in the news
 - `up.rs`: `up`
 - `guide.rs`: `guide`, and telling running coordinators their guide changed (with
   difflib's diff, ported)
 - `watcher.rs`: starting the watcher, and replacing it when the code changes (the same
-  stamp as the Python's)
-- `build.rs`: `build` and `_build_board` (the build lock passed by fd), and `up`'s
-  `rebuild_if_stale`
+  stamp as the Python's); after a merge (`refresh_watcher`) or a build
+- `build.rs`: `build` and `_build_board` (the build lock passed by fd), and the
+  `rebuild_if_stale` of `up` and accept
 - `push_remote.rs`: the push remote's background push (`_push`, one at a time, under
   its lock), `up`'s catch-up push, and doctor's check of the push remote
 - `doctor/`: `mod.rs`: `doctor` and `up`'s hint; `checks.rs`: the checks
@@ -146,10 +142,18 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   `close_reviewer`, what `ready` does with review on (`review_at_ready`), and the
   coordinator's `review`
 - `ready.rs`: `ready`, `finish`, and the summary a worker or reviewer gives (`summary_text`)
-- `close.rs`: the one close step (`close`) that close, drop and finish's auto-accept
-  share (and accept from T9), `close_task`, and the `close` and `drop` commands
-- `auto_accept.rs`: a reviewer's `verdict`; an approval with auto-accept runs Python's
-  `_auto_accept` as a job and waits for it, before the verdict closes the reviewer's pane
+- `close.rs`: the one close step (`close`) that accept, close, drop and finish's
+  auto-accept share, `close_task`, and the `close` and `drop` commands
+- `auto_accept.rs`: a reviewer's `verdict`; an approval with auto-accept runs
+  `_auto_accept` as a job and waits for it, before the verdict closes the reviewer's
+  pane; `_auto_accept` accepts, or waits for the PR's checks (`checks`, `pr_view`)
+- `accept/`: `mod.rs`: `accept`, and the steps after the merge, each on its own
+  (`run_steps`: a failed one is said, the rest still run); `rebase.rs`: rebasing the
+  other tasks onto the moved base (`rebase_others`, keeping both sides of a trivial
+  conflict in a doc or test file)
+- `prs.rs`: `_prs`, following a task's pull request after ready: its checks, people's
+  feedback, a merge or close outside bullpen, a waiting auto-accept
+- `keys.rs`: `keys` (and `--install`), and the hash accept checks to say keys.lua changed
 - `answer.rs`: answering a prompt from the board (`prompt`, `answer`), and `reply`
 - `screen/mod.rs`: what Claude Code's screen says, shared by events, check and answer
   (a background shell still running, compacting, `screen_state`), with Python's
@@ -176,8 +180,7 @@ importing the one with the command being run, or all of them for `--help`):
   panes bullpen knows. It imports none of the others.
 - `jobs.py`: starting a background job so it outlives the command and its pane (a
   double fork), with its output in `jobs.log` and its failure in the news
-- `modes.py`: local mode and remote mode, as two adapters (`mode(repo, t)`), the
-  task's base ref, and the one way to push (`quiet_git`)
+- `modes.py`: the task's base ref, by its mode (a twin)
 - `rex.py`: Rex: running its commands, finding, typing into and closing panes
 - `agents.py`: a task's worker and reviewer: where each one's pane is (`pane`), and
   the one the task waits on (`waits_on`, `waited_on`). Code that needs either asks it,
@@ -187,29 +190,18 @@ importing the one with the command being run, or all of them for `--help`):
   finding it again, and keeping it there (a twin, for launch and review)
 - `news.py`: news lines, and the outboxes typed into coordinators' panes
 - `notifications.py`: the person's notifications
-- `guide.py`: telling running coordinators their guide changed (a twin, for accept)
 - `stops.py`: a worker or reviewer stopping: triage, or the person
-- `hooks.py`: a worktree's teardown hook, and removing a worktree (a twin, for close)
-- `rules.py`: the rules every worker and reviewer gets (a twin, for review)
-- `saves.py`: the run queue's save hook (`move_queue`), which runs Rust's `_queue`
+- `saves.py`: the save hooks of the run queue (`move_queue`, which runs Rust's
+  `_queue`) and of the PR to follow (`follow_saved`)
 - `start.py`: what a task waits on, an agent's pane, handing a worker a message (twins)
-- `review.py`: what a review covers, starting a reviewer (a twin)
-- `watcher.py`: starting the watcher, and replacing it when the code changes (a twin,
-  for accept and board_build)
-- `close.py`: the one close step (`close`, `close_task`) for accept and auto-accept (a
-  twin)
+- `review.py`: a change's patch-id, and closing a reviewer (a twin)
+- `watcher.py`: replacing the watcher after a build (a twin, for board_build)
 - `line_edit.py`: typing on a terminal, for the stepper (a twin of `line_edit.rs`)
 - `tours.py`: a tour's state and diff, and sending the person's comments, for the
   stepper (a twin of `cli/src/tours/`; the tour agent and `tour-comment` are Rust's)
 - `stepper.py`: reading a tour on the board, and the `tour` command that opens it
-- `board.py`: where the board's program is built (for board_build)
-- `board_build.py`: rebuilding bullpen's command line and the board when their source
-  changes (a twin, for accept), the catch-up of a command an old build hands over, and
-  the build entries an old build hands over (`build_entry`)
-- `keys.py`: bullpen's key bindings in the Rex config
-- `accept.py`: accepting a task, and rebasing the others after it
-- `auto_accept.py`: auto-accept (`_auto_accept`, which `verdict` and `ready` start)
-- `prs.py`: following a task's pull request after ready
+- `board_build.py`: the catch-up of a command an old build hands over, and the build
+  entries an old build hands over (`build_entry`), with the build behind them (a twin)
 - `cli.py`: the parser and `main`. It keeps only the groups' titles (`GROUPS`), the
   modules with commands (`MODULES`), and which module declares each command Python
   owns (`COMMANDS`). The help comes from the Rust entry.
@@ -222,13 +214,12 @@ the modules declare) and its row in `cli/src/commands.rs`, which gives `bullpen 
 its order.
 
 A command function (`cmd_...`) only reads its arguments and calls plain functions;
-no other code calls it. Auto-accept calls `accept.accept`.
+no other code calls it. Auto-accept calls `accept::accept` (cli/src/accept/mod.rs).
 
 ## Closing a task
 
 Accept, close, drop, finish's auto-accept and auto-accept end a task through one close
-step, `close` in `cli/src/close.rs` (and its twin `close.close(repo, t, status, then)`
-for the Python's accept), in one order: the reviewer's pane, the PR
+step, `close` in `cli/src/close.rs`, in one order: the reviewer's pane, the PR
 (withdrawn, unless it was merged), the worktree and branch, the status and the save,
 then what the caller says and does (`then`: news, and after an accept the rebase of
 the other tasks), and the worker's pane last, since the step may run in it. Each
@@ -299,11 +290,12 @@ higher one, the higher one registers with the lower:
 
 - Saving a task (`Repo.save_task`) calls each function registered with
   `core.on_save(fn)`, as `fn(repo, t, old)`, `old` the task as it was saved before.
-  `notifications.py` registers the person's notification, `prs.py` marks a PR
-  for the watcher to follow, and `saves.py` moves the run queue when a task leaves
-  `working` or closes (`move_queue`, through Rust's `bullpen _queue`). A command imports only its own module, so
-  `cli.main` has the first save import these three (`core.LOAD_SAVERS`), and their
-  functions run in one order (`cli.SAVERS`) whichever the command imported first.
+  `notifications.py` registers the person's notification, and `saves.py` moves the
+  run queue when a task leaves `working` or closes (`move_queue`, through Rust's
+  `bullpen _queue`) and marks a PR for the watcher to follow (`follow_saved`). A command imports only its own module, so
+  `cli.main` has the first save import these two (`core.LOAD_SAVERS`), and their
+  functions run in one order (`cli.SAVERS`, then the order a module defines them)
+  whichever the command imported first.
   A command that can replace bullpen's own code under itself imports them first
   (`core.load_savers`): `accept`, before it merges into the checkout bullpen runs from,
   and the tour stepper, which stays open while others accept. Otherwise a module

@@ -1,11 +1,13 @@
-"""What Python's saves set off that has moved to Rust: the run queue. When a task frees a
-slot or closes, `bullpen _queue` (Rust's: cli/src/start/queue.rs) starts the next queued
-tasks, once the command's own work is done. It reads the tasks fresh from disk."""
+"""What Python's saves set off that has moved to Rust: the run queue and the PR to
+follow. When a task frees a slot or closes, `bullpen _queue` (Rust's:
+cli/src/start/queue.rs) starts the next queued tasks, once the command's own work is
+done. It reads the tasks fresh from disk. A task whose PR the watcher looks at marks it
+to follow (cli/src/saves.rs's twin)."""
 
 import subprocess
 import sys
 
-from .core import CLOSED, SELF, later, on_save
+from .core import CLOSED, SELF, STATE, WAITING, later, on_save
 
 
 FREES = ("review", "ready", "finished")  # leaving working for these frees a slot
@@ -42,3 +44,25 @@ def run_queue(root, by, how):
                        stdin=subprocess.DEVNULL)
     except OSError as e:
         print(f"bullpen: couldn't move the run queue: {e}", file=sys.stderr)
+
+
+# ---------- the PR to follow (Rust's `_prs` follows it: cli/src/prs.rs) ----------
+
+
+FOLLOWED = ("review", "ready", *WAITING)  # statuses whose PR the watcher looks at
+
+
+def followed(t):
+    """Does the watcher look at this task's PR? Only an open PR of a task that waits
+    on review or the person: a working task is about to push anyway."""
+    return bool(t.get("pr")) and not t.get("local") and t["status"] in FOLLOWED \
+        and (t.get("gh") or {}).get("state", "open") == "open"
+
+
+@on_save
+def follow_saved(repo, t, old):
+    """A saved task whose PR the watcher looks at marks it to follow: <state>/prs exists
+    while some task's PR may need a look, and the watcher only calls `_prs` then."""
+    if followed(t):
+        STATE.mkdir(parents=True, exist_ok=True)
+        (STATE / "prs").touch()

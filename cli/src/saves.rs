@@ -1,7 +1,7 @@
 //! Saving a task, and what a save sets off: core writes it (`Repo::save_task`, which
 //! returns the task as it was), then the hooks run in cli.SAVERS' order: the run queue
 //! (start.move_queue), the person's notification (notifications.notify), the PR to
-//! follow (prs.follow_saved). Work that waits for the command's own work to be done
+//! follow (follow_saved, for prs.rs's `_prs`). Work that waits for the command's own work to be done
 //! (the run queue starting the next task) goes in `later`, and main runs it when the
 //! command returns.
 //!
@@ -52,7 +52,7 @@ pub fn followed(t: &Obj) -> bool {
         && open
 }
 
-/// prs.follow_saved: a saved task whose PR the watcher looks at marks it to follow
+/// follow_saved: a saved task whose PR the watcher looks at marks it to follow
 /// (<state>/prs exists while some task's PR may need a look: the watcher only calls
 /// `_prs` then).
 fn follow_saved(t: &Obj) -> Res<()> {

@@ -1,4 +1,6 @@
-"""Building bullpen's two programs from its own checkout: the command line and the board."""
+"""Building bullpen's two programs from its own checkout (the command line and the board),
+for the catch-up and the build entries an older build hands over (cli.py). The build
+is Rust's (cli/src/build.rs); this is its twin until T13."""
 
 import fcntl
 import hashlib
@@ -12,11 +14,15 @@ import time
 from .core import (
     Fail, HOME, Repo, SELF, file_hash, git, now, read_json, repo_root, write_json,
 )
-from .jobs import background
 from .news import news
-from .board import BOARD, CARGO_BOARD, TARGET
 from .watcher import restart_watcher
 
+
+TARGET = HOME / "target"  # the cargo workspace's
+# What boards run: a copy of cargo's output, renamed into place once it's whole, so a
+# board never runs a half-written file (cargo's own output is a hard link it rewrites).
+BOARD = TARGET / "bullpen-board"
+CARGO_BOARD = TARGET / "release" / "bullpen-board"
 
 # bullpen's own checkout (HOME) is one cargo workspace (Cargo.toml): core/, cli/ (the
 # command line, bin/bullpen runs it) and board/. Each program's source has a hash, and
@@ -154,46 +160,6 @@ def wait_for_build():
 
 def names(progs):
     return " and ".join(p.what for p in progs)
-
-
-def rebuild_if_stale(repo):
-    """`up`, and an accept in HOME's own repo: when a program's source isn't what it was
-    built from, build it in the background. Says what it started; never fails."""
-    if no_build():
-        return None
-    try:
-        stale = []
-        for p in programs(background=True):
-            if not p.stale():
-                continue  # current, or its build failed already: doctor says so
-            if p.dirty():
-                src = p.source_hash()
-                if read_json(p.stamp, {}).get("skipped") != src:
-                    p.set_stamp(skipped=src)
-                    tid, kind = p.news_as
-                    news(repo, {"id": tid}, kind, (
-                        f"{p.subject()} wasn't rebuilt: {HOME} has uncommitted changes to "
-                        f"{', '.join(p.crates)}, and a build would take them in. {p.keeps}. Commit or drop them, "
-                        f"then run `bullpen up` (or `bullpen build` to build them as they are)."), everyone=True)
-                continue
-            stale.append(p)
-        if not stale:
-            return None
-        lock = lock_build(wait=False)
-        if lock is None:
-            return None  # a build is running: it checks the sources again when it's done
-        with lock:  # the job keeps it; this command's copy closes here
-            mark(lock, os.getpid())
-            job = background([SELF, "_build_board", "--lock-fd", str(lock.fileno())], repo.root,
-                             repo.dir / "jobs.log", f"Rebuilding {names(stale)}", pass_fds=(lock.fileno(),))
-            if job:
-                mark(lock, job)
-        their = "their source" if len(stale) > 1 else "its source"
-        boards = "; running boards reload when it's done" if BOARD_PROGRAM in stale else ""
-        return f"rebuilding {names(stale)} in the background ({their} changed){boards}"
-    except (Fail, OSError) as e:
-        print(f"bullpen: couldn't check bullpen's build: {e}", file=sys.stderr)
-        return None
 
 
 # The one lookup of cargo every build uses (cli/src/build.rs's twin): it runs the first

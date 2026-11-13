@@ -1,6 +1,6 @@
 //! Starting the Rex watcher (lua/watch.lua), and replacing it when bullpen's code
-//! changes (bullpen/watcher.py). Python keeps its copy (a twin) for accept's
-//! refresh_watcher and its own build's restart; both write the same stamp.
+//! changes (bullpen/watcher.py). Python keeps its copy (a twin) for its catch-up's
+//! build (board_build.py); both write the same stamp.
 
 use crate::rex::{alive, rex_api, rex_close, with_state};
 use bullpen_core::json::{read_obj, s, write_obj, Obj};
@@ -91,6 +91,21 @@ pub fn ensure_watcher(session: &str, said: Option<&mut Vec<(String, String, Stri
         None => println!("watcher {what}: {block}"),
     }
     Ok(())
+}
+
+/// After a merge that may have changed the watcher (accept): make sure a current one
+/// runs. Never fails the command that called it.
+pub fn refresh_watcher(repo: &bullpen_core::Repo) {
+    let go = || -> Res<()> {
+        let session = crate::coordinators::session_for(repo, None)?;
+        if !session.is_empty() {
+            ensure_watcher(&session, None)?;
+        }
+        Ok(())
+    };
+    if let Err(e) = go() {
+        eprintln!("bullpen: {e}");
+    }
 }
 
 /// After a build: a running watcher started from the old one is replaced (none is

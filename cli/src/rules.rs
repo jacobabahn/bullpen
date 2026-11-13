@@ -1,7 +1,5 @@
 //! The rules every worker and reviewer gets (bullpen/rules.py): the repo's
 //! .bullpen/rules.md as committed, then the person's own, and the `rules` command.
-//! Python keeps rules.py's helpers (a twin) for review.py's `task_rules`, which review.rs
-//! has here too.
 
 use crate::args::{flag, Args};
 use bullpen_core::proc::git;

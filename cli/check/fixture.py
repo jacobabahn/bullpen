@@ -537,6 +537,52 @@ def main(d, now):
     if "autofinish" in extras:  # BP-33 (nothing committed) auto-accepts
         retask(33, auto_accept=True)
 
+    if "squash" in extras:  # accept squashes (the default rebases)
+        config(merge="squash")
+    if "mergecommit" in extras:  # accept makes a merge commit
+        config(merge="merge")
+    if "norebase" in extras:  # accept leaves the other tasks be
+        config(rebase_others=False)
+    if "conflicting" in extras:  # main changed docs.md since BP-17 branched: a squash conflicts
+        commit("docs.md", "# Other docs\n")
+    if "docsmoved" in extras:  # BP-31 (working) adds docs.md too, which BP-17 adds: accepting BP-17 meets it
+        g("worktree", "add", "-q", "-b", "bullpen/bp-31-docs", str(wts / "BP-31"), "main")
+        (wts / "BP-31" / "docs.md").write_text("# BP-31's docs\n")
+        g("add", ".", cwd=str(wts / "BP-31"))
+        g("commit", "-qm", "BP-31's docs", cwd=str(wts / "BP-31"))
+        retask(31, branch="bullpen/bp-31-docs", worktree=str(wts / "BP-31"))
+    if "autoaccept" in extras:  # BP-17 and BP-20 (approved) auto-accept
+        retask(17, auto_accept=True)
+        retask(20, auto_accept=True, status="ready")
+    # what the fake gh says GitHub has on a PR (gh pr view), by extra
+    prs = {
+        "prpassing": {"state": "OPEN", "headRefOid": "abc", "statusCheckRollup": [
+            {"name": "test", "status": "COMPLETED", "conclusion": "SUCCESS"}]},
+        "prrunning": {"state": "OPEN", "headRefOid": "abc", "statusCheckRollup": [
+            {"name": "test", "status": "IN_PROGRESS"}]},
+        "prfailing": {"state": "OPEN", "headRefOid": "abc", "statusCheckRollup": [
+            {"name": "test", "conclusion": "FAILURE"}, {"context": "ci/lint", "state": "ERROR"}]},
+        "prcomments": {"state": "OPEN", "headRefOid": "abc", "comments": [
+            {"id": "c1", "author": {"login": "ann"}, "body": "Please rename it."},
+            {"id": "c2", "author": {"login": "ci[bot]"}, "body": "Coverage 90%"}],
+            "reviews": [{"id": "r1", "author": {"login": "bob"}, "state": "CHANGES_REQUESTED", "body": ""},
+                        {"id": "r2", "author": {"login": "cat"}, "state": "APPROVED", "body": "LGTM"}]},
+        "prmerged": {"state": "MERGED"},
+        "prclosed": {"state": "CLOSED"},
+        "prbadjson": None,
+    }
+    for name, pr in prs.items():
+        if name in extras:
+            (fake / "pr.json").write_text(json.dumps(pr) if pr else "not json")
+    if "rexinit" in extras:  # a Rex config with a line of its own, no newline at its end
+        (d / "config" / "rex").mkdir(parents=True)
+        (d / "config" / "rex" / "init.lua").write_text("require('rexurrect')")
+    if "otherkeys" in extras:  # a Rex config that loads another bullpen's keys
+        (d / "config" / "rex").mkdir(parents=True)
+        (d / "config" / "rex" / "init.lua").write_text('dofile("/old/bullpen/lua/keys.lua").setup{ bin = "x" }\n')
+    if "reloadfails" in extras:
+        (fake / "reload_fails").write_text("")
+
     env = {"HOME": home, "BULLPEN_STATE": state, "BULLPEN_REX": fake / "rex", "FAKE_DIR": fake,
            "XDG_CONFIG_HOME": d / "config", "FIXTURE_ROOT": root, "BULLPEN_GH": fake / "gh",
            "BULLPEN_NO_BUILD": 1}  # never build, or take the build lock in, the checkout it runs from

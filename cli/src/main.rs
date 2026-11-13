@@ -4,6 +4,7 @@
 //! (`exec` of bin/bullpen-py, never bin/bullpen, so it can't loop) before anything is
 //! read or written.
 
+mod accept;
 mod agents;
 mod answer;
 mod args;
@@ -23,6 +24,7 @@ mod guide;
 mod help;
 mod hooks;
 mod jobs;
+mod keys;
 mod limit;
 mod line_edit;
 mod modes;
@@ -30,6 +32,7 @@ mod news;
 mod notifications;
 mod panes;
 mod pick;
+mod prs;
 mod push_remote;
 mod ready;
 mod review;

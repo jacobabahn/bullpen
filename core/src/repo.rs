@@ -392,7 +392,7 @@ pub fn find_repo(from_block: Option<&str>) -> Res<Repo> {
 }
 
 /// <state>/repos/*/config.json, sorted.
-fn config_files() -> Res<Vec<PathBuf>> {
+pub fn config_files() -> Res<Vec<PathBuf>> {
     let dirs = std::fs::read_dir(state().join("repos")).into_iter().flatten().flatten();
     let mut out: Vec<PathBuf> = dirs
         .map(|e| e.path().join("config.json"))

@@ -151,10 +151,6 @@ def screen_end(session, block, n, vt=False):
     return lines[-n:]
 
 
-def review_label(t):
-    return f"bullpen: {t['id']} review"
-
-
 def screen(session, block):
     """The text on a pane's screen, or "" if Rex can't say."""
     p = run([REX, "capture", *(["-s", session] if session else []), "-b", block], check=False)

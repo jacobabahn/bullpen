@@ -1,7 +1,5 @@
 //! The board's program, and a coordinator's board pane beside it (bullpen/board.py):
-//! `board`, and `ensure_board`, which `go` uses to start a board that was quit. Python
-//! keeps board.py's ensure_board, old_board and paths (a twin) for up, doctor and
-//! board_build until T5.
+//! `board`, and `ensure_board`, which `go` uses to start a board that was quit.
 
 use crate::args::{value, Arg, Args};
 use crate::coordinators::coordinator_mut;

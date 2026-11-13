@@ -1,15 +1,17 @@
 //! Local mode and remote mode (bullpen/modes.py): the steps that differ between them.
 //! A task's mode is the one recorded when it was published (`local`), else the repo's
 //! (an origin remote: remote mode). Here: what a task's branch is compared with,
-//! publishing it (`ready`), withdrawing it (close and drop), and the one way to push
-//! (quiet_git, push_base). Merging and what follows a merge are accept's, and move with
-//! it (T9); Python keeps its own modes.py (a twin).
+//! publishing it (`ready`), merging it and what follows (`accept`), pushing it again
+//! after a rebase (refresh), withdrawing it (close and drop), and the one way to push
+//! (quiet_git, push_base). Python keeps task_base_ref in its modes.py (a twin).
 
 use crate::jobs::{background, Job};
-use bullpen_core::json::{get, py_str, s, truthy, Obj};
+use bullpen_core::json::{get, obj, py_str, s, truthy, Obj};
 use bullpen_core::paths::self_bin;
-use bullpen_core::proc::{git, run_in, text, Done};
-use bullpen_core::{Repo, Res};
+use bullpen_core::proc::{git, run_in, run_input, text, Done};
+use bullpen_core::text::{split, splitlines, squash, strip};
+use bullpen_core::{fail, Repo, Res};
+use serde_json::{json, Value};
 use std::io::Read;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
@@ -240,6 +242,173 @@ pub fn publish(repo: &Repo, t: &mut Obj, ahead: i64, base_ref: &str, summary: &s
         t.insert("pr".into(), serde_json::json!(pr));
     }
     Ok(format!("pushed {branch}; pull request: {}", s(t, "pr")))
+}
+
+// ---------- accept: merging, and what follows ----------
+
+/// Merge the task: its PR on GitHub (unless it was merged there already) in remote
+/// mode, its branch into the local base branch in local mode. Fails, leaving the task
+/// as it was, when it can't.
+pub fn merge(repo: &Repo, t: &mut Obj) -> Res<()> {
+    if !remote(repo, t)? {
+        if truthy(t.get("branch")) {
+            merge_locally(repo, t)?;
+        }
+        return Ok(());
+    }
+    if !truthy(t.get("pr")) || s(obj(t, "gh"), "state") == "merged" {
+        return Ok(());
+    }
+    let how = format!("--{}", repo.cfg_str("merge"));
+    let pr = py_str(t.get("pr").unwrap_or(&Value::Null));
+    let p = run_in(&[repo.gh(), "pr".into(), "merge".into(), pr, how], &repo.root, false)?;
+    if !p.ok() {
+        let said = if p.stderr.is_empty() { &p.stdout } else { &p.stderr };
+        return fail(format!("merge refused: {}", strip(said)));
+    }
+    Ok(())
+}
+
+/// What follows a merge: in remote mode the merged branch is deleted on origin and
+/// the base it moved is fetched; in local mode the base branch is backed up to the
+/// push remote. Says what it started, or None.
+pub fn after_merge(repo: &Repo, t: &Obj) -> Res<Option<String>> {
+    let base = py_str(t.get("base").unwrap_or(&Value::Null));
+    if !remote(repo, t)? {
+        if !truthy(t.get("merged")) {
+            return Ok(None);
+        }
+        return push_base(repo, &base, Some(s(t, "id")));
+    }
+    if truthy(t.get("pr")) && truthy(t.get("branch")) {
+        quiet_git(repo, &["push", "-q", "origin", "--delete", s(t, "branch")], 60)?;
+    }
+    quiet_git(repo, &["fetch", "-q", "origin", &base], 60)?;
+    Ok(None)
+}
+
+/// After bullpen rebased the task's branch: push it to its PR (remote mode). Says why
+/// it failed, or None.
+pub fn refresh(repo: &Repo, t: &Obj) -> Res<Option<String>> {
+    if !remote(repo, t)? || !truthy(t.get("pr")) {
+        return Ok(None);
+    }
+    let to = format!("HEAD:refs/heads/{}", s(t, "branch"));
+    let wt = Path::new(s(t, "worktree"));
+    let p = quiet_git_in(repo, wt, &["push", "-q", "--force-with-lease", "origin", &to], 600)?;
+    Ok((!p.ok()).then(|| failed(&p)))
+}
+
+/// The worktree (the main checkout or another) that has branch checked out, or None.
+fn checked_out_at(repo: &Repo, branch: &str) -> Res<Option<String>> {
+    let p = git(&repo.root, &["worktree", "list", "--porcelain"], true)?;
+    let mut path = None;
+    let want = format!("branch refs/heads/{branch}");
+    for line in splitlines(&p.stdout) {
+        if let Some(p) = line.strip_prefix("worktree ") {
+            path = Some(p.to_string());
+        } else if line == want {
+            return Ok(path);
+        }
+    }
+    Ok(None)
+}
+
+/// git's stdout, stripped.
+fn git_out(dir: impl AsRef<Path>, args: &[&str]) -> Res<String> {
+    Ok(strip(&git(dir, args, true)?.stdout).to_string())
+}
+
+/// Local mode: merge the task's branch into its local base branch, as config --merge
+/// says. On any failure, fail with the reason and leave the task, its worktree and its
+/// branch as they were (a rebase that went through stays: the branch is still intact).
+fn merge_locally(repo: &Repo, t: &mut Obj) -> Res<()> {
+    let (id, base, branch) = (
+        s(t, "id"),
+        py_str(t.get("base").unwrap_or(&Value::Null)),
+        s(t, "branch"),
+    );
+    let wt = s(t, "worktree");
+    let how = repo.cfg_str("merge");
+    let root = &repo.root;
+    let head_ref = format!("refs/heads/{branch}");
+    if !git(root, &["rev-parse", "-q", "--verify", &head_ref], false)?.ok() {
+        return fail(format!("merge refused: {id}'s branch {branch} is gone"));
+    }
+    let old = git_out(root, &["rev-parse", &format!("refs/heads/{base}")])?;
+    let count = git_out(root, &["rev-list", "--count", &format!("{old}..{head_ref}")])?;
+    if count == "0" {
+        return Ok(()); // nothing to merge
+    }
+    let new = if how == "rebase" {
+        if wt.is_empty() || !Path::new(wt).exists() {
+            return fail(format!("merge refused: {id} has no worktree to rebase in"));
+        }
+        if !strip(&git(wt, &["status", "--porcelain"], true)?.stdout).is_empty() {
+            return fail(format!("merge refused: {id} has uncommitted changes in {wt}"));
+        }
+        if !git(wt, &["rebase", "-q", &old], false)?.ok() {
+            git(wt, &["rebase", "--abort"], false)?;
+            return fail(format!(
+                "merge refused: {branch} doesn't rebase cleanly onto {base}; rebase it by hand in {wt}, then accept again"
+            ));
+        }
+        git_out(root, &["rev-parse", &head_ref])?
+    } else {
+        let p = git(
+            root,
+            &["merge-tree", "--write-tree", "--no-messages", &old, &head_ref],
+            false,
+        )?;
+        if !p.ok() {
+            let wt = if wt.is_empty() { "None" } else { wt };
+            return fail(format!(
+                "merge refused: {branch} conflicts with {base}; rebase it onto {base} in {wt}, then accept again"
+            ));
+        }
+        let tree = split(&p.stdout).first().map_or(String::new(), |w| w.to_string());
+        let (msg, parents) = if how == "squash" {
+            let mut msg = format!("{} ({id})", s(t, "title"));
+            if truthy(t.get("summary")) {
+                msg += &format!("\n\n{}", strip(s(t, "summary")));
+            }
+            (msg, vec!["-p", &old])
+        } else {
+            let msg = format!("Merge {branch}: {} ({id})", s(t, "title"));
+            (msg, vec!["-p", &old, "-p", &head_ref])
+        };
+        let root_s = root.display().to_string();
+        let mut argv = vec!["git", "-C", &root_s, "commit-tree", &tree];
+        argv.extend(parents);
+        argv.extend(["-F", "-"]);
+        strip(&run_input(&argv, &format!("{msg}\n"), true)?.stdout).to_string()
+    };
+    move_base(repo, &base, &old, &new)?;
+    t.insert("merged".into(), json!(new));
+    Ok(())
+}
+
+/// Fast-forward the local base branch from old to new. Where it's checked out, do it
+/// with `merge --ff-only` there, which keeps uncommitted changes to other files and
+/// refuses if the incoming commits touch one of them.
+fn move_base(repo: &Repo, base: &str, old: &str, new: &str) -> Res<()> {
+    if let Some(at) = checked_out_at(repo, base)? {
+        let p = git(&at, &["merge", "-q", "--ff-only", new], false)?;
+        if !p.ok() {
+            let said = if p.stderr.is_empty() { &p.stdout } else { &p.stderr };
+            return fail(format!(
+                "merge refused: can't fast-forward {base} in {at}: {}",
+                squash(said)
+            ));
+        }
+        return Ok(());
+    }
+    if !git(&repo.root, &["merge-base", "--is-ancestor", old, new], false)?.ok() {
+        return fail(format!("merge refused: {base} can't be fast-forwarded"));
+    }
+    let to = format!("refs/heads/{base}");
+    git(&repo.root, &["update-ref", "-m", "bullpen accept", &to, new, old], true)?;
+    Ok(())
 }
 
 #[cfg(test)]
