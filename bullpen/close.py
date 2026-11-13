@@ -7,6 +7,7 @@ from pathlib import Path
 from .core import Fail, Repo, command, git, is_status, repo_root, set_status, unindex_block
 from .modes import mode
 from .rex import close_last
+from .agents import pane
 from .news import news, tell_coordinator
 from .hooks import remove_worktree
 from .start import dropped_dep
@@ -19,7 +20,7 @@ def close(repo, t, status, then=None, withdraw=True, force=True, **fields):
     queue), then what the caller says and does (then), and the worker's pane last,
     since this may run in it. fields go on the task with the status."""
     os.chdir(repo.root)  # we may be running in the worktree this removes
-    worker = (t.get("session"), t.get("block"))
+    worker = pane(t, "worker")
     unindex_block(t.get("block"))
     close_reviewer(t)
     if withdraw:
