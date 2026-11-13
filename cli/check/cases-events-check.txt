@@ -81,12 +81,13 @@ env:FIXTURE=check _gone blk54
 env:FIXTURE=check _gone blk63
 env:FIXTURE=check _gone blk58
 env:FIXTURE=check,deadcoords _gone blk41
-_stuck blk4 20
+# _stuck writes now less MINUTES as its since: 0, so that stamp is <now> in both runs
+_stuck blk4 0
 _stuck blk5 20
 _stuck blk1 20
 _stuck blk99 20
-env:FIXTURE=check _stuck blk52 30
-env:FIXTURE=check _stuck blk54 30
+env:FIXTURE=check _stuck blk52 0
+env:FIXTURE=check _stuck blk54 0
 usage _stuck blk4 x
 usage _stuck blk4
 _limit
