@@ -332,6 +332,37 @@ def main(d, now):
         subprocess.Popen(["sleep", "5"], pass_fds=(lk.fileno(),), stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL, start_new_session=True)
 
+    if "panes" in extras:  # Rex's windows: c1's tab with the board and capsules, a task's own tab, c2's tab
+        # with a capsule of c1's task that strayed there, background panes, and BP-6's pane under a new ID
+        def pane(n, **kw):
+            path = tasks / f"BP-{n}.json"
+            path.write_text(json.dumps({**json.loads(path.read_text()), **kw}, indent=2) + "\n")
+        pane(3, pane="float")
+        pane(12, pane="background")
+        pane(27, pane="tabs")
+        pane(10, review={**json.loads((tasks / "BP-10.json").read_text())["review"], "pane": "background"})
+        hint = " · ctrl+esc hides"
+        R = {"blocks": {f"blk{i}": {"label": None, "layer": None, "window": None} for i in range(1, 17)},
+             "layers": {"lyr1": "minimized", "lyr2": "normal", "lyr3": "minimized", "lyr4": "minimized",
+                        "lyr5": "minimized"},
+             "windows": ["w1", "w2", "w3"]}
+        for blk, label, layer, window in (
+                ("blk1", "bullpen: proj", None, "w1"), ("blk2", "bullpen: proj board", None, "w1"),
+                ("blk4", "bullpen: BP-3" + hint, "lyr1", "w1"), ("blk5", "bullpen: BP-4" + hint, "lyr2", "w1"),
+                ("blk15", "bullpen: BP-40" + hint, "lyr4", "w1"), ("blk12", "bullpen: BP-27", None, "w2"),
+                ("blk3", "bullpen: proj", None, "w3"), ("blk13", "bullpen: BP-31" + hint, "lyr3", "w3"),
+                ("blk11", "bullpen: BP-12" + hint, "detached", None),
+                ("blk8", "bullpen: BP-10 review" + hint, "detached", None),
+                ("blk14", "bullpen: BP-32 review" + hint, "detached", None),
+                ("blk16", "bullpen: BP-41 review" + hint, "detached", None),
+                ("blk20", "bullpen: BP-6" + hint, "lyr5", "w1")):
+            R["blocks"][blk] = {"label": label, "layer": layer, "window": window}
+        (fake / "reg.json").write_text(json.dumps(R))
+        live("blk20")
+        for blk, role in (("blk2", "board"), ("blk4", "BP-3"), ("blk5", "BP-4"), ("blk11", "BP-12"),
+                          ("blk12", "BP-27"), ("blk13", "BP-31"), ("blk15", "BP-40"), ("blk8", "BP-10 review")):
+            (blocks / f"{blk}.json").write_text(json.dumps({"repo": str(root), "role": role, "stuck_after": 15}))
+
     env = {"HOME": home, "BULLPEN_STATE": state, "BULLPEN_REX": fake / "rex", "FAKE_DIR": fake,
            "XDG_CONFIG_HOME": d / "config", "FIXTURE_ROOT": root}
     for k, v in env.items():

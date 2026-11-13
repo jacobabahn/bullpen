@@ -9,7 +9,7 @@ from .core import (
     unindex_block, with_model,
 )
 from .modes import task_base_ref
-from .rex import rex_alive, rex_type, screen_end, type_to_worker
+from .rex import rex_alive, rex_type, type_to_worker
 from .coordinators import session_for
 from .panes import place
 from .news import news
@@ -298,17 +298,9 @@ def cmd_tell(args):
     print(f"sent to {t['id']}")
 
 
-def cmd_peek(args):
-    repo = Repo(repo_root())
-    t = repo.task(args.id)
-    if not rex_alive(t["session"], t["block"]):
-        raise Fail(f"{t['id']}'s agent isn't running")
-    print("\n".join(screen_end(t["session"], t["block"], args.lines, args.vt)))
-
-
 def commands(sub):
-    """This module's commands, for bullpen's parser. (add, after, model and review-mode
-    are Rust's: cli/src/start/.)"""
+    """This module's commands, for bullpen's parser. (add, after, model, review-mode and
+    peek are Rust's: cli/src/start/.)"""
     p = command(sub, "start", cmd_start, "Coordinator", help="make a task's worktree and start its worker")
     p.add_argument("id", help="the task, like BP-3")
     p.add_argument("--model", help="claude's --model for this task's worker, over the config's")
@@ -333,11 +325,6 @@ def commands(sub):
     p = command(sub, "tell", cmd_tell, "Coordinator", help="type a message to a task's worker")
     p.add_argument("id", help="the task, like BP-3")
     p.add_argument("message", nargs="+", help="the words to type")
-
-    p = command(sub, "peek", cmd_peek, "Coordinator", help="print the end of a worker's screen")
-    p.add_argument("id", help="the task, like BP-3")
-    p.add_argument("--lines", type=int, default=40, help="how many lines (default 40)")
-    p.add_argument("--vt", action="store_true", help="keep the screen's colours, as terminal escape codes")
 
     p = command(sub, "_queue", cmd_queue)
     p.add_argument("--repo", required=True)

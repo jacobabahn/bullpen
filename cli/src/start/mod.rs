@@ -21,6 +21,8 @@ use bullpen_core::{fail, Repo, Res};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
+pub mod peek;
+
 const ID: Arg = pos("id", Nargs::One, "the task, like BP-3");
 const PANE: &str = "where its worker's pane goes, over config --workers: float, tab, tabs or background";
 

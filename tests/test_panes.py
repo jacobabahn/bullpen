@@ -1,4 +1,6 @@
-"""Where a pane lives: bullpen/panes.py's placements, called as the commands call them."""
+"""Where a pane lives: the placements, through the commands that show and hide panes (Rust's
+cli/src/panes/, with its own tests of placement choice), and Python's twin (bullpen/panes.py)
+called as launch, review and `up` call it."""
 
 import json
 import subprocess
@@ -30,6 +32,10 @@ class PanesBase(BullpenTest):
 
     def reg(self):
         return json.loads((self.fake / "reg.json").read_text())
+
+    def made_block(self, label):
+        """The newest block with this label."""
+        return [b for b, i in self.reg()["blocks"].items() if i["label"] == label][-1]
 
     def where(self, blk):
         """"detached", or (window, the floating layer's state, or None when tiled)."""
@@ -69,19 +75,23 @@ class PanesTest(PanesBase):
         tid = self.start_task()
         blk = self.block(tid)
         self.bp("go", tid)
-        got = self.panes(f"""\
-            print(json.dumps([panes.hide(repo, "session:1", {blk!r}), panes.hide(repo, "session:1", "blk1"),
-                              panes.hide(repo, "session:1", "nosuch")]))
-            """)
-        self.assertEqual(got, [True, False, False])  # a worker's capsule, the coordinator's tab, nothing
+        got = [self.bp("hide", "--from", b, ok=False).returncode for b in (blk, "blk1", "nosuch")]
+        self.assertEqual(got, [0, 3, 3])  # a worker's capsule, the coordinator's tab, nothing
         self.assertEqual(self.api("session.set_layer_state")[-1]["state"], "minimized")
+
+    def test_hide_lets_the_key_through_in_a_tab_of_its_own(self):
+        self.bp("config", "--workers", "tabs")
+        tid = self.start_task()
+        before = len(self.rex_calls())
+        self.assertEqual(self.bp("hide", "--from", self.block(tid), ok=False).returncode, 3)
+        self.assertNotIn("focus", [a[0] for a in self.rex_calls()[before:]])
 
     def test_show_brings_one_float_up_and_puts_the_others_away(self):
         a = self.start_task()
         self.bp("add", "Another", "--brief", "B.")
         self.bp("start", "BP-2")
         self.bp("go", a)
-        self.panes(f'panes.show(repo, "session:1", {self.block("BP-2")!r})\n')
+        self.bp("go", "BP-2")
         states = self.layer_states()
         layer = {b: i["layer"] for b, i in json.loads((self.fake / "reg.json").read_text())["blocks"].items()}
         self.assertEqual(states[layer[self.block(a)]], "minimized")
@@ -92,8 +102,8 @@ class PanesTest(PanesBase):
     def test_show_focuses_a_pane_in_a_tab(self):
         self.bp("config", "--workers", "tabs")
         tid = self.start_task()
-        self.panes(f'panes.show(repo, "session:1", {self.block(tid)!r})\n')
-        self.assertEqual(self.rex_calls()[-1][0], "focus")
+        self.bp("go", tid)
+        self.assertEqual(self.rex_calls()[-1][:2], ["focus", "-s"])
 
     def test_find_by_id_or_by_label_with_or_without_the_hint(self):
         tid = self.start_task()
@@ -294,11 +304,20 @@ class ReviewersTest(PanesBase):
     def test_the_diff_pane_never_goes_to_the_background(self):
         self.bp("config", "--workers", "background")
         tid = self.start_task()
-        self.panes(f"""\
-            t = repo.task({tid!r})
-            print(json.dumps(panes.place(repo, t, "session:1", "bullpen: {tid} diff", ["true"], role="diff", hint=False)))
-            """)
-        self.assertEqual(self.api("session.new_layer")[-1]["layout"]["block"]["label"], f"bullpen: {tid} diff")
+        self.bp("diff", tid, "--pane")
+        made = self.api("session.new_layer")[-1]["layout"]["block"]
+        self.assertEqual(made["label"], f"bullpen: {tid} diff")
+        self.assertEqual(made["options"]["command"][-3:], ["diff", tid, "--back"])
+        layer = self.reg()["blocks"][self.made_block(f"bullpen: {tid} diff")]["layer"]
+        self.assertEqual(self.reg()["layers"][layer], "normal")  # shown at once
+
+    def test_a_second_diff_pane_replaces_the_first(self):
+        tid = self.start_task()
+        self.bp("diff", tid, "--pane")
+        first = self.made_block(f"bullpen: {tid} diff")
+        self.bp("diff", tid, "--pane")
+        self.assertFalse((self.fake / "alive" / first).exists())
+        self.assertNotEqual(self.made_block(f"bullpen: {tid} diff"), first)
 
 
 class TabTest(PanesBase):
@@ -382,13 +401,6 @@ class TabTest(PanesBase):
         self.assertEqual(self.where(self.block("BP-2"))[0], tab)  # both, into the one new tab
         self.assertEqual(len(self.api("session.new_window")), 2)
 
-    def test_a_second_coordinator_has_its_own_workers_tab(self):
-        from bullpen.panes import tab_label
-        from bullpen.core import Repo
-        repo = Repo(self.repo)
-        self.assertEqual([tab_label(repo, {"id": c}) for c in ("c1", "c2")],
-                         ["bullpen: proj workers", "bullpen: proj workers c2"])
-
     def test_reviewers_can_go_to_the_tab(self):
         self.bp("config", "--reviewers", "tab")
         tid = self.start_task()
@@ -443,9 +455,7 @@ class PaneChoiceTest(PanesBase):
     def test_the_diff_pane_gets_a_tab_when_the_task_has_a_tab_each(self):
         self.bp("up")
         self.bp("add", "One", "--brief", "A.", "--pane", "tabs")
-        got = self.panes("""\
-            t = repo.task("BP-1")
-            print(json.dumps([panes.for_new(repo, t, "diff").name,
-                              panes.for_new(repo, dict(t, placement="tab"), "diff").name]))
-            """)
-        self.assertEqual(got, ["tabs", "float"])
+        self.bp("start", "BP-1")
+        self.bp("diff", "BP-1", "--pane")
+        run = [a for a in self.rex_calls() if a[0] == "run"][-1]
+        self.assertEqual((run[run.index("--label") + 1], run[2]), ("bullpen: BP-1 diff", "--focus=true"))

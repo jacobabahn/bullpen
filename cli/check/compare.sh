@@ -12,13 +12,15 @@
 # runs on a terminal 100 columns wide (`tty40 `: 40 wide). Leading `env:NAME=VALUE ` words
 # set NAME for the run, and for fixture.py (FIXTURE=a,b picks its extras). RUST_BIN: the binary to
 # check (default target/release/bullpen: run `cargo build --release -p bullpen-cli` first). Prints one line per case,
-# a diff for each that differs, and exits 1 if any did. Stamps from the run's own
+# a diff for each that differs, and exits 1 if any did. What the fake rex was asked (rex.log) and
+# its windows after (reg.json) are compared too; a checkout's own path reads as TOP. Stamps from the run's own
 # time (a command's now()) read as <now>. A case starting `usage ` runs without strict mode (a
 # command handed to the Python then runs there), and all of it is compared.
 here=$(cd "$(dirname "$0")" && pwd)
 top=$(cd "$here/../.." && pwd)
 py=${BULLPEN_PY:-$top/bin/bullpen-py}
 rs=${RUST_BIN:-$top/target/release/bullpen}
+pytop=$(cd "$(dirname "$py")/.." && pwd)
 export BULLPEN_RUST_STRICT=1  # an unported command fails, rather than run the Python
 work=${COMPARE_DIR:-$(mktemp -d)}
 fail=0
@@ -54,7 +56,8 @@ run_one() {  # run_one PROGRAM CASE OUTDIR
         fi
     )
     (cd "$work/fx" && find state -type f ! -name '*.lock' | sort | while read -r f; do echo "== $f"; cat "$f"; done) >"$out/state"
-    sed -i "s#$work/fx#FX#g" "$out"/*
+    for f in rex.log reg.json; do [ -f "$work/fx/fake/$f" ] && cp "$work/fx/fake/$f" "$out/$f"; done
+    sed -i "s#$work/fx#FX#g; s#$pytop#TOP#g; s#$top#TOP#g" "$out"/*
     python3 "$here/now_stamps.py" "$t0" "$(date +%s.%N)" "$out"/*
     return 0
 }

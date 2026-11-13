@@ -34,6 +34,41 @@ pub fn coordinator_at<'a>(repo: &'a Repo, block: &str, boards: bool) -> Option<&
         .find(|c| s(c, "block") == block || (boards && s(obj(c, "board"), "block") == block))
 }
 
+/// The coordinator cid, to change (the caller saves the repo).
+pub fn coordinator_mut<'a>(repo: &'a mut Repo, cid: &str) -> Option<&'a mut Obj> {
+    let list = repo.cfg.get_mut("coordinators").and_then(Value::as_array_mut)?;
+    list.iter_mut()
+        .filter_map(Value::as_object_mut)
+        .find(|c| !cid.is_empty() && s(c, "id") == cid)
+}
+
+/// Does coordinator c's board show the task? Only one c sees to, or one nobody sees
+/// to, while c's board_others is off. With one coordinator (or c None), every task.
+pub fn on_board(repo: &Repo, c: Option<&Obj>, t: &Obj) -> Res<bool> {
+    let Some(c) = c.filter(|c| !c.is_empty()) else {
+        return Ok(true);
+    };
+    if bullpen_core::json::truthy(c.get("board_others")) || coordinators(repo).len() < 2 {
+        return Ok(true);
+    }
+    let sees = sees_to(repo, t)?;
+    Ok(sees.is_empty() || sees.iter().any(|o| o.get("id") == c.get("id")))
+}
+
+/// The Rex session to work in: given (--session), else the primary coordinator's while
+/// it exists (a Rex restart gives sessions new IDs), else the one we're running in.
+pub fn session_for(repo: &Repo, given: Option<&str>) -> Res<String> {
+    if let Some(s) = given.filter(|s| !s.is_empty()) {
+        return Ok(s.into());
+    }
+    let c = primary(repo).map_or("", |c| s(c, "session"));
+    let here = std::env::var("REX_SESSION").unwrap_or_default();
+    if !c.is_empty() && (c == here || crate::rex::rex_view(c)?.is_some()) {
+        return Ok(c.into());
+    }
+    Ok(if here.is_empty() { c.into() } else { here })
+}
+
 /// Is the coordinator's pane running?
 pub fn alive(c: Option<&Obj>) -> Res<bool> {
     match c {

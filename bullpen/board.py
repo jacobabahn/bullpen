@@ -1,11 +1,12 @@
-"""The board's program, and a coordinator's board pane beside it."""
+"""The board's program, and a coordinator's board pane beside it: what `up`, doctor and
+board_build use. The `board` command is Rust's (cli/src/board.rs), with its own copy."""
 
 import json
 import os
 import sys
 from pathlib import Path
 
-from .core import Fail, HOME, REX, Repo, SELF, command, index_block, repo_root, run, unindex_block
+from .core import HOME, REX, SELF, index_block, run, unindex_block
 from .rex import board_label, rex_alive, rex_close, with_state
 
 
@@ -78,21 +79,3 @@ def board_exe():
     if os.environ.get("BULLPEN_BOARD"):
         return Path(os.environ["BULLPEN_BOARD"])
     return BOARD if BOARD.exists() or not CARGO_BOARD.exists() else CARGO_BOARD
-
-
-def cmd_board(args):
-    """The board is a Rust program (board/): it reads the repo's state directory and
-    does everything through this command. It execs itself again when its program is
-    replaced (a rebuild), keeping what it shows."""
-    repo = Repo(repo_root())
-    exe = str(board_exe())
-    if not os.access(exe, os.X_OK):
-        raise Fail(f"the board isn't built: run {HOME / 'install.sh'} (needs cargo)")
-    mine = ["--coordinator", args.coordinator] if args.coordinator else []
-    os.execv(exe, [exe, "--dir", str(repo.dir), "--root", str(repo.root), "--bullpen", SELF, *mine])
-
-
-def commands(sub):
-    """This module's commands, for bullpen's parser."""
-    p = command(sub, "board", cmd_board, "You", help="a live list of tasks to switch between")
-    p.add_argument("--coordinator", help="the coordinator it sits beside: its tasks are marked")

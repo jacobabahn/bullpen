@@ -271,8 +271,9 @@ class EntryTest(BullpenTest):
                                  (sub.choices[c["name"]].group, helps.get(c["name"])), c["name"])
         self.assertEqual({c["name"]: c["owner"] for c in table if c["owner"] != "python"},
                          {"build-board": "alias of build", "_nop": "rust", "_commands": "rust",
-                          **dict.fromkeys(["ls", "show", "add", "after", "model", "review-mode", "ask", "ok", "note", "news",
-                                           "_flush"], "rust")})
+                          **dict.fromkeys(["go", "hide", "adopt", "board", "ls", "show", "diff", "add", "after",
+                                           "model", "review-mode", "peek", "ask", "ok", "note", "news", "_flush"],
+                                          "rust")})
 
     def test_help_and_an_unknown_command_come_from_rust(self):
         p = self.strict("--help")
@@ -307,6 +308,20 @@ class EntryTest(BullpenTest):
         p = self.strict("show", "BP-9")
         self.assertEqual(p.returncode, 1)
         self.assertTrue(p.stderr.startswith("bullpen: no task BP-9 in "), p.stderr)
+
+    def test_the_pane_commands_are_rusts_with_argparses_rules(self):
+        tid = self.start_task()
+        p = self.strict("peek", tid, "--lines", "x")
+        self.assertEqual((p.returncode, p.stderr.splitlines()[-1]),
+                         (2, "bullpen peek: error: argument --lines: invalid int value: 'x'"))
+        self.assertEqual(self.strict("peek", tid, "--li", " 1 ").stdout, "line two\n")
+        p = self.strict("go", "--all-r")
+        self.assertEqual((p.returncode, p.stderr), (1, "bullpen: --all-repos goes with --next\n"))
+        self.assertEqual(self.strict("hide", "--from", "nosuch").returncode, 3)  # not bullpen's: the key goes through
+        p = self.strict("adopt")
+        self.assertEqual((p.returncode, p.stderr.splitlines()[-1]),
+                         (2, "bullpen adopt: error: the following arguments are required: ID"))
+        self.assertEqual(self.strict("diff", tid, "--st").stdout, f"{tid} has no commits against origin/main.\n")
 
     def test_python_says_when_a_command_isnt_in_this_build(self):
         # an older build hands Python a command Python no longer has (here, one Rust owns)

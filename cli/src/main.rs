@@ -6,12 +6,16 @@
 
 mod agents;
 mod args;
+mod board;
 mod commands;
 mod coordinators;
+mod diff;
+mod go;
 mod help;
 mod modes;
 mod news;
 mod notifications;
+mod panes;
 mod rex;
 mod saves;
 mod show;

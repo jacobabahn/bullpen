@@ -11,7 +11,7 @@ from . import core
 from .core import Fail, run_later
 
 # The modules with commands (cli/src/commands.rs lists their commands in `bullpen --help`'s order).
-MODULES = ("go", "board", "show", "answer", "accept", "close", "stepper", "tours", "pick", "start",
+MODULES = ("answer", "accept", "close", "stepper", "tours", "pick", "start",
            "triage", "check", "guide", "ready", "auto_accept", "up", "config", "rules",
            "push_remote", "board_build", "keys", "doctor", "coordinators", "prs", "events")
 
@@ -20,16 +20,13 @@ MODULES = ("go", "board", "show", "answer", "accept", "close", "stepper", "tours
 # is most of a call's time. A test checks this against what the modules declare, and
 # another against the Rust entry's table (cli/src/commands.rs): a command is one side's.
 COMMANDS = {
-    "go": "go", "hide": "go", "adopt": "go",
-    "board": "board",
-    "diff": "show",
     "answer": "answer", "reply": "answer", "prompt": "answer",
     "accept": "accept",
     "close": "close", "drop": "close",
     "tour": "stepper", "_tour": "stepper",
     "tour-comment": "tours",
     "pick": "pick",
-    "start": "start", "resume": "start", "tell": "start", "peek": "start", "_queue": "start",
+    "start": "start", "resume": "start", "tell": "start", "_queue": "start",
     "review": "triage",
     "check": "check",
     "guide": "guide",

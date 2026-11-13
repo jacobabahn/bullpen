@@ -56,13 +56,13 @@ const fn alias(name: &'static str, of: &'static str) -> Command {
 
 #[rustfmt::skip]
 pub const COMMANDS: &[Command] = &[
-    c("go", YOU, "focus a task's pane (or the coordinator's, or the board's)", Python),
-    c("hide", YOU, "put the worker pane you're in away (into its capsule, or the background)", Python),
-    c("adopt", COORDINATOR, "(coordinator) make tasks yours: their news comes to this pane", Python),
-    c("board", YOU, "a live list of tasks to switch between", Python),
+    c("go", YOU, "focus a task's pane (or the coordinator's, or the board's)", Rust(crate::go::cmd_go)),
+    c("hide", YOU, "put the worker pane you're in away (into its capsule, or the background)", Rust(crate::go::cmd_hide)),
+    c("adopt", COORDINATOR, "(coordinator) make tasks yours: their news comes to this pane", Rust(crate::go::cmd_adopt)),
+    c("board", YOU, "a live list of tasks to switch between", Rust(crate::board::cmd_board)),
     c("ls", YOU, "list tasks", Rust(show::cmd_ls)),
     c("show", YOU, "one task", Rust(show::cmd_show)),
-    c("diff", YOU, "a task's changes against its base, in a pager (delta if installed)", Python),
+    c("diff", YOU, "a task's changes against its base, in a pager (delta if installed)", Rust(crate::diff::cmd_diff)),
     c("answer", YOU, "press an option of the prompt a task's agent is at", Python),
     c("reply", YOU, "answer what the coordinator asked about a task: it goes to the coordinator", Python),
     c("prompt", COORDINATOR, "the prompt a task's agent is at, and its screen, as JSON (for the board)", Python),
@@ -80,7 +80,7 @@ pub const COMMANDS: &[Command] = &[
     c("start", COORDINATOR, "make a task's worktree and start its worker", Python),
     c("resume", COORDINATOR, "restart a stopped worker, continuing its conversation", Python),
     c("tell", COORDINATOR, "type a message to a task's worker", Python),
-    c("peek", COORDINATOR, "print the end of a worker's screen", Python),
+    c("peek", COORDINATOR, "print the end of a worker's screen", Rust(crate::start::peek::cmd_peek)),
     c("_queue", INTERNAL, "", Python), // the run queue, Rust's one bridge to Python until T6
     c("ask", COORDINATOR, "(coordinator) the task needs the person: the question shows on the board", Rust(crate::triage::cmd_ask)),
     c("ok", COORDINATOR, "(coordinator) a task waiting on you is seen to: back to work, nothing typed", Rust(crate::triage::cmd_ok)),
