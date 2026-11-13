@@ -1,12 +1,21 @@
 """Python's str methods where Mojo's differ: strip() and split() by Python's whitespace
 (str.isspace, Unicode spaces included; Mojo's strip doesn't take \\xa0 or \\u3000),
-and \\w for the regexes the screen readers port by hand."""
+and \\w for the regexes the screen readers port by hand. Whitespace, strip and
+splitlines are text.mojo's; these names stay for the modules that use them."""
+
+from bullpen.text import is_space, strip, splitlines
 
 
-def is_space(c: Int) -> Bool:
-    """Python's str.isspace for one code point."""
-    return (c >= 9 and c <= 13) or (c >= 0x1C and c <= 0x20) or c == 0x85 or c == 0xA0 or c == 0x1680 or (
-        c >= 0x2000 and c <= 0x200A) or c == 0x2028 or c == 0x2029 or c == 0x202F or c == 0x205F or c == 0x3000
+def py_strip(s: String) -> String:
+    return strip(s)
+
+
+def py_rstrip(s: String) -> String:
+    return strip(s, lead=False)
+
+
+def py_splitlines(s: String) -> List[String]:
+    return splitlines(s)
 
 
 def is_word(c: Int) -> Bool:
@@ -36,39 +45,10 @@ def cps(s: String) -> List[Int]:
     return out^
 
 
-def py_strip(s: String) -> String:
-    """str.strip()."""
-    var c = cps(s)
-    var a = 0
-    var b = len(c)
-    while a < b and is_space(c[a]):
-        a += 1
-    while b > a and is_space(c[b - 1]):
-        b -= 1
-    return from_cps(c, a, b)
-
-
-def py_rstrip(s: String) -> String:
-    """str.rstrip()."""
-    var c = cps(s)
-    var b = len(c)
-    while b > 0 and is_space(c[b - 1]):
-        b -= 1
-    return from_cps(c, 0, b)
-
-
 def from_cps(c: List[Int], a: Int, b: Int) -> String:
     var out = String()
     for i in range(a, b):
         out += String(Codepoint(unsafe_unchecked_codepoint=UInt32(c[i])))
-    return out^
-
-
-def py_splitlines(s: String) -> List[String]:
-    """str.splitlines()."""
-    var out = List[String]()
-    for l in s.splitlines():
-        out.append(String(l))
     return out^
 
 
