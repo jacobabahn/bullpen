@@ -13,6 +13,8 @@ from bullpen import show, rex, coordinators
 def dispatch(av: List[String]) raises -> Int:
     """Run a ported command; -1 when it isn't one (or isn't ported with these arguments)."""
     var cmd = av[0]
+    if cmd == "_nop":  # does nothing: bench/bench.py times start-up with it
+        return 0
     if cmd == "ls":
         show.cmd_ls(parse(av, "--all --all-repos --json", "", 0, 0))
     elif cmd == "show":
