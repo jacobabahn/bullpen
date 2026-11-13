@@ -1,24 +1,56 @@
 """bullpen's command line: the parser, built from each module's commands, and main."""
 
 import argparse
-import difflib
-import shutil
+import importlib
 import sys
-import textwrap
 
 from . import __doc__ as ABOUT
-from . import (
-    accept, answer, auto_accept, board, board_build, check, close, config, coordinators, doctor,
-    events, go, guide, keys, news, notifications, pick, prs, push_remote, ready, rules, show, start,
-    stepper, tours, triage, up,
-)
+from . import core
 from .core import Fail, run_later
 
 # The modules with commands, in the order `bullpen --help` lists a group's commands.
-# Importing them all also registers what saving a task sets off (core.on_save).
-MODULES = (go, board, show, answer, accept, close, stepper, tours, pick, start, triage, check,
-           news, guide, ready, auto_accept, up, config, rules, push_remote, board_build, keys, doctor,
-           coordinators, notifications, prs, events)
+MODULES = ("go", "board", "show", "answer", "accept", "close", "stepper", "tours", "pick", "start",
+           "triage", "check", "news", "guide", "ready", "auto_accept", "up", "config", "rules",
+           "push_remote", "board_build", "keys", "doctor", "coordinators", "notifications", "prs",
+           "events")
+
+# Each command and the module that declares it, in --help's order. A call imports only
+# its command's module (and what that imports), not all of them: start-up is most of a
+# call's time. A test checks this against what the modules declare.
+COMMANDS = {
+    "go": "go", "hide": "go", "adopt": "go",
+    "board": "board",
+    "ls": "show", "show": "show", "diff": "show",
+    "answer": "answer", "reply": "answer", "prompt": "answer",
+    "accept": "accept",
+    "close": "close", "drop": "close",
+    "tour": "stepper", "_tour": "stepper",
+    "tour-comment": "tours",
+    "pick": "pick",
+    "add": "start", "after": "start", "model": "start", "review-mode": "start", "start": "start",
+    "resume": "start", "tell": "start", "peek": "start",
+    "ask": "triage", "ok": "triage", "review": "triage", "note": "triage",
+    "check": "check",
+    "news": "news",
+    "guide": "guide",
+    "ready": "ready", "finish": "ready",
+    "verdict": "auto_accept", "_auto_accept": "auto_accept",
+    "up": "up",
+    "config": "config",
+    "rules": "rules",
+    "_push": "push_remote",
+    "build-board": "board_build", "_build_board": "board_build",
+    "keys": "keys",
+    "doctor": "doctor",
+    "_coordinator_gone": "coordinators",
+    "_flush": "notifications",
+    "_prs": "prs",
+    "_event": "events", "_stuck": "events", "_limit": "events", "_gone": "events",
+}
+
+# The modules that register what saving a task sets off (core.on_save), in the order
+# their hooks run: the run queue, the person's notification, the PR to follow.
+SAVERS = ("start", "notifications", "prs")
 
 # `bullpen --help` lists the commands in these groups, in this order: each command
 # names its group (core.command). A label in a command's help that the group's title
@@ -48,6 +80,8 @@ class Parser(argparse.ArgumentParser):
         return USAGE
 
     def format_help(self):
+        import shutil
+        import textwrap
         sub = next(a for a in self._actions if isinstance(a, argparse._SubParsersAction))
         helps = {a.dest: a.help for a in sub._choices_actions}
         groups = grouped(sub)
@@ -71,30 +105,42 @@ def unknown_command(argv, choices):
     name = argv[0]
     if name.startswith("-"):
         return f"bullpen: `{name}` goes after a command. `bullpen --help` lists them."
+    import difflib
     close = difflib.get_close_matches(name, [n for n in choices if not n.startswith("_")], n=1)
     hint = f" Did you mean `{close[0]}`?" if close else ""
     return f"bullpen: no command `{name}`.{hint} `bullpen --help` lists them."
 
 
-def parser():
+def module(name):
+    return importlib.import_module(f"{__package__}.{name}")
+
+
+def load_savers():
+    """Import the modules that act on a save, and run their hooks in SAVERS' order,
+    whichever of them the command imported first."""
+    order = [module(m).__name__ for m in SAVERS]
+    core.SAVED.sort(key=lambda fn: order.index(fn.__module__) if fn.__module__ in order else len(order))
+
+
+def parser(modules=MODULES):
+    """The parser with the commands of these modules (all of them for --help)."""
     ap = Parser(prog="bullpen", description=ABOUT.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True, parser_class=argparse.ArgumentParser)
-    for m in MODULES:
-        m.commands(sub)
+    for m in modules:
+        module(m).commands(sub)
     return ap
 
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    ap = parser()
     if not argv:
-        print(ap.format_help(), end="")
+        print(parser().format_help(), end="")
         return 2
-    sub = next(a for a in ap._actions if isinstance(a, argparse._SubParsersAction))
-    if err := unknown_command(argv, sub.choices):
+    if err := unknown_command(argv, COMMANDS):
         print(err, file=sys.stderr)
         return 2
-    args = ap.parse_args(argv)
+    core.LOAD_SAVERS[:] = [load_savers]
+    args = parser([COMMANDS[argv[0]]] if argv[0] in COMMANDS else MODULES).parse_args(argv)
     try:
         code = args.fn(args)
     except Fail as e:

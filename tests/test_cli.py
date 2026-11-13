@@ -4,6 +4,7 @@ import ast
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -304,9 +305,37 @@ class CodeTest(unittest.TestCase):
             self.assertEqual(calls, [], f"{name}.py calls a command function")
 
     def test_saving_a_task_tells_the_person_and_marks_its_pr(self):
-        from bullpen import cli, core, notifications, prs  # noqa: F401 (cli imports every module)
+        from bullpen import cli, core, notifications, prs
+        cli.load_savers()
         self.assertIn(notifications.notify, core.SAVED)
         self.assertIn(prs.follow_saved, core.SAVED)
+
+    def test_the_save_hooks_run_in_one_order_whichever_module_loaded_first(self):
+        from bullpen import cli, core, notifications, prs, start
+        core.SAVED.reverse()
+        cli.load_savers()
+        self.assertEqual(core.SAVED[:3], [start.move_queue, notifications.notify, prs.follow_saved])
+
+    def test_each_command_is_found_in_the_module_that_declares_it(self):
+        # main imports only a command's module: COMMANDS says which, in --help's order
+        from bullpen import cli
+        declared = []
+        for m in cli.MODULES:
+            sub = next(a for a in cli.parser([m])._actions if a.choices)
+            declared += [(n, m) for n in sub.choices]
+        self.assertEqual(declared, list(cli.COMMANDS.items()))
+
+    def test_a_command_imports_only_what_it_needs(self):
+        code = ("import sys; sys.argv = ['bullpen', 'rules', '--help']\n"
+                "from bullpen import cli\n"
+                "try: cli.main()\n"
+                "except SystemExit: pass\n"
+                "print(' '.join(m for m in sys.modules if m.startswith('bullpen.')))")
+        p = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True)
+        loaded = set(p.stdout.split())
+        self.assertIn("bullpen.rules", loaded)
+        self.assertNotIn("bullpen.accept", loaded)
+        self.assertNotIn("bullpen.board", loaded)
 
     def calls(self, name):
         """(module, function) for each call of name in the package."""

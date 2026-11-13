@@ -354,6 +354,9 @@ def config_source(repo, key):
 # follow, and start.py moves the run queue when a task frees a slot. That keeps this
 # module below them: it never imports them.
 SAVED = []
+# Loads the modules that register here, before the first save calls them: cli.main sets
+# it, since a command imports only its own module (and the ones it needs).
+LOAD_SAVERS = []
 
 
 def on_save(fn):
@@ -473,6 +476,8 @@ class Repo:
             # when it entered its current status; fine-grained so `go --next` can order it
             t["since"] = dt.datetime.now().astimezone().isoformat(timespec="microseconds")
         write_json(self.task_path(t["id"]), t)
+        while LOAD_SAVERS:
+            LOAD_SAVERS.pop()()
         for fn in SAVED:
             fn(self, t, old)
 
