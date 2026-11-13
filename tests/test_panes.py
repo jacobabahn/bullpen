@@ -8,7 +8,7 @@ import textwrap
 from support import ROOT, BullpenTest, setUpModule, tearDownModule  # noqa: F401
 
 
-class PanesTest(BullpenTest):
+class PanesBase(BullpenTest):
     def panes(self, code):
         """Run code with bullpen.panes imported as panes and the repo as repo, against the
         fake rex; what it prints, as JSON."""
@@ -28,6 +28,19 @@ class PanesTest(BullpenTest):
     def labels(self):
         return {b: i["label"] for b, i in json.loads((self.fake / "reg.json").read_text())["blocks"].items()}
 
+    def reg(self):
+        return json.loads((self.fake / "reg.json").read_text())
+
+    def where(self, blk):
+        """"detached", or (window, the floating layer's state, or None when tiled)."""
+        R = self.reg()
+        info = R["blocks"][blk]
+        if info["layer"] == "detached":
+            return "detached"
+        return info["window"], R["layers"].get(info["layer"]) if info["layer"] else None
+
+
+class PanesTest(PanesBase):
     def test_float_places_a_capsule_in_the_coordinators_window_with_the_hint(self):
         tid = self.start_task()
         b = self.panes(f"""\
@@ -73,7 +86,8 @@ class PanesTest(BullpenTest):
         layer = {b: i["layer"] for b, i in json.loads((self.fake / "reg.json").read_text())["blocks"].items()}
         self.assertEqual(states[layer[self.block(a)]], "minimized")
         self.assertEqual(states[layer[self.block("BP-2")]], "normal")
-        self.assertTrue(self.api("session.set_layer_state")[-1].get("focus"))
+        up = [a for a in self.api("session.set_layer_state") if a["layer_id"] == layer[self.block("BP-2")]]
+        self.assertTrue(up[-1].get("focus"))
 
     def test_show_focuses_a_pane_in_a_tab(self):
         self.bp("config", "--workers", "tabs")
@@ -115,20 +129,9 @@ class PanesTest(BullpenTest):
         self.assertNotIn("w9", R["windows"])  # the tab it left was empty, so it closed
 
 
-class BackgroundTest(PanesTest):
+class BackgroundTest(PanesBase):
     """--workers background and --reviewers: detached panes that `go` floats over the
     coordinator's tab and the hide key detaches again."""
-
-    def reg(self):
-        return json.loads((self.fake / "reg.json").read_text())
-
-    def where(self, blk):
-        """"detached", or (window, the floating layer's state, or None when tiled)."""
-        R = self.reg()
-        info = R["blocks"][blk]
-        if info["layer"] == "detached":
-            return "detached"
-        return info["window"], R["layers"].get(info["layer"]) if info["layer"] else None
 
     def background_task(self):
         self.bp("config", "--workers", "background")
@@ -235,7 +238,7 @@ class BackgroundTest(PanesTest):
         self.assertEqual(worker(), "")
 
 
-class ReviewersTest(PanesTest):
+class ReviewersTest(PanesBase):
     def test_a_reviewer_gone_after_a_rex_restart_goes_to_the_coordinator(self):
         tid = self.start_task()
         reviewer = self.commit_and_ready(tid)
@@ -296,3 +299,153 @@ class ReviewersTest(PanesTest):
             print(json.dumps(panes.place(repo, t, "session:1", "bullpen: {tid} diff", ["true"], role="diff", hint=False)))
             """)
         self.assertEqual(self.api("session.new_layer")[-1]["layout"]["block"]["label"], f"bullpen: {tid} diff")
+
+
+class TabTest(PanesBase):
+    """--workers tab: capsules in one workers tab per coordinator, out of the board's tab."""
+
+    def two_tab_tasks(self):
+        self.bp("config", "--workers", "tab")
+        a = self.start_task()
+        self.bp("add", "Another", "--brief", "B.")
+        self.bp("start", "BP-2")
+        return a, "BP-2"
+
+    def test_workers_share_one_tab_made_without_focus(self):
+        a, b = self.two_tab_tasks()
+        made = self.api("session.new_window")
+        self.assertEqual(len(made), 1)
+        self.assertEqual((made[0]["focus"], made[0]["window_label"]), (False, "bullpen: proj workers"))
+        self.assertEqual(made[0]["layout"]["block"]["label"], f"bullpen: {a} · ctrl+esc hides")
+        tab = self.where(self.block(a))[0]
+        self.assertNotEqual(tab, "w1")  # not the coordinator's
+        # Rex keeps one pane up in a tab of floats: the first stays up, the next is a capsule
+        self.assertEqual([self.where(self.block(t)) for t in (a, b)], [(tab, "normal"), (tab, "minimized")])
+        self.assertEqual([self.show(t)["pane"] for t in (a, b)], ["tab", "tab"])
+        self.assertEqual(self.focused(), [])
+
+    def test_go_switches_to_the_tab_and_hide_goes_back_to_the_board(self):
+        a, b = self.two_tab_tasks()
+        blk = self.block(b)
+        self.bp("go", b)
+        tab = self.where(blk)[0]
+        self.assertEqual([self.where(self.block(t)) for t in (a, b)], [(tab, "minimized"), (tab, "normal")])
+        self.assertEqual(self.api("session.set_layer_state")[-2], {"layer_id": self.reg()["blocks"][blk]["layer"],
+                                                                   "state": "normal", "focus": True})
+        self.bp("hide", "--from", blk)  # the last one up in its tab: Rex keeps it up
+        self.assertEqual(self.focused()[-1], "blk2")  # back on the board, in its tab
+        self.bp("go", a)
+        self.bp("hide", "--from", self.block(a))
+        self.assertEqual(self.focused()[-1], "blk2")
+
+    def test_a_float_comes_up_over_the_board_and_a_tab_pane_is_put_away(self):
+        a, b = self.two_tab_tasks()
+        self.bp("config", "--workers", "float")
+        self.bp("add", "Third", "--brief", "C.")
+        self.bp("start", "BP-3")
+        self.bp("go", a)
+        self.bp("go", "BP-3")
+        self.assertEqual(self.where(self.block("BP-3")), ("w1", "normal"))
+        self.assertEqual(self.where(self.block(a))[1], "normal")  # its tab's last one up
+        self.assertEqual(self.where(self.block(b))[1], "minimized")
+
+    def test_gather_moves_a_stray_pane_back_into_the_workers_tab(self):
+        a, b = self.two_tab_tasks()
+        blk, tab = self.block(b), self.where(self.block(a))[0]
+        R = self.reg()
+        R["windows"].append("w9")
+        R["blocks"][blk].update(layer=None, window="w9")  # dragged to a tab of its own
+        (self.fake / "reg.json").write_text(json.dumps(R))
+        (self.fake / "focused").write_text("blk1")
+        self.panes('panes.gather(repo, "session:1")\n')
+        self.assertEqual(self.where(blk), (tab, "minimized"))
+        layer = self.reg()["blocks"][blk]["layer"]
+        alone = [b2 for b2, i in self.reg()["blocks"].items()
+                 if i["layer"] == layer and (self.fake / "alive" / b2).exists()]
+        self.assertEqual(alone, [blk])  # the stand-in it was placed beside closed
+        stand_in = self.api("session.new_layer")[-1]
+        self.assertEqual(stand_in["window_id"], tab)
+        self.assertNotIn("w9", self.reg()["windows"])  # emptied, so closed
+        self.assertEqual(self.focused()[-1], "blk1")  # moving it took focus: given back
+
+    def test_gather_makes_the_workers_tab_again_when_it_is_gone(self):
+        a, _ = self.two_tab_tasks()
+        blk = self.block(a)
+        R = self.reg()
+        R["labels"] = {}  # its tab was renamed
+        (self.fake / "reg.json").write_text(json.dumps(R))
+        self.panes('panes.gather(repo, "session:1")\n')
+        made = self.api("session.new_window")[-1]
+        self.assertEqual((made["focus"], made["window_label"]), (False, "bullpen: proj workers"))
+        self.assertEqual(made["layout"]["block"]["label"], "bullpen: stand-in")
+        tab = self.where(blk)[0]
+        self.assertEqual(self.where(self.block("BP-2"))[0], tab)  # both, into the one new tab
+        self.assertEqual(len(self.api("session.new_window")), 2)
+
+    def test_a_second_coordinator_has_its_own_workers_tab(self):
+        from bullpen.panes import tab_label
+        from bullpen.core import Repo
+        repo = Repo(self.repo)
+        self.assertEqual([tab_label(repo, {"id": c}) for c in ("c1", "c2")],
+                         ["bullpen: proj workers", "bullpen: proj workers c2"])
+
+    def test_reviewers_can_go_to_the_tab(self):
+        self.bp("config", "--reviewers", "tab")
+        tid = self.start_task()
+        reviewer = self.commit_and_ready(tid)
+        self.assertEqual(self.show(tid)["review"]["pane"], "tab")
+        self.assertEqual(self.reg()["labels"][self.where(reviewer)[0]], "bullpen: proj workers")
+
+
+class PaneChoiceTest(PanesBase):
+    """start/add/resume --pane: a task's own placement, over config --workers."""
+
+    def test_start_pane_goes_over_the_setting_and_show_says_so(self):
+        self.bp("up")
+        self.bp("add", "One", "--brief", "A.")
+        self.bp("start", "BP-1", "--pane", "background")
+        self.assertEqual(self.where(self.block("BP-1")), "detached")
+        t = self.show("BP-1")
+        self.assertEqual((t["placement"], t["pane"]), ("background", "background"))
+        self.assertIn("pane: background (its own", self.bp("show", "BP-1").stdout)
+        self.bp("add", "Two", "--brief", "B.")
+        self.bp("start", "BP-2")
+        self.assertEqual(self.show("BP-2")["pane"], "float")  # the setting, for the others
+        self.assertNotIn("pane:", self.bp("show", "BP-2").stdout)
+
+    def test_add_pane_is_kept_until_the_task_starts(self):
+        self.bp("up")
+        self.bp("add", "One", "--brief", "A.", "--pane", "tabs")
+        self.assertEqual(self.show("BP-1")["placement"], "tabs")
+        self.bp("start", "BP-1")
+        self.assertEqual(self.show("BP-1")["pane"], "tabs")
+
+    def test_resume_pane_changes_where_the_new_pane_goes(self):
+        tid = self.start_task()
+        (self.fake / "alive" / self.block(tid)).unlink()
+        self.bp("resume", tid, "--pane", "tab")
+        t = self.show(tid)
+        self.assertEqual((t["placement"], t["pane"]), ("tab", "tab"))
+        self.assertEqual(self.reg()["labels"][self.where(t["block"])[0]], "bullpen: proj workers")
+
+    def test_a_reviewer_follows_the_tasks_choice_only_with_reviewers_same(self):
+        self.bp("up")
+        self.bp("add", "One", "--brief", "A.", "--pane", "tabs")
+        self.bp("start", "BP-1")
+        self.commit_and_ready("BP-1")
+        self.assertEqual(self.show("BP-1")["review"]["pane"], "background")  # the reviewers setting
+        self.bp("config", "--reviewers", "same")
+        self.bp("add", "Two", "--brief", "B.", "--pane", "tab")
+        self.bp("start", "BP-2")
+        self.commit_and_ready("BP-2")
+        self.assertEqual(self.show("BP-2")["review"]["pane"], "tab")
+
+    def test_the_diff_pane_gets_a_tab_when_the_task_has_a_tab_each(self):
+        self.bp("up")
+        self.bp("add", "One", "--brief", "A.", "--pane", "tabs")
+        got = self.panes("""\
+            t = repo.task("BP-1")
+            print(json.dumps([panes.for_new(repo, t, "diff").name,
+                              panes.for_new(repo, dict(t, placement="tab"), "diff").name]))
+            """)
+        self.assertEqual(got, ["tabs", "float"])

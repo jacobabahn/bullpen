@@ -122,6 +122,8 @@ def cmd_show(args):
     if is_stuck(t):
         print(f"    quiet: its {t['stuck']['who']} has shown {stuck_phrase(t)}")
     r = t.get("review") or {}
+    if t.get("placement"):
+        print(f"     pane: {t['placement']} (its own, over config --workers)")
     if t.get("review_mode"):
         print(f"     mode: {t['review_mode']} first review (its own)")
     if r:

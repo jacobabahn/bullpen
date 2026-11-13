@@ -54,7 +54,7 @@ class Setting:
 
 AGENT = ["claude", "--permission-mode", "auto"]
 NOTIFY = ("all", "needs", "off")
-PLACES = ("float", "tabs", "background")  # where a worker's or reviewer's pane can live (panes.py)
+PLACES = ("float", "tab", "tabs", "background")  # where a worker's or reviewer's pane can live (panes.py)
 
 # Every setting bullpen has, in the order `config` lists them.
 SETTINGS = [
@@ -88,10 +88,11 @@ SETTINGS = [
     Setting("reviewer", list(AGENT), "Agents", "file"),         # the one a reviewer runs
     Setting("tour", ["claude"], "Agents", "file"),        # the one that writes tours, headless (claude -p)
     Setting("workers", "float", "Agents", "choice",
-            "new workers as capsules in the coordinator's tab (float), as tabs, or in the "
-            "background: in no tab until `go` shows one", choices=PLACES),
+            "new workers as capsules in the coordinator's tab (float), as capsules in one workers "
+            "tab (tab), a tab each (tabs), or in the background: in no tab until `go` shows one",
+            choices=PLACES),
     Setting("reviewers", "background", "Agents", "choice",
-            "new reviewers the same way (float, tabs, background), or where workers go (same)",
+            "new reviewers the same way (float, tab, tabs, background), or where workers go (same)",
             choices=("same", *PLACES)),
     Setting("worker_model", None, "Agents", "model",
             "claude's --model for workers (\"default\": none, so Claude Code picks)",

@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 from .core import (
-    CLOSED, Fail, PROMPTS, REVIEW_MODES, Repo, SELF, WAITING,
+    CLOSED, Fail, PLACES, PROMPTS, REVIEW_MODES, Repo, SELF, WAITING,
     back_to_work, clip, command, git, home, index_block, is_claude, is_status, later, model_in, now,
     on_save, pr_short, repo_root, resolve, set_auto_accept, set_status, slug, status_words,
     unindex_block, with_model, write_json,
@@ -43,6 +43,7 @@ def cmd_add(args):
     if args.review_mode and args.review_mode != "auto":
         t["review_mode"] = args.review_mode
     set_auto_accept(t, args.auto_accept)
+    set_placement(t, args.pane)
     (repo.dir / "briefs").mkdir(parents=True, exist_ok=True)
     (repo.dir / "briefs" / f"{tid}.md").write_text(brief.rstrip() + "\n")
     repo.save_task(t)
@@ -306,9 +307,17 @@ def cmd_start(args):
     if not session:
         raise Fail("no Rex session: run `bullpen up` first or pass --session")
     set_auto_accept(t, args.auto_accept)
+    set_placement(t, args.pane)
     if not start_task(repo, t, session, args.model):
         raise Fail(f"{t['id']}'s setup failed, so its worker didn't start: see {hook_log(repo, t, 'setup')}")
     print(f"{t['id']} started in {t['worktree']} (branch {t['branch']}, pane {t['block']})")
+
+
+def set_placement(t, pane):
+    """--pane: where the task's worker pane goes from its next start on, over the
+    `workers` setting (panes.for_new reads it). Its reviewer's too, with `--reviewers same`."""
+    if pane:
+        t["placement"] = pane
 
 
 def start_task(repo, t, session, model=None):
@@ -385,6 +394,7 @@ def cmd_resume(args):
         raise Fail(f"{t['id']}'s agent is still running; use `tell`")
     if not t["worktree"]:
         raise Fail(f"{t['id']} never started; use `start`")
+    set_placement(t, args.pane)
     if t.get("needs_setup"):  # its worker never ran: set it up and start it afresh
         session = session_for(repo, args) or t["session"]
         if not start_task(repo, t, session):
@@ -434,6 +444,8 @@ def commands(sub):
                    help="accept it by itself once review approves it, whatever config --auto-accept says")
     p.add_argument("--no-auto-accept", dest="auto_accept", action="store_false",
                    help="keep it for you to accept even with config --auto-accept on")
+    p.add_argument("--pane", choices=PLACES,
+                   help="where its worker's pane goes, over config --workers: float, tab, tabs or background")
 
     p = command(sub, "after", cmd_after, "Coordinator",
                 help="set the tasks a task waits on (--none: nothing)")
@@ -462,12 +474,16 @@ def commands(sub):
                    help="accept it by itself once review approves it, whatever config --auto-accept says")
     p.add_argument("--no-auto-accept", dest="auto_accept", action="store_false",
                    help="keep it for you to accept even with config --auto-accept on")
+    p.add_argument("--pane", choices=PLACES,
+                   help="where its worker's pane goes, over config --workers: float, tab, tabs or background")
 
     p = command(sub, "resume", cmd_resume, "Coordinator",
                 help="restart a stopped worker, continuing its conversation")
     p.add_argument("id", help="the task, like BP-3")
     p.add_argument("message", nargs="?", help="what to type to it first (default: carry on with your brief)")
     p.add_argument("--session", help="the Rex session for its pane (default: the coordinator's)")
+    p.add_argument("--pane", choices=PLACES,
+                   help="where its worker's pane goes, over config --workers: float, tab, tabs or background")
 
     p = command(sub, "tell", cmd_tell, "Coordinator", help="type a message to a task's worker")
     p.add_argument("id", help="the task, like BP-3")

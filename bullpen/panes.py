@@ -3,7 +3,8 @@ steps (place, show, hide, find), so the code that makes, shows, hides or finds a
 again never asks which one it is."""
 
 from .core import CLOSED, FLOAT_BOUNDS, TERMINAL
-from .rex import HIDE_HINT, find_pane, is_label, rex_api, rex_focus, rex_run, rex_view, set_layer, with_state
+from .rex import (HIDE_HINT, find_pane, is_label, rex_api, rex_close, rex_focus, rex_run, rex_view, set_layer,
+                  with_state)
 from .agents import placed
 from .coordinators import home_of, primary
 
@@ -73,6 +74,82 @@ class Float(Placement):
         return where[0]
 
 
+# Where a pane floats in a workers tab: nearly all of it, as the tab holds nothing else.
+TAB_BOUNDS = [0.02, 0.02, 0.96, 0.9]
+
+
+class Tab(Float):
+    """A capsule in its coordinator's workers tab (`bullpen: <repo> workers`), one tab per
+    coordinator, made without taking focus the first time a pane goes there and found
+    again by its label. Shown and hidden as any capsule: `go` switches to the tab, the
+    hide key minimizes it and goes back to the board's tab. Rex keeps one pane up in a
+    tab that has only floating ones, so the last one up there stays up. Rex closes the
+    tab when its last pane closes."""
+    name = "tab"
+
+    def place(self, repo, t, session, label, argv, hint=True, focus=False):
+        view = rex_view(session)
+        c = home_of(repo, t)
+        w = workers_tab(repo, view, c)
+        layout = {"block": spec(t, label, argv, hint)}
+        if w:
+            r = rex_api(session, "session.new_layer", {"window_id": w, "bounds": TAB_BOUNDS, "layout": layout})
+            set_layer(session, r["layer_id"], "minimized")
+            return r["block_ids"][0]
+        r = rex_api(session, "session.new_window", {"focus": False, "window_label": tab_label(repo, c),
+                                                     "layout": layout})
+        block = r["block_ids"][0]
+        rex_api(session, "session.float_block", {"block_id": block, "bounds": TAB_BOUNDS}, check=False)
+        return block  # the tab's only pane: it stays up
+
+    def keep_home(self, repo, session, view, block, c, home):
+        where = find_pane(view, block=block)
+        w = workers_tab(repo, view, c)
+        if not where or where[0] == w:
+            return None
+        return where[0] if into_tab(repo, session, view, block, c, w) else None
+
+
+def tab_label(repo, c):
+    """The label of coordinator c's workers tab: the first coordinator's has no ID in it."""
+    cid = c.get("id")
+    return f"bullpen: {repo.root.name} workers" + (f" {cid}" if cid and cid != "c1" else "")
+
+
+def workers_tab(repo, view, c):
+    """The window ID of coordinator c's workers tab, or None."""
+    label = tab_label(repo, c)
+    made = (view or {}).get("tabs", {}).get(label)
+    return made or next((w["window_id"] for w in (view or {}).get("windows", []) if w.get("label") == label), None)
+
+
+def into_tab(repo, session, view, block, c, w):
+    """Move block, a pane, into coordinator c's workers tab (w, or a new one), floating.
+    Rex places a block only beside another, and one placed beside a floating block joins
+    its layer: so it's placed beside a stand-in, on a layer (or in a tab) of its own,
+    which then closes. Did it move?"""
+    layout = {"block": {"flavor": TERMINAL, "label": "bullpen: stand-in", "options": {"command": ["sleep", "60"]}}}
+    if w:
+        r = rex_api(session, "session.new_layer", {"window_id": w, "bounds": TAB_BOUNDS, "layout": layout},
+                    check=False)
+    else:
+        r = rex_api(session, "session.new_window", {"focus": False, "window_label": tab_label(repo, c),
+                                                     "layout": layout}, check=False)
+        if r:
+            view.setdefault("tabs", {})[tab_label(repo, c)] = r["window_id"]  # later panes go there too
+    if not r:
+        return False
+    stand_in = r["block_ids"][0]
+    moved = rex_api(session, "session.move_block", {"block_id": block, "anchor_block_id": stand_in},
+                    check=False) is not None
+    if moved and not w:
+        rex_api(session, "session.float_block", {"block_id": block, "bounds": TAB_BOUNDS}, check=False)
+    rex_close(session, stand_in)
+    if moved and w:
+        set_layer(session, r["layer_id"], "minimized")
+    return moved
+
+
 class Tabs(Placement):
     """A tab of its own. Shown by focusing it; the hide key has nothing to do there."""
     name = "tabs"
@@ -127,8 +204,8 @@ class Background(Placement):
         return None
 
 
-FLOAT, TABS, BACKGROUND = Float(), Tabs(), Background()
-PLACEMENTS = {p.name: p for p in (FLOAT, TABS, BACKGROUND)}
+FLOAT, TAB, TABS, BACKGROUND = Float(), Tab(), Tabs(), Background()
+PLACEMENTS = {p.name: p for p in (FLOAT, TAB, TABS, BACKGROUND)}
 
 
 def spec(t, label, argv, hint):
@@ -159,14 +236,16 @@ def setting(repo, key):
 
 def for_new(repo, t, role="worker"):
     """The placement for a new pane of task t's: role is "worker", "reviewer" or "diff".
-    Workers follow the `workers` setting; reviewers the `reviewers` one ("same": the
-    workers'). A diff floats, or gets a tab when workers do: never in the background,
-    since it's made to be looked at."""
+    Workers go where the task's own choice (`start --pane`) says, else the `workers`
+    setting; reviewers follow the `reviewers` setting, or with "same" the workers'. A
+    diff floats, or gets a tab when workers get one each: never in the background, since
+    it's made to be looked at."""
+    workers = PLACEMENTS.get(t.get("placement")) or setting(repo, "workers") or FLOAT
     if role == "diff":
-        return TABS if repo.cfg.get("workers") == "tabs" else FLOAT
+        return TABS if workers is TABS else FLOAT
     if role == "reviewer" and repo.cfg.get("reviewers") != "same":
         return setting(repo, "reviewers") or BACKGROUND
-    return setting(repo, "workers") or FLOAT
+    return workers
 
 
 def made_with(repo, t, role):
@@ -183,7 +262,9 @@ def placement_at(where, made=None):
         return None
     if made is BACKGROUND or where[1].get("kind") == "detached":
         return BACKGROUND
-    return FLOAT if where[1].get("kind") == "floating" else TABS
+    if where[1].get("kind") == "floating":
+        return made if isinstance(made, Float) else FLOAT
+    return TABS
 
 
 def made(repo, block):
@@ -218,14 +299,14 @@ def mine(repo):
 
 
 def put_away_others(repo, session, view, keep):
-    """Put away every worker's or reviewer's pane that floats over a tab, but not keep's:
-    a capsule is minimized, a background pane detached."""
+    """Put away every worker's or reviewer's pane that floats over a tab, but not the
+    pane keep (a block): a capsule is minimized, a background pane detached."""
     ours = mine(repo)
     for w in view["windows"]:
         for layer in w.get("layers", []):
             if layer.get("kind") != "floating" or layer.get("state") == "minimized":
                 continue
-            if keep and keep[1].get("layer_id") == layer["layer_id"]:
+            if any(b.get("block_id") == keep for b in layer.get("blocks", [])):
                 continue
             for b in layer.get("blocks", []):
                 if b.get("block_id") in ours:
@@ -242,10 +323,11 @@ def show(repo, session, block):
     if view is None:
         return rex_focus(session, block)
     target = find(session, view, block=block)
-    put_away_others(repo, session, view, target)
     p = placement_at(target, made(repo, block))
     if not (p and p.show(repo, session, target, view)):
         rex_focus(session, block)
+    # after, not before: Rex won't minimize the last pane up in a workers tab
+    put_away_others(repo, session, view, block)
 
 
 def hide(repo, session, block):
@@ -259,7 +341,9 @@ def gather(repo, session):
     """Keep every open task's worker and reviewer pane where its placement says, in its
     coordinator's tab (the primary coordinator's, when its own is gone). A coordinator
     that was restarted opens in a new tab: the panes move there, and a tab that moving
-    them left empty closes. Tabs and background panes are left where they are."""
+    them left empty closes. A workers tab's panes are kept in their coordinator's
+    workers tab instead. Tabs and background panes are left where they are. Moving a
+    pane focuses it in Rex: focus goes back to where it was."""
     panes = [(t, b, p) for t in repo.tasks() if t["status"] not in CLOSED
              for b, p in ((t.get("block"), made_with(repo, t, "worker")),
                           ((t.get("review") or {}).get("block"), made_with(repo, t, "reviewer")))
@@ -278,6 +362,10 @@ def gather(repo, session):
         if left:
             emptied.add(left)
     if emptied:
+        was = next((w.get("focused_block_id") for w in view.get("windows", [])
+                    if w["window_id"] == view.get("active_window_id")), None)
+        if was:
+            rex_focus(session, was)
         for w in (rex_view(session) or {}).get("windows", []):
             if w["window_id"] in emptied and not any(l.get("blocks") for l in w.get("layers", [])):
                 rex_api(session, "session.close_window", {"window_id": w["window_id"]}, check=False)

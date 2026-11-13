@@ -103,11 +103,16 @@ FAKE_REX = textwrap.dedent("""\
             b = new_block(args["layout"]["block"]["label"], lid,
                           args.get("window_id") or (R["windows"] or [new_window()])[0])
             print(json.dumps({"layer_id": lid, "block_ids": [b]}))
+        elif method == "session.new_window":
+            w = new_window()
+            R.setdefault("labels", {})[w] = args.get("window_label")
+            print(json.dumps({"window_id": w, "block_ids": [new_block(args["layout"]["block"]["label"], window=w)]}))
         elif method == "session.new_block":
             print(json.dumps({"block_id": new_block(args["label"], "detached")}))
         elif method == "session.move_block":
-            blk = R["blocks"][args["block_id"]]
-            blk.update(layer=None, window=R["blocks"][args["anchor_block_id"]]["window"])
+            blk, anchor = R["blocks"][args["block_id"]], R["blocks"][args["anchor_block_id"]]
+            # beside a floating block, as in Rex, it joins that block's layer
+            blk.update(layer=anchor["layer"] if anchor["layer"] != "detached" else None, window=anchor["window"])
             print("{}")
         elif method == "session.float_block":
             lid = f"lyr{len(R['layers']) + 1}"
@@ -127,6 +132,11 @@ FAKE_REX = textwrap.dedent("""\
             R["windows"].remove(args["window_id"])
             print("{}")
         elif method == "session.set_layer_state":
+            w = next(i["window"] for i in R["blocks"].values() if i["layer"] == args["layer_id"])
+            up = [b for b, i in R["blocks"].items() if i["window"] == w and (alive / b).exists()
+                  and i["layer"] != args["layer_id"] and (not i["layer"] or R["layers"][i["layer"]] == "normal")]
+            if args["state"] == "minimized" and not up:
+                sys.exit("rex: cannot minimize layer: it has the window's last visible panes")
             R["layers"][args["layer_id"]] = args["state"]
             print("{}")
         elif method == "session.view":
@@ -139,11 +149,16 @@ FAKE_REX = textwrap.dedent("""\
                         continue
                     entry = {"block_id": b, "label": info["label"]}
                     if info["layer"]:
-                        layers.append({"layer_id": info["layer"], "kind": "floating",
-                                       "state": R["layers"][info["layer"]], "blocks": [entry]})
+                        layer = next((l for l in layers if l["layer_id"] == info["layer"]), None)
+                        if not layer:
+                            layer = {"layer_id": info["layer"], "kind": "floating",
+                                     "state": R["layers"][info["layer"]], "blocks": []}
+                            layers.append(layer)
+                        layer["blocks"].append(entry)
                     else:
                         tiled["blocks"].append(entry)
-                windows.append({"window_id": w, "layers": layers})
+                windows.append({"window_id": w, "layers": layers,
+                                **({"label": R["labels"][w]} if R.get("labels", {}).get(w) else {})})
             view = {"session_id": sid, "label": "main", "windows": windows}
             focused = d / "focused"  # the block the tests say has focus, in the active window
             if focused.exists():
