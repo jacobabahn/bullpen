@@ -1,0 +1,36 @@
+# One bullpen command line per line, checked by compare.sh. `tty ` runs it on a 100-column terminal.
+ls --json
+ls --all --json
+ls --all-repos --json
+show BP-3 --json
+show 17 --json
+show BP-404
+# stage 3: commands that only write a task's files
+add "A new task" --brief "Do the thing."
+add "Waits" --brief "x" --after BP-1 --after "3,BP-17" --model opus --review light --auto-accept
+add "Kept" --brief "x" --no-auto-accept --review auto --base dev
+add "Bad" --brief "x" --after BP-26
+add "Self" --brief "x" --after BP-40
+add "Missing" --brief "x" --after BP-404
+add "No brief"
+usage add "Bad mode" --brief x --review sometimes
+after BP-1 BP-3 BP-17
+after BP-2 --none
+after BP-3 BP-2
+after BP-1
+after BP-23 BP-1
+model BP-1 opus
+model BP-3 opus
+model BP-27 --clear
+model BP-1 --clear
+model BP-1
+review-mode BP-1 light
+review-mode BP-9 full
+review-mode BP-28 auto
+review-mode BP-23 full
+ok BP-40
+ok BP-41
+ok BP-15
+ok BP-3
+note BP-3 "Waiting on   the  CI"   run
+note BP-404 x

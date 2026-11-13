@@ -1,0 +1,19 @@
+[package]
+name = "bullpen-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Part of bullpen's command line in Rust (an experiment, BP-95): the rest runs bin/bullpen"
+
+[[bin]]
+name = "bullpen"
+path = "src/main.rs"
+
+[dependencies]
+# preserve_order: a task's keys stay in the order its file has them, as Python's dict keeps them
+serde_json = { version = "1", features = ["preserve_order"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+libc = "0.2"
+serde = "1"
+
+[profile.release]
+opt-level = 3

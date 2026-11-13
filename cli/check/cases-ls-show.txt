@@ -1,0 +1,63 @@
+# ls and show as text (not --json), piped and on a terminal
+ls
+ls --all
+ls --all-repos
+ls --all-repos --all
+tty ls
+tty ls --all
+tty40 ls
+tty40 ls --all
+tty ls --all-repos
+tty show BP-3
+tty show BP-30
+tty40 show BP-12
+tty40 show BP-30
+show BP-404
+show BP-1
+show BP-2
+show BP-3
+show BP-4
+show BP-5
+show BP-6
+show BP-7
+show BP-8
+show BP-9
+show BP-10
+show BP-11
+show BP-12
+show BP-13
+show BP-14
+show BP-15
+show BP-16
+show BP-17
+show BP-18
+show BP-19
+show BP-20
+show BP-21
+show BP-22
+show BP-23
+show BP-24
+show BP-25
+show BP-26
+show BP-27
+show BP-28
+show BP-29
+show BP-30
+show BP-31
+show BP-32
+show BP-33
+show BP-34
+show BP-35
+show BP-36
+show BP-37
+show BP-38
+show BP-39
+show BP-40
+show BP-41
+# argparse's own cases: abbreviations, and usage errors (handed to Python, compared whole)
+ls --all-r
+show --js BP-3
+usage show
+usage ls --bogus
+usage show BP-3 BP-4
+usage ls -h

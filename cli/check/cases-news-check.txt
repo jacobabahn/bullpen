@@ -1,0 +1,44 @@
+# news (one-off), peek, diff --stat and check. `env:FIXTURE=x,y` picks fixture.py's extras.
+news
+env:REX_BLOCK=blk1 news
+env:REX_BLOCK=blk3 news
+env:REX_BLOCK=blk4 news
+env:REX_BLOCK=blk2 news
+env:FIXTURE=nocoord news
+env:FIXTURE=nocoord,oldcursor news
+env:FIXTURE=oldcursor news
+env:FIXTURE=badcursor news
+env:FIXTURE=pastend news
+env:FIXTURE=nolog news
+env:FIXTURE=midrecord news
+env:FIXTURE=badbytes news
+env:FIXTURE=locked news
+env:FIXTURE=nocoord env:REX_BLOCK=blk4 news
+peek BP-3
+peek BP-3 --lines 5
+peek BP-3 --lines=3 --vt
+peek BP-3 --vt
+peek BP-3 --lines 0
+peek BP-3 --lines -28
+peek 11
+peek BP-12 --lines 1
+peek BP-1
+peek BP-404
+diff BP-3 --stat
+diff BP-17 --stat
+diff BP-33 --stat
+diff BP-1 --stat
+diff bp-404 --stat
+diff BP-17 --stat --session main
+check
+check --quiet
+check BP-3 bp-12
+check 3 3 BP-11
+check BP-17
+check BP-404
+check --all-repos
+env:FIXTURE=check check
+env:FIXTURE=check check --quiet
+env:FIXTURE=check check BP-42 BP-57
+env:FIXTURE=deadcoords check
+env:FIXTURE=check,deadcoords check --all-repos
