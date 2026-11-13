@@ -10,8 +10,8 @@ from pathlib import Path
 
 from .core import (
     Fail, Repo, SELF, command, git, is_status, known_repos, listed, own_model, repo_root,
-    task_base_ref,
 )
+from .modes import task_base_ref
 from .rex import find_pane, rex_alive, rex_close, rex_focus, rex_run, rex_view
 from .agents import is_limited
 from .coordinators import home_of, owner, session_for

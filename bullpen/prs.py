@@ -76,7 +76,7 @@ def cmd_prs(args):
         repo.dir = cfg.parent
         repo.cfg = load_config(cfg.parent)
         tasks = [t for t in repo.tasks() if followed(t)]
-        if not tasks or not repo.has_origin():  # local mode: no PRs to follow
+        if not tasks:  # local mode has no PRs to follow (followed goes by the task's mode)
             continue
         for t in tasks:
             follow_pr(repo, t)

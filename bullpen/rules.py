@@ -3,7 +3,8 @@
 import os
 import subprocess
 
-from .core import Repo, command, git, repo_root, task_base_ref
+from .core import Repo, command, git, repo_root
+from .modes import repo_base_ref, task_base_ref
 
 
 RULES_FILE = ".bullpen/rules.md"
@@ -51,9 +52,7 @@ def cmd_rules(args):
         editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
         subprocess.call([*editor.split(), str(p)])
         return
-    base = repo.base()
-    ref = f"origin/{base}" if repo.has_origin() and git(
-        repo.root, "rev-parse", "-q", "--verify", f"origin/{base}", check=False).returncode == 0 else base
+    ref = repo_base_ref(repo)
     sources = rule_sources(repo, committed_rules_on(repo, ref), f"on {ref}")
     if not sources:
         print(f"No rules. Commit them as {RULES_FILE}, or keep your own in "

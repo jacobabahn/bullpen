@@ -458,3 +458,17 @@ class LocalModeTest(unittest.TestCase):
         self.bp("accept", tid)
         self.assertEqual(self.git("rev-parse", "HEAD", cwd=wt), head)
         self.assertEqual(self.news_lines()[-1], "bullpen · BP-1 accepted (merged into main, rebase)")
+
+    def test_a_task_published_locally_stays_local_when_an_origin_is_added(self):
+        tid, wt = self.ready_task()
+        self.assertIs(self.show(tid)["local"], True)
+        origin = self.tmp / "later.git"
+        sh("git", "init", "-q", "--bare", "-b", "main", str(origin))
+        self.git("remote", "add", "origin", str(origin))
+        self.commit(wt, "fix2.txt", "more\n", "Fix more")
+        out = self.bp("ready", tid, "--summary", "More.", cwd=wt).stdout
+        self.assertIn("no remote, so nothing pushed", out)  # and no gh (tearDown)
+        self.assertEqual(sh("git", "-C", str(origin), "branch"), "")  # nothing pushed
+        self.assertIsNone(self.show(tid)["pr"])
+        self.bp("accept", tid)
+        self.assertEqual(self.git("show", "main:fix2.txt"), "more")

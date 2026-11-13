@@ -5,8 +5,9 @@ from pathlib import Path
 
 from .core import (
     CLOSED, DEFAULT_CONFIG, Repo, WAITING, at_prompt, clip, command, git, known_repos, now,
-    repo_root, seconds_since, task_base_ref, write_json,
+    repo_root, seconds_since, write_json,
 )
+from .modes import task_base_ref
 from .rex import program_status, rex_alive, screen
 from .agents import waited_on
 from .stops import escalate, overdue

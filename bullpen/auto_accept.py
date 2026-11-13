@@ -2,17 +2,16 @@
 
 import json
 import os
-import sys
 
 from .core import (
     Fail, Repo, WAITING, auto_accepts, clip, command, commits, pr_short, repo_root, run,
     set_status, unindex_block, where, write_json,
 )
-from .rex import rex_close
+from .rex import close_last
 from .agents import pane
 from .news import ready_news
 from .stops import stop
-from .start import hand_back, start_queued
+from .start import hand_back
 from .review import review_kind
 from .ready import summary_text
 from .accept import accept
@@ -82,15 +81,14 @@ def cmd_verdict(args):
         ready_news(repo, t, [pr], f", but review still asks for changes after {rounds} rounds: "
                    f"findings in {findings}")
     print(f"verdict recorded: {args.verdict}")
-    sys.stdout.flush()
-    rex_close(*reviewer)  # last: this closes the pane we may be running in
+    close_last(*reviewer)  # last: this closes the pane we may be running in
 
 
 # ---------- auto-accept ----------
 #
 # With `config --auto-accept on`, an approve verdict runs the normal accept itself:
 # the person said in advance that an approval is enough. A task's own "auto_accept"
-# (`add`/`start --no-auto-accept`, or `--auto-accept`) wins over the config's. In PR
+# (`add`/`start --no-auto-accept`, or `--auto-accept`) wins over the config's. In remote
 # mode it waits for the PR's checks ("auto_wait"), which the PR follow-up looks at.
 
 
@@ -102,14 +100,12 @@ def auto_accept(repo, t):
         if state == "failing":
             ready_news(repo, t, [pr_short(t["pr"]), "approved by review"],
                        ", but not auto-accepted: its PR's checks are failing")
-            start_queued(repo, t, "ready")  # its worker is done: its slot is free
             return
         if state == "running":
             t["auto_wait"] = True
             write_json(repo.task_path(t["id"]), t)  # not save_task: the status didn't change
             ready_news(repo, t, [pr_short(t["pr"]), "approved by review"],
                        "; it auto-accepts once its PR's checks pass")
-            start_queued(repo, t, "ready")
             return
     run_auto_accept(repo, t)
 
@@ -136,7 +132,6 @@ def run_auto_accept(repo, t):
         write_json(repo.task_path(t["id"]), t)
         ready_news(repo, t, [where(t), "approved by review"],
                    f", but the auto-accept was refused: {e}. Send it back to rebase")
-        start_queued(repo, t, "ready")
 
 
 FAILED_CHECK = ("FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE")

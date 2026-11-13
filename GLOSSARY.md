@@ -40,7 +40,18 @@ _Avoid_: reason (for the recorded stop), needs (for any stop).
 
 **Hand back**: give the worker a message to act on (review findings, a rebase conflict, PR feedback, carrying on after the usage limit), typing it into its pane or resuming it in a new one. The task is working again once the message reaches the worker.
 
-**Run queue**: the `todo` tasks that wait on others (`--after`): bullpen starts each by itself once those are all accepted, while fewer than `max_running` tasks are working. A plain `todo` task waits for the coordinator to start it. A task leaving `working` (to review, ready or finished, or accepted or dropped) frees a slot, and the queue starts the next. `start_queued` in `bullpen/start.py`.
+**Run queue**: the `todo` tasks that wait on others (`--after`): bullpen starts each by itself once those are all accepted, while fewer than `max_running` tasks are working. A plain `todo` task waits for the coordinator to start it. A task leaving `working` (to review, ready or finished), or closing (accepted, closed or dropped), frees a slot, and the queue starts the next; a stop doesn't. It hears of this from the status change itself (`move_queue` in `bullpen/start.py`), so no caller has to remember it.
+
+**Close step**: the one way a task ends, for accept, close, drop and auto-accept: its reviewer, its PR, its worktree and branch, its status, the news, and its worker's pane last. `close` in `bullpen/close.py`.
+
+## Where work goes
+
+**Remote mode**: a repository with an `origin` remote. `ready` pushes the task's branch and opens a pull request; `accept` merges it on GitHub.
+
+**Local mode**: a repository with no `origin` remote. Nothing is pushed and there is no pull request; `accept` merges the branch into the local base branch (and backs that up to the push remote, if one is set). See `docs/local-mode.md`.
+
+A task's mode is fixed when it is published (its first `ready`) and recorded on the task; every later step goes by that, so a task finishes the way it started even if an `origin` is added or removed meanwhile. The two adapters are in `bullpen/modes.py`.
+_Avoid_: PR mode (say remote mode).
 
 ## Reviewing a change
 

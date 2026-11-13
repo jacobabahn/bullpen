@@ -17,7 +17,10 @@ hands its task off (to review, ready, or finished), or an accept or a drop frees
 a slot, the next queued task starts too. A task sent back from review works
 again and takes a slot again, even if that puts the count over `max_running`:
 it is finishing work already started, and the queue starts nothing more until
-the count is under the limit. Only tasks with dependencies are queued like this: a plain todo task waits
+the count is under the limit. A worker that stops (at a prompt, with a question,
+its pane gone) keeps its slot: it comes back to its task. The queue hears of every
+status change, whatever made it, and starts the next tasks once the command that
+made it has done its own work, so their news follows its news. Only tasks with dependencies are queued like this: a plain todo task waits
 for the coordinator (or you) to start it. Each start is one news line, `BP-9
 started (BP-8 was accepted)`. While the usage limit is reached nothing starts;
 the news says which tasks could.

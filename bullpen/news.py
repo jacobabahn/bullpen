@@ -14,8 +14,9 @@ from pathlib import Path
 
 from .core import (
     Fail, REX, Repo, SELF, STATE, command, load_config, merge_base, now, repo_root, run, safe,
-    task_base_ref, write_json,
+    write_json,
 )
+from .modes import task_base_ref
 from .rex import rex_type, with_state
 from .coordinators import alive, calling_coordinator, coordinator_at, primary, sees_to
 

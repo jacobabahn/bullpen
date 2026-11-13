@@ -13,6 +13,8 @@ importing all of them):
 - `core.py`: the base: paths, the settings table (`SETTINGS`, at the top), small
   helpers, a repo's config and tasks (`Repo`), a task's status (`set_status`) and the
   panes bullpen knows. It imports none of the others.
+- `modes.py`: local mode and remote mode, as two adapters (`mode(repo, t)`), the
+  task's base ref, and the one way to push (`quiet_git`)
 - `rex.py`: Rex: running its commands, finding, typing into and closing panes
 - `agents.py`: a task's worker and reviewer: where each one's pane is (`pane`), and
   the one the task waits on (`waits_on`, `waited_on`). Code that needs either asks it,
@@ -25,13 +27,14 @@ importing all of them):
 - `stops.py`: a worker or reviewer stopping: triage, or the person
 - `hooks.py`: a worktree's setup and teardown hooks
 - `rules.py`: the rules every worker and reviewer gets
-- `start.py`: adding and starting tasks: what a task waits on, the run queue, an
-  agent's pane, handing a worker a message
+- `start.py`: adding and starting tasks: what a task waits on, the run queue (which
+  moves by itself, from a status change), an agent's pane, handing a worker a message
 - `review.py`: what a review covers, starting a reviewer
 - `answer.py`: answering a prompt from the board, `reply`
 - `triage.py`: the coordinator's `ask`, `ok`, `review` and `note`
 - `watcher.py`: starting the watcher, and replacing it when the code changes
-- `close.py`: closing a finished task, and `drop`
+- `close.py`: the one close step (`close`) that accept, close, drop and auto-accept
+  share, and the `close` and `drop` commands
 - `task_line.py`: one task line, as the board says it
 - `line_edit.py`: typing on a terminal, for the picker and the stepper
 - `tours.py`: guided review tours and the person's comments on them
@@ -39,7 +42,7 @@ importing all of them):
 - `ready.py`: `ready` and `finish`
 - `board.py`: the board's program, and its pane beside a coordinator
 - `board_build.py`: rebuilding the board when its source changes
-- `push_remote.py`: the push remote, in local mode
+- `push_remote.py`: the push remote's background push and its checks, in local mode
 - `keys.py`: bullpen's key bindings in the Rex config
 - `accept.py`: accepting a task, and rebasing the others after it
 - `auto_accept.py`: a reviewer's verdict, and auto-accept
@@ -66,6 +69,28 @@ A command function (`cmd_...`) only reads its arguments and calls plain function
 no other code calls it. Auto-accept calls `accept.accept`, and `check --fix` calls
 `events.event` and `events.gone`, as the watcher's commands do.
 
+## Closing a task
+
+Accept, close, drop and auto-accept end a task through one close step,
+`close.close(repo, t, status, then)`, in one order: the reviewer's pane, the PR
+(withdrawn, unless it was merged), the worktree and branch, the status and the save,
+then what the caller says and does (`then`: news, and after an accept the rebase of
+the other tasks), and the worker's pane last, since the step may run in it. Each
+caller says only what to tell and how to merge. Nothing calls the run queue: the save
+moves it.
+
+## Local mode and remote mode
+
+The steps that differ between the modes go through one of two adapters in
+`modes.py`, `REMOTE` (origin and gh) or `LOCAL` (the local base branch and the push
+remote), with the same six verbs: `publish` (at ready), `merge`, `after_merge`,
+`withdraw`, `refresh` (push a branch bullpen rebased) and `base_ref`.
+`mode(repo, t)` picks one: the mode recorded on the task when it was published (its
+`local`, true or false), else the repo's as it is now. Code doesn't ask
+`repo.has_origin()` about a task; that's only for the repo itself (doctor, the push
+remote, the base new work starts from). Every push goes through `quiet_git`, which
+never lets git wait on a prompt.
+
 ## No import loops
 
 A module imports the ones it needs at the top, never inside a function, and the
@@ -74,10 +99,14 @@ to set something off in a higher one, the higher one registers with the lower:
 
 - Saving a task (`Repo.save_task`) calls each function registered with
   `core.on_save(fn)`, as `fn(repo, t, old)`, `old` the task as it was saved before.
-  `notifications.py` registers the person's notification, and `prs.py` marks a PR
-  for the watcher to follow. `cli.py` imports every module, so they're all
-  registered before a command runs. This is how the run queue hears that a task left
-  `working`, too, once it starts the next task by itself (BP-75's task E).
+  `notifications.py` registers the person's notification, `prs.py` marks a PR
+  for the watcher to follow, and `start.py` moves the run queue when a task leaves
+  `working` or closes (`move_queue`). `cli.py` imports every module, so they're all
+  registered before a command runs.
+- What a save sets off that should wait for the command's own work (the run queue,
+  whose news follows the command's) goes to `core.later(key, fn)`. `cli.main` runs
+  it when the command returns (`core.run_later`), and a command that closes the pane
+  it runs in runs it first: `rex.close_last` closes a pane after it.
 - A tour written in the background opens in the stepper through the `on_written`
   function the stepper hands `tours.write_tour`.
 

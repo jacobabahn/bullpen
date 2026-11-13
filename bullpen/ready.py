@@ -4,11 +4,11 @@ import sys
 from pathlib import Path
 
 from .core import (
-    CLOSED, Fail, Repo, auto_accepts, command, commits, git, is_status, pr_short, read_json,
-    repo_root, run, set_status, task_base_ref,
+    CLOSED, Fail, Repo, auto_accepts, command, commits, git, is_status, read_json, repo_root,
+    set_status, where,
 )
+from .modes import mode, task_base_ref
 from .news import news, ready_news
-from .start import start_queued
 from .review import close_reviewer, review_at_ready, shortstat
 from .close import close_task
 from .tours import tour_path, tour_stale
@@ -35,15 +35,7 @@ def summary_text(args, what, required=True):
 
 def cmd_ready(args):
     repo = Repo(repo_root())
-    t = repo.task(args.id)
-    was = t["status"]
-    ready(repo, t, args)
-    t = repo.task(t["id"])
-    # its slot is free now; not when its approval carried over and auto-accept takes it
-    # from here: that accept starts them
-    accepting = auto_accepts(repo, t) and (t.get("review") or {}).get("verdict") == "approved"
-    if was == "working" and (t["status"] == "review" or t["status"] == "ready" and not accepting):
-        start_queued(repo, t, t["status"])
+    ready(repo, repo.task(args.id), args)
 
 
 def ready(repo, t, args):
@@ -62,7 +54,8 @@ def ready(repo, t, args):
             t["tour"].pop("opened", None)
             t["tour"]["stale"] = True
     t.pop("from_ready", None)
-    local = not repo.has_origin()
+    m = mode(repo, t)
+    t["local"] = m.local  # its mode, fixed now: every later step goes by it
     if not repo.cfg["review"]:
         t.pop("tour_sent", None)  # no reviewer checks the person's comments with review off
     base_ref = task_base_ref(repo, t)
@@ -75,36 +68,16 @@ def ready(repo, t, args):
         print("no commits: marked ready with nothing to merge")
         return
     t["diffstat"] = shortstat(wt, base_ref)  # for the board, worked out once per ready
-    if local:
-        t["local"] = True
-        t.update(why=None, summary=summary.strip() or t.get("summary"), commits=ahead)
-        if repo.cfg["review"]:
-            said = review_at_ready(repo, t, base_ref)
-            print(f"local branch {t['branch']} ({commits(ahead)} ahead of {base_ref}; no remote, "
-                  f"so nothing pushed). {said}")
-            return
-        set_status(t, "ready")
-        repo.save_task(t)
-        ready_news(repo, t, [commits(ahead)])
-        print(f"local branch {t['branch']} is ready ({commits(ahead)} ahead of {base_ref})")
-        return
-    git(wt, "push", "-q", "--force-with-lease", "-u", "origin", f"HEAD:refs/heads/{t['branch']}")
-    if t.get("gh"):
-        t["gh"].update(new=0, checks=None)  # what it says about the new push comes later
-    if not t.get("pr"):
-        body = (summary.strip() or t["title"]) + f"\n\nBullpen task {t['id']}.\n"
-        p = run([repo.gh(), "pr", "create", "--base", t["base"], "--head", t["branch"],
-                 "--title", f"{t['title']} ({t['id']})", "--body-file", "-"], cwd=wt, input=body)
-        t["pr"] = p.stdout.strip().splitlines()[-1]
+    published = m.publish(repo, t, ahead, base_ref, summary)  # pushed and a PR, or nothing
     t.update(why=None, summary=summary.strip() or t.get("summary"), commits=ahead)
     if repo.cfg["review"]:
         said = review_at_ready(repo, t, base_ref)
-        print(f"pushed {t['branch']}; pull request: {t['pr']}. {said}")
+        print(f"{published}. {said}")
         return
     set_status(t, "ready")
     repo.save_task(t)
-    ready_news(repo, t, [commits(ahead), pr_short(t["pr"])])
-    print(f"pushed {t['branch']}; pull request: {t['pr']}")
+    ready_news(repo, t, [commits(ahead), where(t)])
+    print(published)
 
 
 # ---------- finish: a task with nothing to merge ----------
@@ -144,7 +117,6 @@ def cmd_finish(args):
         close_task(repo, t, auto=True, first=first)  # last: this closes the pane we run in
         return
     news(repo, t, "finished", f"{t['id']} finished (nothing to merge): {first}")
-    start_queued(repo, t, "finished")
     print(f"{t['id']} finished, with nothing to merge. The person closes it: end your turn.")
 
 

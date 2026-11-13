@@ -2,14 +2,13 @@
 
 import argparse
 import fcntl
-import os
-import subprocess
 
-from .core import Fail, Repo, SELF, clip, command, commits, git, repo_root
+from .core import Fail, Repo, clip, command, commits, git, repo_root
+from .modes import push_base, push_remote, quiet_git
 from .news import news
 
 
-# config --push-remote names a remote (not origin: with origin, bullpen is in PR mode
+# config --push-remote names a remote (not origin: with origin, bullpen is in remote mode
 # and the setting does nothing). After accept merges into the local base branch, the
 # base branch alone is pushed there, in the background, never forced. Pushes take a
 # lock and push the branch as it is then, so two accepts in a row can't race: the
@@ -17,44 +16,6 @@ from .news import news
 
 
 PUSH_NEWS = {"id": "push"}  # the news log's task column when no task is behind a push
-
-
-def push_remote(repo):
-    """The remote accept pushes the base branch to, or None (unset, or PR mode)."""
-    name = repo.cfg.get("push_remote")
-    return name if name and not repo.has_origin() else None
-
-
-def push_env(repo):
-    """git that never waits for a password or a key's passphrase: it fails instead."""
-    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
-    if not env.get("GIT_SSH_COMMAND") and git(repo.root, "config", "core.sshCommand", check=False).returncode != 0:
-        env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
-    return env
-
-
-def quiet_git(repo, *args, timeout=60):
-    """git on the network, away from any terminal (no prompt can reach the person)."""
-    try:
-        return subprocess.run(["git", "-C", str(repo.root), *args], env=push_env(repo), text=True,
-                              stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout,
-                              start_new_session=True)
-    except subprocess.TimeoutExpired:
-        return subprocess.CompletedProcess(args, 1, "", f"no answer from the remote in {timeout}s")
-
-
-def push_base(repo, base, t=None):
-    """After a local merge: push base to the push remote in the background. Says what it
-    started, or None when there's no push remote."""
-    remote = push_remote(repo)
-    if not remote:
-        return None
-    argv = [SELF, "_push", base] + (["--task", t["id"]] if t else [])
-    p = subprocess.Popen(argv, cwd=repo.root, start_new_session=True,
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if os.environ.get("BULLPEN_PUSH_WAIT"):  # the tests: wait for it, to look at what it did
-        p.wait()
-    return f"pushing {base} to {remote} in the background"
 
 
 def push_reason(out, remote, base):
@@ -118,7 +79,7 @@ def check_push(repo, why_not=None):
     if not name:
         return "skip", "none (`bullpen config --push-remote <remote>` backs up the base branch after each accept)"
     if repo.has_origin():
-        return "skip", f"{name} is set, but this repo has an origin remote (PR mode), so nothing is pushed to it"
+        return "skip", f"{name} is set, but this repo has an origin remote (remote mode), so nothing is pushed to it"
     if git(repo.root, "remote", "get-url", name, check=False).returncode != 0:
         return "fail", (f"there's no remote {name}: `git remote add {name} <url>`, "
                         f"or `bullpen config --push-remote \"\"`")

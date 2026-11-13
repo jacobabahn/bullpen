@@ -12,7 +12,7 @@ from . import (
     events, go, guide, keys, news, notifications, pick, prs, push_remote, ready, rules, show, start,
     stepper, tours, triage, up,
 )
-from .core import Fail
+from .core import Fail, run_later
 
 # The modules with commands, in the order `bullpen --help` lists a group's commands.
 # Importing them all also registers what saving a task sets off (core.on_save).
@@ -99,5 +99,7 @@ def main(argv=None):
         code = args.fn(args)
     except Fail as e:
         print(f"bullpen: {e}", file=sys.stderr)
-        return 1
+        code = 1
+    finally:
+        run_later()  # what the command's saves set off: the run queue
     return code if type(code) is int else 0

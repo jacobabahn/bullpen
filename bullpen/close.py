@@ -1,15 +1,36 @@
-"""Closing a finished task (nothing to merge), and dropping a task."""
+"""Closing a task: the one close step that accept, close, drop and auto-accept share,
+and the `close` and `drop` commands."""
 
 import os
-import sys
 from pathlib import Path
 
-from .core import Fail, Repo, command, git, is_status, repo_root, run, set_status, unindex_block
-from .rex import rex_close
+from .core import Fail, Repo, command, git, is_status, repo_root, set_status, unindex_block
+from .modes import mode
+from .rex import close_last
 from .news import news, tell_coordinator
 from .hooks import remove_worktree
-from .start import dropped_dep, start_queued
+from .start import dropped_dep
 from .review import close_reviewer
+
+
+def close(repo, t, status, then=None, withdraw=True, force=True, **fields):
+    """The one close step, in one order: the reviewer, the PR (withdrawn, unless it was
+    merged), the worktree and branch, the status and the save (which moves the run
+    queue), then what the caller says and does (then), and the worker's pane last,
+    since this may run in it. fields go on the task with the status."""
+    os.chdir(repo.root)  # we may be running in the worktree this removes
+    worker = (t.get("session"), t.get("block"))
+    unindex_block(t.get("block"))
+    close_reviewer(t)
+    if withdraw:
+        mode(repo, t).withdraw(repo, t, delete_branch=status == "done")
+    remove_worktree(repo, t, force=force)
+    set_status(t, status, t.get("why"))
+    t.update(block=None, worktree=None, **fields)
+    repo.save_task(t)
+    if then:
+        then()
+    close_last(*worker)
 
 
 def cmd_close(args):
@@ -24,27 +45,14 @@ def cmd_close(args):
 
 
 def close_task(repo, t, auto=False, first=None):
-    """Remove a finished task's worktree and branch (no warning: it has nothing to
-    merge), close its panes and any PR, and mark it done."""
-    os.chdir(repo.root)  # we may be running in the worktree this removes
-    worker = (t.get("session"), t.get("block"))
-    unindex_block(t.get("block"))
-    close_reviewer(t)
-    if t.get("pr"):
-        run([repo.gh(), "pr", "close", t["pr"]], cwd=repo.root, check=False)
-        git(repo.root, "push", "-q", "origin", "--delete", t["branch"], check=False)
-    remove_worktree(repo, t, force=True)
-    set_status(t, "done", t.get("why"))
-    t.update(closed=True, block=None, worktree=None, auto_accepted=auto)
-    repo.save_task(t)
-    if auto:
-        news(repo, t, "closed", f"{t['id']} finished (nothing to merge) and was closed by auto-accept: {first}")
-    else:
-        print(f"{t['id']} closed")
-        tell_coordinator(repo, t, "closed", f"{t['id']} closed (finished, nothing to merge)")
-    start_queued(repo, t, "closed")
-    sys.stdout.flush()
-    rex_close(*worker)  # last: this may close the pane we run in
+    """A finished task (nothing to merge): close its PR if it has one, and mark it done."""
+    def said():
+        if auto:
+            news(repo, t, "closed", f"{t['id']} finished (nothing to merge) and was closed by auto-accept: {first}")
+        else:
+            print(f"{t['id']} closed")
+            tell_coordinator(repo, t, "closed", f"{t['id']} closed (finished, nothing to merge)")
+    close(repo, t, "done", said, closed=True, auto_accepted=auto)
 
 
 # ---------- drop ----------
@@ -56,19 +64,12 @@ def cmd_drop(args):
     if t.get("worktree") and Path(t["worktree"]).exists() and not args.force:
         if git(t["worktree"], "status", "--porcelain").stdout.strip():
             raise Fail(f"{t['id']} has uncommitted changes in {t['worktree']}; pass --force to discard them")
-    rex_close(t["session"], t["block"])
-    unindex_block(t["block"])
-    close_reviewer(t)
-    if t.get("pr"):
-        run([repo.gh(), "pr", "close", t["pr"]], cwd=repo.root, check=False)
-    remove_worktree(repo, t, force=args.force)
-    set_status(t, "dropped", t.get("why"))
-    t.update(block=None, worktree=None)
-    repo.save_task(t)
-    print(f"{t['id']} dropped")
-    tell_coordinator(repo, t, "dropped", f"{t['id']} dropped")
-    dropped_dep(repo, t)
-    start_queued(repo, t, "dropped")
+
+    def said():
+        print(f"{t['id']} dropped")
+        tell_coordinator(repo, t, "dropped", f"{t['id']} dropped")
+        dropped_dep(repo, t)
+    close(repo, t, "dropped", said, force=args.force)
 
 
 def commands(sub):

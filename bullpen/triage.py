@@ -2,8 +2,9 @@
 
 from .core import (
     CLOSED, Fail, Repo, ask, command, is_status, ok, repo_root,
-    task_base_ref, write_json,
+    write_json,
 )
+from .modes import task_base_ref
 from .agents import running, waits_on, whose_turn
 from .news import tell_coordinator
 from .review import start_review

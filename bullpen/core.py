@@ -252,15 +252,6 @@ def model_phrase(cmd, model):
     return model_in(with_model(cmd, model)) or "default (Claude Code picks)"
 
 
-def task_base_ref(repo, t):
-    """What the task's branch is compared with: origin's copy of its base branch when
-    there is one, else the local base branch (local mode)."""
-    if repo.has_origin() and git(t["worktree"], "rev-parse", "-q", "--verify", f"origin/{t['base']}",
-                                 check=False).returncode == 0:
-        return f"origin/{t['base']}"
-    return t["base"]
-
-
 def seconds_since(stamp, at=None):
     at = at or dt.datetime.now().astimezone()
     return (at - dt.datetime.fromisoformat(stamp)).total_seconds()
@@ -360,8 +351,8 @@ def config_source(repo, key):
 # What saving a task sets off, beyond writing it: each fn(repo, t, old), old the
 # task as it was saved before. The modules that act on a change register here
 # (on_save): notifications.py tells the person, prs.py marks a PR for the watcher to
-# follow. That keeps this module below them: it never imports them. The run queue
-# hears of a task leaving working the same way (BP-75's task E).
+# follow, and start.py moves the run queue when a task frees a slot. That keeps this
+# module below them: it never imports them.
 SAVED = []
 
 
@@ -369,6 +360,25 @@ def on_save(fn):
     """Call fn(repo, t, old) after every save_task, in the order registered."""
     SAVED.append(fn)
     return fn
+
+
+# Work a save sets off that waits for the command's own work to be done (the run
+# queue starting the next task), so its news follows the command's. cli.main runs it
+# when the command returns; a command that closes the pane it runs in runs it first
+# (rex.close_last).
+LATER = {}
+
+
+def later(key, fn):
+    """Run fn once the command's work is done (run_later). A later fn with the same key
+    replaces it: it runs once."""
+    LATER.pop(key, None)
+    LATER[key] = fn
+
+
+def run_later():
+    while LATER:
+        LATER.pop(next(iter(LATER)))()
 
 
 class Repo:

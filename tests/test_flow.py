@@ -170,6 +170,31 @@ class FlowTest(BullpenTest):
         branches = sh("git", "-C", str(self.repo), "branch")
         self.assertNotIn("bullpen/", branches)
 
+    def test_a_task_published_with_an_origin_finishes_on_github(self):
+        tid = self.ready_with_a_commit()
+        self.assertIs(self.show(tid)["local"], False)
+        sh("git", "-C", str(self.repo), "remote", "remove", "origin")
+        self.bp("accept", tid)  # merged by gh, as it started: not locally
+        gh = [json.loads(l)["argv"] for l in (self.fake / "gh.log").read_text().splitlines()]
+        self.assertEqual(gh[-1][:2], ["pr", "merge"])
+        self.assertNotIn("fix.txt", sh("git", "-C", str(self.repo), "ls-tree", "--name-only", "main"))
+
+    def test_the_close_step_closes_the_workers_pane_last(self):
+        for verb in ("drop", "accept"):
+            with self.subTest(verb=verb):
+                self.setUp()
+                tid = self.start_task()
+                blk = self.block(tid)
+                review = self.commit_and_ready(tid)
+                if verb == "accept":
+                    self.verdict(tid, "approve")
+                    review = None  # its verdict closed it
+                self.bp(verb, tid)
+                closes = [a[2] for a in self.rex_calls() if a[:2] == ["block", "close"]]
+                self.assertEqual(closes[-1], blk)
+                if review:
+                    self.assertIn(review, closes[:-1])
+
     def test_accept_refuses_unready(self):
         tid = self.start_task()
         p = self.bp("accept", tid, ok=False)

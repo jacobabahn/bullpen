@@ -12,8 +12,9 @@ from pathlib import Path
 
 from .core import (
     Fail, PROMPTS, Repo, SELF, clip, command, git, head, is_claude, is_status, merge_base,
-    model_in, now, read_json, repo_root, resolve, task_base_ref, with_model, write_json,
+    model_in, now, read_json, repo_root, resolve, with_model, write_json,
 )
+from .modes import task_base_ref
 from .news import tell_coordinator
 from .stops import stop
 from .start import hand_back

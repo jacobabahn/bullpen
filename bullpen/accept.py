@@ -5,20 +5,16 @@ import re
 import subprocess
 from pathlib import Path
 
-from .core import (
-    CLOSED, Fail, HOME, Repo, command, git, is_status, pr_short, repo_root, run, set_status,
-    task_base_ref, unindex_block, worker_idle,
-)
-from .rex import rex_alive, rex_close, rex_type
+from .core import CLOSED, Fail, HOME, Repo, command, git, is_status, pr_short, repo_root, run_later, worker_idle
+from .modes import mode, task_base_ref
+from .rex import rex_alive, rex_type
 from .news import news, tell_coordinator
 from .guide import tell_guide_changes
-from .hooks import remove_worktree
-from .start import hand_back, start_queued
-from .review import close_reviewer, is_doc, keep_approval, rebase_check, shortstat, start_review
+from .start import hand_back
+from .review import is_doc, keep_approval, rebase_check, shortstat, start_review
 from .watcher import refresh_watcher
-from .close import close_task
+from .close import close, close_task
 from .board_build import rebuild_board_if_stale
-from .push_remote import push_base
 from .keys import KEYS_CHANGED, keys_hash
 
 
@@ -38,32 +34,24 @@ def accept(repo, t, auto=False):
         raise Fail(f"{is_status(t)}, not ready to accept or finished")
     keys = keys_hash()
     touched = changed_files(repo, t)  # before the merge: what the others are checked against
-    if t.get("pr"):
-        p = None if merged_outside else run(
-            [repo.gh(), "pr", "merge", t["pr"], f"--{repo.cfg['merge']}"],
-            cwd=repo.root, check=False)
-        if p and p.returncode != 0:
-            raise Fail(f"merge refused: {(p.stderr or p.stdout).strip()}")
-        if t.get("branch"):
-            git(repo.root, "push", "-q", "origin", "--delete", t["branch"], check=False)
-    elif t.get("branch") and (t.get("local") or not repo.has_origin()):
-        # t["local"] too: a remote added after ready mustn't make accept skip the merge
-        merge_locally(repo, t)  # raises, leaving the task as it was, if it can't
-    rex_close(t["session"], t["block"])
-    unindex_block(t["block"])
-    close_reviewer(t)
-    remove_worktree(repo, t, force=True)
-    set_status(t, "done", t.get("why"))
-    t.update(block=None, worktree=None, auto_accepted=auto)
-    repo.save_task(t)
-    mode = repo.cfg["merge"]
+    m = mode(repo, t)
+    m.merge(repo, t)  # raises, leaving the task as it was, if it can't
+    close(repo, t, "done", lambda: accepted(repo, t, m, auto, merged_outside, touched, keys),
+          withdraw=False, auto_accepted=auto)
+
+
+def accepted(repo, t, m, auto, merged_outside, touched, keys):
+    """What follows a merge, once the task is closed: the news, the merge's follow-up
+    in the task's mode, the other tasks rebased, and whatever the merge changed in
+    bullpen itself."""
+    merge = repo.cfg["merge"]
     if t.get("pr"):
         print(f"{t['id']} done (merged {t['pr']})")
         how = (f"{pr_short(t['pr'])} was merged outside bullpen" if merged_outside
-               else f"merged {pr_short(t['pr'])}, {mode}")
+               else f"merged {pr_short(t['pr'])}, {merge}")
     elif t.get("merged"):
         print(f"{t['id']} done (merged into {t['base']}: {t['merged'][:12]})")
-        how = f"merged into {t['base']}, {mode}"
+        how = f"merged into {t['base']}, {merge}"
     else:
         print(f"{t['id']} done")
         how = "nothing to merge"
@@ -71,13 +59,12 @@ def accept(repo, t, auto=False):
         news(repo, t, "accepted", f"{t['id']} approved by review and auto-accepted ({how})")
     else:
         tell_coordinator(repo, t, "accepted", f"{t['id']} accepted ({how})")
-    if t.get("merged") and not t.get("pr"):  # local mode: back up the base branch
-        said = push_base(repo, t["base"], t)
-        if said:
-            print(said)
+    said = m.after_merge(repo, t)  # the branch deleted on origin, or the push remote
+    if said:
+        print(said)
     if how != "nothing to merge":
         rebase_others(repo, t, touched)
-    start_queued(repo, t, "accepted")
+    run_later()  # the run queue starts the next task now, before the rest
     tell_guide_changes(repo)  # the merge may have changed the coordinator's guide
     refresh_watcher(repo)  # the merge may have changed the watcher itself
     if repo.root.resolve() == HOME.resolve():  # bullpen's own checkout: maybe the board too
@@ -87,77 +74,6 @@ def accept(repo, t, auto=False):
     if keys_hash() != keys:  # last: the line the board shows
         news(repo, t, "keys", KEYS_CHANGED, everyone=True)
         print(KEYS_CHANGED)
-
-
-def checked_out_at(repo, branch):
-    """The worktree (the main checkout or another) that has branch checked out, or None."""
-    p = git(repo.root, "worktree", "list", "--porcelain")
-    path = None
-    for line in p.stdout.splitlines():
-        if line.startswith("worktree "):
-            path = line[len("worktree "):]
-        elif line == f"branch refs/heads/{branch}":
-            return path
-    return None
-
-
-def merge_locally(repo, t):
-    """Local mode: merge the task's branch into its local base branch, as config --merge
-    says. On any failure, raise with the reason and leave the task, its worktree and its
-    branch as they were (a rebase that went through stays: the branch is still intact)."""
-    base, branch, wt = t["base"], t["branch"], t.get("worktree")
-    mode = repo.cfg["merge"]
-    if git(repo.root, "rev-parse", "-q", "--verify", f"refs/heads/{branch}", check=False).returncode != 0:
-        raise Fail(f"merge refused: {t['id']}'s branch {branch} is gone")
-    old = git(repo.root, "rev-parse", f"refs/heads/{base}").stdout.strip()
-    if int(git(repo.root, "rev-list", "--count", f"{old}..refs/heads/{branch}").stdout.strip()) == 0:
-        return  # nothing to merge
-    if mode == "rebase":
-        if not wt or not Path(wt).exists():
-            raise Fail(f"merge refused: {t['id']} has no worktree to rebase in")
-        if git(wt, "status", "--porcelain").stdout.strip():
-            raise Fail(f"merge refused: {t['id']} has uncommitted changes in {wt}")
-        p = git(wt, "rebase", "-q", old, check=False)
-        if p.returncode != 0:
-            git(wt, "rebase", "--abort", check=False)
-            raise Fail(f"merge refused: {branch} doesn't rebase cleanly onto {base}; "
-                       f"rebase it by hand in {wt}, then accept again")
-        new = git(repo.root, "rev-parse", f"refs/heads/{branch}").stdout.strip()
-    else:
-        p = git(repo.root, "merge-tree", "--write-tree", "--no-messages", old, f"refs/heads/{branch}",
-                check=False)
-        if p.returncode != 0:
-            raise Fail(f"merge refused: {branch} conflicts with {base}; "
-                       f"rebase it onto {base} in {wt}, then accept again")
-        tree = p.stdout.split()[0]
-        if mode == "squash":
-            msg = f"{t['title']} ({t['id']})"
-            if t.get("summary"):
-                msg += "\n\n" + t["summary"].strip()
-            parents = ["-p", old]
-        else:
-            msg = f"Merge {branch}: {t['title']} ({t['id']})"
-            parents = ["-p", old, "-p", f"refs/heads/{branch}"]
-        new = run(["git", "-C", str(repo.root), "commit-tree", tree, *parents, "-F", "-"],
-                  input=msg + "\n").stdout.strip()
-    move_base(repo, base, old, new)
-    t["merged"] = new
-
-
-def move_base(repo, base, old, new):
-    """Fast-forward the local base branch from old to new. Where it's checked out, do it
-    with `merge --ff-only` there, which keeps uncommitted changes to other files and
-    refuses if the incoming commits touch one of them."""
-    at = checked_out_at(repo, base)
-    if at:
-        p = git(at, "merge", "-q", "--ff-only", new, check=False)
-        if p.returncode != 0:
-            msg = " ".join((p.stderr or p.stdout).split())
-            raise Fail(f"merge refused: can't fast-forward {base} in {at}: {msg}")
-        return
-    if git(repo.root, "merge-base", "--is-ancestor", old, new, check=False).returncode != 0:
-        raise Fail(f"merge refused: {base} can't be fast-forwarded")
-    git(repo.root, "update-ref", "-m", "bullpen accept", f"refs/heads/{base}", new, old)
 
 
 def changed_files(repo, t):
@@ -182,8 +98,6 @@ def rebase_others(repo, accepted, touched=None):
               and o.get("base") == base and o.get("worktree") and Path(o["worktree"]).is_dir()]
     if not others:
         return
-    if repo.has_origin():
-        git(repo.root, "fetch", "-q", "origin", base, check=False)
     said = []
     for o in others:
         try:
@@ -225,11 +139,9 @@ def rebase_other(repo, t, accepted, touched=None):
         save_conflicts(repo, t, files, shown)
         p = subprocess.run(["git", "-C", str(wt), "rebase", "--continue"], env={**os.environ, "GIT_EDITOR": "true"},
                            stdin=subprocess.DEVNULL, text=True, capture_output=True)
-    if t.get("pr"):
-        p = git(wt, "push", "-q", "--force-with-lease", "origin", f"HEAD:refs/heads/{t['branch']}",
-                check=False)
-        if p.returncode != 0:
-            return f"{t['id']} rebased, but the push failed: {' '.join((p.stderr or p.stdout).split())}"
+    failed = mode(repo, t).refresh(repo, t)  # its PR gets the rebased branch
+    if failed:
+        return f"{t['id']} rebased, but the push failed: {failed}"
     t["rebased"] = t["base"]
     if t["status"] == "ready" and t.get("diffstat"):
         t["diffstat"] = shortstat(wt, ref)

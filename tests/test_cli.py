@@ -307,3 +307,37 @@ class CodeTest(unittest.TestCase):
         from bullpen import cli, core, notifications, prs  # noqa: F401 (cli imports every module)
         self.assertIn(notifications.notify, core.SAVED)
         self.assertIn(prs.follow_saved, core.SAVED)
+
+    def calls(self, name):
+        """(module, function) for each call of name in the package."""
+        out = []
+        for mod, tree in self.modules().items():
+            for f in ast.walk(tree):
+                if isinstance(f, ast.FunctionDef):
+                    out += [(mod, f.name) for n in ast.walk(f) if isinstance(n, ast.Call)
+                            and getattr(n.func, "id", getattr(n.func, "attr", None)) == name]
+        return out
+
+    def test_the_run_queue_moves_only_from_a_status_change(self):
+        # no caller has to remember it: saving a task that frees a slot starts the queue
+        self.assertEqual(self.calls("start_queued"), [("start", "move_queue")])
+        from bullpen import cli, core, start  # noqa: F401
+        self.assertIn(start.move_queue, core.SAVED)
+
+    def test_only_the_mode_adapters_push(self):
+        # one way to push: quiet_git, which never waits on a prompt, in modes.py (and the
+        # push remote's background push)
+        pushes = []
+        for mod, tree in self.modules().items():
+            for n in ast.walk(tree):
+                f = isinstance(n, ast.Call) and getattr(n.func, "id", getattr(n.func, "attr", None))
+                if f in ("git", "quiet_git", "run") and any(
+                        isinstance(a, ast.Constant) and a.value == "push" for x in n.args for a in ast.walk(x)):
+                    pushes.append((mod, f))
+        self.assertEqual({m for m, _ in pushes}, {"modes", "push_remote"})
+        self.assertEqual({f for _, f in pushes}, {"quiet_git"})
+
+    def test_close_accept_and_drop_share_one_close_step(self):
+        self.assertEqual(sorted(f for m, f in self.calls("close") if m in ("accept", "close")),
+                         ["accept", "close_task", "cmd_drop"])
+        self.assertEqual(self.calls("remove_worktree"), [("close", "close")])

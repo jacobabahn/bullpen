@@ -10,6 +10,12 @@ changes to other files survive. If anything stands in the way (a conflict, or an
 uncommitted change to a file the task touches), `accept` says why and leaves the
 task ready, with its worktree and branch as they were.
 
+A task's mode is fixed at its first `ready`, and recorded on it: if you add an
+`origin` while a task is open, a task that was ready before still finishes locally
+(another `ready` pushes nothing; `accept` merges locally), and one that wasn't
+ready yet goes through a pull request. The same holds the other way: a task with a
+pull request is merged on GitHub even if `origin` is removed meanwhile.
+
 To keep a copy elsewhere without PRs, add a remote under another name than `origin`
 (so bullpen stays in local mode) and name it: `bullpen config --push-remote github`.
 After each `accept` (and auto-accept) that merges something, bullpen pushes the base
@@ -23,4 +29,4 @@ nothing (there's no merge), nor does a merge you do by hand. But `bullpen up` pu
 the base branch when it has commits the remote didn't get (as far as this checkout
 last saw the remote), so things catch up after an offline spell. `bullpen config
 --push-remote ""` or `--unset push_remote` turns it off. With an `origin` remote
-(PR mode), the setting does nothing: merges happen on GitHub.
+(remote mode), the setting does nothing: merges happen on GitHub.

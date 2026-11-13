@@ -178,3 +178,32 @@ class QueueTest(BullpenTest):
         self.bp("finish", "BP-3", "--summary", "Answered.", cwd=self.show("BP-3")["worktree"])
         self.assertEqual(self.show("BP-4")["status"], "working")
         self.assertIn("bullpen · BP-4 started (BP-3 finished, freeing a slot)", self.news_lines())
+
+    def test_the_queue_starts_after_the_news_of_what_freed_the_slot(self):
+        tid = self.ready_with_a_commit()
+        self.bp("add", "Next", "--brief", "x", "--after", tid)
+        self.merge_on_github(tid)
+        self.bp("accept", tid)
+        news = self.news_lines()
+        accepted = news.index("bullpen · BP-1 accepted (merged PR #7, rebase)")
+        self.assertGreater(news.index("bullpen · BP-2 started (BP-1 was accepted)"), accepted)
+
+    def test_a_stop_frees_no_slot(self):
+        # a worker waiting on the person comes back to its task: its slot stays taken
+        self.bp("config", "--max-running", "1")
+        self.start_task("First")
+        dep = self.done_dependency()  # BP-2
+        self.bp("add", "Next", "--brief", "x", "--after", dep)  # BP-3
+        self.ask("BP-1", "Which one?")
+        self.assertEqual(self.show("BP-1")["status"], "needs")
+        self.assertEqual(self.show("BP-3")["status"], "todo")
+
+    def test_which_status_changes_move_the_queue(self):
+        from bullpen.start import slot_freed
+        self.assertEqual(slot_freed({"status": "working"}, {"status": "review"}), "review")
+        self.assertEqual(slot_freed({"status": "ready"}, {"status": "done"}), "accepted")
+        self.assertEqual(slot_freed({"status": "finished"}, {"status": "done", "closed": True}), "closed")
+        self.assertEqual(slot_freed({"status": "todo"}, {"status": "dropped"}), "dropped")
+        for old, new in (("working", "needs"), ("working", "triage"), ("review", "ready"),
+                         ("triage", "review"), ("done", "done"), (None, "todo")):
+            self.assertIsNone(slot_freed({"status": old}, {"status": new}), (old, new))

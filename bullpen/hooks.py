@@ -5,7 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .core import Fail, git, now, task_base_ref
+from .core import Fail, git, now
+from .modes import task_base_ref
 from .stops import stop
 
 

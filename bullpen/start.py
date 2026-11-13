@@ -7,10 +7,11 @@ from pathlib import Path
 
 from .core import (
     CLOSED, FLOAT_BOUNDS, Fail, PROMPTS, REVIEW_MODES, Repo, SELF, TERMINAL, WAITING,
-    back_to_work, clip, command, git, home, index_block, is_claude, is_status, model_in, now,
-    pr_short, repo_root, resolve, set_auto_accept, set_status, slug, status_words,
-    task_base_ref, unindex_block, with_model, write_json,
+    back_to_work, clip, command, git, home, index_block, is_claude, is_status, later, model_in, now,
+    on_save, pr_short, repo_root, resolve, set_auto_accept, set_status, slug, status_words,
+    unindex_block, with_model, write_json,
 )
+from .modes import task_base_ref
 from .rex import (
     HIDE_HINT, find_pane, rex_alive, rex_api, rex_run, rex_type, rex_view, screen_end,
     set_layer, type_to_worker, with_state,
@@ -180,11 +181,37 @@ def running_count(repo):
     return sum(1 for t in repo.tasks() if t["status"] == "working")
 
 
+FREES = ("review", "ready", "finished")  # leaving working for these frees a slot
+
+
+def slot_freed(old, t):
+    """How a save moves the run queue: "review", "ready" or "finished" for a task that
+    left working for one of them, "accepted", "closed" or "dropped" for one that closed
+    (its dependents may start), else None. A stop (needs, triage, stopped) frees
+    nothing: its agent comes back to the task."""
+    was, now_ = old.get("status"), t["status"]
+    if now_ in CLOSED and was not in CLOSED:
+        return "dropped" if now_ == "dropped" else "closed" if t.get("closed") else "accepted"
+    if was == "working" and now_ in FREES:
+        return now_
+    return None
+
+
+@on_save
+def move_queue(repo, t, old):
+    """The run queue hears of every status change: when a task frees a slot or closes,
+    it starts the next queued tasks once the command's own work is done."""
+    how = slot_freed(old, t)
+    if how:
+        by = dict(t)
+        later(("queue", str(repo.root)), lambda: start_queued(repo, by, how))
+
+
 def start_queued(repo, by, how):
     """After `by` was accepted, closed or dropped, or went to review, ready or finished
     (how): start each queued task, one with dependencies all done, in ID order, while
     fewer than max_running work. One news line per start. Plain todo tasks wait for the
-    coordinator."""
+    coordinator. Only move_queue calls it, from the status change."""
     tasks = {t["id"]: t for t in repo.tasks()}
     queued = [t for t in tasks.values() if t["status"] == "todo" and t.get("after")
               and not open_deps(repo, t, tasks)]

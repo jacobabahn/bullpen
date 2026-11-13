@@ -3,9 +3,10 @@
 import json
 import os
 import re
+import sys
 import tty
 
-from .core import REX, clip, run
+from .core import REX, clip, run, run_later
 
 
 def with_state(argv):
@@ -106,6 +107,14 @@ def set_layer(session, layer_id, state, focus=False):
 def rex_close(session, block):
     if block:
         run([REX, "block", "close", block] + (["-s", session] if session else []), check=False)
+
+
+def close_last(session, block):
+    """Close a pane this command may run in: last, after the work it set off (run_later),
+    since closing it may end this process."""
+    run_later()
+    sys.stdout.flush()
+    rex_close(session, block)
 
 
 def pane_tty(session, block):

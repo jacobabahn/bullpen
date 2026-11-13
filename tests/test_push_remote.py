@@ -166,6 +166,6 @@ class PushRemoteTest(unittest.TestCase):
         self.assertNotIn("pushing", self.bp("up").stdout)
         self.assertEqual(self.backup_main(), before)
         _, lines = self.doctor()
-        self.assertEqual(lines["push"], ("--", "backup is set, but this repo has an origin remote (PR mode), "
+        self.assertEqual(lines["push"], ("--", "backup is set, but this repo has an origin remote (remote mode), "
                                                 "so nothing is pushed to it"))
-        (self.fake / "gh.log").unlink(missing_ok=True)  # doctor's gh check, in PR mode: fine here
+        (self.fake / "gh.log").unlink(missing_ok=True)  # doctor's gh check, in remote mode: fine here

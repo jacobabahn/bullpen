@@ -10,8 +10,9 @@ from pathlib import Path
 from .core import (
     CLOSED, Fail, Repo, STATE, WAITING, back_to_work, clip, command, git, load_config,
     lookup_block, mark_compacting, now, read_json, seconds_since, set_status,
-    task_base_ref, unindex_block,
+    unindex_block,
 )
+from .modes import task_base_ref
 from .rex import rex_alive, rex_type, screen
 from .agents import is_limited, on_reviewer, pane, whose_turn
 from .coordinators import coordinator_at, coordinator_gone
@@ -21,7 +22,7 @@ from .limit import (
     limit_over, limited,
 )
 from .stops import stop
-from .start import hand_back, start_queued
+from .start import hand_back
 from .review import approval_kept, keep_approval, start_review
 
 
@@ -141,7 +142,6 @@ def ready_again(repo, t):
     repo.save_task(t)
     ready_news(repo, t, [f"its worker's turn left the code as approved: {kept}"],
                f". `bullpen peek {t['id']}` if it said something", again=True)
-    start_queued(repo, t, "ready")  # it worked again, and took a slot: now it's free
     return True
 
 

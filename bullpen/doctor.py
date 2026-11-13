@@ -12,6 +12,7 @@ from .core import (
     DEFAULT_CONFIG, Fail, INTERNAL, REPO_ONLY, REX, Repo, SELF, STATE, command, git,
     global_config_path, homes, read_global_file, read_json, repo_root, run, safe,
 )
+from .modes import repo_base_ref
 from .rex import rex_alive
 from .coordinators import alive
 from .watcher import watcher_stamp
@@ -230,9 +231,7 @@ def check_hook(repo, name, why_not=None):
         if word and "=" not in word and not shell_word_found(word, repo.root):
             return "fail", f"{source} runs {word}, which isn't on PATH: install it, or fix the command"
         return "ok", f"{source}: {cmd}"
-    base = repo.base()
-    ref = f"origin/{base}" if repo.has_origin() and git(
-        repo.root, "rev-parse", "-q", "--verify", f"origin/{base}", check=False).returncode == 0 else base
+    ref = repo_base_ref(repo)
     p = git(repo.root, "show", f"{ref}:{path}", check=False)
     text = p.stdout if p.returncode == 0 and p.stdout.strip() else None
     if text is None:
