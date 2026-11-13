@@ -35,7 +35,7 @@ fn the_last_row_is_left_for_rexs_capsules() {
 }
 
 #[test]
-fn the_working_and_review_marks_turn_twice_a_second_and_a_command_spinner_fast() {
+fn the_working_and_review_marks_turn_five_times_a_second_and_a_command_spinner_fast() {
     let working = Task { status: "working".into(), ..ready("BP-1") };
     let review = Task { status: "review".into(), ..ready("BP-2") };
     let mut a = app(vec![working, review, ready("BP-3")], 0, Layout::Grouped);
@@ -44,14 +44,17 @@ fn the_working_and_review_marks_turn_twice_a_second_and_a_command_spinner_fast()
         let s = screen(a, 42, 24);
         ["BP-1", "BP-2"].map(|id| s.iter().find(|r| r.contains(id)).unwrap().chars().nth(1).unwrap())
     };
-    // the same frame through the first half second, the next one after it
-    assert_eq!(marks(&mut a, 0), marks(&mut a, 450));
-    let (first, later) = (marks(&mut a, 0), marks(&mut a, 550));
+    // the same frame through the first fifth of a second, the next one after it
+    assert_eq!(marks(&mut a, 0), marks(&mut a, 150));
+    let (first, later) = (marks(&mut a, 0), marks(&mut a, 250));
     assert_ne!(first[0], later[0]);
     assert_ne!(first[1], later[1]);
     // a command's spinner is feedback: it moves every tenth of a second
     a.started = Instant::now();
     assert_ne!(spinner(&a), { a.started = Instant::now() - std::time::Duration::from_millis(150); spinner(&a) });
+    // the board redraws often enough to show every frame of the marks
+    a.tasks.retain(|t| t.status == "review");
+    assert!(a.tick().as_millis() * 2 <= super::MARK_MS, "{:?}", a.tick());
 }
 
 #[test]

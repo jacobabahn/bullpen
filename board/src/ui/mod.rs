@@ -53,8 +53,8 @@ fn spinner(app: &App) -> &'static str {
     frame(app, SPINNER, 100)
 }
 
-/// A working task: the six-dot snake, at two frames a second. It says "nothing for you
-/// here", so it moves slowly; the command spinner is feedback and stays fast.
+/// A working task: the six-dot snake, at five frames a second. It says "nothing for you
+/// here", so it moves slower than the command spinner, which is feedback.
 fn working_mark(app: &App) -> &'static str {
     frame(app, WORKING, MARK_MS)
 }
@@ -65,7 +65,7 @@ fn review_mark(app: &App) -> &'static str {
 }
 
 /// How long the working and review marks hold each frame.
-pub const MARK_MS: u128 = 500;
+pub const MARK_MS: u128 = 200;
 
 const SPINNER: &[&str] = &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
 

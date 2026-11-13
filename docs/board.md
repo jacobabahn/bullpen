@@ -33,8 +33,8 @@ Each task starts with its mark, the same one `?` shows under "Marks":
 
 A turning mark stands still, in amber, when its agent has shown no progress for
 a while (see [No progress](check.md#no-progress)), and in its own colour at the usage
-limit. The working and review marks turn twice a second, so they stay quiet in
-the corner of your eye; a command's spinner turns fast. Each task shows how long
+limit. The working and review marks turn five times a second, slower than a command's
+spinner, so they stay calmer than its feedback. Each task shows how long
 it has been there; a task that needs you or stopped turns its age red after 5
 minutes. On the lines under it (from under its ID) it shows
 what it needs or where it stands ("Asks: python3 or python?", "PR #4, approved

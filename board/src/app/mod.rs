@@ -275,7 +275,7 @@ impl App {
         if !self.running.is_empty() || self.tasks.iter().any(|t| t.tour_writing()) {
             Duration::from_millis(50) // a command's spinner turns fast
         } else if self.tasks.iter().any(moving) {
-            Duration::from_millis(100) // the marks of working tasks turn twice a second
+            Duration::from_millis(100) // under half of MARK_MS, so the marks show every frame
         } else if matches!(self.mode, Mode::Overlay { peek: Some(_), .. } | Mode::Answer { .. }) {
             Duration::from_millis(250)
         } else {
