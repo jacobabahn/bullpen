@@ -27,9 +27,13 @@ use std::time::{Duration, Instant};
 pub const BOARD_KEYS: &[(&str, &[(&str, &str)])] = &[
     ("Moving", &[
         ("j k", "select a task (↑ ↓ too)"),
+        ("PgDn", "a page down (ctrl+d: half)"),
+        ("PgUp", "a page up (ctrl+u: half)"),
+        ("G", "the last task (End; Home: first)"),
         ("n", "next that needs you, else ready"),
         ("⏎", "open its pane, or its reviewer's"),
         ("c", "back to the coordinator"),
+        ("/", "pick any open task, anywhere"),
     ]),
     ("The selected task", &[
         ("a", "accept and merge, or close"),
@@ -204,6 +208,8 @@ pub struct App {
     pub mode: Mode,
     /// screen height, for how much a peek shows
     pub height: u16,
+    /// how many tasks the list showed last time it was drawn: a page, for PgDn and PgUp
+    pub page: usize,
     /// when the board started: spinners turn by it
     pub started: Instant,
     tx: Sender<Msg>,
@@ -720,8 +726,9 @@ impl App {
             KeyCode::Char(c) => Some(c),
             _ => None,
         };
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         // a failure stays while you look around, until the next action on a task (or esc)
-        if self.msg.kind != Kind::Failed || self.pending.is_some() || acts_on_task(k.code, ch) {
+        if self.msg.kind != Kind::Failed || self.pending.is_some() || acts_on_task(k.code, ch.filter(|_| !ctrl)) {
             self.msg.clear();
         }
 
@@ -742,13 +749,27 @@ impl App {
 
         let ids: Vec<String> = self.order().iter().map(|t| t.id.clone()).collect();
         let i = ids.iter().position(|x| Some(x) == self.sel.as_ref()).unwrap_or(0);
+        // the selection moves; the list scrolls to keep it in view
+        let page = self.page.max(1);
+        let to = |n: usize| ids.get(n.min(ids.len().saturating_sub(1))).cloned();
         match (k.code, ch) {
+            // before the letters: ctrl+d isn't d (drop)
+            (_, Some('d')) if ctrl => self.sel = to(i + (page / 2).max(1)),
+            (_, Some('u')) if ctrl => self.sel = to(i.saturating_sub((page / 2).max(1))),
+            (_, Some(_)) if ctrl => {}
             (_, Some('q')) => self.mode = Mode::Quit,
-            (KeyCode::Down, _) | (_, Some('j')) => {
-                self.sel = ids.get((i + 1).min(ids.len().saturating_sub(1))).cloned();
-            }
-            (KeyCode::Up, _) | (_, Some('k')) => {
-                self.sel = ids.get(i.saturating_sub(1)).cloned();
+            (KeyCode::Down, _) | (_, Some('j')) => self.sel = to(i + 1),
+            (KeyCode::Up, _) | (_, Some('k')) => self.sel = to(i.saturating_sub(1)),
+            (KeyCode::PageDown, _) => self.sel = to(i + page),
+            (KeyCode::PageUp, _) => self.sel = to(i.saturating_sub(page)),
+            (KeyCode::End, _) | (_, Some('G')) => self.sel = to(usize::MAX),
+            (KeyCode::Home, _) => self.sel = to(0),
+            (_, Some('/')) => {
+                // a floating pane over this window; it goes where you choose, or esc
+                let (ok, out) = self.bp(&["pick", "--pane"]);
+                if !ok {
+                    self.msg = Note::failed(out);
+                }
             }
             (_, Some('?')) => {
                 self.mode = Mode::Help { top: 0 }
@@ -982,6 +1003,7 @@ fn main() {
         running: Vec::new(),
         mode: Mode::Normal,
         height: 0,
+        page: 1,
         started: Instant::now(),
         tx,
         peeking: false,
@@ -1070,6 +1092,7 @@ mod tests {
             running: Vec::new(),
             mode: Mode::Normal,
             height: 0,
+            page: 1,
             started: Instant::now(),
             tx,
             peeking: false,
@@ -1481,6 +1504,33 @@ mod tests {
         // a y/n answered is an action
         press(&mut a, 'a');
         assert!(a.msg.is_empty() && a.pending.is_some());
+    }
+
+    #[test]
+    fn slash_opens_the_picker_or_says_why_not() {
+        let d = Scratch::new("slash");
+        let mut a = with_bullpen(&d, vec![task("BP-1", "ready")], "#!/bin/sh\n");
+        a.bullpen = fake_bullpen(&d, "current");
+        press(&mut a, '/');
+        assert_eq!(calls(&d), ["pick --pane"]);
+        assert!(a.msg.is_empty() && matches!(a.mode, Mode::Normal));
+        let d = Scratch::new("slash-fails");
+        let mut a = with_bullpen(&d, vec![], "#!/bin/sh\necho 'bullpen: no Rex session here' >&2\nexit 1\n");
+        press(&mut a, '/');
+        assert_eq!(a.msg, Note::failed("no Rex session here"));
+    }
+
+    #[test]
+    fn ctrl_letters_dont_act_as_the_letters() {
+        let mut a = app(vec![task("BP-1", "ready"), task("BP-2", "ready")]);
+        a.settle();
+        for c in ['a', 'q', 'l', 'k'] {
+            a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
+        }
+        assert!(a.pending.is_none() && matches!(a.mode, Mode::Normal) && a.msg.is_empty());
+        a.key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+        assert_eq!(a.sel.as_deref(), Some("BP-2"));
+        assert!(a.pending.is_none());
     }
 
     #[test]

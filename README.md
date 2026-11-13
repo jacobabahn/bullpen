@@ -200,9 +200,13 @@ in the order `?` lists them:
 | Key | Does |
 | --- | --- |
 | `j` `k` (`↑` `↓`) | select a task |
+| `PgDn` (`ctrl+d`: half as far) | select the task a page down: as many tasks as the board shows; the list scrolls to keep it in view |
+| `PgUp` (`ctrl+u`: half as far) | select the task a page up |
+| `G` (`End`) | select the last task; `Home` the first (`g` is for tours) |
 | `n` | select the next task that needs you; once nothing does, the next one ready to accept, then finished ("Nothing needs you: BP-3 is ready.") |
 | `⏎` | open its worker's pane, or its reviewer's |
 | `c` | back to the coordinator |
+| `/` | the picker, as `cmd+;` `j` opens it: type part of any open task, in any repository, and go to it |
 | `a` | accept a ready task (merge it), or close a finished one; asks y/n first |
 | `d` | drop it; asks y/n first |
 | `i` | answer its question, on a task that needs you (see [Answering from the board](#answering-from-the-board)) |

@@ -333,6 +333,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         }
     }
     app.top = top;
+    // a page, for PgDn and PgUp: the tasks this list has room for
+    app.page = rows.iter().skip(top).take(avail).filter(|r| matches!(r, Row::Title(_))).count().max(1);
 
     if groups.is_empty() {
         let lines = model::empty_board(&app.tasks, &app.cfg, app.me.as_deref(), app.closed);
@@ -740,6 +742,7 @@ mod tests {
             running: Vec::new(),
             mode: Mode::Normal,
             height: 0,
+            page: 1,
             started: Instant::now(),
             tx,
             peeking: false,
@@ -776,6 +779,57 @@ mod tests {
         let y = s.iter().position(|r| r.contains(text))?;
         let x = s[y][..s[y].find(text)?].chars().count();
         Some(buf[(x as u16, y as u16)].fg)
+    }
+
+    #[test]
+    fn page_down_and_up_move_a_screenful_at_42_columns() {
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let tasks: Vec<Task> = (1..=30).map(|n| ready(&format!("BP-{n}"))).collect();
+        let mut a = app(tasks, 0, Layout::Compact);
+        let s = screen(&mut a, 42, 24);
+        let shown = a.page;
+        assert!(shown > 3 && shown < 30, "a page: {shown}");
+        assert!(s.iter().any(|r| r.contains(&format!("BP-{shown} "))), "{s:#?}");
+        let key = |a: &mut App, code: KeyCode, m: KeyModifiers| {
+            a.key(KeyEvent::new(code, m));
+            screen(a, 42, 24)
+        };
+        // a page down selects the task a page on, and the list scrolls to it
+        let s = key(&mut a, KeyCode::PageDown, KeyModifiers::NONE);
+        let sel = format!("BP-{}", 1 + shown);
+        assert_eq!(a.sel.as_deref(), Some(sel.as_str()));
+        assert!(!s.iter().any(|r| r.contains("BP-1 ")), "scrolled: {s:#?}");
+        assert!(s.iter().any(|r| r.contains(&format!("{sel} "))));
+        // half a page (of what shows now: the heading's row has scrolled off) with
+        // ctrl+u, and ctrl+d doesn't drop
+        let half = a.page / 2;
+        key(&mut a, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        assert_eq!(a.sel, Some(format!("BP-{}", 1 + shown - half)));
+        key(&mut a, KeyCode::Char('d'), KeyModifiers::CONTROL);
+        assert_eq!(a.sel.as_deref(), Some(sel.as_str()));
+        assert!(a.pending.is_none());
+        // G and End go to the last, Home to the first, and the page keys stop at the ends
+        let s = key(&mut a, KeyCode::Char('G'), KeyModifiers::SHIFT);
+        assert_eq!(a.sel.as_deref(), Some("BP-30"));
+        assert!(s.iter().any(|r| r.contains("BP-30 ")), "{s:#?}");
+        key(&mut a, KeyCode::PageDown, KeyModifiers::NONE);
+        assert_eq!(a.sel.as_deref(), Some("BP-30"));
+        let s = key(&mut a, KeyCode::Home, KeyModifiers::NONE);
+        assert_eq!(a.sel.as_deref(), Some("BP-1"));
+        assert!(s.iter().any(|r| r.contains("BP-1 ")));
+        key(&mut a, KeyCode::PageUp, KeyModifiers::NONE);
+        assert_eq!(a.sel.as_deref(), Some("BP-1"));
+        key(&mut a, KeyCode::End, KeyModifiers::NONE);
+        assert_eq!(a.sel.as_deref(), Some("BP-30"));
+    }
+
+    #[test]
+    fn a_page_in_the_grouped_layout_counts_the_tasks_with_their_details() {
+        let tasks: Vec<Task> = (1..=30).map(|n| ready(&format!("BP-{n}"))).collect();
+        let mut a = app(tasks, 0, Layout::Grouped);
+        let s = screen(&mut a, 42, 24);
+        let titles = s.iter().filter(|r| r.contains("Task BP-")).count();
+        assert_eq!(a.page, titles, "{s:#?}");
     }
 
     #[test]
@@ -1413,8 +1467,8 @@ mod tests {
             "",
             " Moving",
             "   j k   select a task (↑ ↓ too)",
-            "   n     next that needs you, else ready",
-            "   ⏎     open its pane, or its reviewer's",
+            "   PgDn  a page down (ctrl+d: half)",
+            "   PgUp  a page up (ctrl+u: half)",
         ].map(String::from), "{s:#?}");
         // one short line per key: nothing is cut or wrapped at 42 columns
         assert!(!s.iter().any(|r| r.ends_with('…')), "{s:#?}");
