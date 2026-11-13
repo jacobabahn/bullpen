@@ -7,7 +7,7 @@ from std.os import getenv
 
 from bullpen.args import Args, parse
 from bullpen.core import python_self
-from bullpen import show, rex, coordinators, add, triage
+from bullpen import show, rex, coordinators, news, peek, diff, check, add, triage
 
 
 def dispatch(av: List[String]) raises -> Int:
@@ -19,6 +19,14 @@ def dispatch(av: List[String]) raises -> Int:
         show.cmd_ls(parse(av, "--all --all-repos --json", "", 0, 0))
     elif cmd == "show":
         show.cmd_show(parse(av, "--json", "", 1, 1))
+    elif cmd == "news":
+        news.cmd_news(parse(av, "--follow", "--every", 0, 0))
+    elif cmd == "peek":
+        peek.cmd_peek(parse(av, "--vt", "--lines", 1, 1))
+    elif cmd == "diff":
+        diff.cmd_diff(parse(av, "--stat --pane --back", "--session", 1, 1))
+    elif cmd == "check":
+        return check.cmd_check(parse(av, "--fix --quiet --all-repos", "", 0, -1))
     elif cmd == "add":
         add.cmd_add(parse(av, "--auto-accept --no-auto-accept", "--brief --brief-file --base --after --model --review", 1, 1))
     elif cmd == "after":
