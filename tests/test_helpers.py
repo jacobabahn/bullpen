@@ -8,7 +8,7 @@ import unittest
 
 from support import setUpModule, tearDownModule, ROOT  # a temp folder for each module
 from bullpen import (
-    agents, answer, check, cli, core, limit, line_edit, notifications, stepper,
+    agents, answer, cli, core, limit, line_edit, notifications, stepper,
 )
 
 

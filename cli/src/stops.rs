@@ -1,14 +1,13 @@
 //! A task's worker or reviewer stopping (bullpen/stops.py): whether it goes to its
 //! coordinator (triage) or to the person, and a triage passed on to the person once it
-//! is overdue. Nothing in Rust stops a task yet: the watcher's events (T10) and the
-//! commands that hand a task back (T6 on) call these. Python keeps its own (a twin).
+//! is overdue. The watcher's events, `check` and the commands that hand a task back
+//! call these. Python keeps its own (a twin) for prs and tours.
 //!
 //! A task that stopped on something its coordinator can handle (a failed turn, a turn
 //! ended without ready, a message that didn't reach its worker, a reviewer without a
 //! verdict) is "triage": its coordinator hears of it, and settles it with tell, resume,
 //! `review`, `ok` or `ask`. Still there after triage_minutes, or with no coordinator
 //! running, it needs the person ("needs"), as prompts and `ask` do at once.
-#![allow(dead_code)] // its callers move from T6 on
 
 use crate::coordinators::sees_to;
 use crate::news::say;

@@ -42,7 +42,6 @@ pub fn rex_type(session: &str, block: &str, text: &str) -> Res<()> {
 
 /// Type msg into the task's worker. None if it went through, else why not (the caller
 /// leaves the task where it was and says so).
-#[allow(dead_code)] // hand_back's: its callers move from T7 on
 pub fn type_to_worker(t: &Obj, msg: &str) -> Res<Option<String>> {
     let (session, block) = (s(t, "session"), s(t, "block"));
     for argv in [

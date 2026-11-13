@@ -12,8 +12,8 @@ from .core import Fail, run_later
 
 # The modules with commands (cli/src/commands.rs lists their commands in `bullpen --help`'s order).
 MODULES = ("answer", "accept", "stepper", "tours",
-           "check", "auto_accept",
-           "keys", "coordinators", "prs", "events")
+           "auto_accept",
+           "keys", "prs")
 
 # Each command Python owns and the module that declares it, in --help's order. A call
 # imports only its command's module (and what that imports), not all of them: start-up
@@ -24,12 +24,9 @@ COMMANDS = {
     "accept": "accept",
     "tour": "stepper", "_tour": "stepper",
     "tour-comment": "tours",
-    "check": "check",
     "_auto_accept": "auto_accept",
     "keys": "keys",
-    "_coordinator_gone": "coordinators",
     "_prs": "prs",
-    "_event": "events", "_stuck": "events", "_limit": "events", "_gone": "events",
 }
 
 # The modules that register what saving a task sets off (core.on_save), in the order

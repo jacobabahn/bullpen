@@ -1,14 +1,17 @@
 //! A repo's coordinators, and who sees to a task (bullpen/coordinators.py): which one a
 //! pane is, which are alive, and whose a task is; adding one, and dropping those whose
-//! panes are gone (`up`). The watcher's `_coordinator_gone` stays with Python until T10.
+//! panes are gone (`up`), or whose pane the watcher said closed (`_coordinator_gone`).
 //!
 //! cfg["coordinators"] lists them, oldest (the primary) first: {"id": "c1", "block",
 //! "session", "board": {"block", "session"}, "board_others"}. A task belongs to the one
 //! that added it (t["coordinator"]). Who sees to it is that one alone while its pane is
 //! running, else every running coordinator.
 
+use crate::args::{pos, value, Arg, Args, Nargs};
+use crate::jobs::{background, Job};
 use bullpen_core::json::{obj, s, Obj};
-use bullpen_core::repo::{index_block, unindex_block};
+use bullpen_core::paths::self_bin;
+use bullpen_core::repo::{index_block, repo_root, unindex_block};
 use bullpen_core::{Repo, Res};
 use serde_json::{json, Value};
 
@@ -86,6 +89,72 @@ fn drop_coordinator(repo: &mut Repo, c: &Obj) -> Res<()> {
     }
     println!("coordinator {}: its pane is gone, so it is dropped", s(c, "id"));
     Ok(())
+}
+
+/// Seconds before a look at whether a coordinator's pane really closed.
+const GONE_WAIT: &str = "5";
+
+/// The watcher said coordinator c's pane is gone: a few seconds later, look in the
+/// background (a job of its own: jobs.rs), and drop c if its pane really closed.
+pub fn coordinator_gone(repo: &Repo, c: &Obj) {
+    // the tests: no wait, and wait for the look
+    let wait = std::env::var("BULLPEN_GONE_WAIT").unwrap_or_default();
+    let cid = s(c, "id");
+    let argv = vec![
+        self_bin().display().to_string(),
+        "_coordinator_gone".into(),
+        cid.into(),
+        "--wait".into(),
+        if wait.is_empty() { GONE_WAIT.into() } else { wait.clone() },
+    ];
+    let log = repo.dir.join("jobs.log");
+    let job = Job {
+        argv,
+        cwd: &repo.root,
+        log: &log,
+        what: format!("Looking at whether coordinator {cid}'s pane closed"),
+        task: None,
+        pass_fds: vec![],
+    };
+    background(&job, !wait.is_empty());
+}
+
+const GONE: &[Arg] = &[pos("id", Nargs::One, ""), value("--wait", "WAIT", "")];
+
+/// `_coordinator_gone ID [--wait SECONDS]` (background): drop a coordinator whose pane
+/// closed, only while Rex still answers for its session but not for its pane, and has no
+/// pane of bullpen's coordinator label that no coordinator has. So a Rex shutdown or
+/// restart drops nobody: `up` finds the panes again.
+pub fn cmd_coordinator_gone(argv: &[String]) -> Res<i32> {
+    let a = Args::parse("_coordinator_gone", argv, GONE);
+    let wait = match a.opt("--wait") {
+        None => 5.0,
+        Some(w) => match bullpen_core::text::strip(w).parse::<f64>() {
+            Ok(n) => n,
+            Err(_) => crate::args::usage_error("_coordinator_gone", GONE, &format!("argument --wait: invalid float value: '{w}'")),
+        },
+    };
+    if wait > 0.0 {
+        std::thread::sleep(std::time::Duration::from_secs_f64(wait));
+    }
+    let mut repo = Repo::new(repo_root()?)?;
+    let Some(c) = coordinator(&repo, a.arg("id").unwrap_or("")).cloned() else {
+        return Ok(0);
+    };
+    if alive(Some(&c))? {
+        return Ok(0);
+    }
+    let Some(view) = crate::rex::rex_view(s(&c, "session"))? else {
+        return Ok(0); // Rex is down, or restarted with a new session: nobody can tell
+    };
+    let taken: Vec<&str> = coordinators(&repo).into_iter().map(|o| s(o, "block")).collect();
+    let label = crate::rex::coordinator_label(&repo);
+    if crate::rex::find_panes(Some(&view), &label).iter().any(|h| !taken.contains(&h.block.as_str())) {
+        return Ok(0); // a restart brought it back under a new ID
+    }
+    drop_coordinator(&mut repo, &c)?;
+    repo.save()?;
+    Ok(0)
 }
 
 /// Does coordinator c's board show the task? Only one c sees to, or one nobody sees

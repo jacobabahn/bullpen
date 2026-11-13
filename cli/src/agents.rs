@@ -78,7 +78,6 @@ pub fn waits_on(t: &Obj) -> Option<&'static str> {
 
 /// (who, session, block) of the agent the task waits on now, or None: it waits on none,
 /// or that agent has no pane.
-#[allow(dead_code)] // check and the watcher's events use it (T10)
 pub fn waited_on(t: &Obj) -> Option<(&'static str, String, String)> {
     let who = waits_on(t)?;
     let (session, block) = pane(t, who);
