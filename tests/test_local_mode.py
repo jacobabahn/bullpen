@@ -14,6 +14,7 @@ class LocalModeTest(unittest.TestCase):
     bp = BullpenTest.bp
     rex_calls = BullpenTest.rex_calls
     api = BullpenTest.api
+    made = BullpenTest.made
     typed = BullpenTest.typed
     show = BullpenTest.show
     start_task = BullpenTest.start_task
