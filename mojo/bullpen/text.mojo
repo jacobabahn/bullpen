@@ -141,6 +141,66 @@ def textwrap(text: String, width: Int) -> List[String]:
     return lines^
 
 
+# ---------- Python's str methods, with its idea of whitespace and of a line ----------
+
+
+def strip(text: String, lead: Bool = True, trail: Bool = True) -> String:
+    """str.strip(), str.lstrip() (trail False) or str.rstrip() (lead False)."""
+    var cps = List[Codepoint]()
+    for cp in text.codepoints():
+        cps.append(cp)
+    var a = 0
+    var b = len(cps)
+    while lead and a < b and is_space(Int(cps[a])):
+        a += 1
+    while trail and b > a and is_space(Int(cps[b - 1])):
+        b -= 1
+    var out = String()
+    for i in range(a, b):
+        out += String(cps[i])
+    return out^
+
+
+def split_words(text: String) -> List[String]:
+    """str.split(): the words between runs of whitespace."""
+    var out = List[String]()
+    var cur = String()
+    for cp in text.codepoints():
+        if is_space(Int(cp)):
+            if cur.byte_length():
+                out.append(cur)
+                cur = String()
+        else:
+            cur += String(cp)
+    if cur.byte_length():
+        out.append(cur)
+    return out^
+
+
+def splitlines(text: String) -> List[String]:
+    """str.splitlines(): lines split at \\n, \\r\\n, \\r, \\v, \\f, \\x1c-\\x1e, \\x85, U+2028, U+2029."""
+    var out = List[String]()
+    var cur = String()
+    var after_cr = False
+    var ended = True  # nothing since the last break
+    for cp in text.codepoints():
+        var c = Int(cp)
+        if after_cr and c == 0xA:
+            after_cr = False
+            continue
+        after_cr = c == 0xD
+        if (c >= 0xA and c <= 0xD) or (c >= 0x1C and c <= 0x1E) or c == 0x85 or c == 0x2028 or c == 0x2029:
+            out.append(cur)
+            cur = String()
+            ended = True
+        else:
+            cur += String(cp)
+            ended = False
+    if not ended:
+        out.append(cur)
+    return out^
+
+
 def wrap(text: String, w: Int, lines: Int) -> List[String]:
     """text in at most `lines` lines of w columns, the last ending in " …" when cut."""
     var out = textwrap(text, max(w, 1))
