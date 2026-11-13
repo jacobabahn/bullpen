@@ -335,7 +335,7 @@ fn unix_time(t: &[char]) -> Option<i64> {
         let digits: Vec<u32> = (j..j + 10)
             .map(|k| t.get(k).copied().and_then(digit))
             .collect::<Option<_>>()?;
-        let boundary = t.get(j + 10).map_or(true, |&c| !is_word(c));
+        let boundary = t.get(j + 10).is_none_or(|&c| !is_word(c));
         (same && boundary).then(|| digits.iter().fold(0i64, |n, &d| n * 10 + d as i64))
     };
     (0..t.len()).find_map(at)
@@ -449,7 +449,7 @@ fn time_at(t: &[char], i: usize) -> Option<Reset> {
         if t.get(k) == Some(&'.') {
             k += 1;
         }
-        if t.get(k).is_some_and(|&c| ci(c, 'm')) && t.get(k + 1).map_or(true, |&c| !is_word(c)) {
+        if t.get(k).is_some_and(|&c| ci(c, 'm')) && t.get(k + 1).is_none_or(|&c| !is_word(c)) {
             k += 1;
             if t.get(k) == Some(&'.') {
                 k += 1;
@@ -488,7 +488,7 @@ fn zone_at(t: &[char], i: usize) -> Option<String> {
 /// One character of the text against one of a (?i) pattern: re folds case simply,
 /// and also takes İ and ı for i, ſ for s and the Kelvin sign for k.
 fn ci(c: char, p: char) -> bool {
-    c.to_ascii_lowercase() == p.to_ascii_lowercase()
+    c.eq_ignore_ascii_case(&p)
         || match p.to_ascii_lowercase() {
             'i' => matches!(c, '\u{130}' | '\u{131}'),
             's' => c == '\u{17f}',
