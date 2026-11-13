@@ -36,24 +36,18 @@ class SelfUpdateTest(unittest.TestCase):
     def git(self, *args, cwd=None):
         return sh("git", "-C", str(cwd or self.home), *args).strip()
 
-    def move_tour(self, where):
-        """A port's commit in where: `tour` moves to Rust (cli/ changes) and its Python goes.
-        (`tour` is the Python's last command, until T11b.)"""
+    def move_a_command(self, where):
+        """A port's commit in where: a command (`_t11b`, which only the new build has) moves
+        to Rust (cli/ changes). Python has no commands left to lose since T11b."""
         where = Path(where)
-        (where / "cli" / "src" / "main.rs").write_text("// moved: tour\nfn main() { tour() }\n")
-        cli = where / "bullpen" / "cli.py"
-        text = cli.read_text().replace('"tour": "stepper",', "")
-        modules = re.search(r"MODULES = \(([^)]*)\)", text)
-        rest = [m for m in re.findall(r'"(\w+)"', modules.group(1)) if m != "stepper"]
-        cli.write_text(text.replace(modules.group(0), f"MODULES = {tuple(rest)!r}"))
-        (where / "bullpen" / "stepper.py").unlink()
-        sh("git", "-C", str(where), "commit", "-qam", "tour moves to Rust")
+        (where / "cli" / "src" / "main.rs").write_text("// moved: _t11b\nfn main() { _t11b() }\n")
+        sh("git", "-C", str(where), "commit", "-qam", "_t11b moves to Rust")
 
-    def task_moving_tour(self):
+    def task_moving_a_command(self):
         tid = self.start_task()
         wt = Path(self.show(tid)["worktree"])
-        self.move_tour(wt)
-        self.bp("ready", tid, "--summary", "Moved tour.", cwd=wt)
+        self.move_a_command(wt)
+        self.bp("ready", tid, "--summary", "Moved _t11b.", cwd=wt)
         return tid, wt
 
     def wait_for(self, what, cond, wait=15):
@@ -65,14 +59,14 @@ class SelfUpdateTest(unittest.TestCase):
 
     def assert_rebuilt_and_pushed(self, builds=2):
         self.wait_for("no push", lambda: self.git("rev-parse", "main", cwd=self.backup) == self.git("rev-parse", "main"))
-        self.wait_for("no rebuild", lambda: "tour()" in (self.board("bullpen") or ""))
+        self.wait_for("no rebuild", lambda: "_t11b()" in (self.board("bullpen") or ""))
         self.settle()
         self.assertEqual(self.builds(), builds)
-        self.assertEqual(self.bp("tour").stdout, "tour runs in the new build\n")
+        self.assertEqual(self.bp("_t11b").stdout, "_t11b runs in the new build\n")
 
     def test_a_plain_accept_rebuilds_and_pushes(self):
         self.bp("config", "--review", "off")
-        tid, wt = self.task_moving_tour()
+        tid, wt = self.task_moving_a_command()
         out = self.bp("accept", tid).stdout
         self.assertIn("pushing main to backup in the background", out)
         self.assertIn("rebuilding bullpen's command line in the background", out)
@@ -82,7 +76,7 @@ class SelfUpdateTest(unittest.TestCase):
         # BP-118: the verdict closes the reviewer's pane last, and Claude Code kills the
         # verdict's tree as it ends: the push and the build were still its children
         self.bp("config", "--auto-accept", "on")
-        tid, wt = self.task_moving_tour()
+        tid, wt = self.task_moving_a_command()
         reviewer = self.show(tid)["review"]["block"]
         (self.fake / f"kills_tree_{reviewer}").write_text("")
         (self.fake / "cargo_slow").write_text("1")  # as for real, both take a while
@@ -105,12 +99,12 @@ class SelfUpdateTest(unittest.TestCase):
         # BP-119: the old build handed the background build (_build_board) to the Python,
         # which had none and waited for the build that's running: its own, for ever
         self.bp("config", "--review", "off")
-        tid, wt = self.task_moving_tour()
+        tid, wt = self.task_moving_a_command()
         self.old_build("build", "build-board", "_build_board", "up", "doctor", "guide")
         self.bp("accept", tid)
-        self.wait_for("no rebuild", lambda: "tour()" in (self.board("bullpen") or ""), wait=8)
+        self.wait_for("no rebuild", lambda: "_t11b()" in (self.board("bullpen") or ""), wait=8)
         self.settle()
-        self.assertEqual(self.bp("tour").stdout, "tour runs in the new build\n")
+        self.assertEqual(self.bp("_t11b").stdout, "_t11b runs in the new build\n")
         self.assertNotIn("case $1 in build|", self.board("bullpen"))  # the new build is in place
         self.bp("build")  # a moved command runs, in Rust
 
@@ -124,8 +118,8 @@ class SelfUpdateTest(unittest.TestCase):
         sh("git", "-C", str(wt), "add", ".")
         sh("git", "-C", str(wt), "commit", "-qm", "Fix")
         self.bp("ready", tid, "--summary", "Fixed.", cwd=wt)
-        # T7's merge, not yet built: cli/ changes (the new build answers tour itself) and verdict's Python is gone
-        (self.home / "cli" / "src" / "main.rs").write_text("// moved: tour\nfn main() { tour() }\n")
+        # T7's merge, not yet built: cli/ changes (the new build answers _t11b itself) and verdict's Python is gone
+        (self.home / "cli" / "src" / "main.rs").write_text("// moved: _t11b\nfn main() { _t11b() }\n")
         self.git("commit", "-qam", "verdict moves to Rust")
         self.old_build("verdict", "ready", "review")
         p = self.bp("verdict", tid, "approve", "--summary", "Fine.", cwd=wt)
@@ -133,13 +127,13 @@ class SelfUpdateTest(unittest.TestCase):
         self.assertIn("verdict recorded: approve", p.stdout)
         self.assertEqual(self.show(tid)["status"], "done")
         self.assertNotIn("case $1 in verdict|", self.board("bullpen"))  # the new build is in place
-        self.assertEqual(self.bp("tour").stdout, "tour runs in the new build\n")
+        self.assertEqual(self.bp("_t11b").stdout, "_t11b runs in the new build\n")
         self.wait_for("no push", lambda: self.git("rev-parse", "main", cwd=self.backup) == self.git("rev-parse", "main"))
         self.settle()
         self.assertNotIn(" job: ", self.news_log())
 
     def test_a_tour_through_the_old_build_catches_up_and_is_written(self):
-        # BP-119 for T11a: tour (Python) starts _tour in the background through the old
+        # BP-119 for T11a: tour (Rust since T11b) starts _tour in the background through the old
         # build, which hands it to the Python, which no longer has it: the job catches up
         import test_tour
         agent = self.fake / "tour-agent"
@@ -172,7 +166,7 @@ class SelfUpdateTest(unittest.TestCase):
         # (T8 moved it); the push catches up (waits for accept's rebuild, or builds both
         # programs itself, so accept's rebuild skips), then the new build pushes
         self.bp("config", "--review", "off")
-        tid, wt = self.task_moving_tour()
+        tid, wt = self.task_moving_a_command()
         self.old_build("_push", "close", "drop", "finish")
         self.bp("accept", tid)
         self.assert_rebuilt_and_pushed()
@@ -189,7 +183,7 @@ class SelfUpdateTest(unittest.TestCase):
         self.bp("up")
         cfg = next((self.tmp / "state" / "repos").glob("*/config.json"))
         block = json.loads(cfg.read_text())["coordinators"][0]["block"]
-        (self.home / "cli" / "src" / "main.rs").write_text("// moved: tour\nfn main() { tour() }\n")
+        (self.home / "cli" / "src" / "main.rs").write_text("// moved: _t11b\nfn main() { _t11b() }\n")
         self.git("commit", "-qam", "_coordinator_gone moves to Rust")
         self.old_build("_coordinator_gone")
         (self.fake / "alive" / block).unlink()  # its pane closed
@@ -197,7 +191,7 @@ class SelfUpdateTest(unittest.TestCase):
         self.bp("_gone", block)
         self.assertEqual(json.loads(cfg.read_text())["coordinators"], [])  # dropped
         self.assertNotIn("case $1 in _coordinator_gone|", self.board("bullpen"))  # the new build is in place
-        self.assertEqual(self.bp("tour").stdout, "tour runs in the new build\n")
+        self.assertEqual(self.bp("_t11b").stdout, "_t11b runs in the new build\n")
         self.settle()
         self.assertNotIn(" job: ", self.news_log())
 
@@ -207,7 +201,7 @@ class SelfUpdateTest(unittest.TestCase):
         # catches up, then the new build accepts a task that moves another command: it
         # merges, rebuilds again and pushes
         self.bp("config", "--auto-accept", "on")
-        tid, wt = self.task_moving_tour()
+        tid, wt = self.task_moving_a_command()
         (self.home / "core" / "src" / "lib.rs").write_text("// T9's merge\n")
         self.git("commit", "-qam", "accept moves to Rust")
         self.old_build("_auto_accept", "accept", "_prs", "keys")
@@ -226,9 +220,9 @@ class SelfUpdateTest(unittest.TestCase):
         # build); the accept goes on to the end in the build it started in, and the next
         # call runs the new one
         self.bp("config", "--review", "off")
-        tid, wt = self.task_moving_tour()
+        tid, wt = self.task_moving_a_command()
         built = self.target / "bullpen"
-        self.bp("config", "--setup", f"i=0; until grep -q 'tour()' {built}; do sleep 0.05; i=$((i+1)); "
+        self.bp("config", "--setup", f"i=0; until grep -q '_t11b()' {built}; do sleep 0.05; i=$((i+1)); "
                 f"[ $i -gt 300 ] && exit 1; done; echo the new build is in")
         nxt = self.bp("add", "Next", "--brief", "x", "--after", tid).stdout.strip()
         p = self.bp("accept", tid)
@@ -238,9 +232,9 @@ class SelfUpdateTest(unittest.TestCase):
         self.assertEqual(self.show(nxt)["status"], "working")  # its setup saw the new build first
         state = next((self.tmp / "state" / "repos").iterdir())
         self.assertIn("the new build is in", (state / "briefs" / f"{nxt}.setup.log").read_text())
-        self.assertIn("tour()", built.read_text())  # in place before the accept was done
+        self.assertIn("_t11b()", built.read_text())  # in place before the accept was done
         self.settle()
-        self.assertEqual(self.bp("tour").stdout, "tour runs in the new build\n")
+        self.assertEqual(self.bp("_t11b").stdout, "_t11b runs in the new build\n")
         self.assertNotIn(" job: ", self.news_log())
 
     def with_a_stuck_build(self, *args):
@@ -263,9 +257,9 @@ class SelfUpdateTest(unittest.TestCase):
                       f"if it's stuck, stop it (`kill {os.getpid()}`)", p.stderr)
 
     def test_a_moved_command_stops_waiting_for_a_build_that_never_ends(self):
-        self.move_tour(self.home)
-        p = self.with_a_stuck_build("tour")
-        self.assertIn("`tour` is in the build that's running: waiting for it", p.stderr)
+        self.move_a_command(self.home)
+        p = self.with_a_stuck_build("_t11b")
+        self.assertIn("`_t11b` is in the build that's running: waiting for it", p.stderr)
         self.assert_stuck(p)
         self.assertEqual(p.stdout, "")
 
@@ -277,42 +271,42 @@ class SelfUpdateTest(unittest.TestCase):
     def failed_old_build(self):
         """After T5's merge, by hand: the stuck build killed, its source's build marked
         failed, the old build in place (BP-119)."""
-        self.move_tour(self.home)
+        self.move_a_command(self.home)
         self.old_build("build", "build-board", "_build_board", "up", "doctor", "guide")
         (self.fake / "cargo_fails").write_text("")
-        self.bp("tour", ok=False)
+        self.bp("_t11b", ok=False)
         (self.fake / "cargo_fails").unlink()
-        self.assertIn("its last build failed", self.bp("tour", ok=False).stderr)
+        self.assertIn("its last build failed", self.bp("_t11b", ok=False).stderr)
 
     def test_build_rebuilds_a_failed_build_with_the_old_build(self):
         self.failed_old_build()
         self.assertIn("built bullpen's command line", self.bp("build").stdout)
-        self.assertEqual(self.bp("tour").stdout, "tour runs in the new build\n")
+        self.assertEqual(self.bp("_t11b").stdout, "_t11b runs in the new build\n")
 
     def test_install_rebuilds_a_failed_build_with_the_old_build(self):
         self.failed_old_build()
         p = self.install()
         self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertEqual(self.bp("tour").stdout, "tour runs in the new build\n")
-        self.assertIn("tour()", self.board("bullpen"))
+        self.assertEqual(self.bp("_t11b").stdout, "_t11b runs in the new build\n")
+        self.assertIn("_t11b()", self.board("bullpen"))
 
     def test_a_moved_command_before_its_build_builds_it_first(self):
-        self.move_tour(self.home)  # merged, not yet built: the old build hands `tour` to the new Python
-        p = self.bp("tour")
-        self.assertEqual(p.stdout, "tour runs in the new build\n")
-        self.assertIn("`tour` is newer than this build: building it first", p.stderr)
+        self.move_a_command(self.home)  # merged, not yet built: the old build hands `_t11b` to the new Python
+        p = self.bp("_t11b")
+        self.assertEqual(p.stdout, "_t11b runs in the new build\n")
+        self.assertIn("`_t11b` is newer than this build: building it first", p.stderr)
         self.assertEqual(self.builds(), 2)
-        self.assertEqual(self.bp("tour").stderr, "")  # the next call runs the new build at once
+        self.assertEqual(self.bp("_t11b").stderr, "")  # the next call runs the new build at once
 
     def test_a_moved_command_in_a_fixture_never_touches_the_build(self):
         # BP-121: a test's or compare.sh's call (BULLPEN_NO_BUILD) to a command missing from its Python
-        self.move_tour(self.home)
+        self.move_a_command(self.home)
         (self.target / "build.lock").unlink(missing_ok=True)
         before = {f.name: f.read_bytes() for f in self.target.iterdir() if f.is_file()}
         self.env["BULLPEN_NO_BUILD"] = "1"
-        p = self.bp("tour", ok=False)
+        p = self.bp("_t11b", ok=False)
         self.assertEqual((p.returncode, p.stderr),
-                         (2, "bullpen: `tour` isn't in this build of bullpen: rebuild it with `bullpen build`\n"))
+                         (2, "bullpen: `_t11b` isn't in this build of bullpen: rebuild it with `bullpen build`\n"))
         self.assertEqual(self.builds(), 1)  # setUp's: no cargo
         self.assertEqual({f.name: f.read_bytes() for f in self.target.iterdir() if f.is_file()}, before)  # no lock, no stamp
         self.assertIn("builds are off here", self.bp("build", ok=False).stderr)
@@ -321,31 +315,31 @@ class SelfUpdateTest(unittest.TestCase):
         self.assertFalse((self.target / "build.lock").exists())
 
     def test_a_job_of_a_call_that_caught_up_catches_up_too(self):
-        self.move_tour(self.home)
+        self.move_a_command(self.home)
         self.env["BULLPEN_CAUGHT_UP"] = "1"  # its parent's: an auto-accept that caught up, say
-        self.assertEqual(self.bp("tour").stdout, "tour runs in the new build\n")
+        self.assertEqual(self.bp("_t11b").stdout, "_t11b runs in the new build\n")
 
     def test_a_moved_command_waits_for_the_build_that_is_running(self):
-        self.move_tour(self.home)
+        self.move_a_command(self.home)
         lock = (self.target / "build.lock").open("a")
         fcntl.flock(lock, fcntl.LOCK_EX)  # a build is running
-        call = subprocess.Popen([str(self.bin), "tour"], cwd=self.home, env=self.env, text=True,
+        call = subprocess.Popen([str(self.bin), "_t11b"], cwd=self.home, env=self.env, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         time.sleep(0.5)
         self.assertIsNone(call.poll())  # waiting on it
         lock.close()  # it's done (it didn't build: the call builds it)
         out, err = call.communicate(timeout=15)
-        self.assertIn("`tour` is in the build that's running: waiting for it", err)
-        self.assertEqual(out, "tour runs in the new build\n")
+        self.assertIn("`_t11b` is in the build that's running: waiting for it", err)
+        self.assertEqual(out, "_t11b runs in the new build\n")
 
     def test_a_moved_command_with_a_failed_build_says_so(self):
-        self.move_tour(self.home)
+        self.move_a_command(self.home)
         (self.fake / "cargo_fails").write_text("")
-        p = self.bp("tour", ok=False)
+        p = self.bp("_t11b", ok=False)
         self.assertEqual(p.returncode, 2)
-        self.assertIn("`tour` isn't in this build of bullpen: rebuild it with `bullpen build`", p.stderr)
+        self.assertIn("`_t11b` isn't in this build of bullpen: rebuild it with `bullpen build`", p.stderr)
         self.assertIn("its last build failed", p.stderr)
-        p = self.bp("tour", ok=False)  # a source whose build failed isn't tried again on every call
+        p = self.bp("_t11b", ok=False)  # a source whose build failed isn't tried again on every call
         self.assertNotIn("building it first", p.stderr)
         self.assertEqual(self.builds(), 2)
 
@@ -370,7 +364,7 @@ class SelfUpdateTest(unittest.TestCase):
     def test_a_build_restarts_a_running_watcher(self):
         self.bp("up")
         before = self.watcher_block()
-        self.move_tour(self.home)
+        self.move_a_command(self.home)
         self.bp("build")
         self.assertNotEqual(self.watcher_block(), before)
 

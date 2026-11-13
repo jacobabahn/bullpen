@@ -1,6 +1,5 @@
 """bullpen's functions, called directly from the package's modules."""
 
-import argparse
 import datetime as dt
 import re
 import unittest
@@ -44,24 +43,6 @@ class HelpersTest(unittest.TestCase):
         self.assertEqual(listed, board)
 
     # ---------- help and ls ----------
-
-    def test_every_command_is_in_one_help_group(self):
-        sub = next(a for a in cli.parser()._actions if a.choices)
-        titles = [title for title, _ in cli.GROUPS]
-        grouped = {n for n, p in sub.choices.items() if p.group}
-        self.assertTrue(all(p.group in titles for p in sub.choices.values() if p.group))
-        self.assertEqual(grouped, {n for n in sub.choices if not n.startswith("_")})
-
-    def test_every_command_and_option_has_help_but_the_internal_ones(self):
-        sub = next(a for a in cli.parser()._actions if a.choices)
-        listed = {a.dest for a in sub._choices_actions}
-        for name, p in sub.choices.items():
-            self.assertEqual(name in listed, not name.startswith("_"), name)
-            if name.startswith("_"):
-                continue
-            for a in p._actions:
-                if a.dest != "help" and a.help != argparse.SUPPRESS:
-                    self.assertTrue(a.help, f"{name} {a.option_strings or a.dest}")
 
     def test_status_words_are_the_boards(self):
         w = core.status_words

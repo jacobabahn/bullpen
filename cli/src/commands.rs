@@ -14,6 +14,8 @@ pub enum Owner {
     /// Rust: the command's function, given its arguments (after the name).
     Rust(fn(&[String]) -> Res<i32>),
     /// The Python bullpen (bin/bullpen-py), handed the whole call before anything is read or written.
+    /// No command is Python's since T11b moved `tour`; T13 removes the hand-over.
+    #[allow(dead_code)]
     Python,
     /// Another name for the command named here, which runs instead (with its own name).
     Alias(&'static str),

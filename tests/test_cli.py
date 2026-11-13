@@ -263,13 +263,9 @@ class EntryTest(BullpenTest):
     def test_the_table_is_the_commands_python_declares(self):
         from bullpen import cli
         table = json.loads(self.bp("_commands").stdout)
+        # none, since T11b moved `tour`: the Python is only the catch-up of an old build's call (T13 removes it)
         self.assertEqual([c["name"] for c in table if c["owner"] == "python"], list(cli.COMMANDS))
-        sub = next(a for a in cli.parser()._actions if a.choices)
-        helps = {a.dest: a.help for a in sub._choices_actions}
-        for c in table:
-            if c["owner"] == "python":
-                self.assertEqual((c["group"], c["help"] or None),
-                                 (sub.choices[c["name"]].group, helps.get(c["name"])), c["name"])
+        self.assertEqual(cli.COMMANDS, {})
         self.assertEqual({c["name"]: c["owner"] for c in table if c["owner"] != "python"},
                          {"build-board": "alias of build", "_nop": "rust", "_commands": "rust",
                           **dict.fromkeys(["go", "hide", "adopt", "board", "ls", "show", "diff", "add", "after",
@@ -290,8 +286,6 @@ class EntryTest(BullpenTest):
         self.assertEqual((p.returncode, p.stderr), (2, "bullpen: no command `acept`. Did you mean `accept`? "
                                                        "`bullpen --help` lists them.\n"))
         self.assertEqual(self.strict("_nop").returncode, 0)
-        p = self.strict("tour")  # Python's: handed over, which strict mode refuses
-        self.assertEqual((p.returncode, p.stderr), (3, "bullpen-rust: not in Rust: tour\n"))
 
     def test_a_python_command_reaches_python_whole(self):
         # the old name of build is build, as Python owns it
@@ -350,18 +344,16 @@ class EntryTest(BullpenTest):
         self.assertEqual(p.returncode, 2)
         self.assertEqual(p.stderr, "bullpen: `_nop` isn't in this build of bullpen: rebuild it with `bullpen build`\n")
 
-    def test_without_a_build_bin_bullpen_runs_the_python(self):
+    def test_without_a_build_bin_bullpen_runs_the_python_which_says_to_build(self):
         home = self.tmp / "bullpen"
         for d in ("bin", "bullpen"):
             shutil.copytree(ROOT / d, home / d, ignore=shutil.ignore_patterns("__pycache__"))
         run = lambda *a: subprocess.run([str(home / "bin" / "bullpen"), *a], cwd=self.repo, env=self.env,
                                         text=True, capture_output=True)
-        p = run("tour", "--help")
-        self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertIn("usage: bullpen tour", p.stdout)
-        p = run("--help")
-        self.assertEqual(p.returncode, 2)
-        self.assertEqual(p.stderr, f"bullpen: bullpen isn't built: run {home / 'install.sh'} (it needs cargo)\n")
+        for args in (["tour", "--help"], ["--help"]):  # Python has no commands of its own since T11b
+            p = run(*args)
+            self.assertEqual(p.returncode, 2)
+            self.assertEqual(p.stderr, f"bullpen: bullpen isn't built: run {home / 'install.sh'} (it needs cargo)\n")
 
 
 class CodeTest(unittest.TestCase):
@@ -441,17 +433,6 @@ class CodeTest(unittest.TestCase):
             sub = next(a for a in cli.parser([m])._actions if a.choices)
             declared += [(n, m) for n in sub.choices]
         self.assertEqual(declared, list(cli.COMMANDS.items()))
-
-    def test_a_command_imports_only_what_it_needs(self):
-        code = ("import sys; sys.argv = ['bullpen', 'tour', '--help']\n"
-                "from bullpen import cli\n"
-                "try: cli.main()\n"
-                "except SystemExit: pass\n"
-                "print(' '.join(m for m in sys.modules if m.startswith('bullpen.')))")
-        p = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True)
-        loaded = set(p.stdout.split())
-        self.assertIn("bullpen.stepper", loaded)
-        self.assertNotIn("bullpen.board_build", loaded)
 
     def calls(self, name):
         """(module, function) for each call of name in the package."""
