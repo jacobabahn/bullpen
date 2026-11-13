@@ -124,3 +124,8 @@ def clock(when: Float64, at: Float64) -> String:
     if days > 0 and days < 7:
         return String(materialize[DAYS]()[w.weekday]) + " " + text
     return String(materialize[MONTHS]()[w.month - 1]) + " " + String(w.day) + " " + text
+
+
+def seconds_since(stamp: String) raises -> Float64:
+    """Seconds from an ISO stamp to now (core.seconds_since)."""
+    return now() - parse_iso(stamp)
