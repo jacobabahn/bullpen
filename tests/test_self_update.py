@@ -3,6 +3,7 @@ its Python goes): the rebuild and the push happen whichever way the accept ran, 
 in the window before the new build waits for it, and a job that fails is news."""
 
 import fcntl
+import json
 import os
 import subprocess
 import time
@@ -129,6 +130,34 @@ class SelfUpdateTest(unittest.TestCase):
         self.assertNotIn("case $1 in verdict|", self.board("bullpen"))  # the new build is in place
         self.assertEqual(self.bp("keys").stdout, "keys runs in the new build\n")
         self.wait_for("no push", lambda: self.git("rev-parse", "main", cwd=self.backup) == self.git("rev-parse", "main"))
+        self.settle()
+        self.assertNotIn(" job: ", self.news_log())
+
+    def test_a_tour_through_the_old_build_catches_up_and_is_written(self):
+        # BP-119 for T11a: tour (Python) starts _tour in the background through the old
+        # build, which hands it to the Python, which no longer has it: the job catches up
+        import test_tour
+        agent = self.fake / "tour-agent"
+        agent.write_text(test_tour.FAKE_TOUR)
+        agent.chmod(0o755)
+        (self.fake / "tour_out").write_text('{"steps": [{"title": "The fix", "note": "", "hunks": []}]}')
+        (self.tmp / "xdg" / "bullpen").mkdir(parents=True, exist_ok=True)
+        (self.tmp / "xdg" / "bullpen" / "config.json").write_text(json.dumps({"tour": [str(agent)]}))
+        tid = self.start_task()
+        wt = Path(self.show(tid)["worktree"])
+        (wt / "fix.txt").write_text("fixed\n")
+        sh("git", "-C", str(wt), "add", ".")
+        sh("git", "-C", str(wt), "commit", "-qm", "Fix")
+        self.bp("config", "--review", "off")
+        self.bp("ready", tid, "--summary", "Fixed.", cwd=wt)
+        # T11a's merge, not yet built: cli/ changes, and _tour's Python is gone
+        (self.home / "cli" / "src" / "main.rs").write_text("// moved: keys\nfn main() { keys() }\n")
+        self.git("commit", "-qam", "_tour moves to Rust")
+        self.old_build("_tour", "tour-comment")
+        self.assertIn("writing a tour of", self.bp("tour", tid).stdout)
+        self.wait_for("no tour", lambda: (self.show(tid).get("tour") or {}).get("state") == "written", wait=30)
+        self.assertNotIn("case $1 in _tour|", self.board("bullpen"))  # the new build is in place
+        self.assertEqual(self.bp("keys").stdout, "keys runs in the new build\n")
         self.settle()
         self.assertNotIn(" job: ", self.news_log())
 

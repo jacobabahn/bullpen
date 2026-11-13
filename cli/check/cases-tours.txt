@@ -1,0 +1,32 @@
+# T11a: tour-comment, and _tour (the tour agent: a fake one, from the fixture's touragent)
+env:FIXTURE=toured tour-comment BP-17
+env:FIXTURE=toured tour-comment BP-17 --json
+env:FIXTURE=toured tour-comment BP-17 2 Keep it, but say why.
+env:FIXTURE=toured tour-comment BP-17 1 "  spaced   out  "
+env:FIXTURE=toured tour-comment BP-17 3 Out of range
+env:FIXTURE=toured tour-comment BP-17 0 Out of range
+env:FIXTURE=toured tour-comment BP-17 1
+env:FIXTURE=toured tour-comment BP-17 1 "   "
+env:FIXTURE=toured tour-comment BP-17 --remove 3
+env:FIXTURE=toured tour-comment BP-17 --remove 2
+env:FIXTURE=toured tour-comment bp-17 --rem 1
+tour-comment BP-17
+tour-comment BP-17 --json
+tour-comment BP-17 1 No tour yet
+tour-comment BP-17 --remove 1
+tour-comment BP-404 1 x
+usage tour-comment
+usage tour-comment BP-17 one two
+usage tour-comment BP-17 --remove x
+tour-comment --help
+env:FIXTURE=touragent _tour BP-17
+env:FIXTURE=touragent _tour BP-17 $(printf 'Here it is:\n{"steps": [{"title": "x"}]}\nFixed:\n{"steps": [{"title": "Docs", "hunks": [{"file": "docs.md", "lines": "1-1"}, {"file": "gone.md"}]}]}\n' >"$FAKE_DIR/tour_out")
+env:FIXTURE=touragent _tour BP-17 $(printf '{"type": "result", "result": "", "structured_output": {"steps": [{"title": "S", "note": "", "hunks": []}]}}' >"$FAKE_DIR/tour_out")
+env:FIXTURE=touragent _tour BP-17 $(printf 'no tour here' >"$FAKE_DIR/tour_out")
+env:FIXTURE=touragent _tour BP-17 $(printf '{"steps": [{"title": "x", "hunks": "docs.md"}]}' >"$FAKE_DIR/tour_out")
+env:FIXTURE=touragent _tour BP-17 $(printf 'oops\n' >"$FAKE_DIR/tour_out"; echo 3 >"$FAKE_DIR/tour_exit")
+env:FIXTURE=touragent _tour BP-17 $(printf '{"type": "result", "is_error": true, "subtype": "error_max_turns"}' >"$FAKE_DIR/tour_out")
+env:FIXTURE=touragent _tour BP-3
+env:FIXTURE=touragent _tour BP-1
+env:FIXTURE=touragent,touropen,panes _tour BP-17
+env:FIXTURE=touragent,touropen _tour BP-17

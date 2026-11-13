@@ -484,6 +484,34 @@ def main(d, now):
         commit, base, _, _ = covers(wt17)
         retask(17, tour_sent={"n": 1, "count": 1, "file": str(sdir / "briefs" / "BP-17.tour-comments.md"),
                               "commit": commit, "base": base})
+    if "toured" in extras:  # BP-17's tour, written on its commit, with two draft comments on it
+        commit, base, patch, _ = covers(wt17)
+        steps = [{"title": "The docs page", "note": "A new page.", "hunks": [{"file": "docs.md", "lines": [1, 1]}]},
+                 {"title": "Other changes", "note": "The changes no step above covers.", "hunks": [{"file": "x"}]}]
+        (sdir / "briefs" / "BP-17.tour.json").write_text(json.dumps(
+            {"task": "BP-17", "commit": commit, "base": base, "base_ref": "main", "patch": patch,
+             "written": stamp(10), "model": None, "steps": steps}, indent=2) + "\n")
+        drafts = [{"id": n, "step": st, "title": steps[st - 1]["title"], "hunks": steps[st - 1]["hunks"],
+                   "commit": commit, "text": text, "at": stamp(5)}
+                  for n, st, text in ((1, 1, "Say why."), (3, 2, "Is x needed?"))]
+        (sdir / "briefs" / "BP-17.tour-comments.json").write_text(json.dumps({"next": 4, "comments": drafts},
+                                                                             indent=2) + "\n")
+        retask(17, tour={"state": "written", "at": stamp(10), "commit": commit})
+    if "touragent" in extras:  # a fake tour agent: it answers $FAKE_DIR/tour_out (a tour of BP-17 by default)
+        agent = fake / "tour-agent"
+        agent.write_text("#!/bin/sh\ncat >/dev/null\nd=$FAKE_DIR\n"
+                         "if [ -f \"$d/tour_out\" ]; then cat \"$d/tour_out\"; else echo '{\"steps\": "
+                         "[{\"title\": \"Docs\", \"note\": \"The page.\", \"hunks\": [{\"file\": \"docs.md\"}]}]}'; fi\n"
+                         "exit \"$(cat \"$d/tour_exit\" 2>/dev/null || echo 0)\"\n")
+        agent.chmod(0o755)
+        (sdir / "briefs" / "BP-17.md").write_text("Write the docs.\n")
+        (sdir / "briefs" / "BP-17.review-1.findings.md").write_text("Too short.\n")
+        path = d / "config" / "bullpen" / "config.json"
+        path.write_text(json.dumps({**json.loads(path.read_text()), "tour": [str(agent)]}, indent=2) + "\n")
+        retask(17, tour={"state": "writing", "at": stamp(1), "pid": 1}, note="tour failed: before")
+    if "touropen" in extras:  # the person asked on the board for BP-17's tour to open once written
+        retask(17, tour={"state": "writing", "at": stamp(1), "pid": 1,
+                         "open": {"session": "session:1", "from": "blk2"}})
     if "verdicts" in extras:  # reviewers in panes for each kind of review
         retask(36, review={"round": 1, "kind": "rebase", "block": "blk17", "session": "session:1",
                            "verdict": None}, commits=2)

@@ -45,7 +45,7 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   catch-up of a command an old build hands over), `board.py` (the board's paths, for
   board_build) and `jobs.py`; and `start.py` (`launch` and `hand_back` for accept,
   prs and tours; `waits_phrase` for task_line),
-  `rules.py` (`task_rules`, for review), `hooks.py` (the teardown, for close),
+  `rules.py` (`task_rules`, for review), `hooks.py` (the teardown, for close), `tours.py` (for the stepper),
   `review.py` (what a review covers, `start_review`,
   `keep_approval`, `close_reviewer`, for accept, prs, tours and close)
   and `close.py` (`close`, `close_task`, for accept and auto-accept). There is one bridge, the run queue: a Python save that frees a
@@ -160,6 +160,11 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   progress (`_stuck`) and the usage limit's reset (`_limit`)
 - `check.rs`: `check`, and `--fix`, which applies the events the watcher missed
   through `events::event` and `events::gone`
+- `tours/`: guided review tours. `mod.rs`: a tour's files, the diff it is written on
+  (`diff_files`, `covers`), its state (`tour_state`, `tour_stale`) and a step's patch
+  (`step_diff`); `write.rs`: the tour agent, `_tour` (run it, check its answer against
+  the diff, write the tour, and open the stepper where the board asked); `comments.rs`:
+  `tour-comment`. Python's stepper starts `_tour`, for `tour --wait` too
 
 ## The Python
 
@@ -194,7 +199,8 @@ importing the one with the command being run, or all of them for `--help`):
 - `close.py`: the one close step (`close`, `close_task`) for accept and auto-accept (a
   twin)
 - `line_edit.py`: typing on a terminal, for the stepper (a twin of `line_edit.rs`)
-- `tours.py`: guided review tours and the person's comments on them
+- `tours.py`: a tour's state and diff, and sending the person's comments, for the
+  stepper (a twin of `cli/src/tours/`; the tour agent and `tour-comment` are Rust's)
 - `stepper.py`: reading a tour on the board, and the `tour` command that opens it
 - `board.py`: where the board's program is built (for board_build)
 - `board_build.py`: rebuilding bullpen's command line and the board when their source
@@ -306,8 +312,8 @@ higher one, the higher one registers with the lower:
   whose news follows the command's) goes to `core.later(key, fn)`. `cli.main` runs
   it when the command returns (`core.run_later`), and a command that closes the pane
   it runs in runs it first: `rex.close_last` closes a pane after it.
-- A tour written in the background opens in the stepper through the `on_written`
-  function the stepper hands `tours.write_tour`.
+- A tour is written by Rust's `_tour` (`cli/src/tours/write.rs`), which opens it in
+  the stepper once written when the board asked for that (the task's `tour.open`).
 
 A file stays under 1,000 lines unless there's a good reason; a test
 (`tests/test_cli.py`) holds every Python module and every `.rs` file in `core/` and

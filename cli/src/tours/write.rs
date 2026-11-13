@@ -154,6 +154,9 @@ pub fn json_objects(text: &str) -> Vec<Value> {
     out
 }
 
+/// A tour's steps, the references dropped, and a note on any text around it.
+pub type Parsed = (Vec<Value>, Vec<String>, Option<String>);
+
 /// What the agent answered: claude's structured output, or its text.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Answer {
@@ -164,7 +167,7 @@ pub enum Answer {
 /// The checked steps of an agent's answer: the text as JSON, else the last JSON object
 /// in it that is a tour. Err for an answer with no tour. Returns (steps, references
 /// dropped, a note on any text around the tour, else None).
-pub fn parse_tour(answer: &Answer, files: &[DiffFile]) -> Result<(Vec<Value>, Vec<String>, Option<String>), String> {
+pub fn parse_tour(answer: &Answer, files: &[DiffFile]) -> Result<Parsed, String> {
     let text = match answer {
         Answer::Data(v) => {
             let (steps, dropped) = tour_format(v, files)?;
