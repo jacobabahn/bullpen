@@ -59,6 +59,25 @@ FAKE_REX = textwrap.dedent("""\
         sys.exit(0 if (alive / a[2]).exists() else 1)
     elif a[:2] == ["block", "close"]:
         (alive / a[2]).unlink(missing_ok=True)
+        if (d / f"kills_tree_{a[2]}").exists():
+            # its program is Claude Code, which kills the tree of the command it ran (the one
+            # closing it, here) as it ends: every descendant by parent, new sessions too
+            import signal, subprocess
+            kids = {}
+            for row in subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True).stdout.splitlines():
+                pid, ppid = map(int, row.split())
+                kids.setdefault(ppid, []).append(pid)
+            tree = [os.getppid()]
+            for pid in tree:
+                tree += kids.get(pid, [])
+            reg.write_text(json.dumps(R))
+            for pid in tree:
+                if pid != os.getpid():
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+            sys.exit(0)
     elif a[0] == "capture":
         own = d / f"screen_{a[a.index('-b') + 1]}"  # one pane's screen, else every pane's
         screen = own if own.exists() else d / "screen"  # what the tests put on screen, else two lines

@@ -55,6 +55,15 @@ only ones a command imports later), so it runs the old code to the end and never
 old and new. What it starts after the merge runs the new code: the background push,
 the watcher's calls, a rebuilt board.
 
+What an accept starts in the background (the push, the rebuild, an auto-accept, a
+tour, ...) leaves the command's process tree at once (a double fork), so it outlives
+the command and its pane. An auto-accept runs in the reviewer's pane and closes it
+last, and Claude Code kills the whole tree of the command it ran as it ends, new
+sessions too: a job still the command's child died with it (BP-118). A job's output
+goes to `jobs.log` in the repo's state folder, and a job that fails without saying so
+itself (killed, or a traceback) is one news line: `Pushing main to backup failed:
+... Log: .../jobs.log`.
+
 ## Auto-accept
 
 Off by default: you accept each task yourself. Turn it on with `bullpen config

@@ -1,10 +1,10 @@
 """A repo's coordinators, and who sees to a task."""
 
 import os
-import subprocess
 import time
 
 from .core import Repo, SELF, command, index_block, repo_root, unindex_block
+from .jobs import background
 from .rex import coordinator_label, find_panes, rex_alive, rex_close, rex_view
 
 
@@ -115,11 +115,8 @@ def coordinator_gone(repo, c):
     """The watcher said coordinator c's pane is gone: a few seconds later, look in the
     background, and drop c if its pane really closed."""
     wait = os.environ.get("BULLPEN_GONE_WAIT")  # the tests: no wait, and wait for the look
-    p = subprocess.Popen([SELF, "_coordinator_gone", c["id"], "--wait", wait or str(GONE_WAIT)],
-                         cwd=repo.root, start_new_session=True, stdin=subprocess.DEVNULL,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if wait:
-        p.wait()
+    background([SELF, "_coordinator_gone", c["id"], "--wait", wait or str(GONE_WAIT)], repo.root,
+               repo.dir / "jobs.log", f"Looking at whether coordinator {c['id']}'s pane closed", wait=bool(wait))
 
 
 def cmd_coordinator_gone(args):

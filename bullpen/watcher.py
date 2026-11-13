@@ -66,3 +66,14 @@ def refresh_watcher(repo):
             ensure_watcher(session)
     except Fail as e:
         print(f"bullpen: {e}", file=sys.stderr)
+
+
+def restart_watcher():
+    """After a build: a running watcher started from the old one is replaced (none is
+    started). Never fails the build."""
+    try:
+        w = read_json(STATE / "watcher.json", {})
+        if rex_alive(w.get("session"), w.get("block")):
+            ensure_watcher(w["session"])
+    except Fail as e:
+        print(f"bullpen: {e}", file=sys.stderr)

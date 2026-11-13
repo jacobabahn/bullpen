@@ -18,6 +18,7 @@ import subprocess
 from pathlib import Path
 
 from .core import Fail, SELF, commits, git, run
+from .jobs import background
 
 
 def mode(repo, t):
@@ -84,10 +85,8 @@ def push_base(repo, base, t=None):
     if not remote:
         return None
     argv = [SELF, "_push", base] + (["--task", t["id"]] if t else [])
-    p = subprocess.Popen(argv, cwd=repo.root, start_new_session=True,
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if os.environ.get("BULLPEN_PUSH_WAIT"):  # the tests: wait for it, to look at what it did
-        p.wait()
+    background(argv, repo.root, repo.dir / "jobs.log", f"Pushing {base} to {remote}", t and t["id"],
+               wait=bool(os.environ.get("BULLPEN_PUSH_WAIT")))  # the tests: wait, to look at what it did
     return f"pushing {base} to {remote} in the background"
 
 

@@ -19,7 +19,9 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
 - `bin/bullpen-py` is the Python entry: it finds the `bullpen/` package beside it and
   runs `bullpen.cli.main`. Python caches a package's bytecode, but compiles a script it
   runs on every call, so it stays small. Python given a command it doesn't have says
-  it isn't in this build: the build is older than its source (`bullpen build`).
+  it isn't in this build: the build is older than its source. First it waits for the
+  build that's running, or builds it, and runs the call again with the new build
+  (`board_build.catch_up`); only when it can't does it say to run `bullpen build`.
 - The Rust is one cargo workspace (`Cargo.toml`, one `Cargo.lock`, built into
   `target/`): `core/` (`bullpen-core`: tasks, config, wording, what the command line
   and the board share), `cli/` (`bullpen-cli`, the program `bullpen`) and `board/`.
@@ -93,6 +95,8 @@ importing the one with the command being run, or all of them for `--help`):
 - `core.py`: the base: paths, the settings table (`SETTINGS`, at the top), small
   helpers, a repo's config and tasks (`Repo`), a task's status (`set_status`) and the
   panes bullpen knows. It imports none of the others.
+- `jobs.py`: starting a background job so it outlives the command and its pane (a
+  double fork), with its output in `jobs.log` and its failure in the news
 - `modes.py`: local mode and remote mode, as two adapters (`mode(repo, t)`), the
   task's base ref, and the one way to push (`quiet_git`)
 - `rex.py`: Rex: running its commands, finding, typing into and closing panes

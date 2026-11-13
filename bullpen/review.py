@@ -1,13 +1,13 @@
 """Reviews: what a review covers, starting a reviewer, and what ready does with review on."""
 
 import re
-import subprocess
 from pathlib import Path
 
 from .core import (
     PROMPTS, SELF, auto_accepts, commits, git, head, index_block, merge_base, resolve, run,
     set_status, unindex_block, where, with_model,
 )
+from .jobs import background
 from .rex import review_label, rex_close
 from .agents import pane, running
 from .coordinators import session_for
@@ -33,8 +33,8 @@ def review_at_ready(repo, t, base_ref):
         repo.save_task(t)
         if auto_accepts(repo, t):
             # not here: accepting closes the worker's pane, which this runs in
-            subprocess.Popen([SELF, "_auto_accept", t["id"]], cwd=repo.root, start_new_session=True,
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            background([SELF, "_auto_accept", t["id"]], repo.root, repo.dir / "jobs.log",
+                       f"{t['id']}'s auto-accept", t["id"])
         else:
             ready_news(repo, t, [commits(t.get("commits") or 0), where(t), f"its approval carried over: {kept}"])
         return f"Its review approval carries over ({kept}), so there's no new review: end your turn."

@@ -88,11 +88,13 @@ def accepted(repo, t, m, auto, merged_outside, touched, keys):
     steps = [
         ("the accepted news", tell),
         ("the merge's follow-up", follow_up),
+        # before the rest: a command the merge moved runs in neither the old build nor the
+        # new Python until it's built (a call in that window waits for it: board_build.catch_up)
+        ("rebuilding bullpen and the board", rebuild),
         ("rebasing the other tasks", lambda: how != "nothing to merge" and rebase_others(repo, t, touched)),
         ("the run queue", run_later),  # starts the next task now, before the rest
         ("telling the coordinators about guide changes", lambda: tell_guide_changes(repo)),
         ("refreshing the watcher", lambda: refresh_watcher(repo)),  # the merge may have changed it
-        ("rebuilding bullpen and the board", rebuild),
         ("the keys-changed news", keys_news),
     ]
     for what, step in steps:

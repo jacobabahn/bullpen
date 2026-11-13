@@ -130,7 +130,10 @@ def parser(modules=MODULES):
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if not argv or argv[0] not in COMMANDS:
-        print(module("board_build").not_in_build(argv[0] if argv else None), file=sys.stderr)
+        build = module("board_build")
+        if argv:
+            build.catch_up(argv)  # returns only when the new build can't run it
+        print(build.not_in_build(argv[0] if argv else None), file=sys.stderr)
         return 2
     core.LOAD_SAVERS[:] = [load_savers]
     args = parser([COMMANDS[argv[0]]]).parse_args(argv)

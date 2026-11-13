@@ -8,13 +8,29 @@ import re
 import shlex
 from pathlib import Path
 
-from .core import REX, SELF, STATE, merge_base, now, run, safe, write_json
+from .core import Fail, REX, Repo, SELF, STATE, merge_base, now, repo_root, run, safe, write_json
+from . import jobs
 from .modes import task_base_ref
 from .rex import rex_type, with_state
 from .coordinators import alive, calling_coordinator, sees_to
 
 
 NEWS_MARK = "bullpen · "
+JOB_NEWS = {"id": "job"}  # the news log's task column for a job with no task behind it
+
+
+def job_failed(cwd, tid, line):
+    """A background job failed without saying so (jobs.py): news to the task's
+    coordinator, or to everyone."""
+    repo = Repo(repo_root(cwd))
+    try:
+        t = repo.task(tid) if tid else JOB_NEWS
+    except Fail:
+        t = JOB_NEWS
+    news(repo, t, "job", line, everyone=t is JOB_NEWS)
+
+
+jobs.FAILED.append(job_failed)
 
 
 def ready_news(repo, t, facts=(), then="", again=False):

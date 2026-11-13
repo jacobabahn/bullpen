@@ -14,6 +14,7 @@ from .core import (
     Fail, PROMPTS, Repo, SELF, clip, command, git, head, is_claude, is_status, merge_base,
     model_in, now, read_json, repo_root, resolve, with_model, write_json,
 )
+from .jobs import background
 from .modes import task_base_ref
 from .news import tell_coordinator
 from .stops import stop
@@ -476,9 +477,8 @@ def start_tour(repo, t, wait, opener=None, on_written=None):
     write_json(repo.task_path(t["id"]), t)
     if wait:
         return write_tour(repo, t["id"], on_written)
-    p = subprocess.Popen([SELF, "_tour", t["id"]], cwd=repo.root, start_new_session=True,
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    t["tour"]["pid"] = p.pid
+    t["tour"]["pid"] = background([SELF, "_tour", t["id"]], repo.root, repo.dir / "jobs.log",
+                                  f"Writing {t['id']}'s tour", t["id"])
     write_json(repo.task_path(t["id"]), t)
     return None
 

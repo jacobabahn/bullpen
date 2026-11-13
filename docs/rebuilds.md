@@ -11,7 +11,8 @@ longer matches, as after accepting a task that changes it or a `git pull`, bullp
 builds that program again in the background:
 
 - `bullpen up` checks, in any repository.
-- `accept` checks only in bullpen's own repository. Accepting a task elsewhere never
+- `accept` checks only in bullpen's own repository, right after the merge (before the
+  other tasks are rebased and the queued ones start). Accepting a task elsewhere never
   builds anything.
 - The build copies cargo's output and renames the copy into place, so nothing ever
   runs a half-written file. A command that's running keeps its old program; the next
@@ -25,8 +26,14 @@ builds that program again in the background:
   work never goes out. One news line says so.
 - If the build fails (no cargo, a compile error), the old programs keep running. One
   news line per program gives the reason and the log, `target/build.log`. bullpen
-  doesn't try that source again by itself; `bullpen build` does. A command whose
-  Python is gone but which an old build still hands to Python says to rebuild.
+  doesn't try that source again by itself; `bullpen build` does.
+- A command a merge moved to Rust is in neither the old build nor the new Python until
+  the new build is in place. A call to it in that window (a worker's, the watcher's,
+  yours) waits for the build that's running, or builds the command line itself when
+  none is, then runs with the new build: `` bullpen: `ls` is in the build that's
+  running: waiting for it `` on stderr. When it can't (the source has uncommitted
+  changes, or its build failed), it says to rebuild, with the log.
+- A new command line replaces the running watcher, so its calls run the new build.
 - cargo can be a mise shim with no Rust version set for bullpen's folder. Then
   bullpen tries rustup's `~/.cargo/bin/cargo`, and failing that says to set a
   version. It never changes your mise config.

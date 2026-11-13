@@ -12,8 +12,10 @@ from pathlib import Path
 from .core import (
     Fail, HOME, Repo, SELF, command, file_hash, git, now, read_json, repo_root, write_json,
 )
+from .jobs import background
 from .news import news
 from .board import BOARD, CARGO_BOARD, TARGET
+from .watcher import restart_watcher
 
 
 # bullpen's own checkout (HOME) is one cargo workspace (Cargo.toml): core/, cli/ (the
@@ -145,10 +147,9 @@ def rebuild_if_stale(repo):
         lock = lock_build(wait=False)
         if lock is None:
             return None  # a build is running: it checks the sources again when it's done
-        with lock:
-            subprocess.Popen([SELF, "_build_board", "--lock-fd", str(lock.fileno())], cwd=repo.root,
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             start_new_session=True, pass_fds=(lock.fileno(),))
+        with lock:  # the job keeps it; this command's copy closes here
+            background([SELF, "_build_board", "--lock-fd", str(lock.fileno())], repo.root, repo.dir / "jobs.log",
+                       f"Rebuilding {names(stale)}", pass_fds=(lock.fileno(),))
         their = "their source" if len(stale) > 1 else "its source"
         boards = "; running boards reload when it's done" if BOARD_PROGRAM in stale else ""
         return f"rebuilding {names(stale)} in the background ({their} changed){boards}"
@@ -245,6 +246,7 @@ def cmd_build(args):
                    f"{names(failed)} wasn't built: {why} (log: {BUILD_LOG})")
     for p in built:
         print(f"built {p.what}: {p.installed}")
+    watcher_after(built)
 
 
 def cmd_build_bg(args):
@@ -253,11 +255,12 @@ def cmd_build_bg(args):
     with open(args.lock_fd, "a", closefd=True):
         progs = programs(background=True)
         try:
-            failed, why, _ = build(progs, background=True)
+            failed, why, built = build(progs, background=True)
         except Exception as e:  # noqa: BLE001 - say it once, whatever it was
-            failed, why = [p for p in progs if p.stale()], f"{type(e).__name__}: {e}"
+            failed, why, built = [p for p in progs if p.stale()], f"{type(e).__name__}: {e}", []
             for p in failed:
                 p.set_stamp(failed=p.source_hash())
+        watcher_after(built)
         if not failed:
             return 0
         try:
@@ -269,6 +272,42 @@ def cmd_build_bg(args):
             news(repo, {"id": tid}, kind, f"{p.subject()} wasn't rebuilt: {why}. {p.keeps}. "
                  f"Log: {BUILD_LOG}. Fix it, then run `bullpen build`.", everyone=True)
         return 1
+
+
+def watcher_after(built):
+    """A new command line: a running watcher is replaced, so it runs the new build."""
+    if CLI in built:
+        restart_watcher()
+
+
+def catch_up(argv):
+    """The build handed over a command the Python doesn't have: an accept moved it, and
+    the build is older than its source (the window between the merge and the new build,
+    or a build that never ran). Wait for the build that's running, or build the command
+    line now, then run the call again with the new build. Returns only when it can't:
+    no build, a source with uncommitted changes, a build that failed, no new build, or
+    a second try."""
+    if os.environ.get("BULLPEN_CAUGHT_UP") or CLI not in programs() or not os.access(CLI.installed, os.X_OK):
+        return
+    if read_json(CLI.stamp, {}).get("failed") == CLI.source_hash():
+        return
+    was = os.stat(CLI.installed).st_ino  # a new build is a new file (renamed into place)
+    lock = lock_build(wait=False)
+    if lock is None:
+        print(f"bullpen: `{argv[0]}` is in the build that's running: waiting for it", file=sys.stderr)
+        lock = lock_build(wait=True)
+    with lock:
+        if CLI.stale() and not CLI.dirty():
+            print(f"bullpen: `{argv[0]}` is newer than this build: building it first (log: {BUILD_LOG})",
+                  file=sys.stderr)
+            failed, _, built = build([CLI], background=True)
+            if failed:
+                return
+            watcher_after(built)
+    if os.stat(CLI.installed).st_ino == was or read_json(CLI.stamp, {}).get("source") != CLI.source_hash():
+        return  # no new build: it would hand the call over again
+    sys.stderr.flush()
+    os.execve(SELF, [SELF, *argv], {**os.environ, "BULLPEN_CAUGHT_UP": "1"})
 
 
 def not_in_build(name):

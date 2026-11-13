@@ -22,6 +22,9 @@ FAKE_CARGO = textwrap.dedent("""\
         f.write(json.dumps(sys.argv[1:]) + "\\n")
     if (d / "cargo_mise").exists():
         sys.exit("mise ERROR No version is set for shim: cargo")
+    if (d / "cargo_slow").exists():
+        import time
+        time.sleep(float((d / "cargo_slow").read_text()))
     if (d / "cargo_fails").exists():
         sys.exit("error[E0425]: cannot find value `x` in this scope")
     home = Path(sys.argv[sys.argv.index("--manifest-path") + 1]).parent
@@ -35,6 +38,10 @@ FAKE_CARGO = textwrap.dedent("""\
         # the command line it builds runs the commands Rust owns with the real build (they
         # read the state, not this checkout), and hands the rest to this copy's Python
         rust = f'case $1 in {RUST_OWNED}) exec "{RUST_BIN}" "$@" ;; esac\\n'
+        # a command a port moved: "// moved: NAME" in its main.rs, which it answers itself
+        for line in (home / crate / "src" / "main.rs").read_text().splitlines():
+            if line.startswith("// moved: "):
+                rust += f'[ "$1" = {line.split()[-1]} ] && echo "$1 runs in the new build" && exit 0\\n'
         run = rust + f'exec python3 -S "{home}/bin/bullpen-py" "$@"' if name == "bullpen" else ""
         out.write_text(f"#!/bin/sh\\n# built from: {source}\\n{run}\\n")
         out.chmod(0o755)
