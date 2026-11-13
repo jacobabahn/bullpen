@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S python3 -S
 """bullpen's entry script. The code is the bullpen package beside bin/ (bullpen/):
 Python caches a package's bytecode, but compiles a script it runs on every call, so
 this stays small. It finds the package from its own resolved path, so a link to it
