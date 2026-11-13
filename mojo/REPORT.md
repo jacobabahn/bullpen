@@ -191,7 +191,7 @@ What was hard:
 | Python functions this port covers (by name, in `bullpen/`) | about 1,210 |
 | The Mojo port (`main.mojo`, `bullpen/*.mojo`) | 3,729 |
 | of which stand in for the standard library (json, args, proc, timeutil, text, textutil) | about 1,100 |
-| The compare harness and fixture (`check/`) | about 560 |
+| The compare harness and fixture (`check/`), and its 132 cases | about 440, and 140 |
 
 The Mojo is about three times as long. A third of that is the standard library it lacks. The rest
 is the same logic, spelled out more: optional values (Python's `t.get("x") or {}`) become a node
