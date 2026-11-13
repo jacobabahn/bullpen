@@ -263,6 +263,7 @@ bullpen · BP-6 is ready: Fix login (PR #14, approved by review), but the auto-a
 bullpen · After BP-8: BP-5 told to rebase (conflicts in bin/bullpen); BP-7 left alone (no overlap); BP-6 rebased; BP-9 conflicts in bin/bullpen, sent back.
 bullpen · After BP-8: BP-5 told to rebase (uncommitted changes in README.md); BP-7 left alone (no conflict).
 bullpen · After BP-8, main wasn't pushed to github: ... The accept still counts; `bullpen doctor` says how far behind github is.
+bullpen · BP-4 and BP-6 both changed cli/src/accept/mod.rs (and 2 more)
 bullpen · BP-9 dropped
 bullpen · BP-4 started (BP-3 was accepted)
 bullpen · BP-6 started (BP-9 was dropped, freeing a slot)
@@ -345,6 +346,11 @@ bullpen · Your coordinator guide changed (section: News). Read the change below
   conflict); between turns, rebased, or sent back with conflicts. Nothing to do:
   the workers handle it. A task skipped for uncommitted changes, or not rebased
   because it waits on the person or on you: see to it, or mention it to them.
+- Both changed a file: two open tasks change the same files, so the second to be
+  accepted will likely need a rebase. Only a warning: nothing is blocked and the
+  workers aren't told; don't tell them either. Tell the person in a line. When both
+  are ready, suggest accepting the smaller one first (`bullpen show <ID>` has each
+  diffstat and the overlap). A later line with "too" only adds files.
 - The base branch wasn't pushed to the push remote (a backup, in local mode): the
   accept still counts, and the next accept or `bullpen up` pushes it again. Nothing
   to do the first time. If it keeps failing, or says the push was rejected (the

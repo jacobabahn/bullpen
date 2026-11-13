@@ -198,7 +198,8 @@ pub fn cmd_show(argv: &[String]) -> Res<i32> {
         print_all(&[dumps(&Value::Object(t))])?;
         return Ok(0);
     }
-    let every = every(&repo.tasks()?);
+    let all = repo.tasks()?;
+    let every = every(&all);
     let detail = board_detail(&repo.cfg, &t, &every, None)?;
     let cols = term_width();
     let mut out = Vec::new();
@@ -291,6 +292,9 @@ pub fn cmd_show(argv: &[String]) -> Res<i32> {
             "     mode: {} first review (its own)",
             py_str(&t["review_mode"])
         ));
+    }
+    for (other, files) in crate::overlap::overlaps_of(&repo, s(&t, "id"), &all) {
+        out.push(format!("  overlap: {other} changed {} too", files.join(", ")));
     }
     if let Some(line) = review_line(&t) {
         out.push(line);

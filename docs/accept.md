@@ -38,6 +38,32 @@ rebased, keeping both sides of a conflict in README.md; its approval carried ove
 (only the base moved); BP-9 conflicts in bin/bullpen, sent back.` `bullpen config
 --rebase-others off` turns this off.
 
+## Overlap warning
+
+Before anything is accepted, bullpen says when two open tasks (working, ready, in
+review, waiting on you) change the same file, so you know early that the second to
+be accepted will need a rebase. It only says so: nothing waits on it, no worker is
+told, and no order is forced.
+
+It checks when a worker ends a turn and on `ready`, for that task against the other
+open tasks on the same base: the files each branch changed since it left its base
+(its commits; uncommitted changes don't count). A new overlap is one news line, once
+per pair of tasks: `BP-122 and BP-123 both changed cli/src/accept/mod.rs (and 2
+more)`. When more files join later, one more line says those (`... both changed
+README.md too`); a check that finds nothing new says nothing. `bullpen show BP-122`
+lists the tasks it overlaps with and the files (`overlap: BP-123 changed
+cli/src/accept/mod.rs, ... too`). A task accepted, closed, dropped or finished drops
+out of its pairs.
+
+Files every task may change harmlessly never count: lock files (`Cargo.lock`,
+`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`, `uv.lock`) and
+`CHANGELOG.md`, by name in any folder (the list is `IGNORED` in `cli/src/overlap.rs`).
+The pairs said so far are kept in `overlaps.json` beside the tasks.
+
+Overlap isn't conflict: two tasks can change different parts of one file and merge
+cleanly. When the first is accepted, [After accept](#after-accept) works out whether
+the other really conflicts.
+
 ## The steps after the merge
 
 Once the task is merged and saved as done, `accept` (and auto-accept) goes on in this

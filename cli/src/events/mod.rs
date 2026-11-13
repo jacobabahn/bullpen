@@ -188,6 +188,7 @@ pub fn event(ev: &Event) -> Res<()> {
                 // a background shell of its own still runs: it takes another turn when that ends
                 return save(&repo, &mut t);
             }
+            crate::overlap::check(&repo, &t); // the end of a turn: its branch may share files with another's now
             if ready_again(&repo, &mut t)? {
                 return Ok(());
             }

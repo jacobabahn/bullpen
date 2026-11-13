@@ -12,6 +12,8 @@
   [News](news.md).
 - The coordinator guides running coordinators were given, for the diff when it changes:
   `~/.local/state/bullpen/guides/<hash>.md`. See [News](news.md).
+- Overlaps told so far (two open tasks that change the same file): `overlaps.json`
+  beside the tasks. See [Accept](accept.md#overlap-warning).
 - Notifications: `notify.log` beside the tasks. See [Notifications](notifications.md).
 - What each worker and reviewer is doing, for the board: `~/.local/state/bullpen/doing/<pane>.json`,
   written by the watcher (at most every 3 seconds a pane, no news) and removed with the pane.

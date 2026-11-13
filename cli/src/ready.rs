@@ -66,6 +66,7 @@ pub fn cmd_ready(argv: &[String]) -> Res<i32> {
     let repo = Repo::new(repo_root()?)?;
     let mut t = repo.task(a.arg("id").unwrap_or(""))?;
     ready(&repo, &mut t, &a)?;
+    crate::overlap::check(&repo, &t);
     Ok(0)
 }
 

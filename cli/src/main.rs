@@ -30,6 +30,7 @@ mod line_edit;
 mod modes;
 mod news;
 mod notifications;
+mod overlap;
 mod panes;
 mod pick;
 mod prs;

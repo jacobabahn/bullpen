@@ -102,6 +102,8 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   them into coordinators' panes (`deliver`, `has_draft`); `read.rs`: `news` and
   `news --follow`
 - `notifications.rs`: the person's notifications (the save hook) and `_flush`
+- `overlap.rs`: two open tasks changing the same file: checked at a worker's end of turn
+  and on `ready` (`check`), one news line per pair, and `show`'s list (`overlaps_of`)
 - `stops.rs`: a worker or reviewer stopping, and a triage passed on to the person
 - `hooks.rs`: a worktree's setup and teardown hooks (`set_up`), and removing a
   worktree (`remove_worktree`)
