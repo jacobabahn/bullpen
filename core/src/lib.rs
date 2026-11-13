@@ -11,6 +11,7 @@ pub mod printable;
 pub mod proc;
 pub mod repo;
 pub mod settings;
+pub mod sha1;
 pub mod sha256;
 pub mod task;
 pub mod text;
