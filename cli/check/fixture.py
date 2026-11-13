@@ -367,7 +367,7 @@ def main(d, now):
            "XDG_CONFIG_HOME": d / "config", "FIXTURE_ROOT": root}
     for k, v in env.items():
         print(f"export {k}='{v}'")
-    print("unset REX_BLOCK NO_COLOR")
+    print("unset REX_BLOCK REX_SESSION NO_COLOR")
 
 
 if __name__ == "__main__":

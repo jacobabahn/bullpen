@@ -32,14 +32,16 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   code, frozen, deleted with its last Python caller. `bullpen/core.py` is `core/`'s
   twin, and `task_line.py` is `core/src/words.rs`' and `cli/src/task_line.rs`' (for
   `pick` and `config`); `news.py` (`news`, `tell_coordinator`, `ready_news`, the outboxes),
-  `notifications.py` (`notify`), `stops.py`, `agents.py`, `coordinators.py`, `modes.py`
-  and `rex.py` are twins of `cli/src/`'s for the Python commands. There is one bridge,
+  `notifications.py` (`notify`), `stops.py`, `agents.py`, `coordinators.py`, `modes.py`,
+  `rex.py` and `panes.py` (for launch, review and `up`) are twins of `cli/src/`'s for the
+  Python commands, and so are `go.py` (only `relink`, for `up`) and `board.py`
+  (`ensure_board`, `old_board` and the board's paths, for `up`, doctor and the build). There is one bridge,
   the run queue: a Rust save that frees a slot runs `bullpen _queue` (Python's
   `start_queued`, reading the tasks fresh) once the command is done, until T6 moves the
   queue to Rust.
 - `cli/check/compare.sh` runs each case of `cli/check/cases-*.txt` with the Python and
   the Rust build in a fresh fixture, and compares stdout, stderr, exit code and the
-  state folder, byte for byte. Each port adds cases for what it moves, and runs them
+  state folder, byte for byte, and what the fake Rex was asked and its windows after. Each port adds cases for what it moves, and runs them
   against main's Python (`BULLPEN_PY=<main checkout>/bin/bullpen-py`).
 
 ## The Rust
@@ -73,10 +75,19 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   terminal), cut to the terminal's width and coloured there
 - `saves.rs`: saving a task and what it sets off (`save`): the run queue (through
   `bullpen _queue`), the person's notification, the PR to follow; `later` and `run_later`
-- `rex.rs`: Rex: whether a pane is there, typing into one, the session's view, a pane's
-  terminal
+- `rex.rs`: Rex: running its commands, finding (`find_pane`, by ID or label), typing
+  into, focusing and closing panes, a pane's terminal and program, the end of its screen
+  (`screen_end`)
+- `panes/`: where a worker's, reviewer's or diff's pane lives (see "Where a pane lives"):
+  `mod.rs` (`place`, `show`, `hide`, `find`, `gather`, `placement_at`, `for_new`), and one
+  file per placement that does more than focus: `float.rs`, `tab.rs`, `background.rs`
+- `go/`: `mod.rs`: `go`, `hide` and `adopt`; `relink.rs`: finding a repo's panes again
+  after a Rex restart
+- `board.rs`: `board`, and a coordinator's board pane beside it (`ensure_board`)
+- `diff.rs`: `diff` (the pager, `--stat`, `--pane`)
 - `agents.rs`: a task's worker and reviewer, and the one it waits on
-- `coordinators.rs`: a repo's coordinators, and who sees to a task (reading them)
+- `coordinators.rs`: a repo's coordinators, who sees to a task, whose board shows it
+  (`on_board`), and the session to work in (`session_for`)
 - `news/`: `mod.rs`: a news line (`news`, `tell_coordinator`), the outboxes and typing
   them into coordinators' panes (`deliver`, `has_draft`); `read.rs`: `news` and
   `news --follow`
@@ -84,7 +95,7 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
 - `stops.rs`: a worker or reviewer stopping (its callers move from T6 on)
 - `modes.rs`: the task's base ref (the adapters move in T8)
 - `start/mod.rs`: `add`, `after`, `model`, `review-mode`, what a task waits on, and
-  which saves move the run queue (`slot_freed`)
+  which saves move the run queue (`slot_freed`); `peek.rs`: `peek`
 - `triage.rs`: `ask`, `ok` and `note`
 
 ## The Python
@@ -104,8 +115,8 @@ importing the one with the command being run, or all of them for `--help`):
   the one the task waits on (`waits_on`, `waited_on`). Code that needs either asks it,
   rather than reading the task's `block` or its review's `session`
 - `coordinators.py`: a repo's coordinators, and who sees to a task (`sees_to`)
-- `panes.py`: where a worker's, reviewer's or diff's pane lives: making, showing,
-  hiding and finding it again, and keeping it there (`gather`)
+- `panes.py`: where a worker's or reviewer's pane lives: making, showing, hiding and
+  finding it again, and keeping it there (`gather`; a twin, for launch, review and `up`)
 - `news.py`: news lines, and the outboxes typed into coordinators' panes
 - `notifications.py`: the person's notifications
 - `guide.py`: the coordinator's guide, and telling running coordinators it changed
@@ -127,7 +138,8 @@ importing the one with the command being run, or all of them for `--help`):
 - `tours.py`: guided review tours and the person's comments on them
 - `stepper.py`: reading a tour on the board, and the `tour` command that opens it
 - `ready.py`: `ready` and `finish`
-- `board.py`: the board's program, and its pane beside a coordinator
+- `board.py`: the board's program, and its pane beside a coordinator (a twin, for `up`,
+  doctor and board_build)
 - `board_build.py`: building bullpen's command line and the board, and rebuilding them
   when their source changes
 - `push_remote.py`: the push remote's background push and its checks, in local mode
@@ -136,9 +148,7 @@ importing the one with the command being run, or all of them for `--help`):
 - `auto_accept.py`: a reviewer's verdict, and auto-accept
 - `prs.py`: following a task's pull request after ready
 - `config.py`: `config`
-- `go.py`: `go`, `hide`, `adopt`, and finding a repo's panes again after a Rex restart
-  (`relink`)
-- `show.py`: `diff`
+- `go.py`: finding a repo's panes again after a Rex restart (`relink`; a twin, for `up`)
 - `doctor.py`: `bullpen doctor`
 - `pick.py`: the jump picker
 - `up.py`: `up`
@@ -172,7 +182,8 @@ moves it.
 
 ## Where a pane lives
 
-A worker's, reviewer's or diff's pane goes where its placement in `panes.py` puts it:
+A worker's, reviewer's or diff's pane goes where its placement in `cli/src/panes/` (and
+its Python twin, `panes.py`) puts it:
 `FLOAT` (a capsule in its coordinator's tab, the default), `TAB` (a capsule in its
 coordinator's workers tab, found by the tab's label), `TABS` (a tab of its own) or
 `BACKGROUND` (a detached Rex block, in no tab), picked by the task's own `placement`
@@ -191,7 +202,7 @@ says to detach it rather than minimize it. Otherwise showing and hiding go by wh
 pane is now (`placement_at`), so a pane started before the settings changed keeps
 working. Rex's `session.view` lists only placed blocks: `BACKGROUND.find` asks
 `session.list_blocks` for the detached ones, once per view. A new placement is a new
-class there, added to `PLACEMENTS`.
+`Placement` there (a class in the twin, added to `PLACEMENTS`).
 
 ## Local mode and remote mode
 
@@ -221,7 +232,7 @@ needs (BP-94 took `ls` from about 72 ms to 37 ms):
 - A standard module that takes over a millisecond to import and that most calls never
   use (`shutil`, `hashlib`, `tempfile`, `textwrap`) is imported in the function that
   needs it, with a comment saying why. A module compiles its patterns on first use
-  (re caches them), not on import. `python3 -X importtime bin/bullpen-py diff BP-1` shows what
+  (re caches them), not on import. `python3 -X importtime bin/bullpen-py tell BP-1 x` shows what
   a call imports.
 
 ## No import loops

@@ -57,7 +57,7 @@ run_one() {  # run_one PROGRAM CASE OUTDIR
     )
     (cd "$work/fx" && find state -type f ! -name '*.lock' | sort | while read -r f; do echo "== $f"; cat "$f"; done) >"$out/state"
     for f in rex.log reg.json; do [ -f "$work/fx/fake/$f" ] && cp "$work/fx/fake/$f" "$out/$f"; done
-    sed -i "s#$work/fx#FX#g; s#$pytop#TOP#g; s#$top#TOP#g" "$out"/*
+    sed -i "s#$work/fx#FX#g; s#$top#TOP#g; s#$pytop#TOP#g" "$out"/*
     python3 "$here/now_stamps.py" "$t0" "$(date +%s.%N)" "$out"/*
     return 0
 }
