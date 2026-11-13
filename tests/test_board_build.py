@@ -143,7 +143,7 @@ class BoardBuildTest(unittest.TestCase):
         return b.read_text() if b.exists() else None
 
     def edit_board(self, text, commit=True, crate="board"):
-        (self.home / crate / "src" / "main.rs").write_text(text)
+        (self.home / crate / "src" / ("lib.rs" if crate == "core" else "main.rs")).write_text(text)
         if commit:
             sh("git", "-C", str(self.home), "-c", "user.name=T", "-c", "user.email=t@example.com",
                "commit", "-qam", "Change the board")
@@ -174,6 +174,15 @@ class BoardBuildTest(unittest.TestCase):
         self.assertEqual(self.builds(), 2)
         self.assertIn("v2()", self.board())
         self.assertEqual(self.board_lines(), [])  # a build that works isn't news
+
+    def test_a_change_in_core_rebuilds_both_programs(self):
+        # the board reads tasks and settings through core, as the command line does
+        self.bp("build")
+        self.edit_board("pub fn shared() {}\n", crate="core")
+        out = self.bp("up").stdout
+        self.assertIn("rebuilding bullpen's command line and the board in the background (their source changed)", out)
+        self.settle()
+        self.assertEqual(self.builds(), 2)
 
     def test_up_leaves_the_build_running_in_the_background(self):
         (self.fake / "cargo_slow").write_text("3")
