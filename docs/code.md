@@ -113,8 +113,9 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
 - `hooks.rs`: a worktree's setup and teardown hooks (`set_up`), and removing a
   worktree (`remove_worktree`)
 - `rules.rs`: the rules every worker and reviewer gets (`task_rules`), and `rules`
-- `limit.rs`: the usage limit, as far as `start` and the queue need it (`limit_active`,
-  `limit_phrase`)
+- `limit.rs`: the usage limit: in force for `start` and the queue (`limit_active`,
+  `limit_phrase`), and read off an agent's turn or screen for the watcher (`limit_hit`,
+  `limit_over`, `limit_reset`, with Python's patterns matched by hand)
 - `modes.rs`: the task's and the repo's base ref, the task's mode (`is_local`), `ready`'s
   `publish`, `withdraw` (close and drop), and the one way to push (`quiet_git`,
   `push_base`); `merge`, `after_merge` and `refresh` move with accept (T9)

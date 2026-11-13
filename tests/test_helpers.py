@@ -7,7 +7,7 @@ import unittest
 
 from support import setUpModule, tearDownModule, ROOT  # a temp folder for each module
 from bullpen import (
-    agents, cli, core, limit, line_edit, notifications, stepper,
+    agents, cli, core, line_edit, notifications, stepper,
 )
 
 
@@ -410,37 +410,3 @@ class HelpersTest(unittest.TestCase):
 
     def test_news_doesnt_say_local_branch_in_local_mode(self):
         self.assertEqual(core.where({"status": "ready", "pr": None, "local": True}), "")
-
-    def test_only_the_agent_a_task_waits_on_is_stuck_or_limited(self):
-        # (is_stuck and stuck_phrase: core/src/test_words.rs, under this name)
-        import datetime as dt
-        at = dt.datetime(2026, 11, 11, 13, 0).astimezone()
-        lim = {"who": "worker", "resets": at.replace(hour=15).isoformat(), "text": "x"}
-        self.assertTrue(agents.is_limited({"status": "working", "limit": lim}))
-        self.assertFalse(agents.is_limited({"status": "ready", "limit": lim}))
-        self.assertEqual(limit.limit_why(lim, at), "Usage limit, resets 3:00 PM")
-
-    def test_reset_times_are_read(self):
-        import datetime as dt
-        at = dt.datetime(2026, 11, 11, 13, 0).astimezone()  # a Wednesday, 1 PM
-        when = lambda text: limit.limit_reset(text, at)
-        day = lambda d, h, m=0: dt.datetime(2026, 11, d, h, m).astimezone()
-        self.assertEqual(when("You've hit your 5-hour limit · resets 3pm"), day(11, 15))
-        self.assertEqual(when("You've hit your session limit · resets 3:45pm"), day(11, 15, 45))
-        self.assertEqual(when("Resets at 3:10 PM"), day(11, 15, 10))
-        self.assertEqual(when("resets 15:00"), day(11, 15))
-        self.assertEqual(when("You've hit your Opus limit · resets 9am"), day(12, 9))  # tomorrow
-        self.assertEqual(when("resets 12:58pm"), day(11, 12, 58))  # just gone: now, not tomorrow
-        self.assertEqual(when("You've hit your weekly limit · resets Mon 12:00am"), day(16, 0))
-        self.assertEqual(when("weekly limit · resets Nov 14, 3pm · progress saved"), day(14, 15))
-        self.assertEqual(when("Claude AI usage limit reached|1794430800"),
-                         dt.datetime.fromtimestamp(1794430800).astimezone())
-        ny = when("Claude usage limit reached. Your limit will reset at 3pm (America/New_York).")
-        self.assertEqual((ny.utcoffset(), ny.astimezone(dt.timezone.utc).hour),
-                         (at.utcoffset(), 20))  # 3 PM in New York, told in local time
-        for text in ("Usage limit reached", "spend limit reached · resets Aug 8", "resets in 8 minutes",
-                     "resets 3", "resets 13pm", "resets 3pm (Nowhere/Land)"):
-            self.assertIsNone(when(text), text)
-        self.assertEqual(limit.clock(day(11, 15), at), "3:00 PM")
-        self.assertEqual(limit.clock(day(16, 0), at), "Mon 12:00 AM")
-        self.assertEqual(limit.clock(day(30, 9, 5), at), "Nov 30 9:05 AM")
