@@ -1,7 +1,7 @@
 #!/bin/bash
 # Check the Mojo bullpen against the Python one, byte for byte.
 #
-#   compare.sh [CASES...]     (default: every line of cases.txt)
+#   compare.sh [CASES...]     (default: every line of check/cases*.txt)
 #
 # Each case is a command line for bullpen, like `show BP-3` or `ls --all`. For each,
 # a fresh fixture (fixture.py) is made, Python's bin/bullpen runs in it, then a fresh
@@ -19,7 +19,7 @@ work=${COMPARE_DIR:-$(mktemp -d)}
 now=$(python3 -c 'import time; print(time.time())')
 fail=0
 
-if [ $# -gt 0 ]; then cases=("$@"); else mapfile -t cases < <(grep -v '^\s*\(#\|$\)' "$here/cases.txt"); fi
+if [ $# -gt 0 ]; then cases=("$@"); else mapfile -t cases < <(cat "$here"/cases*.txt | grep -v '^\s*\(#\|$\)'); fi
 
 run_one() {  # run_one PROGRAM CASE OUTDIR
     local prog=$1 case=$2 out=$3 cols=""
