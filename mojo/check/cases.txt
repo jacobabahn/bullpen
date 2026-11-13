@@ -28,3 +28,9 @@ review-mode BP-1 light
 review-mode BP-9 full
 review-mode BP-28 auto
 review-mode BP-23 full
+ok BP-40
+ok BP-41
+ok BP-15
+ok BP-3
+note BP-3 "Waiting on   the  CI"   run
+note BP-404 x

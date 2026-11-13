@@ -7,7 +7,7 @@ from std.os import getenv
 
 from bullpen.args import Args, parse
 from bullpen.core import python_self
-from bullpen import show, rex, coordinators, add
+from bullpen import show, rex, coordinators, add, triage
 
 
 def dispatch(av: List[String]) raises -> Int:
@@ -27,6 +27,10 @@ def dispatch(av: List[String]) raises -> Int:
         add.cmd_model(parse(av, "--clear", "", 1, 2))
     elif cmd == "review-mode":
         add.cmd_review_mode(parse(av, "", "", 2, 2))
+    elif cmd == "ok":
+        triage.cmd_ok(parse(av, "", "", 1, 1))
+    elif cmd == "note":
+        triage.cmd_note(parse(av, "", "", 2, -1))
     else:
         return -1
     return 0

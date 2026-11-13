@@ -409,9 +409,13 @@ struct Repo(Movable):
             t.doc.pop(0, "auto_wait")
         if not had or old_status != t.status() or not t.truthy("since"):
             _ = t.doc.put_str(0, "since", iso_now(True))
-        if t.status() != "todo":
-            raise Error("save_task: the port only saves todo tasks (notifications aren't ported)")
+        if notifies(t, old_status):
+            raise Error("save_task: this change notifies the person, and notifications aren't ported")
         write_json(path, t.doc)
+        if followed(t):  # prs.follow_saved: the watcher looks at its PR
+            mkdirs(state_dir())
+            if not exists(state_dir() + "/prs"):
+                write_text(state_dir() + "/prs", "")
 
     def cfg_str(self, key: String) -> String:
         return self.cfg.str(0, key)
@@ -561,6 +565,59 @@ def board_words(status: String) -> String:
 def status_words(status: String) -> String:
     var words = board_words(status)
     return words if status in words else words + " (" + status + ")"
+
+
+def notifies(t: Task, was: String) -> Bool:
+    """Would saving this change send the person a notification (notifications.notice)?
+    Needs, or a new ready, finished or auto-accepted. (The port has no notifications.)"""
+    var s = t.status()
+    if s == "needs":
+        return True
+    if s == was:
+        return False
+    return s == "ready" or s == "finished" or (s == "done" and t.truthy("auto_accepted"))
+
+
+def followed(t: Task) -> Bool:
+    """prs.followed: an open PR of a task that waits on review or the person."""
+    var s = t.status()
+    var g = t.get("gh")
+    var state = t.doc.str(g, "state") if t.doc.has(g, "state") else String("open")
+    return t.truthy("pr") and not t.truthy("local") and (s == "review" or s == "ready" or waiting(s)) and state == "open"
+
+
+def stopped(status: String) -> Bool:
+    return waiting(status) or status == "stopped"
+
+
+def set_status(mut t: Task, status: String, why: String = "", stop: Int = -1):
+    """The one place a task's status changes (why "": None). A new status ends ask and ok.
+    stop: a node in t.doc (a new stop), or -1: a stopped task keeps the one it had."""
+    if status != t.status():
+        t.doc.pop(0, "ok")
+        t.doc.pop(0, "ask")
+        t.doc.pop(0, "asked_from")
+    _ = t.doc.put_str(0, "status", status)
+    if why:
+        _ = t.doc.put_str(0, "why", why)
+    else:
+        _ = t.doc.put_null(0, "why")
+    if stop >= 0:
+        _ = t.doc.link(0, "stop", stop)
+    elif not stopped(status):
+        t.doc.pop(0, "stop")
+
+
+def reviewers_stop(t: Task) -> Bool:
+    """Is the task's stop its reviewer's? (Not one at the usage limit: its worker's.)"""
+    var s = t.get("stop")
+    return t.doc.str(s, "by") == "reviewer" and t.doc.str(s, "kind") != "limit"
+
+
+def ok(mut t: Task):
+    """Its coordinator saw to the task's stop: back to working, or to review."""
+    set_status(t, "review" if reviewers_stop(t) else "working")
+    _ = t.doc.put_bool(0, "ok", True)
 
 
 def is_status(t: Task) -> String:

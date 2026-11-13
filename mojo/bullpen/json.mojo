@@ -158,7 +158,10 @@ struct Doc(Copyable, Movable):
 
     def put(mut self, n: Int, key: String, var value: Node) -> Int:
         """Set object n's key to a new node (in place when it has the key, else last)."""
-        var v = self.add(value^)
+        return self.link(n, key, self.add(value^))
+
+    def link(mut self, n: Int, key: String, v: Int) -> Int:
+        """Set object n's key to node v, already in this document."""
         ref node = self.nodes[n]
         for i in range(len(node.keys)):
             if node.keys[i] == key:

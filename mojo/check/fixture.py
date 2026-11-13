@@ -87,7 +87,7 @@ def main(d, now):
         {"id": "c1", "block": "blk1", "session": "session:1", "board": {"block": "blk2", "session": "session:1"}},
         {"id": "c2", "block": "blk3", "session": "session:1", "board": None},
     ]
-    cfg = {"prefix": "BP", "next": 40, "base": None, "news": "monitor", "coordinators": coords,
+    cfg = {"prefix": "BP", "next": 42, "base": None, "news": "monitor", "coordinators": coords,
            "next_coordinator": 3, "auto_accept": False, "worker_model": "sonnet",
            "root": str(root), "triage_migrated": True, "stops_migrated": True, "layered": True}
     (sdir / "config.json").write_text(json.dumps(cfg, indent=2) + "\n")
@@ -162,6 +162,11 @@ def main(d, now):
     task(38, "Asked while ready", "needs", 4, ask=True, why="Merge now?",
          asked_from={"status": "ready", "why": None})
     task(39, "Old stamp only", "todo", 0, since=None)
+    task(40, "Triage, worker alive", "triage", 3, why="Ended its turn without saying ready",
+         stop={"by": "worker", "kind": "ended"}, block="blk15", session="session:1", ok=None)
+    task(41, "Triage on the reviewer", "triage", 3, why="Reviewer stopped without a verdict",
+         stop={"by": "reviewer", "kind": "ended"}, pr="https://github.com/me/proj/pull/41",
+         review={"round": 1, "kind": "full", "block": "blk16"})
 
     # what agents are doing now (the board's doing/), and the panes' index
     doing, blocks = state / "doing", state / "blocks"
@@ -191,7 +196,7 @@ def main(d, now):
     (fake / "rex").write_text(FAKE_REX)
     (fake / "rex").chmod(0o755)
     (fake / "alive").mkdir()
-    for blk in ("blk1", "blk2", "blk3", "blk4", "blk5", "blk8", "blk11", "blk12", "blk13", "blk14"):
+    for blk in ("blk1", "blk2", "blk3", "blk4", "blk5", "blk8", "blk11", "blk12", "blk13", "blk14", "blk15", "blk16"):
         (fake / "alive" / blk).write_text("")
     (fake / "screen_blk4").write_text("$ pytest\n\x1b[32m3 passed\x1b[0m\x1b[3Cok\n" + "".join(
         f"line {i}\n" for i in range(30)) + "❯ \n\n\n")
