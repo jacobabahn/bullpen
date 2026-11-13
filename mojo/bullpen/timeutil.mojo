@@ -69,6 +69,7 @@ struct Local(Copyable, Movable):
         var t = List[Int](length=1, fill=epoch)
         var tm = List[Int32](length=16, fill=0)  # struct tm: 9 ints, then long tm_gmtoff at byte 40
         _ = external_call["localtime_r", Int](Int(t.unsafe_ptr()), Int(tm.unsafe_ptr()))
+        _ = t^  # alive until here: a value can be destroyed right after its last use
         self.second = Int(tm[0])
         self.minute = Int(tm[1])
         self.hour = Int(tm[2])
@@ -76,7 +77,7 @@ struct Local(Copyable, Movable):
         self.month = Int(tm[4]) + 1
         self.year = Int(tm[5]) + 1900
         self.weekday = Int(tm[6])
-        self.offset = Int(tm[10]) + (Int(tm[11]) << 32)
+        self.offset = Int(tm[10])  # the low half of tm_gmtoff: an offset fits
 
     def days(self) -> Int:
         return days_from_civil(self.year, self.month, self.day)

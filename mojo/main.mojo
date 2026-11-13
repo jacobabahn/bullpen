@@ -7,7 +7,7 @@ from std.os import getenv
 
 from bullpen.args import Args, parse
 from bullpen.core import python_self
-from bullpen import show, rex, coordinators
+from bullpen import show, rex, coordinators, add
 
 
 def dispatch(av: List[String]) raises -> Int:
@@ -19,6 +19,14 @@ def dispatch(av: List[String]) raises -> Int:
         show.cmd_ls(parse(av, "--all --all-repos --json", "", 0, 0))
     elif cmd == "show":
         show.cmd_show(parse(av, "--json", "", 1, 1))
+    elif cmd == "add":
+        add.cmd_add(parse(av, "--auto-accept --no-auto-accept", "--brief --brief-file --base --after --model --review", 1, 1))
+    elif cmd == "after":
+        add.cmd_after(parse(av, "--none", "", 1, -1))
+    elif cmd == "model":
+        add.cmd_model(parse(av, "--clear", "", 1, 2))
+    elif cmd == "review-mode":
+        add.cmd_review_mode(parse(av, "", "", 2, 2))
     else:
         return -1
     return 0
@@ -40,6 +48,8 @@ def hand_to_python(av: List[String]) raises -> Int:
     for i in range(len(cstrs)):
         ptrs[i] = Int(cstrs[i].unsafe_ptr())
     _ = external_call["execv", c_int](Int(cstrs[0].unsafe_ptr()), Int(ptrs.unsafe_ptr()))
+    _ = cstrs^  # alive through the call
+    _ = ptrs^
     print("bullpen: couldn't run " + path, file=stderr)
     return 1
 

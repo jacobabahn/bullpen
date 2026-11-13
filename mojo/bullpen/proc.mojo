@@ -66,9 +66,14 @@ def run(argv: List[String], cwd: String = "") raises -> Done:
     var err = _slurp(efd)
     _ = external_call["close", c_int](ofd)
     _ = external_call["close", c_int](efd)
+    # Keep alive what libc read through an address: a value is destroyed after its last use.
     _ = cstrs^
     _ = ptrs^
     _ = acts^
+    _ = name^
+    _ = devnull^
+    _ = cwdz^
+    _ = envsym^
     if rc != 0:
         err = "No such file or directory: '" + argv[0] + "'"
     return Done(code, out^, err^)

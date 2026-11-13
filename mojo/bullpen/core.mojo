@@ -6,12 +6,13 @@ A task is its JSON record (a Doc, node 0 its object): code reads it with `t.s(ke
 then the Doc's own getters. A command's error (core.Fail in Python) is a raised
 Error; main prints it as `bullpen: <message>` and exits 1."""
 
-from std.os import getenv, listdir
+from std.os import getenv, listdir, makedirs
 from std.os.path import exists, isdir
 from std.ffi import external_call, c_int
 
 from bullpen.json import Doc, Node, copy_into, OBJ, ARR, STR, NULL
 from bullpen.proc import run, Done
+from bullpen.timeutil import iso_now
 
 
 # ---------- paths ----------
@@ -37,6 +38,7 @@ def self_exe() raises -> String:
     var buf = List[UInt8](length=4096, fill=0)
     var link = String("/proc/self/exe\0")
     var n = external_call["readlink", Int](Int(link.unsafe_ptr()), Int(buf.unsafe_ptr()), 4096)
+    _ = link^  # alive through the call: a value is destroyed after its last use
     buf.resize(max(n, 0), 0)
     return String(from_utf8=buf) if n > 0 else ""
 
@@ -72,7 +74,10 @@ def write_text(path: String, text: String) raises:
         f.write(text)
     var a = tmp + "\0"
     var b = path + "\0"
-    if external_call["rename", c_int](Int(a.unsafe_ptr()), Int(b.unsafe_ptr())) != 0:
+    var rc = external_call["rename", c_int](Int(a.unsafe_ptr()), Int(b.unsafe_ptr()))
+    _ = a^  # alive through the call
+    _ = b^
+    if rc != 0:
         raise Error("couldn't write " + path)
 
 
@@ -82,11 +87,8 @@ def write_json(path: String, doc: Doc) raises:
 
 
 def mkdirs(path: String) raises:
-    if path == "" or isdir(path):
-        return
-    mkdirs(dirname(path))
-    var z = path + "\0"
-    _ = external_call["mkdir", c_int](Int(z.unsafe_ptr()), c_int(0o777))
+    if path and not isdir(path):
+        makedirs(path, exist_ok=True)
 
 
 def read_json_or(path: String, default: String) raises -> Doc:
@@ -224,6 +226,16 @@ def overlay(mut cfg: Doc, src: Doc, skip_repo_only: Bool):
             cfg.nodes[0].kids.append(v)
 
 
+def inherited_config() raises -> Doc:
+    """What a repository gets when its own config.json doesn't say: the global settings
+    over the built-in defaults."""
+    var cfg = Doc.parse(materialize[DEFAULTS]())
+    var gpath = global_config_path()
+    if exists(gpath):
+        overlay(cfg, Doc.read(gpath), True)
+    return cfg^
+
+
 def load_config(dir: String) raises -> Doc:
     """A repo's settings: its own config.json over the global one, over the defaults.
     (An old config with one "coordinator" becomes coordinator c1, as in Python.)"""
@@ -327,18 +339,79 @@ struct Repo(Movable):
     var root: String
     var dir: String
     var cfg: Doc
+    var own: List[String]  # the keys this repo's config.json sets itself
 
     def __init__(out self, root: String) raises:
         self.root = root
         var stripped = root.strip("/")
         self.dir = state_dir() + "/repos/" + safe(String(stripped).replace("/", "-"))
         self.cfg = load_config(self.dir)
+        self.own = List[String]()
+        if exists(self.dir + "/config.json"):
+            self.own = Doc.read(self.dir + "/config.json").nodes[0].keys.copy()
         # Python's Repo migrates an old config.json here (triage, stops, layers) and saves it.
         # The port reads only: it says so rather than read a config Python hasn't migrated.
         if exists(self.dir + "/config.json") and not (
             self.cfg.truthy(0, "triage_migrated") and self.cfg.truthy(0, "stops_migrated") and self.cfg.truthy(0, "layered")
         ):
             raise Error("this repo's config.json is from an older bullpen: run the Python bullpen once first")
+
+    def save(mut self) raises:
+        """Write this repo's config.json: only what it sets itself (and the keys only a
+        repo has, and bullpen's own notes); the rest comes from the global one."""
+        _ = self.cfg.put_str(0, "root", self.root)
+        _ = self.cfg.put_bool(0, "triage_migrated", True)
+        _ = self.cfg.put_bool(0, "stops_migrated", True)
+        _ = self.cfg.put_bool(0, "layered", True)
+        var inherited = inherited_config()
+        var out = Doc()
+        _ = out.add(Node(OBJ))
+        var own = List[String]()
+        ref root = self.cfg.nodes[0]
+        for i in range(len(root.keys)):
+            var k = root.keys[i]
+            var mine = False
+            for o in self.own:
+                if o == k:
+                    mine = True
+            if mine or in_words(k, REPO_ONLY) or in_words(k, INTERNAL) or not inherited.has(0, k):
+                var v = copy_into(out, self.cfg, root.kids[i])
+                out.nodes[0].keys.append(k)
+                out.nodes[0].kids.append(v)
+                own.append(k)
+        self.own = own^
+        write_json(self.dir + "/config.json", out)
+
+    def base(self) raises -> String:
+        """The branch tasks start from: the config's, else origin's default, else the current one."""
+        if self.cfg.truthy(0, "base"):
+            return self.cfg_str("base")
+        var p = git(self.root, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], False)
+        if p.code == 0:
+            var s = String(p.out.strip())
+            return String(s[byte=s.find("/") + 1:])
+        var cur = String(git(self.root, ["branch", "--show-current"]).out.strip())
+        return cur if cur else "main"
+
+    def save_task(self, mut t: Task) raises:
+        """Write a task whose status may have changed: when it was updated, and when it
+        entered its status. (Python's on_save hooks, notifications and PRs to follow,
+        do nothing for the statuses the port saves: todo.)"""
+        _ = t.doc.put_str(0, "updated", iso_now())
+        var path = self.task_path(t.id())
+        var old_status = String("")
+        var had = exists(path)
+        if had:
+            old_status = Doc.read(path).str(0, "status")
+        if not had or old_status != t.status():
+            _ = t.doc.put_null(0, "note")
+            t.doc.pop(0, "stuck")
+            t.doc.pop(0, "auto_wait")
+        if not had or old_status != t.status() or not t.truthy("since"):
+            _ = t.doc.put_str(0, "since", iso_now(True))
+        if t.status() != "todo":
+            raise Error("save_task: the port only saves todo tasks (notifications aren't ported)")
+        write_json(path, t.doc)
 
     def cfg_str(self, key: String) -> String:
         return self.cfg.str(0, key)

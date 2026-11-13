@@ -27,10 +27,28 @@ struct Args(Movable):
         return False
 
     def opt(self, name: String, default: String = "") -> String:
+        """The option's value (the last one given, as argparse keeps), else default."""
+        var out = default
         for i in range(len(self.keys)):
             if self.keys[i] == name:
-                return self.vals[i]
-        return default
+                out = self.vals[i]
+        return out
+
+    def opts(self, name: String) -> List[String]:
+        """Every value given for an option that can repeat (argparse's action="append")."""
+        var out = List[String]()
+        for i in range(len(self.keys)):
+            if self.keys[i] == name:
+                out.append(self.vals[i])
+        return out^
+
+    def last_flag(self, a: String, b: String) -> String:
+        """Which of two flags was given last ("" for neither): argparse's store_true/store_false pair."""
+        var out = String("")
+        for f in self.flags:
+            if f == a or f == b:
+                out = f
+        return out
 
     def has_opt(self, name: String) -> Bool:
         for k in self.keys:
@@ -80,3 +98,9 @@ def usage_error(cmd: String, msg: String) raises:
     print("usage: bullpen " + cmd + " ...", file=stderr)
     print("bullpen " + cmd + ": error: " + msg, file=stderr)
     raise Error("__usage__")
+
+
+def choice(cmd: String, name: String, value: String, choices: String) raises:
+    """A usage error unless value is one of choices (space-separated), as argparse's choices=."""
+    if not _listed(value, choices):
+        usage_error(cmd, "argument " + name + ": invalid choice: '" + value + "'")

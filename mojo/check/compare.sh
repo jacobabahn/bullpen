@@ -9,7 +9,9 @@
 # folder afterwards (every file but locks) must be the same. A case starting `tty `
 # runs on a terminal 100 columns wide (`tty40 `: 40 wide). MOJO_BIN: the binary to
 # check (default mojo/build/bullpen). Prints one line per case,
-# a diff for each that differs, and exits 1 if any did.
+# a diff for each that differs, and exits 1 if any did. Stamps from the run's own
+# time (a command's now()) read as <now>. A case starting `usage ` is a usage error:
+# its stderr isn't compared (the port doesn't copy argparse's usage text), the rest is.
 here=$(cd "$(dirname "$0")" && pwd)
 top=$(cd "$here/../.." && pwd)
 py="$top/bin/bullpen"
@@ -22,15 +24,18 @@ fail=0
 if [ $# -gt 0 ]; then cases=("$@"); else mapfile -t cases < <(cat "$here"/cases*.txt | grep -v '^\s*\(#\|$\)'); fi
 
 run_one() {  # run_one PROGRAM CASE OUTDIR
-    local prog=$1 case=$2 out=$3 cols=""
+    local prog=$1 case=$2 out=$3 cols="" usage=""
     mkdir -p "$out"
     local envs
     envs=$(python3 "$here/fixture.py" "$work/fx" "$now") || { echo "fixture.py failed" >&2; exit 2; }
     eval "$envs"
+    case "$case" in usage\ *) usage=1; case=${case#usage } ;; esac
     case "$case" in
         tty40\ *) cols=40; case=${case#tty40 } ;;
         tty\ *) cols=100; case=${case#tty } ;;
     esac
+    local t0
+    t0=$(date +%s.%N)
     (
         cd "$FIXTURE_ROOT" || { echo "no fixture" >&2; exit 2; }
         if [ -n "$cols" ]; then
@@ -43,6 +48,9 @@ run_one() {  # run_one PROGRAM CASE OUTDIR
     )
     (cd "$work/fx" && find state -type f ! -name '*.lock' | sort | while read -r f; do echo "== $f"; cat "$f"; done) >"$out/state"
     sed -i "s#$work/fx#FX#g" "$out"/*
+    python3 "$here/now_stamps.py" "$t0" "$(date +%s.%N)" "$out"/*
+    [ -n "$usage" ] && echo "(usage error: not compared)" >"$out/stderr"
+    return 0
 }
 
 for c in "${cases[@]}"; do
