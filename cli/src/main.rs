@@ -2,12 +2,20 @@
 //! ported so far and hands any other (and any it can't do as Python would) to the
 //! Python bullpen, bin/bullpen, so it can stand in for it.
 
+mod agents;
 mod args;
+mod check;
 mod coordinators;
 mod core;
+mod diff;
+mod events;
 mod json;
+mod modes;
+mod news;
+mod peek;
 mod rex;
 mod show;
+mod stops;
 mod task_line;
 mod text;
 mod timeutil;
@@ -25,6 +33,13 @@ fn dispatch(argv: &[String]) -> Res<Option<i32>> {
         "_nop" => {} // does nothing: the benchmark times start-up with it
         "ls" => show::cmd_ls(&parse(rest, &spec(&["--all", "--all-repos", "--json"], &[], 0, 0))?)?,
         "show" => show::cmd_show(&parse(rest, &spec(&["--json"], &[], 1, 1))?)?,
+        "news" => news::cmd_news(&parse(rest, &spec(&["--follow"], &["--every"], 0, 0))?)?,
+        "peek" => peek::cmd_peek(&parse(rest, &spec(&["--vt"], &["--lines"], 1, 1))?)?,
+        "diff" => diff::cmd_diff(&parse(rest, &spec(&["--stat", "--pane", "--back"], &["--session"], 1, 1))?)?,
+        "check" => {
+            let flags = &["--fix", "--quiet", "--all-repos"];
+            return Ok(Some(check::cmd_check(&parse(rest, &spec(flags, &[], 0, usize::MAX))?)?));
+        }
         _ => return Ok(None),
     }
     Ok(Some(0))

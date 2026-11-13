@@ -42,3 +42,28 @@ env:FIXTURE=check check --quiet
 env:FIXTURE=check check BP-42 BP-57
 env:FIXTURE=deadcoords check
 env:FIXTURE=check,deadcoords check --all-repos
+# added with the Rust port: flags, prefixes, errors and argparse's usage errors
+news --every 2
+env:REX_BLOCK=blk1 env:FIXTURE=nolog news
+env:REX_BLOCK=blk3 env:FIXTURE=midrecord news
+usage news --every x
+usage news extra
+peek BP-27
+peek BP-5 --lines 1 --vt
+peek BP-3 --li 2
+peek BP-3 --lines +2
+peek BP-3 --lines 999
+usage peek
+usage peek BP-3 --lines x
+usage peek BP-3 BP-4
+diff BP-3 --st
+diff BP-21 --stat
+diff 33 --stat --back
+check --quiet BP-3
+check BP-3 BP-404
+check --all-repos --quiet
+env:FIXTURE=check check BP-45 BP-58 BP-60 BP-61 BP-62 BP-63
+env:FIXTURE=check check --all-repos BP-52
+env:FIXTURE=deadcoords check --quiet
+usage check BP-3 --quiet BP-4
+usage check --nope
