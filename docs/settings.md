@@ -61,16 +61,29 @@ accept](accept.md#after-accept)), and `--gh PATH` runs that gh instead of the on
 
 - `float` (the default): a capsule, a minimized floating pane at the bottom right of
   the coordinator's tab. `go` brings it up, and `ctrl+esc` minimizes it again.
+- `tab`: a capsule in one workers tab, `bullpen: <repo> workers`, out of the
+  coordinator's tab (a second coordinator's is `bullpen: <repo> workers c2`). bullpen
+  makes the tab, without switching to it, when a pane first goes there, and Rex
+  closes it when the last one there closes. `go` switches to that tab and brings the
+  pane up, and `ctrl+esc` minimizes it and takes you back to the board's tab. Rex
+  keeps one pane up in a tab that holds only floating ones, so the last one up there
+  stays up. A worker that needs you puts Rex's dot on that tab. `bullpen up` (and
+  `go`) moves a pane dragged out of it back in.
 - `tabs`: a tab each. `go` focuses it, and `ctrl+esc` does nothing there.
 - `background`: in no tab at all, out of sight. `go` (and `go --next`, the jump key,
   the board's Enter) floats it over the coordinator's tab, with focus, and `ctrl+esc`
   puts it back in the background.
 
 `bullpen config --reviewers` does the same for reviewers (full, light, follow-up and
-rebase-check reviews): `background` by default, or `float`, `tabs`, or `same` (where
-workers go). A reviewer is read through its findings rather than its screen; when one
+rebase-check reviews): `background` by default, or `float`, `tab`, `tabs`, or `same`
+(where workers go, the task's own choice included). A reviewer is read through its findings rather than its screen; when one
 stops on a prompt or needs you, `go --next` and the board bring it up like a worker.
 The board's diff (`v`) floats, or gets a tab with `--workers tabs`, whatever these say.
+
+A task can have its own: `bullpen start BP-3 --pane background` (also on `add` and
+`resume`) puts its worker there, whatever `--workers` says, from then on: it's kept in
+the task, and `bullpen show BP-3` says it. Its reviewer goes there too only with
+`--reviewers same`.
 
 A change applies to panes made after it: a pane that's running stays where it is and
 shows and hides as before.

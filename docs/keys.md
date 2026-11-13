@@ -29,7 +29,8 @@ four actions, also in the command palette under Bullpen, and binds:
   (`bullpen pick --pane`; `bullpen pick` runs it in the terminal you're in).
 
 And in a worker's or reviewer's floating pane, `ctrl+escape` puts it away and
-returns you to the board (`bullpen hide`): a capsule is minimized again, and a
+returns you to the board (`bullpen hide`): a capsule is minimized again (in the workers
+tab too, with `--workers tab`, and you're back in the board's tab), and a
 background pane goes back to the background, out of every tab. In a pane with a tab of
 its own (`--workers tabs`), and anywhere else, the key goes through. Those panes say
 so in their label ("bullpen: BP-3 · ctrl+esc hides"). See [Where panes

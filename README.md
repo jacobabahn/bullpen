@@ -59,9 +59,10 @@ the bottom right labelled `bullpen: BP-3`. `bullpen go BP-3` (or the board, or
 the [keys](docs/keys.md)) brings one up and puts any other worker back into its capsule;
 going to the coordinator puts them all back. Reviewers run in the background, in
 no tab, until `go` (or the board) brings one up. The watcher runs detached, with no
-tab. `bullpen config --workers tabs` gives new workers their own tabs instead, and
-`--workers background` keeps them out of sight too (see [Where panes
-live](docs/settings.md#where-panes-live)).
+tab. `bullpen config --workers tab` puts new workers' capsules in one workers tab
+instead, `--workers tabs` gives them a tab each, and `--workers background` keeps
+them out of sight too; `bullpen start BP-3 --pane tab` chooses for one task (see
+[Where panes live](docs/settings.md#where-panes-live)).
 
 After a Rex server restart, run `bullpen up` again: it finds its panes by their
 labels, marks workers whose panes are gone as stopped, and restarts the watcher.

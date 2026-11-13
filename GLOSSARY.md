@@ -17,7 +17,7 @@ _Avoid_: window, block (Rex's API word for it).
 
 **Waits on**: the agent a task waits on: its reviewer while the task is in review or stopped on its reviewer (a usage-limit stop is seen to as its worker's), else its worker while it's working or waiting on its coordinator or the person, and no agent while it waits on the usage limit or isn't running (queued, stopped, ready, finished, closed). Its prompt is the one `answer` presses, its pane comes first in a notification, and `ok` and `reply` check it's running. `waits_on` in `bullpen/agents.py` is the rule, and `pane` there says where a worker's or reviewer's pane is.
 
-**Capsule**: a worker's or reviewer's pane minimized, shown at the bottom right of the coordinator's tab. `bullpen go` brings it up; `bullpen hide` (ctrl+escape) puts it back.
+**Capsule**: a worker's or reviewer's pane minimized, shown at the bottom right of the coordinator's tab (or of its workers tab, with `--workers tab`). `bullpen go` brings it up; `bullpen hide` (ctrl+escape) puts it back.
 
 **Board**: the live task list beside the coordinator (`bullpen board`). It groups tasks by what you do next; `ls` uses its words for each status.
 

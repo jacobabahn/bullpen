@@ -87,9 +87,13 @@ moves it.
 ## Where a pane lives
 
 A worker's, reviewer's or diff's pane goes where its placement in `panes.py` puts it:
-`FLOAT` (a capsule in its coordinator's tab, the default), `TABS` (a tab of its own) or
-`BACKGROUND` (a detached Rex block, in no tab), picked by the `workers` and `reviewers`
-settings (`for_new`; a diff never goes to the background). Each placement has the same
+`FLOAT` (a capsule in its coordinator's tab, the default), `TAB` (a capsule in its
+coordinator's workers tab, found by the tab's label), `TABS` (a tab of its own) or
+`BACKGROUND` (a detached Rex block, in no tab), picked by the task's own `placement`
+(`start --pane`) over the `workers` setting, and the `reviewers` setting (`for_new`; a
+diff never goes to the background). Rex places a block only beside another, and one
+placed beside a floating block joins its layer, so `gather` moves a pane into a workers
+tab beside a stand-in on a layer (or in a tab) of its own, then closes the stand-in. Each placement has the same
 steps: `place` (make the pane; one the hide key puts away gets its hint in its label),
 `show`, `hide` (False when it has no away, so `hide` exits 3), `find` (by ID, else
 label, after a Rex restart), and what `gather` does to keep it home. Code that makes,
