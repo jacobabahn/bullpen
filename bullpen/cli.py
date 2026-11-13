@@ -73,7 +73,31 @@ def grouped(sub):
     return out
 
 
-class Parser(argparse.ArgumentParser):
+class Formatter(argparse.HelpFormatter):
+    """argparse's formatter, but its colours (Python 3.14's _colorize, which takes about
+    13 ms to import) load when it first formats something, not whenever a parser is
+    built: most calls never print help or usage."""
+
+    def _set_color(self, color):
+        self.__dict__.pop("_theme", None)
+        self.__dict__.pop("_decolor", None)
+        self._wants_color = color
+
+    def __getattr__(self, name):
+        if name in ("_theme", "_decolor") and "_wants_color" in self.__dict__:
+            super()._set_color(self._wants_color)
+            return self.__dict__[name]
+        raise AttributeError(name)
+
+
+class CommandParser(argparse.ArgumentParser):
+    """A command's parser, with the formatter above."""
+
+    def __init__(self, *a, formatter_class=Formatter, **kw):
+        super().__init__(*a, formatter_class=formatter_class, **kw)
+
+
+class Parser(CommandParser):
     """The top-level parser: a short usage line and the commands in groups."""
 
     def format_usage(self):
@@ -125,7 +149,8 @@ def load_savers():
 def parser(modules=MODULES):
     """The parser with the commands of these modules (all of them for --help)."""
     ap = Parser(prog="bullpen", description=ABOUT.splitlines()[0])
-    sub = ap.add_subparsers(dest="cmd", required=True, parser_class=argparse.ArgumentParser)
+    # prog as argparse would work it out, which would format a usage line to do it
+    sub = ap.add_subparsers(dest="cmd", required=True, parser_class=CommandParser, prog="bullpen")
     for m in modules:
         module(m).commands(sub)
     return ap
