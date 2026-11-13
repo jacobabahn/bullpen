@@ -49,5 +49,9 @@ program in `restart.rs`. A test builds a board with `App::for_test(tasks)` (in
 `board/src/app/testing.rs`, with `press()`, `Scratch` and the other shared helpers),
 so a new field on `App` is set in `App::new` alone.
 
-`ui.rs` still keeps its tests in a `mod tests` at the bottom, until it is split the
-same way.
+`board/src/ui/` is the same too: `mod.rs` sizes the board once (`Sizes`) and picks
+what to draw (tests in `test_ui.rs`); the list in `list.rs`, the message and key rows
+in `bottom.rs`, the full-screen views (a peek, a prompt, a question) in `overlay.rs`
+and the `?` list, with `BOARD_KEYS`, in `help.rs`. Their tests draw the board into a
+test terminal and read it back with `screen()`, `row()` and `tone_of()` (in
+`board/src/ui/testing.rs`).

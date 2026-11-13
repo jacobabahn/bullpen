@@ -86,16 +86,16 @@ class HelpersTest(unittest.TestCase):
             self.assertIn(words, cells)
         self.assertIn("`◐`", cells["in review"])
         self.assertIn("`○`", cells["working"])
-        # the turning marks: the first frame of each animation in board/src/ui.rs
-        ui = (ROOT / "board" / "src" / "ui.rs").read_text()
+        # the turning marks: the first frame of each animation in board/src/ui/mod.rs
+        ui = (ROOT / "board" / "src" / "ui" / "mod.rs").read_text()
         for name, words in (("REVIEW", "in review"), ("WORKING", "working")):
             first = re.search(name + r': &\[&str\] = &\["(.)"', ui).group(1)
             self.assertIn(f"`{first}`", cells[words])
         spin = re.search(r'SPINNER: &\[&str\] = &\["(.)"', ui).group(1)
         self.assertTrue(any(c.startswith(f"`{spin}`") for c in cells.values()))
-        # every key of the board (BOARD_KEYS in board/src/main.rs, the tour's aside), in its order
-        main = (ROOT / "board" / "src" / "main.rs").read_text()
-        keys = main[main.index("pub const BOARD_KEYS"):main.index('("In a tour"')]
+        # every key of the board (BOARD_KEYS in board/src/ui/help.rs, the tour's aside), in its order
+        help = (ROOT / "board" / "src" / "ui" / "help.rs").read_text()
+        keys = help[help.index("pub const BOARD_KEYS"):help.index('("In a tour"')]
         board = [k.split()[0] for k in re.findall(r'\("([^"]+)", "', keys)]
         table = [re.match(r"`([^`]+)`", c).group(1) for c in cells.values() if re.match(r"`[^`]+`", c)]
         listed = [k for k in table if k in board]

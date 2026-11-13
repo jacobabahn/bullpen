@@ -25,50 +25,6 @@ use std::process::Command;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-/// The `?` list: a heading, then one short line per key. The board wraps it to its
-/// width; the long explanations are in docs/board.md.
-pub const BOARD_KEYS: &[(&str, &[(&str, &str)])] = &[
-    ("Moving", &[
-        ("j k", "select a task (↑ ↓ too)"),
-        ("PgDn", "a page down (ctrl+d: half)"),
-        ("PgUp", "a page up (ctrl+u: half)"),
-        ("G", "the last task (End; Home: first)"),
-        ("n", "next that needs you, else ready"),
-        ("⏎", "open its pane, or its reviewer's"),
-        ("c", "back to the coordinator"),
-        ("/", "pick any open task, anywhere"),
-    ]),
-    ("The selected task", &[
-        ("a", "accept and merge, or close"),
-        ("d", "drop it"),
-        ("i", "answer its question"),
-        ("t", "tell its worker something"),
-        ("p", "peek at its worker's screen"),
-        ("v", "view its diff"),
-        ("g", "guided tour of its change"),
-        ("s", "start it"),
-        ("r", "resume a stopped worker"),
-    ]),
-    ("The board", &[
-        ("l", "switch layout"),
-        ("f", "show closed tasks too"),
-        ("o", "other coordinators' tasks too"),
-        ("esc", "put a red message away"),
-        ("?", "this list"),
-        ("q", "quit the board (y to be sure)"),
-    ]),
-    ("In a tour", &[
-        ("n p", "next, previous step"),
-        ("j k", "scroll (space b too)"),
-        ("c", "comment on the step"),
-        ("s", "at the end: send the comments"),
-        ("a", "accept (before the end: a twice)"),
-        ("t", "tell its worker something"),
-        ("⏎ v", "close it, open its pane or diff"),
-        ("esc", "close it"),
-    ]),
-];
-
 /// Take the terminal, with bracketed paste on: a paste arrives whole, so a newline
 /// in it doesn't send the line, and pasted text outside a line isn't taken as keys.
 fn term_init() -> ratatui::DefaultTerminal {
