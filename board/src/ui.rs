@@ -1,6 +1,7 @@
 //! Drawing the board. It sits in a narrow pane, so every line is cut to fit.
 
 use crate::model::{self, fit, pad, width, Action, Layout, Task, STALE};
+use crate::edit::LineEdit;
 use crate::{App, Kind, Mode};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
@@ -497,25 +498,20 @@ fn message(app: &App, w: usize, most: usize) -> Vec<Span<'static>> {
 /// How many lines of detail the selected task gets.
 const SELECTED_LINES: usize = 8;
 
-/// A label, then what's typed, at row y: the end of it when it's longer than the
-/// line. Returns the cursor's column.
-fn input_line(buf: &mut Buffer, area: Rect, y: usize, label: &str, text: &str) -> usize {
+/// A label, then what's typed, at row y: the part around the cursor when it's longer
+/// than the line. Returns the cursor's column.
+fn input_line(buf: &mut Buffer, area: Rect, y: usize, label: &str, text: &LineEdit) -> usize {
     let w = area.width as usize;
     let x = width(label) + 2;
-    let room = w.saturating_sub(x + 2);
-    let mut s: Vec<char> = text.chars().collect();
-    while width(&s.iter().collect::<String>()) > room && !s.is_empty() {
-        s.remove(0);
-    }
-    let shown: String = s.into_iter().collect();
+    let (shown, at) = text.view(w.saturating_sub(x + 2));
     put(buf, area, y, 1, span(label.to_string(), bold()));
-    put(buf, area, y, x, shown.clone());
-    x + width(&shown)
+    put(buf, area, y, x, shown);
+    x + at
 }
 
 /// `i` on a coordinator's question: the task, the whole question wrapped, then the
 /// line the answer is typed on. Returns the cursor's column and row.
-fn draw_ask(buf: &mut Buffer, area: Rect, h: usize, title: &str, question: &str, text: &str) -> (usize, usize) {
+fn draw_ask(buf: &mut Buffer, area: Rect, h: usize, title: &str, question: &str, text: &LineEdit) -> (usize, usize) {
     let w = area.width as usize;
     put(buf, area, 0, 1, span(fit(title, w.saturating_sub(2)), bold()));
     // the title, a gap, the question, a gap, the answer and the foot
@@ -1212,6 +1208,34 @@ mod tests {
         // a tell is still the one line at the bottom of the board
         a.mode = Mode::Tell { id: "BP-31".into(), text: "hi".into(), reply: false };
         assert_eq!(row(&screen(&mut a, 42, 16), 1), " Tell BP-31: hi");
+    }
+
+    #[test]
+    fn a_long_tell_shows_the_part_around_the_cursor_at_42_columns() {
+        let mut a = app(vec![asking("BP-31")], 0, Layout::Grouped);
+        let mut text = crate::edit::LineEdit::from("move the session table to postgres and keep the old one");
+        use ratatui::crossterm::event::{KeyCode, KeyEvent};
+        let k = |t: &mut crate::edit::LineEdit, code| t.key(KeyEvent::from(code));
+        a.mode = Mode::Tell { id: "BP-31".into(), text: text.clone(), reply: false };
+        let mut term = Terminal::new(TestBackend::new(42, 16)).unwrap();
+        term.draw(|f| draw(f, &mut a)).unwrap();
+        let last = |term: &Terminal<TestBackend>| (0..42).map(|x| term.backend().buffer()[(x, 15)].symbol()).collect::<String>();
+        // the end, with the cursor after it, inside the line
+        assert_eq!(last(&term).trim_end(), " Tell BP-31: tgres and keep the old one");
+        assert_eq!(term.get_cursor_position().unwrap(), Position::new(39, 15));
+        // home: the start, the cursor on its first letter
+        k(&mut text, KeyCode::Home);
+        a.mode = Mode::Tell { id: "BP-31".into(), text: text.clone(), reply: false };
+        term.draw(|f| draw(f, &mut a)).unwrap();
+        assert_eq!(last(&term), " Tell BP-31: move the session table to p  ");
+        assert_eq!(term.get_cursor_position().unwrap(), Position::new(13, 15));
+        // the answer line scrolls the same way
+        k(&mut text, KeyCode::End);
+        a.mode = Mode::Tell { id: "BP-31".into(), text, reply: true };
+        term.draw(|f| draw(f, &mut a)).unwrap();
+        let row = (0..42).map(|x| term.backend().buffer()[(x, 14)].symbol()).collect::<String>();
+        assert_eq!(row.trim_end(), " Answer:  postgres and keep the old one");
+        assert_eq!(term.get_cursor_position().unwrap(), Position::new(39, 14));
     }
 
     #[test]

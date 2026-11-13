@@ -11,8 +11,11 @@
 //!
 //! Usage: bullpen-board --dir <repo state dir> --root <repo> --bullpen <bullpen program>
 
+mod edit;
 mod model;
 mod ui;
+
+use edit::LineEdit;
 
 use model::{Action, Config, Layout, Prompt, Question, Task, TourShow};
 use notify::{RecursiveMode, Watcher};
@@ -78,7 +81,7 @@ pub enum Mode {
     /// the `?` list, scrolled to its top line; scroll keys scroll, any other key closes
     Help { top: usize },
     /// typing a line to tell a task's worker, or with reply, to answer its coordinator's question
-    Tell { id: String, text: String, reply: bool },
+    Tell { id: String, text: LineEdit, reply: bool },
     /// the prompt a task's agent is at, read again every second (None until first read),
     /// until an option is pressed or esc
     Answer { id: String, title: String, prompt: Option<Prompt> },
@@ -247,6 +250,8 @@ impl ExeId {
 
 enum Msg {
     Key(KeyEvent),
+    /// pasted text (bracketed paste): it goes into a line being typed, and is never keys
+    Paste(String),
     Redraw,
     Changed,
     Done { id: String, job: Job, ok: bool, out: String },
@@ -570,7 +575,7 @@ impl App {
                 self.peek_due = Instant::now();
                 self.peek();
             }
-            Some(Question::Ask) => self.mode = Mode::Tell { id: t.id.clone(), text: String::new(), reply: true },
+            Some(Question::Ask) => self.mode = Mode::Tell { id: t.id.clone(), text: LineEdit::default(), reply: true },
             None if t.needs_you() => self.msg = Note::info(format!("{} asks nothing here: ⏎ opens it.", t.id)),
             None => self.msg = Note::info(format!("{} doesn't need you.", t.id)),
         }
@@ -700,9 +705,12 @@ impl App {
                 return true;
             }
             Mode::Tell { id, text, reply } => {
+                if text.key(k) {
+                    return true;
+                }
                 match k.code {
                     KeyCode::Enter => {
-                        let (id, text, reply) = (id.clone(), text.trim().to_string(), *reply);
+                        let (id, text, reply) = (id.clone(), text.text().trim().to_string(), *reply);
                         self.mode = Mode::Normal;
                         if !text.is_empty() {
                             let (ok, out) = self.bp(&[if reply { "reply" } else { "tell" }, &id, &text]);
@@ -711,10 +719,6 @@ impl App {
                         }
                     }
                     KeyCode::Esc => self.mode = Mode::Normal,
-                    KeyCode::Backspace => {
-                        text.pop();
-                    }
-                    KeyCode::Char(c) if text.chars().count() < 500 => text.push(c),
                     _ => {}
                 }
                 return true;
@@ -868,7 +872,7 @@ impl App {
                 let (ok, out) = self.bp(&["diff", sel, "--pane"]);
                 self.msg = Note::of(ok, format!("Opened {sel}'s diff."), out);
             }
-            (_, Some('t')) => self.mode = Mode::Tell { id: sel.into(), text: String::new(), reply: false },
+            (_, Some('t')) => self.mode = Mode::Tell { id: sel.into(), text: LineEdit::default(), reply: false },
             (_, Some('i')) => self.answer(&cur),
             (_, Some('g')) => self.tour(&cur),
             _ => {}
@@ -893,6 +897,11 @@ impl App {
     fn handle(&mut self, m: Msg) -> bool {
         match m {
             Msg::Key(k) => return self.key(k),
+            Msg::Paste(text) => {
+                if let Mode::Tell { text: line, .. } = &mut self.mode {
+                    line.paste(&text);
+                }
+            }
             Msg::Done { id, job, ok, out } => self.done(id, job, ok, out),
             Msg::Peeked { id, text, ok } => self.peeked(id, text, ok),
             Msg::Prompted { id, prompt, out } => self.prompted(id, prompt, out),
@@ -900,6 +909,19 @@ impl App {
         }
         true
     }
+}
+
+/// Take the terminal, with bracketed paste on: a paste arrives whole, so a newline
+/// in it doesn't send the line, and pasted text outside a line isn't taken as keys.
+fn term_init() -> ratatui::DefaultTerminal {
+    let term = ratatui::init();
+    let _ = ratatui::crossterm::execute!(std::io::stdout(), ratatui::crossterm::event::EnableBracketedPaste);
+    term
+}
+
+fn term_restore() {
+    let _ = ratatui::crossterm::execute!(std::io::stdout(), ratatui::crossterm::event::DisableBracketedPaste);
+    ratatui::restore();
 }
 
 /// Report this program's status to the terminal (the Program Status Protocol).
@@ -974,6 +996,7 @@ fn main() {
     std::thread::spawn(move || loop {
         let m = match event::read() {
             Ok(Event::Key(k)) if k.kind == KeyEventKind::Press => Msg::Key(k),
+            Ok(Event::Paste(text)) => Msg::Paste(text),
             Ok(Event::Resize(..)) => Msg::Redraw,
             Ok(_) => continue,
             Err(_) => return,
@@ -1016,7 +1039,7 @@ fn main() {
     // program can say what it is (OSC 7501's app): "rust" gets Rust's icon.
     // bullpen ignores status from the board's pane, and other terminals ignore this.
     status("state=idle:app=rust");
-    let mut term = ratatui::init();
+    let mut term = term_init();
     // Read the tasks again when their files change, and once a second in case a
     // change was missed; frames drawn in between only move the animations.
     let (mut stale, mut read) = (true, Instant::now());
@@ -1026,9 +1049,9 @@ fn main() {
             (stale, read) = (false, Instant::now());
             if let Some(exe) = app.replaced() {
                 use std::os::unix::process::CommandExt;
-                ratatui::restore();
+                term_restore();
                 let err = Command::new(&exe).args(app.restart_args()).exec(); // returns only if it failed
-                term = ratatui::init();
+                term = term_init();
                 app.exe = None; // don't try again
                 app.msg = Note::failed(format!("Couldn't reload the rebuilt board: {err}"));
             }
@@ -1064,7 +1087,7 @@ fn main() {
             _ => {}
         }
     }
-    ratatui::restore();
+    term_restore();
     status("state=clear");
 }
 
@@ -1299,6 +1322,43 @@ mod tests {
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(matches!(a.mode, Mode::Normal));
         assert!(a.msg.text.contains("can't run"), "{}", a.msg.text); // it tried `bullpen reply`
+    }
+
+    #[test]
+    fn the_tell_line_edits_takes_a_paste_whole_and_has_no_cap() {
+        let d = Scratch::new("tell-edit");
+        let mut a = app(vec![task("BP-1", "working")]);
+        (a.bullpen, a.root) = (fake_bullpen(&d, "none"), d.0.clone());
+        a.settle();
+        let ctrl = |a: &mut App, c: char| a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
+        press(&mut a, 't');
+        for c in "use the old table".chars() {
+            press(&mut a, c);
+        }
+        ctrl(&mut a, 'w'); // the last word goes; ctrl+w isn't typed as w
+        key(&mut a, KeyCode::Home);
+        for c in "please ".chars() {
+            press(&mut a, c);
+        }
+        // a pasted newline is a space: it doesn't send the line
+        a.handle(Msg::Paste("keep\nit, ".into()));
+        assert!(matches!(a.mode, Mode::Tell { .. }));
+        // past the old 500-character cap, nothing is dropped
+        key(&mut a, KeyCode::End);
+        let long = "x".repeat(600);
+        a.handle(Msg::Paste(long.clone()));
+        let Mode::Tell { text, .. } = &a.mode else { panic!() };
+        assert_eq!(text.text(), format!("please keep it, use the old {long}"));
+        // ctrl+u cuts to the start; ⏎ sends what's left
+        ctrl(&mut a, 'u');
+        for c in "ok".chars() {
+            press(&mut a, c);
+        }
+        key(&mut a, KeyCode::Enter);
+        assert_eq!(calls(&d), ["tell BP-1 ok"]);
+        // a paste with no line to go into isn't taken as keys
+        a.handle(Msg::Paste("dq".into()));
+        assert!(matches!(a.mode, Mode::Normal) && a.pending.is_none());
     }
 
     #[test]
