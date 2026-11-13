@@ -74,8 +74,12 @@ fn check_after(repo: &Repo, tid: &str, after: Vec<String>) -> Res<Vec<String>> {
 }
 
 /// Path.read_text(): the file as UTF-8 with universal newlines. One it can't read goes
-/// to Python, whose traceback says why.
+/// to Python, whose traceback says why; so does anything but a plain file (a pipe,
+/// /dev/stdin), which Python couldn't read again once the port had.
 fn read_text(path: &str) -> Res<String> {
+    if !std::fs::metadata(path).is_ok_and(|m| m.is_file()) {
+        return Err(Fail::Python);
+    }
     let bytes = std::fs::read(path).map_err(|_| Fail::Python)?;
     let text = String::from_utf8(bytes).map_err(|_| Fail::Python)?;
     Ok(text.replace("\r\n", "\n").replace('\r', "\n"))
