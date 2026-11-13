@@ -312,9 +312,11 @@ fn save_conflicts(repo: &Repo, t: &mut Obj, files: &[String], shown: &str) -> Re
 /// A conflict marker line (`^(<{7}|\|{7}|={7}|>{7})( |$)`): its first character.
 fn marker(line: &str) -> Option<char> {
     let c = line.chars().next().filter(|c| "<|=>".contains(*c))?;
-    let run = line.chars().take_while(|&x| x == c).count();
-    let rest = &line[7.min(line.len())..];
-    (run == 7 && (rest.is_empty() || rest.starts_with(' '))).then_some(c)
+    if line.chars().take_while(|&x| x == c).count() != 7 {
+        return None;
+    }
+    let rest = &line[7..]; // after seven ASCII characters: a char boundary
+    (rest.is_empty() || rest.starts_with(' ')).then_some(c)
 }
 
 /// str.splitlines(keepends=True).

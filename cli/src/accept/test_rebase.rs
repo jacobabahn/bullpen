@@ -67,3 +67,14 @@ fn a_remote_base_is_fetched_first() {
     );
     assert_eq!(onto("main"), "rebase your branch onto main");
 }
+
+#[test]
+fn a_line_with_wide_characters_is_no_marker() {
+    // a markdown table row or a quote: byte 7 falls inside a character
+    assert_eq!(marker("| 日本語 |"), None);
+    assert_eq!(marker("> 日本語"), None);
+    assert_eq!(marker("=======日本"), None);
+    assert_eq!(marker("<<<<<<< 日本語"), Some('<'));
+    let file = "| 日本語 |\n<<<<<<< HEAD\n> 引用\n||||||| base\n=======\n| 表 |\n>>>>>>> t\n";
+    assert_eq!(both_sides(file).as_deref(), Some("| 日本語 |\n> 引用\n| 表 |\n"));
+}
