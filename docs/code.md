@@ -44,7 +44,7 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   `watcher.py` (`refresh_watcher`), `board_build.py` (`rebuild_if_stale`, and the
   catch-up of a command an old build hands over), `board.py` (the board's paths, for
   board_build) and `jobs.py`; and `start.py` (`launch` and `hand_back` for accept,
-  verdict, events, prs and tours; `dropped_dep` for drop; `waits_phrase` for task_line),
+  events, prs and tours; `dropped_dep` for drop; `waits_phrase` for task_line),
   `rules.py` (`task_rules`, for review), `hooks.py` (the teardown, for close),
   `limit.py` (for events), `review.py` (what a review covers, `start_review`,
   `keep_approval`, `close_reviewer`, for accept, events, prs, tours, close and finish)
