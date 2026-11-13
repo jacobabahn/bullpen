@@ -2,6 +2,7 @@
 //! ported so far and hands any other (and any it can't do as Python would) to the
 //! Python bullpen, bin/bullpen, so it can stand in for it.
 
+mod add;
 mod agents;
 mod args;
 mod check;
@@ -19,6 +20,7 @@ mod stops;
 mod task_line;
 mod text;
 mod timeutil;
+mod triage;
 mod widths;
 
 use crate::args::{parse, Spec};
@@ -40,6 +42,15 @@ fn dispatch(argv: &[String]) -> Res<Option<i32>> {
             let flags = &["--fix", "--quiet", "--all-repos"];
             return Ok(Some(check::cmd_check(&parse(rest, &spec(flags, &[], 0, usize::MAX))?)?));
         }
+        "add" => add::cmd_add(&parse(
+            rest,
+            &spec(&["--auto-accept", "--no-auto-accept"], &["--brief", "--brief-file", "--base", "--after", "--model", "--review"], 1, 1),
+        )?)?,
+        "after" => add::cmd_after(&parse(rest, &spec(&["--none"], &[], 1, usize::MAX))?)?,
+        "model" => add::cmd_model(&parse(rest, &spec(&["--clear"], &[], 1, 2))?)?,
+        "review-mode" => add::cmd_review_mode(&parse(rest, &spec(&[], &[], 2, 2))?)?,
+        "ok" => triage::cmd_ok(&parse(rest, &spec(&[], &[], 1, 1))?)?,
+        "note" => triage::cmd_note(&parse(rest, &spec(&[], &[], 2, usize::MAX))?)?,
         _ => return Ok(None),
     }
     Ok(Some(0))

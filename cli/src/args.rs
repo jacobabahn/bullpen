@@ -37,6 +37,11 @@ impl Args {
         self.opts.iter().filter(|(n, _)| *n == name).map(|(_, v)| v.as_str()).collect()
     }
 
+    /// Which of these flags came last (argparse's store_true/store_false on one dest).
+    pub fn last(&self, names: &[&str]) -> Option<&'static str> {
+        self.flags.iter().rev().find(|f| names.contains(f)).copied()
+    }
+
     /// The nth positional, if given.
     pub fn arg(&self, n: usize) -> Option<&str> {
         self.pos.get(n).map(String::as_str)
