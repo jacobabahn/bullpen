@@ -11,14 +11,13 @@ from . import core
 from .core import Fail, run_later
 
 # The modules with commands (cli/src/commands.rs lists their commands in `bullpen --help`'s order).
-MODULES = ("stepper",)
+MODULES = ()
 
 # Each command Python owns and the module that declares it, in --help's order. A call
 # imports only its command's module (and what that imports), not all of them: start-up
 # is most of a call's time. A test checks this against what the modules declare, and
 # another against the Rust entry's table (cli/src/commands.rs): a command is one side's.
 COMMANDS = {
-    "tour": "stepper",
 }
 
 # The modules that register what saving a task sets off (core.on_save), in the order

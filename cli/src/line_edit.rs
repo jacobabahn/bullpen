@@ -1,6 +1,6 @@
-//! Typing on a terminal (bullpen/line_edit.py): the keys a read gives, raw mode and
-//! bracketed paste, and the line editor the picker (and, from T11b, the stepper's
-//! comment and tell boxes) uses. Python keeps its own line_edit.py (a twin) for its stepper.
+//! Typing on a terminal (once bullpen/line_edit.py): the keys a read gives, raw mode and
+//! bracketed paste, and the line editor the picker and the tour stepper's comment and
+//! tell boxes use.
 
 use bullpen_core::text::{char_width, printable};
 
@@ -34,12 +34,10 @@ pub struct LineEdit {
     text: Vec<char>,
     pub at: usize,
     left: usize,
-    #[allow(dead_code)] // rows' (the stepper's, from T11b)
     top: usize,
 }
 
 impl LineEdit {
-    #[allow(dead_code)] // the stepper's boxes (T11b) start with text and lines
     pub fn new(text: &str, lines: bool) -> LineEdit {
         let mut e = LineEdit {
             lines,
@@ -198,7 +196,6 @@ impl LineEdit {
 
     /// With lines: the text wrapped to width, at most `most` rows of it around the
     /// cursor, and the cursor's (row, column) in them.
-    #[allow(dead_code)] // the stepper's comment box (T11b)
     pub fn rows(&mut self, width: i64, most: i64) -> (Vec<String>, (usize, usize)) {
         let width = width.max(2) as usize;
         let (mut out, mut cur, mut i) = (Vec::new(), (0, 0), 0);
@@ -319,7 +316,7 @@ impl Decoder {
 }
 
 /// Is there something to read on fd within ms milliseconds?
-fn ready(fd: i32, ms: i32) -> bool {
+pub fn ready(fd: i32, ms: i32) -> bool {
     let mut p = libc::pollfd {
         fd,
         events: libc::POLLIN,

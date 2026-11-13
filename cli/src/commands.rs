@@ -69,7 +69,7 @@ pub const COMMANDS: &[Command] = &[
     c("accept", YOU, "(the person's call) merge a ready task's PR, or its local branch without a remote (config --merge), and clean up; on a finished task (nothing to merge), close it", Rust(crate::accept::cmd_accept)),
     c("close", YOU, "(the person's call) close a finished task: remove its worktree, branch and pane (the same as accept on it)", Rust(crate::close::cmd_close)),
     c("drop", YOU, "stop a task, close its PR, remove its worktree", Rust(crate::close::cmd_drop)),
-    c("tour", YOU, "a guided tour of a ready task's change: step through it (its path, off a terminal), or start writing one", Python),
+    c("tour", YOU, "a guided tour of a ready task's change: step through it (its path, off a terminal), or start writing one", Rust(crate::stepper::cmd_tour)),
     c("_tour", INTERNAL, "", Rust(crate::tours::write::cmd_tour_bg)),
     c("tour-comment", YOU, "draft comments on a tour's steps: add, list (no STEP) or remove", Rust(crate::tours::comments::cmd_tour_comment)),
     c("pick", YOU, "type part of any open task, in any repository, and go to it", Rust(crate::pick::cmd_pick)),

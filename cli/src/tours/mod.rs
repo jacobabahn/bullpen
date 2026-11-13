@@ -1,7 +1,7 @@
-//! Guided review tours (bullpen/tours.py): a tour's files, the diff it is written on,
-//! its state, and the person's draft comments on its steps. The tour agent that writes
-//! one is in write.rs, `tour-comment` in comments.rs. The stepper (`tour`, `_tour`'s
-//! starter) is still Python's stepper.py until T11b, with tours.py as its twin.
+//! Guided review tours (once bullpen/tours.py): a tour's files, the diff it is written
+//! on, its state, and the person's draft comments on its steps. The tour agent that
+//! writes one is in write.rs, `tour-comment` in comments.rs. The stepper (`tour`, which
+//! starts `_tour`, and reads and sends a tour) is in stepper/.
 //!
 //! On request (`bullpen tour BP-3`, the board's g), a cheap headless agent writes a
 //! tour of a ready or in-review task's change: its steps in reading order, each a
@@ -252,7 +252,6 @@ fn pid_alive(pid: Option<&Value>) -> bool {
 
 /// What the tour is: "writing", "failed" (why), "current", "stale" (why) or "none",
 /// with the tour when there is one. A tour being written whose writer is gone has failed.
-#[allow(dead_code)] // the stepper's (T11b)
 pub fn tour_state(repo: &Repo, t: &mut Obj) -> Res<(&'static str, Option<Obj>, Option<String>)> {
     if s(obj(t, "tour"), "state") == "writing" {
         if pid_alive(obj(t, "tour").get("pid")) {
@@ -297,14 +296,12 @@ pub fn tour_stale(repo: &Repo, t: &Obj, tour: &Obj) -> Res<Option<String>> {
     )))
 }
 
-#[allow(dead_code)] // the stepper's (T11b)
 fn has_commit(wt: &str, c: &str) -> Res<bool> {
     Ok(!c.is_empty() && git(wt, &["cat-file", "-e", &format!("{c}^{{commit}}")], false)?.ok())
 }
 
 /// The diff the tour was written on: from its own commits, else (they're gone after a
 /// rebase) from the task's code now.
-#[allow(dead_code)] // the stepper's (T11b)
 pub fn tour_diff(repo: &Repo, t: &Obj, tour: &Obj) -> Res<Vec<DiffFile>> {
     let wt = s(t, "worktree");
     let (commit, base) = (s(tour, "commit"), s(tour, "base"));
@@ -318,7 +315,6 @@ pub fn tour_diff(repo: &Repo, t: &Obj, tour: &Obj) -> Res<Vec<DiffFile>> {
 
 /// A step's hunks from git, as a patch: each file the step names, in the step's order,
 /// with its header and the hunks the step covers.
-#[allow(dead_code)] // the stepper's (T11b)
 pub fn step_diff(files: &[DiffFile], step: &Obj) -> String {
     let refs: Vec<&Obj> = refs_of(step);
     let mut names: Vec<&str> = Vec::new();
@@ -359,7 +355,6 @@ fn refs_of(step: &Obj) -> Vec<&Obj> {
 }
 
 /// "bin/bullpen 120-140, README.md": a step's files and lines, for people.
-#[allow(dead_code)] // the stepper's (T11b)
 pub fn step_files(step: &Obj) -> String {
     let named: Vec<String> = refs_of(step)
         .into_iter()

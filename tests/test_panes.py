@@ -1,6 +1,5 @@
-"""Where a pane lives: the placements, through the commands that show and hide panes (Rust's
-cli/src/panes/, with its own tests of placement choice), and Python's twin (bullpen/panes.py)
-called as launch, review and `up` call it."""
+"""Where a pane lives: the placements, through the commands that make, show, hide and
+gather panes (Rust's cli/src/panes/, with its own tests of placement choice)."""
 
 import json
 import subprocess
@@ -11,21 +10,14 @@ from support import ROOT, BullpenTest, setUpModule, tearDownModule  # noqa: F401
 
 
 class PanesBase(BullpenTest):
-    def panes(self, code):
-        """Run code with bullpen.panes imported as panes and the repo as repo, against the
-        fake rex; what it prints, as JSON."""
-        src = textwrap.dedent("""\
-            import json, sys
-            sys.path.insert(0, %r)
-            from bullpen import panes
-            from bullpen.core import Repo
-            from pathlib import Path
-            repo = Repo(Path(%r))
-            """) % (str(ROOT), str(self.repo)) + textwrap.dedent(code)
-        p = subprocess.run([sys.executable, "-c", src], cwd=self.repo, env=self.env,
-                           text=True, capture_output=True)
-        self.assertEqual(p.returncode, 0, p.stderr)
-        return json.loads(p.stdout) if p.stdout.strip() else None
+    def gather(self, tid):
+        """Run what puts stray panes back where they belong (gather), through `adopt`
+        from the coordinator's pane: the task is its own already, so nothing else changes."""
+        env, self.env = self.env, {**self.env, "REX_BLOCK": "blk1", "REX_SESSION": "session:1"}
+        try:
+            return self.bp("adopt", tid)
+        finally:
+            self.env = env
 
     def labels(self):
         return {b: i["label"] for b, i in json.loads((self.fake / "reg.json").read_text())["blocks"].items()}
@@ -47,30 +39,6 @@ class PanesBase(BullpenTest):
 
 
 class PanesTest(PanesBase):
-    def test_float_places_a_capsule_in_the_coordinators_window_with_the_hint(self):
-        tid = self.start_task()
-        b = self.panes(f"""\
-            t = repo.task({tid!r})
-            print(json.dumps([panes.place(repo, t, "session:1", "bullpen: X", ["true"])[0],
-                              panes.place(repo, t, "session:1", "bullpen: Y", ["true"], hint=False)[0]]))
-            """)
-        self.assertEqual([self.labels()[x] for x in b], ["bullpen: X · ctrl+esc hides", "bullpen: Y"])
-        layers = self.api("session.new_layer")[-2:]
-        self.assertEqual({l.get("window_id") for l in layers}, {"w1"})  # the coordinator's
-        self.assertEqual([self.layer_states()[l] for l in ("lyr2", "lyr3")], ["minimized", "minimized"])
-
-    def test_tabs_places_a_tab_without_the_hint(self):
-        tid = self.start_task()
-        self.bp("config", "--workers", "tabs")
-        self.panes(f"""\
-            t = repo.task({tid!r})
-            panes.place(repo, t, "session:1", "bullpen: X", ["true"])
-            panes.place(repo, t, "session:1", "bullpen: Y", ["true"], role="diff", focus=True)
-            """)
-        runs = [a for a in self.rex_calls() if a[0] == "run"][-2:]
-        self.assertEqual([a[a.index("--label") + 1] for a in runs], ["bullpen: X", "bullpen: Y"])
-        self.assertEqual([a[2] for a in runs], ["--focus=false", "--focus=true"])
-
     def test_hide_minimizes_a_float_and_refuses_anything_else(self):
         tid = self.start_task()
         blk = self.block(tid)
@@ -105,23 +73,11 @@ class PanesTest(PanesBase):
         self.bp("go", tid)
         self.assertEqual(self.rex_calls()[-1][:2], ["focus", "-s"])
 
-    def test_find_by_id_or_by_label_with_or_without_the_hint(self):
-        tid = self.start_task()
-        blk = self.block(tid)
-        got = self.panes(f"""\
-            from bullpen.rex import rex_view
-            v = rex_view("session:1")
-            print(json.dumps([(panes.find("session:1", v, block={blk!r}) or [None])[-1],
-                              (panes.find("session:1", v, label="bullpen: {tid}") or [None])[-1],
-                              panes.find("session:1", v, label="bullpen: nobody")]))
-            """)
-        self.assertEqual(got, [blk, blk, None])
-
     def test_gather_with_tabs_leaves_the_panes_alone(self):
         self.bp("config", "--workers", "tabs")
-        self.start_task()
+        tid = self.start_task()
         before = len(self.rex_calls())
-        self.panes('panes.gather(repo, "session:1")\n')
+        self.gather(tid)
         self.assertEqual(self.rex_calls()[before:], [])
 
     def test_gather_brings_a_stray_float_back_as_a_capsule(self):
@@ -132,7 +88,7 @@ class PanesTest(PanesBase):
         R["windows"].append("w9")
         R["blocks"][blk].update(layer=None, window="w9")  # moved to a tab of its own
         reg.write_text(json.dumps(R))
-        self.panes('panes.gather(repo, "session:1")\n')
+        self.gather(tid)
         R = json.loads(reg.read_text())
         self.assertEqual(R["blocks"][blk]["window"], "w1")
         self.assertEqual(R["layers"][R["blocks"][blk]["layer"]], "minimized")
@@ -192,18 +148,6 @@ class BackgroundTest(PanesBase):
         self.assertEqual(self.where(blk), ("w1", "minimized"))
         self.assertEqual(self.api("session.detach_block"), [])
 
-    def test_find_by_id_or_label_in_the_background(self):
-        tid, blk = self.background_task()
-        got = self.panes(f"""\
-            from bullpen.rex import rex_view
-            v = rex_view("session:1")
-            print(json.dumps([panes.find("session:1", v, block={blk!r}),
-                              (panes.find("session:1", v, label="bullpen: {tid}") or [None])[-1],
-                              panes.find("session:1", v, label="bullpen: nobody")]))
-            """)
-        self.assertEqual(got, [[None, {"kind": "detached"}, blk], blk, None])
-        self.assertEqual(len(self.api("session.list_blocks")), 1)  # once, for the whole view
-
     def test_relink_finds_a_background_pane_by_its_label(self):
         tid, blk = self.background_task()
         reg = self.fake / "reg.json"
@@ -221,9 +165,9 @@ class BackgroundTest(PanesBase):
         self.assertEqual(self.show(tid)["status"], "stopped")
 
     def test_gather_leaves_background_panes_alone(self):
-        self.background_task()
+        tid, _ = self.background_task()
         before = len(self.rex_calls())
-        self.panes('panes.gather(repo, "session:1")\n')
+        self.gather(tid)
         self.assertEqual([a for a in self.rex_calls()[before:] if "session.view" not in a], [])
 
     def test_peek_tell_answer_and_the_watcher_work_in_the_background(self):
@@ -376,7 +320,7 @@ class TabTest(PanesBase):
         R["blocks"][blk].update(layer=None, window="w9")  # dragged to a tab of its own
         (self.fake / "reg.json").write_text(json.dumps(R))
         (self.fake / "focused").write_text("blk1")
-        self.panes('panes.gather(repo, "session:1")\n')
+        self.gather(b)
         self.assertEqual(self.where(blk), (tab, "minimized"))
         layer = self.reg()["blocks"][blk]["layer"]
         alone = [b2 for b2, i in self.reg()["blocks"].items()
@@ -393,7 +337,7 @@ class TabTest(PanesBase):
         R = self.reg()
         R["labels"] = {}  # its tab was renamed
         (self.fake / "reg.json").write_text(json.dumps(R))
-        self.panes('panes.gather(repo, "session:1")\n')
+        self.gather(a)
         made = self.api("session.new_window")[-1]
         self.assertEqual((made["focus"], made["window_label"]), (False, "bullpen: proj workers"))
         self.assertEqual(made["layout"]["block"]["label"], "bullpen: stand-in")

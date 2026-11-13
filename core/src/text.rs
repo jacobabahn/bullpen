@@ -169,28 +169,36 @@ fn blank(chunk: &[char]) -> bool {
 /// textwrap.wrap(text, width, break_on_hyphens=False): lines of at most width code
 /// points (code points, as Python counts them), long words broken.
 pub fn textwrap(text: &str, width: usize) -> Vec<String> {
+    textwrap_indent(text, width as i64, "", "")
+}
+
+/// textwrap.wrap with initial_indent (first) and subsequent_indent (rest): each line
+/// starts with its indent, which counts toward width.
+pub fn textwrap_indent(text: &str, width: i64, first: &str, rest: &str) -> Vec<String> {
     let mut chunks = chunks(text);
     chunks.reverse();
     let mut lines: Vec<String> = Vec::new();
     while !chunks.is_empty() {
         let mut cur: Vec<Vec<char>> = Vec::new();
-        let mut cur_len = 0;
+        let mut cur_len = 0i64;
+        let indent = if lines.is_empty() { first } else { rest };
+        let width = width - len(indent) as i64;
         if !lines.is_empty() && blank(chunks.last().unwrap()) {
             chunks.pop();
         }
         while let Some(c) = chunks.last() {
-            if cur_len + c.len() <= width {
-                cur_len += c.len();
+            if cur_len + c.len() as i64 <= width {
+                cur_len += c.len() as i64;
                 cur.push(chunks.pop().unwrap());
             } else {
                 break;
             }
         }
-        if chunks.last().is_some_and(|c| c.len() > width) {
+        if chunks.last().is_some_and(|c| c.len() as i64 > width) {
             let left = if width < 1 { 1 } else { width - cur_len };
             if left > 0 {
                 let chunk = chunks.last_mut().unwrap();
-                let tail = chunk.split_off(left);
+                let tail = chunk.split_off((left as usize).min(chunk.len()));
                 cur.push(std::mem::replace(chunk, tail));
             } else if cur.is_empty() {
                 cur.push(chunks.pop().unwrap());
@@ -200,7 +208,8 @@ pub fn textwrap(text: &str, width: usize) -> Vec<String> {
             cur.pop();
         }
         if !cur.is_empty() {
-            lines.push(cur.concat().into_iter().collect());
+            let line: String = cur.concat().into_iter().collect();
+            lines.push(format!("{indent}{line}"));
         }
     }
     lines

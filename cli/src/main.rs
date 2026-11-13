@@ -42,6 +42,7 @@ mod saves;
 mod screen;
 mod show;
 mod start;
+mod stepper;
 mod stops;
 mod task_line;
 mod tours;

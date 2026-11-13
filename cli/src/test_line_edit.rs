@@ -1,4 +1,4 @@
-//! test_helpers.py's line-edit cases (the Python twin keeps its own until T11b).
+//! test_helpers.py's line-edit and split-keys cases, with their names.
 
 use super::*;
 

@@ -75,3 +75,18 @@ fn printable_is_pythons() {
         assert!(!is_printable(c), "{c:?}");
     }
 }
+
+#[test]
+fn textwrap_indents_as_python() {
+    // textwrap.wrap("one two three four five", 12, initial_indent="> ", subsequent_indent="    ")
+    assert_eq!(
+        textwrap_indent("one two three four five", 12, "> ", "    "),
+        vec!["> one two", "    three", "    four", "    five"]
+    );
+    // a word longer than the room left by a wide indent is broken
+    assert_eq!(
+        textwrap_indent("abcdefgh", 6, "    ", "    "),
+        vec!["    ab", "    cd", "    ef", "    gh"]
+    );
+    assert!(textwrap_indent("", 10, "  ", "  ").is_empty());
+}

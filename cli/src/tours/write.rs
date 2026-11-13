@@ -1,20 +1,17 @@
 //! The tour agent (tours.py's write_tour): `_tour` runs it on a task's code, away from
 //! whoever asked, checks its answer against the diff and writes the tour. If the person
 //! asked on the board to open the tour once written, it opens in the stepper there.
-//! Python's stepper starts `_tour` (its `tour`, `tour --wait` and the board's g).
+//! The stepper starts `_tour` (`tour`, `tour --wait` and the board's g: stepper/).
 
 use super::{append, diff_files, lines_of, tour_failed, tour_log, tour_path, write_task, DiffFile, OTHER};
 use crate::args::{pos, Arg, Args, Nargs};
-use crate::coordinators::home_of;
 use crate::modes::task_base_ref;
 use crate::review::patch_id;
-use crate::rex::{find_pane, find_panes, rex_api, rex_close, rex_view, set_layer, with_state};
 use crate::start::launch::py_format;
 use bullpen_core::json::{dumps_line, obj, py_repr, py_str, s, truthy, Obj};
-use bullpen_core::paths::{prompts, self_bin};
+use bullpen_core::paths::prompts;
 use bullpen_core::proc::{git, head, merge_base, resolve, text};
 use bullpen_core::repo::repo_root;
-use bullpen_core::settings::TERMINAL;
 use bullpen_core::task::{clip, is_claude, model_in, with_model};
 use bullpen_core::text::{rstrip, shell_join, split, splitlines, strip};
 use bullpen_core::timeutil::iso_now;
@@ -50,8 +47,6 @@ const TOUR_SCHEMA: &str = concat!(
     r#""properties":{"file":{"type":"string"},"lines":{"type":"array","items":{"type":"integer"},"#,
     r#""minItems":2,"maxItems":2}}}}}}}}}"#
 );
-/// most of the window: x, y, w, h
-const TOUR_BOUNDS: [f64; 4] = [0.05, 0.04, 0.9, 0.9];
 
 /// How writing a tour went wrong, as the Python's exceptions: a ValueError (the tour
 /// failed: recorded on the task), a Fail (said, nothing recorded), or anything else
@@ -635,51 +630,16 @@ pub fn cmd_tour_bg(argv: &[String]) -> Res<i32> {
 
 // ---------- opening it ----------
 
-fn tour_label(t: &Obj) -> String {
-    format!("bullpen: {} tour", s(t, "id"))
-}
-
 /// The tour the person asked for on the board is written: open it where they asked.
 fn open_when_written(repo: &Repo, t: &Obj, opener: &Value) {
     let get = |k: &str| opener.get(k).filter(|v| truthy(Some(v))).map_or(String::new(), py_str);
-    if let Err(e) = open_stepper(repo, t, &get("session"), &get("from")) {
+    if let Err(e) = crate::stepper::open_stepper(repo, t, &get("session"), &get("from")) {
         // the tour is written all the same: g opens it
         let _ = append(
             &tour_log(repo, t),
             &format!("{} couldn't open the tour: {e}\n", iso_now()),
         );
     }
-}
-
-/// The stepper in a floating pane over the window of from_block (else of the task's
-/// board or coordinator), focused. One per task: an old one closes.
-fn open_stepper(repo: &Repo, t: &Obj, session: &str, from_block: &str) -> Res<()> {
-    let view = rex_view(session)?;
-    for w in find_panes(view.as_ref(), &tour_label(t)) {
-        rex_close(session, &w.block)?;
-    }
-    let me = self_bin().to_string_lossy().into_owned();
-    let argv = vec![me, "tour".into(), s(t, "id").into(), "--view".into(), "--back".into()];
-    let mut spec = json!({"bounds": TOUR_BOUNDS, "layout": {"block": {
-        "flavor": TERMINAL, "label": tour_label(t),
-        "options": {"command": with_state(&argv), "cwd": repo.root_str()}}}});
-    let home = home_of(repo, t)?;
-    let anchor = [from_block, s(obj(&home, "board"), "block"), s(&home, "block")]
-        .into_iter()
-        .find(|b| !b.is_empty())
-        .unwrap_or("");
-    let at = if anchor.is_empty() {
-        None
-    } else {
-        find_pane(view.as_ref(), anchor, "")
-    };
-    if let Some(window) = at.and_then(|w| w.window) {
-        spec["window_id"] = Value::from(window);
-    }
-    let r = rex_api(session, "session.new_layer", &spec, true)?;
-    let layer = r.as_ref().and_then(|r| r.get("layer_id")).map_or(String::new(), py_str);
-    set_layer(session, &layer, "normal", true)?;
-    Ok(())
 }
 
 #[cfg(test)]

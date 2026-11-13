@@ -37,13 +37,11 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   `cli`; the board isn't formatted yet.
 - Python code that still calls code that moved keeps its own copy, a twin: library
   code, frozen, deleted with its last Python caller. `bullpen/core.py` is `core/`'s
-  twin, and `line_edit.py` is `cli/src/line_edit.rs`' (for the stepper); `news.py` (`news`, `tell_coordinator`, the outboxes),
-  `notifications.py` (`notify`), `stops.py`, `agents.py`, `coordinators.py`, `modes.py`
-  (`task_base_ref`), `rex.py`, `panes.py`, `start.py` (`launch`, `hand_back`),
-  `review.py` (`patch_id`, `close_reviewer`) and `jobs.py` are twins of `cli/src/`'s
-  for the stepper and `tours.py` (itself a twin, for the stepper); `board_build.py` and `watcher.py` (`restart_watcher`)
-  are, for the catch-up of a command an old build hands over (`cli.py`), and
-  `saves.py`'s `follow_saved` is `saves.rs`'. There is one bridge, the run queue: a Python save that frees a
+  twin. Python declares no commands now (T11b moved its last, `tour`): what's left
+  is the catch-up of a command an old build hands over (`cli.py`, `board_build.py`),
+  with the twins it reaches (`news.py`, `jobs.py`, `rex.py`, `coordinators.py`,
+  `watcher.py`), and the save hooks (`saves.py`, `notifications.py`, `agents.py`);
+  T13 deletes it. There is one bridge, the run queue: a Python save that frees a
   slot runs Rust's `bullpen _queue` (`saves.py`'s `move_queue`, which reads the tasks
   fresh) once the command is done.
 - `cli/check/compare.sh` runs each case of `cli/check/cases-*.txt` with the Python and
@@ -136,7 +134,7 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
 - `config.rs`: `config`, its flags made from the settings table
 - `pick.rs`: the jump picker (`pick`, `--filter`, `--pane`)
 - `line_edit.rs`: typing on a terminal: raw mode, bracketed paste, the keys a read
-  gives, and the line editor the picker (and the stepper, from T11b) uses
+  gives, and the line editor the picker and the stepper's comment and tell boxes use
 - `review.rs`: what a review covers (`patch_id`, `own_lines`, `rebase_check`,
   `keep_approval`), the kind of a first review, starting a reviewer (`start_review`),
   `close_reviewer`, what `ready` does with review on (`review_at_ready`), and the
@@ -168,7 +166,13 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   (`diff_files`, `covers`), its state (`tour_state`, `tour_stale`) and a step's patch
   (`step_diff`); `write.rs`: the tour agent, `_tour` (run it, check its answer against
   the diff, write the tour, and open the stepper where the board asked); `comments.rs`:
-  `tour-comment`. Python's stepper starts `_tour`, for `tour --wait` too
+  `tour-comment`
+- `stepper/`: the `tour` command. `mod.rs`: starting `_tour` (in the background, or
+  waited for with `--wait`), the board's g (`--pane`, `open_stepper`), `--show` and
+  `--step` for the board, and sending the person's draft comments back (`--send`,
+  `send_comments`); `screen.rs`: the stepper's keys and screen (`Stepper`), apart from
+  the terminal; `view.rs`: the stepper on a terminal (`--view`), and what its keys ask
+  for (a comment saved, a line told, send, accept, the task's pane or diff)
 
 ## The Python
 
@@ -180,26 +184,16 @@ importing the one with the command being run, or all of them for `--help`):
   panes bullpen knows. It imports none of the others.
 - `jobs.py`: starting a background job so it outlives the command and its pane (a
   double fork), with its output in `jobs.log` and its failure in the news
-- `modes.py`: the task's base ref, by its mode (a twin)
 - `rex.py`: Rex: running its commands, finding, typing into and closing panes
 - `agents.py`: a task's worker and reviewer: where each one's pane is (`pane`), and
   the one the task waits on (`waits_on`, `waited_on`). Code that needs either asks it,
   rather than reading the task's `block` or its review's `session`
 - `coordinators.py`: a repo's coordinators, and who sees to a task (`sees_to`)
-- `panes.py`: where a worker's or reviewer's pane lives: making, showing, hiding and
-  finding it again, and keeping it there (a twin, for launch and review)
 - `news.py`: news lines, and the outboxes typed into coordinators' panes
 - `notifications.py`: the person's notifications
-- `stops.py`: a worker or reviewer stopping: triage, or the person
 - `saves.py`: the save hooks of the run queue (`move_queue`, which runs Rust's
   `_queue`) and of the PR to follow (`follow_saved`)
-- `start.py`: what a task waits on, an agent's pane, handing a worker a message (twins)
-- `review.py`: a change's patch-id, and closing a reviewer (a twin)
 - `watcher.py`: replacing the watcher after a build (a twin, for board_build)
-- `line_edit.py`: typing on a terminal, for the stepper (a twin of `line_edit.rs`)
-- `tours.py`: a tour's state and diff, and sending the person's comments, for the
-  stepper (a twin of `cli/src/tours/`; the tour agent and `tour-comment` are Rust's)
-- `stepper.py`: reading a tour on the board, and the `tour` command that opens it
 - `board_build.py`: the catch-up of a command an old build hands over, and the build
   entries an old build hands over (`build_entry`), with the build behind them (a twin)
 - `cli.py`: the parser and `main`. It keeps only the groups' titles (`GROUPS`), the
@@ -228,8 +222,7 @@ moves it.
 
 ## Where a pane lives
 
-A worker's, reviewer's or diff's pane goes where its placement in `cli/src/panes/` (and
-its Python twin, `panes.py`) puts it:
+A worker's, reviewer's or diff's pane goes where its placement in `cli/src/panes/` puts it:
 `FLOAT` (a capsule in its coordinator's tab, the default), `TAB` (a capsule in its
 coordinator's workers tab, found by the tab's label), `TABS` (a tab of its own) or
 `BACKGROUND` (a detached Rex block, in no tab), picked by the task's own `placement`
@@ -253,9 +246,9 @@ working. Rex's `session.view` lists only placed blocks: `BACKGROUND.find` asks
 ## Local mode and remote mode
 
 The steps that differ between the modes go through one of two adapters in
-`modes.py`, `REMOTE` (origin and gh) or `LOCAL` (the local base branch and the push
-remote), with the same verbs: `publish` (at ready) and `withdraw` (close and drop) are
-Rust's (`cli/src/modes.rs`); `merge`, `after_merge`, `withdraw`, `refresh` (push a branch bullpen rebased) and `base_ref`.
+`cli/src/modes.rs`, `REMOTE` (origin and gh) or `LOCAL` (the local base branch and the push
+remote), with the same verbs: `publish` (at ready), `merge`, `after_merge`, `withdraw`
+(close and drop), `refresh` (push a branch bullpen rebased) and `base_ref`.
 `mode(repo, t)` picks one: the mode recorded on the task when it was published (its
 `local`, true or false), else the repo's as it is now. Code doesn't ask
 `repo.has_origin()` about a task; that's only for the repo itself (doctor, the push
@@ -296,16 +289,10 @@ higher one, the higher one registers with the lower:
   `cli.main` has the first save import these two (`core.LOAD_SAVERS`), and their
   functions run in one order (`cli.SAVERS`, then the order a module defines them)
   whichever the command imported first.
-  A command that can replace bullpen's own code under itself imports them first
-  (`core.load_savers`): `accept`, before it merges into the checkout bullpen runs from,
-  and the tour stepper, which stays open while others accept. Otherwise a module
-  imported after that would be the new code, beside the old the command already runs.
 - What a save sets off that should wait for the command's own work (the run queue,
   whose news follows the command's) goes to `core.later(key, fn)`. `cli.main` runs
   it when the command returns (`core.run_later`), and a command that closes the pane
   it runs in runs it first: `rex.close_last` closes a pane after it.
-- A tour is written by Rust's `_tour` (`cli/src/tours/write.rs`), which opens it in
-  the stepper once written when the board asked for that (the task's `tour.open`).
 
 A file stays under 1,000 lines unless there's a good reason; a test
 (`tests/test_cli.py`) holds every Python module and every `.rs` file in `core/` and

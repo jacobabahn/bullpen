@@ -1,6 +1,6 @@
 //! `tour-comment` (tours.py's cmd_tour_comment): the person's draft comments on a
-//! tour's steps, added, listed or removed. `tour --send` (the stepper's, Python until
-//! T11b) sends them to the worker.
+//! tour's steps, added, listed or removed. `tour --send` (stepper/) sends them to the
+//! worker.
 
 use super::{comments_path, tour_path};
 use crate::args::{flag, pos, usage_error, value, Arg, Args, Nargs};
