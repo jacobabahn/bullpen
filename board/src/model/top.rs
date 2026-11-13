@@ -1,0 +1,216 @@
+//! The top line's counts: this repo's and the other repositories'.
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant, SystemTime};
+use super::*;
+
+/// Another repository with tasks that need you or are ready, for the top line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoCount {
+    pub name: String,
+    /// needs you (needs or stopped)
+    pub needs: usize,
+    /// waits on your accept or close (ready or finished)
+    pub ready: usize,
+}
+
+/// How often the board looks at the other repositories: their tasks aren't watched.
+pub const OTHERS_EVERY: Duration = Duration::from_secs(10);
+
+/// The other repositories' counts, kept between looks. A look reads each one's
+/// config.json and the time its tasks folder last changed (bullpen writes a task by
+/// renaming a new file into it), and reads its tasks again only when that changed.
+#[derive(Default)]
+pub struct OtherRepos {
+    pub counts: Vec<RepoCount>,
+    /// by state folder: when its tasks folder changed, and its needs and ready
+    seen: HashMap<PathBuf, (SystemTime, usize, usize)>,
+    looked: Option<Instant>,
+}
+
+impl OtherRepos {
+    /// Look again if the last look is OTHERS_EVERY old.
+    pub fn refresh(&mut self, me: &Path) {
+        if self.looked.is_some_and(|t| t.elapsed() < OTHERS_EVERY) {
+            return;
+        }
+        self.looked = Some(Instant::now());
+        self.look(me);
+    }
+
+    /// The repositories beside me (<state>/repos/*) whose checkout is still there,
+    /// each with what needs you and what's ready; those with neither are left out.
+    pub fn look(&mut self, me: &Path) {
+        let Some(repos) = me.parent() else { return };
+        let mut dirs: Vec<PathBuf> = std::fs::read_dir(repos)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|d| d.file_name() != me.file_name())
+            .collect();
+        dirs.sort();
+        let mut counts = Vec::new();
+        let mut seen = HashMap::new();
+        for dir in dirs {
+            let cfg = read_object(&dir.join("config.json"));
+            let Some(root) = cfg.get("root").and_then(|r| r.as_str()).map(PathBuf::from) else { continue };
+            if !root.is_dir() {
+                continue; // its checkout is gone
+            }
+            let changed = std::fs::metadata(dir.join("tasks")).and_then(|m| m.modified()).ok();
+            let Some(changed) = changed else { continue }; // no tasks yet
+            // a change in the same second as the last look may share its time: read again
+            let settled = changed.elapsed().is_ok_and(|a| a > Duration::from_secs(2));
+            let (needs, ready) = match self.seen.get(&dir) {
+                Some(&(t, n, r)) if t == changed && settled => (n, r),
+                _ => count_tasks(&dir.join("tasks")),
+            };
+            seen.insert(dir, (changed, needs, ready));
+            if needs + ready > 0 {
+                let name = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                counts.push(RepoCount { name, needs, ready });
+            }
+        }
+        self.seen = seen;
+        self.counts = counts;
+    }
+}
+
+/// How many tasks in a tasks folder need you, and how many are ready or finished.
+fn count_tasks(tasks: &Path) -> (usize, usize) {
+    let (mut needs, mut ready) = (0, 0);
+    for p in std::fs::read_dir(tasks).into_iter().flatten().flatten().map(|e| e.path()) {
+        if p.extension().is_none_or(|x| x != "json") {
+            continue;
+        }
+        match read_object(&p).get("status").and_then(|s| s.as_str()) {
+            Some("needs" | "stopped") => needs += 1,
+            Some("ready" | "finished") => ready += 1,
+            _ => {}
+        }
+    }
+    (needs, ready)
+}
+
+/// "1 needs you", "2 need you", "3 ready": a count of what you act on, in words.
+fn act_words(n: usize, status: &str) -> String {
+    match status {
+        "needs" if n == 1 => "1 needs you".into(),
+        "needs" => format!("{n} need you"),
+        _ => format!("{n} ready"),
+    }
+}
+
+/// What you act on among these tasks: how many need you (needs or stopped) and
+/// how many wait on your accept or close (ready or finished).
+pub fn acts(tasks: &[&Task]) -> (usize, usize) {
+    let n = |sts: &[&str]| tasks.iter().filter(|t| sts.contains(&t.status.as_str())).count();
+    (n(&["needs", "stopped"]), n(&["ready", "finished"]))
+}
+
+/// This repository's part of the top line: what needs you and what's ready, each
+/// with the status whose colour it takes, in words ("2 need you", "3 ready") or
+/// marks ("●2", "✔3"). Words go between " · ", marks between spaces.
+pub fn act_parts(needs: usize, ready: usize, words: bool) -> Vec<(String, &'static str)> {
+    [(needs, "needs"), (ready, "ready")]
+        .into_iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, st)| (if words { act_words(n, st) } else { format!("{}{n}", mark(st)) }, st))
+        .collect()
+}
+
+pub fn act_sep(words: bool) -> &'static str {
+    if words { " · " } else { " " }
+}
+
+fn act_width(needs: usize, ready: usize, words: bool) -> usize {
+    let parts = act_parts(needs, ready, words);
+    parts.iter().map(|(s, _)| width(s)).sum::<usize>() + width(act_sep(words)) * parts.len().saturating_sub(1)
+}
+
+/// The other repositories on the top line: "shop: 1 needs you, 2 ready · web: 1 ready".
+fn others_words(counts: &[RepoCount]) -> String {
+    let one = |c: &RepoCount| {
+        let parts: Vec<String> = [(c.needs, "needs"), (c.ready, "ready")]
+            .into_iter()
+            .filter(|(n, _)| *n > 0)
+            .map(|(n, st)| act_words(n, st))
+            .collect();
+        format!("{}: {}", c.name, parts.join(", "))
+    };
+    counts.iter().map(one).collect::<Vec<_>>().join(" · ")
+}
+
+/// The same in marks: "shop ●1 ✔2 · web ✔1".
+fn others_marks(counts: &[RepoCount]) -> String {
+    let one = |c: &RepoCount| {
+        let parts: Vec<String> = act_parts(c.needs, c.ready, false).into_iter().map(|(s, _)| s).collect();
+        format!("{} {}", c.name, parts.join(" "))
+    };
+    counts.iter().map(one).collect::<Vec<_>>().join(" · ")
+}
+
+/// The right of the top line: the other repositories' text (put after " · "),
+/// and this repository's counts at the right edge, two columns after it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Top {
+    pub others: String,
+    /// each part with the status whose colour it takes, between `sep`
+    pub counts: Vec<(String, &'static str)>,
+    pub sep: &'static str,
+    /// nothing was cut or left out
+    pub whole: bool,
+}
+
+/// How the top line's `room` columns after the repository's name (and its
+/// coordinator and hidden tasks, which come first) are shared. The other
+/// repositories get the room first: their words, else their marks, else their
+/// marks cut to no less than 8 columns. This repository's counts take words when
+/// they fit beside them, else marks, else only what needs you ("●2"). Without room
+/// for both, the other repositories' marks stay whole and this one's counts go:
+/// they are on the group headings below.
+pub fn top_right(needs: usize, ready: usize, others: &[RepoCount], room: usize) -> Top {
+    let forms = [(needs, ready, true), (needs, ready, false), (needs, 0, false)];
+    let gap = |w: usize| if w == 0 { 0 } else { w + 2 };
+    let mine = |taken: usize, all: bool| {
+        let forms = if all { &forms[..2] } else { &forms[..] };
+        forms.iter().find(|&&(n, r, words)| taken + gap(act_width(n, r, words)) <= room).map(|&(n, r, words)| Top {
+            others: String::new(),
+            counts: act_parts(n, r, words),
+            sep: act_sep(words),
+            whole: r == ready,
+        })
+    };
+    let with = |others: String, top: Option<Top>, cut: bool| {
+        top.map(|t| Top { whole: t.whole && !cut, others, ..t })
+    };
+    let mut tries: Vec<Option<Top>> = Vec::new();
+    if !others.is_empty() {
+        for o in [others_words(others), others_marks(others)] {
+            tries.push(with(o.clone(), mine(3 + width(&o), true), false));
+        }
+        let left = room.saturating_sub(3 + gap(act_width(needs, ready, false)));
+        if left >= 8 {
+            let cut = fit(&others_marks(others), left);
+            // "shop ●1…", not "shop ●1 …"
+            let cut = match cut.strip_suffix('…') {
+                Some(head) if head.ends_with(' ') => format!("{}…", head.trim_end()),
+                _ => cut,
+            };
+            tries.push(with(cut.clone(), mine(3 + width(&cut), true), true));
+        }
+        let o = others_marks(others);
+        if 3 + width(&o) <= room {
+            tries.push(Some(Top { others: o, counts: Vec::new(), sep: "", whole: needs + ready == 0 }));
+        }
+    }
+    tries.push(with(String::new(), mine(0, false), !others.is_empty()));
+    let none = Top { others: String::new(), counts: Vec::new(), sep: "", whole: false };
+    tries.into_iter().flatten().next().unwrap_or(none)
+}
+
+#[cfg(test)]
+#[path = "test_top.rs"]
+mod tests;

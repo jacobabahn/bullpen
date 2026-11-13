@@ -19,3 +19,24 @@ from the `bullpen` package (`tests/test_helpers.py`). Each test removes its temp
 when it ends.
 Each module runs inside a temp folder of its own and fails if anything is left in it
 afterwards.
+
+## The board's tests
+
+The board's tests sit next to the code they test, one file per module:
+`board/src/model/detail.rs` ends with
+
+```rust
+#[cfg(test)]
+#[path = "test_detail.rs"]
+mod tests;
+```
+
+and its tests are in `board/src/model/test_detail.rs`. The test file is a child of its
+module, so it can use the module's private items. Helpers several test files share are
+in the folder's `testing.rs` (`board/src/model/testing.rs`: `task()`,
+`Config::default_for_test()`, ...). Add a test to the end of its module's
+`test_<module>.rs`. The `test_` name means bullpen treats the file as a test file when
+it rebases: two tasks that both added tests at the end of it keep both.
+
+`main.rs` and `ui.rs` still keep their tests in a `mod tests` at the bottom, until
+they are split the same way.

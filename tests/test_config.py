@@ -478,12 +478,12 @@ class SettingsCopiesTest(unittest.TestCase):
         cls.bp = core
 
     def test_the_boards_repo_only_settings_agree(self):
-        src = (ROOT / "board" / "src" / "model.rs").read_text()
+        src = (ROOT / "board" / "src" / "model" / "config.rs").read_text()
         m = re.search(r"const REPO_ONLY: \[&str; \d+\] = \[([^\]]*)\]", src)
         self.assertEqual(sorted(re.findall(r'"(\w+)"', m.group(1))), sorted(self.bp.REPO_ONLY))
 
     def test_the_boards_defaults_agree(self):
-        src = (ROOT / "board" / "src" / "model.rs").read_text()
+        src = (ROOT / "board" / "src" / "model" / "config.rs").read_text()
         body = src[src.index("pub fn from_value"):]
         body = body[:body.index("\n    }\n")]
         found = re.findall(r'v\["(\w+)"\]\.as_(\w+)\(\)\.unwrap_or\(([^)]*)\)', body)

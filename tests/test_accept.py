@@ -14,7 +14,7 @@ class AcceptTest(BullpenTest):
         return [a for a in calls if a[:2] == ["pr", "view"]]
 
     def sent_back_by(self, tid):
-        """Who the board says sent a working task back (board/src/model.rs reads
+        """Who the board says sent a working task back (board/src/model/task.rs reads
         the same fields): "github", "review", or None."""
         t = self.show(tid)
         if (t.get("gh") or {}).get("sent"):

@@ -65,8 +65,8 @@ class HelpersTest(unittest.TestCase):
         self.assertIn("\x1b[1;31m12m", colour)  # needs you for over 5 minutes: the age turns red
 
     def test_the_marks_are_the_boards(self):
-        # one mark per status everywhere: the board's mark() in board/src/model.rs
-        src = (ROOT / "board" / "src" / "model.rs").read_text()
+        # one mark per status everywhere: the board's mark() in board/src/model/groups.rs
+        src = (ROOT / "board" / "src" / "model" / "groups.rs").read_text()
         body = src[src.index("pub fn mark(status: &str)"):]
         body = body[:body.index("\n}\n")]
         board = dict(re.findall(r'"(\w+)" => "(.)"', body))
