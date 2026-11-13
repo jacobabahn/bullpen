@@ -17,9 +17,8 @@ non-zero when anything fails. It checks:
   `bullpen_coordinator` and `bullpen_jump` actions (`rex actions`). With some of them
   listed and one missing, the line is there but Rex loaded an older `keys.lua`: the
   fix is `rex config reload`. With none listed, it's `bullpen keys --install`
-- the watcher is running, from the current `watch.lua` and bullpen code (`bin/bullpen`,
-  `bin/bullpen-py`, `bullpen/*.py` and the build, `target/bullpen`; the hashes in
-  `watcher.json`)
+- the watcher is running, from the current `watch.lua` and bullpen build (the build's
+  stamp, `target/bullpen.json`; the hashes in `watcher.json`)
 - the state folder is writable, and this repo's `config.json` parses
 - the global `config.json` (see [Settings](settings.md)), if there is one, parses
   and sets nothing only a repository can have

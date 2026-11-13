@@ -27,21 +27,20 @@ builds that program again in the background:
 - If the build fails (no cargo, a compile error), the old programs keep running. One
   news line per program gives the reason and the log, `target/build.log`. bullpen
   doesn't try that source again by itself; `bullpen build` does.
-- A command a merge moved to Rust is in neither the old build nor the new Python until
-  the new build is in place. A call to it in that window (a worker's, the watcher's,
-  yours) waits for the build that's running, or builds the command line itself when
-  none is, then runs with the new build: `` bullpen: `ls` is in the build that's
-  running: waiting for it `` on stderr. When it can't (the source has uncommitted
-  changes, or its build failed), it says to rebuild, with the log.
-- The build commands themselves (`build`, and `_build_board`, the background build)
-  are in that window too, after the merge that moved them (T5). An old build hands them
-  to the Python, which builds with its own copy of the build, so the new build is in
-  place whichever side the old one thinks owns them. The background build already holds
-  the build lock (accept passed it on), so it never waits for "the build that's running":
-  it is that build.
+- An internal command a merge adds (a job's, or one a newer `watch.lua` calls) isn't
+  in the old build until the new one is in place. A call to it in that window waits
+  for the build that's running, or builds the command line itself when none is, then
+  runs again with the new build, once: `` bullpen: `_x` is in the build that's
+  running: waiting for it `` on stderr (a job's goes to `jobs.log`). When it can't (the
+  source has uncommitted changes, or its build failed), it says to rebuild, with the
+  log. A command people type never sets off a build: one the build doesn't have gets
+  the unknown-command line, and `bullpen build` puts the new one in place.
+- A job never catches up holding the build lock: `_build_board`, the background build,
+  holds it (accept passed it on) and would wait for itself. So the build commands keep
+  their names.
 - Nothing waits for a build for ever. The program that holds the build lock writes its
-  pid in `target/build.lock`, and a call that waits for it (a moved command, `bullpen
-  build`) gives up after 10 minutes: `` bullpen: the build that's running (pid 1234)
+  pid in `target/build.lock`, and a call that waits for it (a new internal command,
+  `bullpen build`) gives up after 10 minutes: `` bullpen: the build that's running (pid 1234)
   still isn't done after 600s: if it's stuck, stop it (`kill 1234`) and run this again ``,
   exiting 1.
 - A new command line replaces the running watcher, so its calls run the new build.
@@ -53,11 +52,11 @@ builds that program again in the background:
 
 A build starts wherever the command that set it off runs, and their environments
 differ: an agent's pane may have mise's shims on PATH and no `~/.cargo/bin`, and a
-test's or `cli/check/compare.sh`'s fixture sets HOME to a folder of its own. rustup's
+test's fixture sets HOME to a folder of its own. rustup's
 cargo is a proxy that reads its toolchain from `$RUSTUP_HOME`, by default
 `$HOME/.rustup`, so with HOME pointing elsewhere it says "no default is configured"
-(BP-120: a compare run against main's Python, right after an accept, set off the
-catch-up build of main with the fixture's HOME). `bin/bullpen-cargo` runs the first
+(BP-120: a fixture's call, right after an accept, set off the catch-up build of main
+with the fixture's HOME). `bin/bullpen-cargo` runs the first
 cargo that works, trying in order:
 
 1. the one that worked last time, with what it needed (`target/cargo.env`)
@@ -79,8 +78,7 @@ and from `bullpen build`: `` no cargo works here: tried cargo on PATH
 rebuild it set off would have.
 
 From any state of the build (none, older than its source, a build that failed, a stuck
-one stopped by hand, or an old build that hands `build` itself to a Python that no
-longer has it), `bullpen build` builds both programs again, and so does
+one stopped by hand), `bullpen build` builds both programs again, and so does
 `./install.sh`, which builds the command line with cargo itself first, every time
 (cargo does nothing when it's current), so it never depends on the build in place. Both
 find cargo the same way (`bin/bullpen-cargo`), and so does `tests/run.py`.
@@ -88,20 +86,21 @@ find cargo the same way (`bin/bullpen-cargo`), and so does `tests/run.py`.
 With `BULLPEN_BOARD` set (a board program of your own), bullpen doesn't build the
 board by itself. Boards started from an older install's path
 (`board/target/bullpen-board`, from before the workspace) don't reload themselves:
-`bullpen doctor` names them, and `bullpen up` restarts them. `bullpen build-board`
-is the old name of `bullpen build`, until the port is done.
+`bullpen doctor` names them, and `bullpen up` restarts them.
+
+An installed build from before the Python was removed (BP-116) that hands a command to
+`bin/bullpen-py` finds no such file: run `./install.sh` once. Builds from after BP-114
+hand nothing over.
 
 ## Fixtures never build
 
-A test's or a compare's fixture runs bullpen from a real checkout (the one being
-tested, or the base `cli/check/compare.sh` compares against), with a HOME and a
-state of its own. A build set off there would build that checkout in the fixture's
+A test's fixture runs bullpen from a real checkout (the one being tested), with a
+HOME and a state of its own. A build set off there would build that checkout in the fixture's
 environment, and hold its build lock against the person's own builds (BP-120: a
-compare run caught up, built main's checkout, failed, and the accept's rebuild found
-its lock held and skipped). So `tests/support.py`, `cli/check/fixture.py` and
-`compare.sh` set `BULLPEN_NO_BUILD=1` for every bullpen they run. With it set, bullpen
-never builds, or takes the build lock in, its checkout: no catch-up (a command its
-Python doesn't have fails with the plain `` `tour` isn't in this build of bullpen ``
+fixture's call caught up, built main's checkout, failed, and the accept's rebuild found
+its lock held and skipped). So `tests/support.py` sets `BULLPEN_NO_BUILD=1` for every
+bullpen it runs. With it set, bullpen never builds, or takes the build lock in, its
+checkout: no catch-up (a command the build doesn't have gets the plain unknown-command
 line), no background rebuild from `up` or accept, and `bullpen build` says `builds are
 off here`. The tests that are about building (`tests/test_board_build.py` and the
 modules that use its setup) build a copy of bullpen, without it.

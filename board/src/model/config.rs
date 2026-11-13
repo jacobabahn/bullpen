@@ -97,7 +97,7 @@ pub fn global_config_path() -> Option<PathBuf> {
 }
 
 /// Settings only a repository can have: the global config.json's are ignored.
-/// A copy of bullpen/core.py's REPO_ONLY: a test in tests/test_config.py holds it to its table.
+/// A copy of core/src/settings.rs's repo-only settings: a test in tests/test_config.py holds it to its table.
 const REPO_ONLY: [&str; 7] = ["prefix", "next", "base", "push_remote", "news", "coordinators", "next_coordinator"];
 
 /// The repo's settings over the global ones, as bullpen layers them.
@@ -117,7 +117,7 @@ impl Config {
         Config::from_value(&layered(global, read_object(&dir.join("config.json"))))
     }
 
-    /// The defaults here are copies of bullpen/core.py's: a test in tests/test_config.py holds them to its table.
+    /// The defaults here are copies of core/src/settings.rs's: a test in tests/test_config.py holds them to its table.
     pub fn from_value(v: &serde_json::Value) -> Config {
         Config {
             layout: if v["board_layout"].as_str().unwrap_or("grouped") == "compact" {
@@ -152,7 +152,7 @@ impl Config {
 
 /// The bottom gap when the config sets none: a row while workers or reviewers float as
 /// capsules over the board's tab, else none. The defaults (workers float, reviewers
-/// in the background) are bullpen/core.py's.
+/// in the background) are core/src/settings.rs's.
 fn default_gap(v: &serde_json::Value) -> usize {
     let workers = v["workers"].as_str().unwrap_or("float");
     let reviewers = v["reviewers"].as_str().unwrap_or("background");

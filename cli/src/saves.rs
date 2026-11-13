@@ -1,8 +1,8 @@
 //! Saving a task, and what a save sets off: core writes it (`Repo::save_task`, which
 //! returns the task as it was), then the hooks run in order: the run queue, the
-//! person's notification (notifications.rs), the PR to follow (for prs.rs's `_prs`). Work that waits for the command's own work to be done
-//! (the run queue starting the next task) goes in `later`, and main runs it when the
-//! command returns.
+//! person's notification (notifications.rs), the PR to follow (for prs.rs's `_prs`).
+//! Work that waits for the command's own work to be done (the run queue starting the
+//! next task) goes in `later`, and main runs it when the command returns.
 
 use bullpen_core::fail::Res;
 use bullpen_core::json::{obj, s, truthy, Obj};

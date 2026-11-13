@@ -1,5 +1,5 @@
 //! The line you type a tell or an answer on: the text, the cursor in it, and the
-//! editing keys. The picker and the tour stepper (`LineEdit` in bullpen/line_edit.py) take
+//! editing keys. The picker and the tour stepper (`LineEdit` in cli/src/line_edit.rs) take
 //! the same keys.
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};

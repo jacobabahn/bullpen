@@ -3,10 +3,10 @@
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 
-# bullpen's command line (cli/, with the commands not moved yet in Python, bullpen/)
-# and its task board (board/) are Rust programs, built in place: bin/bullpen runs
-# target/bullpen, which runs target/bullpen-board. bullpen rebuilds them by itself when
-# their source changes (`bullpen up`, and an accept in this checkout).
+# bullpen's command line (cli/) and its task board (board/) are Rust programs, built
+# in place: bin/bullpen runs target/bullpen, which runs target/bullpen-board. bullpen
+# rebuilds them by itself when their source changes (`bullpen up`, and an accept in
+# this checkout).
 # cargo as every build of bullpen finds it (bin/bullpen-cargo): the first that works
 # here, whether on PATH, rustup's or mise's; when none does, it says what it tried.
 mkdir -p "$here/target"

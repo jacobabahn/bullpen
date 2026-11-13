@@ -1,21 +1,20 @@
 # Glossary
 
-Words bullpen's code and docs use. The code for a task's lifecycle is in the
-"task lifecycle" section of `bullpen/core.py` (`set_status`), and in `bullpen/stops.py`
-for its stops.
+Words bullpen's code and docs use. The code for a task's lifecycle is in
+`core/src/task.rs` (`set_status`), and in `cli/src/stops.rs` for its stops.
 
 ## Where things run
 
 **Coordinator**: the agent you talk to. It turns what you ask into tasks, starts their workers and sees to their stops. A repository can have several, `c1`, `c2`, ...
 
-**Sees to**: the coordinators who see to a task: its own (the one that added it, or adopted it) while that one's pane is running, else every running coordinator, else nobody, and the task needs the person. They get its news and its triage stops, its panes go in their tab, and their boards show it. A coordinator whose pane closes is dropped, so a listed coordinator is a running one. `sees_to` in `bullpen/coordinators.py` is the rule.
+**Sees to**: the coordinators who see to a task: its own (the one that added it, or adopted it) while that one's pane is running, else every running coordinator, else nobody, and the task needs the person. They get its news and its triage stops, its panes go in their tab, and their boards show it. A coordinator whose pane closes is dropped, so a listed coordinator is a running one. `sees_to` in `cli/src/coordinators.rs` is the rule.
 
 **Worker**: the agent doing one task, in its own pane, worktree and branch. A **reviewer** is the agent that checks it after `ready`.
 
 **Pane**: where an agent or the board runs: a Rex pane, labelled `bullpen: <ID>` for a worker and `bullpen: <ID> review` for its reviewer.
 _Avoid_: window, block (Rex's API word for it).
 
-**Waits on**: the agent a task waits on: its reviewer while the task is in review or stopped on its reviewer (a usage-limit stop is seen to as its worker's), else its worker while it's working or waiting on its coordinator or the person, and no agent while it waits on the usage limit or isn't running (queued, stopped, ready, finished, closed). Its prompt is the one `answer` presses, its pane comes first in a notification, and `ok` and `reply` check it's running. `waits_on` in `bullpen/agents.py` is the rule, and `pane` there says where a worker's or reviewer's pane is.
+**Waits on**: the agent a task waits on: its reviewer while the task is in review or stopped on its reviewer (a usage-limit stop is seen to as its worker's), else its worker while it's working or waiting on its coordinator or the person, and no agent while it waits on the usage limit or isn't running (queued, stopped, ready, finished, closed). Its prompt is the one `answer` presses, its pane comes first in a notification, and `ok` and `reply` check it's running. `waits_on` in `cli/src/agents.rs` is the rule, and `pane` there says where a worker's or reviewer's pane is.
 
 **Capsule**: a worker's or reviewer's pane minimized, shown at the bottom right of the coordinator's tab (or of its workers tab, with `--workers tab`). `bullpen go` brings it up; `bullpen hide` (ctrl+escape) puts it back.
 
@@ -40,9 +39,9 @@ _Avoid_: reason (for the recorded stop), needs (for any stop).
 
 **Hand back**: give the worker a message to act on (review findings, a rebase conflict, PR feedback, carrying on after the usage limit), typing it into its pane or resuming it in a new one. The task is working again once the message reaches the worker.
 
-**Run queue**: the `todo` tasks that wait on others (`--after`): bullpen starts each by itself once those are all accepted, while fewer than `max_running` tasks are working. A plain `todo` task waits for the coordinator to start it. A task leaving `working` (to review, ready or finished), or closing (accepted, closed or dropped), frees a slot, and the queue starts the next; a stop doesn't. It hears of this from the status change itself (`move_queue` in `bullpen/start.py`), so no caller has to remember it.
+**Run queue**: the `todo` tasks that wait on others (`--after`): bullpen starts each by itself once those are all accepted, while fewer than `max_running` tasks are working. A plain `todo` task waits for the coordinator to start it. A task leaving `working` (to review, ready or finished), or closing (accepted, closed or dropped), frees a slot, and the queue starts the next; a stop doesn't. It hears of this from the status change itself (`move_queue` in `cli/src/saves.rs`), so no caller has to remember it.
 
-**Close step**: the one way a task ends, for accept, close, drop and auto-accept: its reviewer, its PR, its worktree and branch, its status, the news, and its worker's pane last. `close` in `bullpen/close.py`.
+**Close step**: the one way a task ends, for accept, close, drop and auto-accept: its reviewer, its PR, its worktree and branch, its status, the news, and its worker's pane last. `close` in `cli/src/close.rs`.
 
 ## Where work goes
 
@@ -50,7 +49,7 @@ _Avoid_: reason (for the recorded stop), needs (for any stop).
 
 **Local mode**: a repository with no `origin` remote. Nothing is pushed and there is no pull request; `accept` merges the branch into the local base branch (and backs that up to the push remote, if one is set). See `docs/local-mode.md`.
 
-A task's mode is fixed when it is published (its first `ready`) and recorded on the task; every later step goes by that, so a task finishes the way it started even if an `origin` is added or removed meanwhile. The two adapters are in `bullpen/modes.py`.
+A task's mode is fixed when it is published (its first `ready`) and recorded on the task; every later step goes by that, so a task finishes the way it started even if an `origin` is added or removed meanwhile. The two adapters are in `cli/src/modes.rs`.
 _Avoid_: PR mode (say remote mode).
 
 ## Reviewing a change
@@ -62,5 +61,5 @@ _Avoid_: walkthrough, guide (the coordinator's guide is `bullpen guide`).
 
 ## Settings
 
-**Setting**: one of bullpen's options, like `merge` or `max_running`, changed with `bullpen config`. Each has a row in `SETTINGS` at the top of `bullpen/core.py`: its default, its kind and its help. A repository's own value (its `config.json`) wins over the **global** one (`~/.config/bullpen/config.json`), which wins over the default. A **repo-only** setting (the prefix, the base branch, the news mode, the push remote, the coordinators) belongs to one repository: the global file can't hold it.
+**Setting**: one of bullpen's options, like `merge` or `max_running`, changed with `bullpen config`. Each has a row in `SETTINGS` in `core/src/settings.rs`: its default, its kind and its help. A repository's own value (its `config.json`) wins over the **global** one (`~/.config/bullpen/config.json`), which wins over the default. A **repo-only** setting (the prefix, the base branch, the news mode, the push remote, the coordinators) belongs to one repository: the global file can't hold it.
 _Avoid_: option, preference.

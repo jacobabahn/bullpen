@@ -35,7 +35,7 @@ pane), and `a` accepts (merges) a ready one, or closes a finished one. The words
 ```
 
 Needs Rex (a server from preview.13 on, for minimized floating panes), git, `gh`
-(signed in), Claude Code, Python 3, and Rust's `cargo`: bullpen's command line and its
+(signed in), Claude Code and Rust's `cargo`: bullpen's command line and its
 task board are Rust programs, and `install.sh` stops without cargo. After a change to
 their source, bullpen rebuilds them by itself (see [Rebuilds](docs/rebuilds.md));
 `bullpen build` builds them now.
@@ -69,7 +69,7 @@ After a Rex server restart, run `bullpen up` again: it finds its panes by their
 labels, marks workers whose panes are gone as stopped, and restarts the watcher.
 
 The watcher is also replaced when it is out of date. `up` and `accept` compare
-`lua/watch.lua` and bullpen's code (`bin/`, `bullpen/` and the build, `target/bullpen`) with what the running watcher was started from
+`lua/watch.lua` and bullpen's build (`target/bullpen`'s stamp) with what the running watcher was started from
 (hashes kept in `watcher.json`); if either changed, say because a merge or a
 pull brought a new version, they close the old watcher and start a new one. A
 current watcher is left alone.
