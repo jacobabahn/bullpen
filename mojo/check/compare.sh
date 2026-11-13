@@ -18,7 +18,6 @@ py="$top/bin/bullpen"
 mj=${MOJO_BIN:-$top/mojo/build/bullpen}
 export BULLPEN_MOJO_STRICT=1  # an unported command fails, rather than run the Python
 work=${COMPARE_DIR:-$(mktemp -d)}
-now=$(python3 -c 'import time; print(time.time())')
 fail=0
 
 if [ $# -gt 0 ]; then cases=("$@"); else mapfile -t cases < <(cat "$here"/cases*.txt | grep -v '^\s*\(#\|$\)'); fi
@@ -55,6 +54,7 @@ run_one() {  # run_one PROGRAM CASE OUTDIR
 
 for c in "${cases[@]}"; do
     rm -rf "$work/py" "$work/mojo"
+    now=$(date +%s.%N)  # per case: both runs of it see the same ages
     run_one "$py" "$c" "$work/py" || exit 2
     run_one "$mj" "$c" "$work/mojo" || exit 2
     if diff -q "$work/py" "$work/mojo" >/dev/null; then
