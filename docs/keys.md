@@ -28,9 +28,12 @@ four actions, also in the command palette under Bullpen, and binds:
   and stays open. It works from any pane
   (`bullpen pick --pane`; `bullpen pick` runs it in the terminal you're in).
 
-And in a worker's or reviewer's floating pane, `ctrl+escape` puts it back into its
-capsule and returns you to the board (`bullpen hide`); elsewhere the key goes
-through. Those panes say so in their label ("bullpen: BP-3 · ctrl+esc hides").
+And in a worker's or reviewer's floating pane, `ctrl+escape` puts it away and
+returns you to the board (`bullpen hide`): a capsule is minimized again, and a
+background pane goes back to the background, out of every tab. In a pane with a tab of
+its own (`--workers tabs`), and anywhere else, the key goes through. Those panes say
+so in their label ("bullpen: BP-3 · ctrl+esc hides"). See [Where panes
+live](settings.md#where-panes-live).
 
 `setup{ prefix = "ctrl+b" }` moves them behind another key, and
 `keys = { next = "cmd+shift+j", jump = "cmd+k" }` sets single ones. Run `rex config reload` after.

@@ -307,9 +307,10 @@ class FlowTest(BullpenTest):
         t = self.show(tid)
         self.assertEqual(t["status"], "review")
         self.assertEqual(t["pr"], "https://github.com/me/repo/pull/7")  # pushed and opened first
-        layer = self.api("session.new_layer")[-1]
-        self.assertEqual(layer["layout"]["block"]["label"], "bullpen: BP-1 review · ctrl+esc hides")
-        self.assertEqual(self.layer_states()["lyr2"], "minimized")
+        made = self.api("session.new_block")[-1]  # in the background, by default
+        self.assertEqual(made["label"], "bullpen: BP-1 review · ctrl+esc hides")
+        self.assertEqual((t["review"]["block"], t["review"]["pane"]), (reviewer, "background"))
+        self.assertEqual(json.loads((self.fake / "reg.json").read_text())["blocks"][reviewer]["layer"], "detached")
         prompt = next((self.tmp / "state").rglob("BP-1.review-1.md")).read_text()
         self.assertIn("verdict BP-1 approve", prompt)
         self.assertIn("Did it.", prompt)

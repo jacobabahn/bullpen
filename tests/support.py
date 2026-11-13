@@ -114,6 +114,15 @@ FAKE_REX = textwrap.dedent("""\
             R["layers"][lid] = "normal"
             R["blocks"][args["block_id"]]["layer"] = lid
             print(json.dumps({"layer_id": lid}))
+        elif method == "session.detach_block":
+            R["blocks"][args["block_id"]].update(layer="detached", window=None)
+            print("{}")
+        elif method == "session.list_blocks":
+            print(json.dumps({"blocks": [
+                {"block_id": b, "label": info["label"],
+                 **({"placement": "detached"} if info["layer"] == "detached" else
+                    {"placement": "placed", "window_id": info["window"]})}
+                for b, info in R["blocks"].items() if (alive / b).exists()]}))
         elif method == "session.close_window":
             R["windows"].remove(args["window_id"])
             print("{}")
@@ -385,8 +394,18 @@ class BullpenTest(unittest.TestCase):
     def full_brief(self, tid="BP-1"):
         return next((self.tmp / "state").rglob(f"{tid}.full.md")).read_text()
 
+    def made(self):
+        """The terminal block of each pane bullpen made as a float or in the background, in order."""
+        out = []
+        for a in self.rex_calls():
+            if a[:2] == ["api", "call"] and "session.new_layer" in a:
+                out.append(json.loads(a[a.index("session.new_layer") + 1])["layout"]["block"])
+            elif a[:2] == ["api", "call"] and "session.new_block" in a:
+                out.append(json.loads(a[a.index("session.new_block") + 1]))
+        return out
+
     def last_command(self):
-        cmd = self.api("session.new_layer")[-1]["layout"]["block"]["options"]["command"]
+        cmd = self.made()[-1]["options"]["command"]
         return cmd[cmd.index("--permission-mode"):]  # past env and the resolved program
 
     def set_commands(self, **cmds):

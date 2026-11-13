@@ -243,7 +243,7 @@ def diff_pane(repo, t, args):
     if old:
         rex_close(session, old[2])  # one diff pane per task, showing the latest
     argv = [SELF, "diff", t["id"], "--back"]
-    block = place(repo, t, session, diff_label(t), argv, role="diff", hint=False, focus=True)
+    block, _ = place(repo, t, session, diff_label(t), argv, role="diff", hint=False, focus=True)
     show(repo, session, block)
 
 

@@ -1,7 +1,9 @@
 # Review
 
 When a worker runs `ready`, bullpen pushes its branch, opens the PR and starts a
-reviewer agent on it, in its own capsule (`bullpen: BP-3 review`). The reviewer
+reviewer agent on it, in the background (`bullpen: BP-3 review`, in no tab; `go BP-3
+--review` or the board shows it, and `bullpen config --reviewers` puts reviewers in
+capsules or tabs instead: see [Where panes live](settings.md#where-panes-live)). The reviewer
 reads the brief and the diff, runs the tests, changes nothing, and ends with
 `bullpen verdict BP-3 approve` or `changes`. Changes go back to the worker,
 which fixes them and runs `ready` again, for up to 2 rounds. The task is ready

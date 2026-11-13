@@ -142,8 +142,7 @@ class LocalModeTest(unittest.TestCase):
         tid, wt = self.ready_task(review=True)
         t = self.show(tid)
         self.assertEqual(t["status"], "review")
-        layer = self.api("session.new_layer")[-1]
-        self.assertEqual(layer["layout"]["block"]["label"], "bullpen: BP-1 review · ctrl+esc hides")
+        self.assertEqual(self.made()[-1]["label"], "bullpen: BP-1 review · ctrl+esc hides")
         prompt = next((self.tmp / "state").rglob("BP-1.review-1.md")).read_text()
         self.assertIn(f"diff main...HEAD", prompt)
         self.bp("verdict", tid, "approve", "--summary", "Fine.")

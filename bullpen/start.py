@@ -352,10 +352,10 @@ def launch(repo, t, session, first, resume):
         ["-n", f"{t['id']}: {t['title']}", first]
     unindex_block(t.get("block"))
     label = f"bullpen: {t['id']}"
-    block = place(repo, t, session, label, argv)
+    block, where = place(repo, t, session, label, argv)
     index_block(block, repo, t["id"])
     set_status(t, "working")
-    t.update(block=block, session=session, last=None)
+    t.update(block=block, session=session, last=None, pane=where)
     repo.save_task(t)
 
 

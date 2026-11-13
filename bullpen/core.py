@@ -54,6 +54,7 @@ class Setting:
 
 AGENT = ["claude", "--permission-mode", "auto"]
 NOTIFY = ("all", "needs", "off")
+PLACES = ("float", "tabs", "background")  # where a worker's or reviewer's pane can live (panes.py)
 
 # Every setting bullpen has, in the order `config` lists them.
 SETTINGS = [
@@ -87,7 +88,11 @@ SETTINGS = [
     Setting("reviewer", list(AGENT), "Agents", "file"),         # the one a reviewer runs
     Setting("tour", ["claude"], "Agents", "file"),        # the one that writes tours, headless (claude -p)
     Setting("workers", "float", "Agents", "choice",
-            "new workers as capsules in the coordinator's tab (float) or as tabs", choices=("float", "tabs")),
+            "new workers as capsules in the coordinator's tab (float), as tabs, or in the "
+            "background: in no tab until `go` shows one", choices=PLACES),
+    Setting("reviewers", "background", "Agents", "choice",
+            "new reviewers the same way (float, tabs, background), or where workers go (same)",
+            choices=("same", *PLACES)),
     Setting("worker_model", None, "Agents", "model",
             "claude's --model for workers (\"default\": none, so Claude Code picks)",
             none="the worker command's own"),
@@ -106,9 +111,10 @@ SETTINGS = [
             least=0, says="a number of lines, or 0 for docs-only changes alone", metavar="LINES"),
     Setting("board_layout", "grouped", "Board", "choice", "how the board lists tasks",
             choices=("grouped", "compact")),
-    Setting("board_bottom_gap", 1, "Board", "number",
+    Setting("board_bottom_gap", None, "Board", "number",
             "empty rows at the board's bottom, under Rex's minimized-pane capsules (0: none)",
-            least=0, says="rows, or 0 for none", metavar="ROWS"),
+            least=0, says="rows, or 0 for none", metavar="ROWS",
+            none="1 while workers or reviewers float, else 0"),
     Setting("board_repos", True, "Board", "on/off",
             "the board's top line counts the tasks that need you or are ready in other repositories"),
     Setting("news", "type", "News", "choice",

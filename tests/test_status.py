@@ -540,6 +540,7 @@ class StatusTest(BullpenTest):
         return {w: sorted(labels) for w, labels in out.items()}
 
     def test_a_restarted_coordinator_takes_the_workers_with_it(self):
+        self.bp("config", "--reviewers", "same")
         tid = self.start_task()
         self.commit_and_ready(tid)  # a reviewer capsule too
         both = sorted(["bullpen: proj", "bullpen: proj board", "bullpen: BP-1 · ctrl+esc hides",

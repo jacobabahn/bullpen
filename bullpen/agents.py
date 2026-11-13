@@ -14,6 +14,12 @@ def pane(t, who):
     return t.get("session"), t.get("block")
 
 
+def placed(t, who):
+    """The placement the task's worker or reviewer pane was made with ("float", "tabs",
+    "background"), or None for one made before bullpen recorded it."""
+    return ((t.get("review") or {}) if who == "reviewer" else t).get("pane")
+
+
 def is_limited(t):
     """Is the agent the task is waiting on stopped at the usage limit?"""
     lim = t.get("limit")

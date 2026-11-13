@@ -251,7 +251,7 @@ class PickTest(BullpenTest):
         self.assertEqual(json.loads(self.bp("config", "--json").stdout)["board_layout"], "compact")
 
     def test_board_bottom_gap_is_a_setting(self):
-        self.assertEqual(json.loads(self.bp("config", "--json").stdout)["board_bottom_gap"], 1)
+        self.assertIsNone(json.loads(self.bp("config", "--json").stdout)["board_bottom_gap"])  # the board's default_gap
         self.bp("config", "--board-bottom-gap", "0")
         self.assertEqual(json.loads(self.bp("config", "--json").stdout)["board_bottom_gap"], 0)
         p = self.bp("config", "--board-bottom-gap", "-1", ok=False)

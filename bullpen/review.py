@@ -280,11 +280,11 @@ def start_review(repo, t, base_ref, rebase=None):
     model = review_model(repo, kind)
     argv = resolve(with_model(repo.cfg["reviewer"], model)) + ["-n", f"{t['id']} review", first]
     session = t.get("session") or session_for(repo)
-    block = place(repo, t, session, review_label(t), argv, role="reviewer")
+    block, where = place(repo, t, session, review_label(t), argv, role="reviewer")
     index_block(block, repo, f"{t['id']} review")
     set_status(t, "review")
     t.update(review={
-        "round": n, "block": block, "session": session, "verdict": None, "findings": None,
+        "round": n, "block": block, "session": session, "pane": where, "verdict": None, "findings": None,
         "kind": kind, "why": why, "model": model, "prev": prev, **({"tour": sent["n"]} if sent else {}),
         **({"rebase": rebase} if rebase else {}),
         "commit": head(wt), "base": merge_base(wt, base_ref), "patch": patch_id(wt, base_ref),

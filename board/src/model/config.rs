@@ -19,7 +19,7 @@ pub struct Config {
     /// the worker model for all tasks (`bullpen config --worker-model`)
     pub worker_model: Option<String>,
     /// rows the board leaves empty at its bottom, for Rex's minimized-pane capsules
-    /// (`bullpen config --board-bottom-gap`; 0: none)
+    /// (`bullpen config --board-bottom-gap`; 0: none; unset: default_gap)
     pub bottom_gap: usize,
     /// the top line counts what needs you or is ready in other repositories
     /// (`bullpen config --board-repos`)
@@ -142,12 +142,21 @@ impl Config {
                 })
                 .unwrap_or_default(),
             worker_model: v["worker_model"].as_str().map(String::from),
-            bottom_gap: v["board_bottom_gap"].as_u64().unwrap_or(1) as usize,
+            bottom_gap: v["board_bottom_gap"].as_u64().map_or_else(|| default_gap(v), |n| n as usize),
             other_repos: v["board_repos"].as_bool().unwrap_or(true),
             review: v["review"].as_bool().unwrap_or(true),
             triage_minutes: v["triage_minutes"].as_u64().unwrap_or(10),
         }
     }
+}
+
+/// The bottom gap when the config sets none: a row while workers or reviewers float as
+/// capsules over the board's tab, else none. The defaults (workers float, reviewers
+/// in the background) are bullpen/core.py's.
+fn default_gap(v: &serde_json::Value) -> usize {
+    let workers = v["workers"].as_str().unwrap_or("float");
+    let reviewers = v["reviewers"].as_str().unwrap_or("background");
+    usize::from(workers == "float" || reviewers == "float")
 }
 
 #[cfg(test)]

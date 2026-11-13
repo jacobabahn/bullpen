@@ -13,7 +13,7 @@ from .core import (
     write_json,
 )
 from .rex import pane_tty, rex_view
-from .agents import pane, waits_on
+from .agents import pane, placed, waits_on
 from .coordinators import home_of
 from .news import NEWS_MARK, deliver
 
@@ -142,11 +142,13 @@ def flush_notifications(repo):
 def notify_panes(repo, t):
     """(session, block) of the panes a notification can come from, best first: the task's
     reviewer if it is what needs the person, its worker, its coordinator's board, its
-    coordinator. Clicking it opens the pane's tab."""
+    coordinator. Clicking it opens the pane's tab: a pane in the background has none, so
+    it's passed over (the board's Enter, or `go --next`, brings it up)."""
     c = home_of(repo, t)
     b = c.get("board") or {}
-    out = [pane(t, "reviewer") if waits_on(t) == "reviewer" else (None, None), pane(t, "worker"),
-           (b.get("session"), b.get("block")), (c.get("session"), c.get("block"))]
+    agents = [who for who in ("reviewer", "worker") if placed(t, who) != "background"
+              and (who == "worker" or waits_on(t) == "reviewer")]
+    out = [pane(t, who) for who in agents] + [(b.get("session"), b.get("block")), (c.get("session"), c.get("block"))]
     return [p for p in out if p[1]]
 
 

@@ -13,7 +13,7 @@ from .rex import (
     board_label, coordinator_label, find_pane, find_panes, review_label, rex_alive, rex_close,
     rex_focus, rex_view,
 )
-from .agents import is_limited, pane
+from .agents import is_limited, on_reviewer, pane
 from .coordinators import (
     alive, calling_coordinator, coordinator_at, home_of, on_board, owner, primary, session_for,
 )
@@ -26,19 +26,27 @@ def go_target(repo, args):
     if args.next:
         # only over the tasks the board of the pane's coordinator shows
         c = pane_coordinator(repo, args.from_block)
-        needs = [(repo, t) for t in repo.tasks() if t["status"] == "needs" and t.get("block")
+        needs = [(repo, t) for t in repo.tasks() if t["status"] == "needs" and needing(t)[1]
                  and on_board(repo, c, t)]
         if args.all_repos:  # and every other repository's, whoever's board they're on
             needs += [(r, t) for r in known_repos() if r.dir != repo.dir
-                      for t in r.tasks() if t["status"] == "needs" and t.get("block")]
+                      for t in r.tasks() if t["status"] == "needs" and needing(t)[1]]
         needs.sort(key=lambda rt: rt[1].get("since") or rt[1].get("updated") or "")
         if not needs:
             raise Fail("nothing needs you" + (" in any repository" if args.all_repos else ""))
-        blocks = [t["block"] for _, t in needs]
+        blocks = [needing(t)[1] for _, t in needs]
         here = args.from_block
         r, t = needs[(blocks.index(here) + 1) % len(needs) if here in blocks else 0]
-        return r, t["session"], t["block"], t["id"] if r.dir == repo.dir else f"{r.root.name} {t['id']}"
+        return (r, *needing(t), t["id"] if r.dir == repo.dir else f"{r.root.name} {t['id']}")
     return (repo, *pane_target(repo, args))
+
+
+def needing(t):
+    """(session, block) of the pane of a task that needs you: its reviewer's when the
+    reviewer is what stopped (and still has a pane), else its worker's."""
+    if on_reviewer(t) and pane(t, "reviewer")[1]:
+        return pane(t, "reviewer")
+    return pane(t, "worker")
 
 
 def next_to_accept(repo, args):
@@ -208,15 +216,16 @@ def go_home(args):
 
 
 def cmd_hide(args):
-    """Put the worker or reviewer pane you're in away (back into its capsule) and go
-    back to the board. Exits 3 if its placement has no away (a tab of its own), or it
+    """Put the worker or reviewer pane you're in away (back into its capsule, or into the
+    background) and go back to the board. Exits 3 if its placement has no away (a tab
+    of its own), or it
     isn't one of bullpen's panes, so a key binding can let the key through."""
     repo, role = lookup_block(args.from_block)
     if not repo or role in ("coordinator", "board"):
         sys.exit(3)
     t = repo.task(role.split()[0])
     session = args.session or pane(t, "reviewer" if role.endswith(" review") else "worker")[0]
-    if not hide(session, args.from_block):
+    if not hide(repo, session, args.from_block):
         sys.exit(3)
     c = home_of(repo, t)
     for p in (c.get("board") or {}, c):
@@ -358,7 +367,7 @@ def commands(sub):
     p.add_argument("--repo", help="the repository the task is in (default: the pane's, else this folder's)")
     p.add_argument("--json", action="store_true", help="print the target instead of focusing it")
 
-    p = command(sub, "hide", cmd_hide, "You", help="put the worker pane you're in back into its capsule")
+    p = command(sub, "hide", cmd_hide, "You", help="put the worker pane you're in away (into its capsule, or the background)")
     p.add_argument("--from", dest="from_block", default=os.environ.get("REX_BLOCK"),
                    help="the pane to put away (default: this one)")
     p.add_argument("--session", help="the session you're in (key bindings pass it)")

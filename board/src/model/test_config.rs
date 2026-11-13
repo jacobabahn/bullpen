@@ -14,3 +14,14 @@ fn repo_settings_over_global_ones() {
     assert!(c.coordinators.is_empty()); // never the global file's
     assert_eq!(Config::from_value(&serde_json::Value::Null).merge, "rebase");
 }
+
+#[test]
+fn the_bottom_gap_is_a_row_only_while_something_floats() {
+    let gap = |s: &str| Config::from_value(&serde_json::from_str(s).unwrap()).bottom_gap;
+    assert_eq!(gap("{}"), 1); // workers float by default
+    assert_eq!(gap(r#"{"workers":"background"}"#), 0); // and reviewers are in the background
+    assert_eq!(gap(r#"{"workers":"tabs","reviewers":"float"}"#), 1);
+    assert_eq!(gap(r#"{"workers":"tabs","reviewers":"same"}"#), 0);
+    assert_eq!(gap(r#"{"workers":"tabs","board_bottom_gap":2}"#), 2); // a setting wins
+    assert_eq!(gap(r#"{"board_bottom_gap":0}"#), 0);
+}

@@ -40,8 +40,9 @@ coordinator before it goes to you (10 by default; see [Triage](triage.md)). `bul
 --notify all` sends you a notification when a task is ready, finished or auto-accepted
 too, and `off` none (`needs`, when a task needs you, by default; see
 [Notifications](notifications.md)). `bullpen config
---board-bottom-gap 0` lets the board use its bottom row (1 empty row by default, for
-Rex's capsules). `bullpen config --board-others on --coordinator c1` makes c1's
+--board-bottom-gap 0` lets the board use its bottom row, and a number leaves that many
+rows empty. Unset, it's 1 row while workers or reviewers float (Rex draws their
+capsules there), else none. `bullpen config --board-others on --coordinator c1` makes c1's
 board show the other coordinators' tasks too (see [Several
 coordinators](several-coordinators.md); the board's `o`). `bullpen config --board-repos off`
 takes the other repositories off the board's top line (on by default; see [Several
@@ -53,6 +54,37 @@ commands are in that folder's `config.json` (`worker`, `coordinator_cmd`). `bull
 --rebase-others off` stops `accept` rebasing the other open tasks (see [After
 accept](accept.md#after-accept)), and `--gh PATH` runs that gh instead of the one on PATH
 (`BULLPEN_GH` wins over both).
+
+## Where panes live
+
+`bullpen config --workers` says where new workers' panes go:
+
+- `float` (the default): a capsule, a minimized floating pane at the bottom right of
+  the coordinator's tab. `go` brings it up, and `ctrl+esc` minimizes it again.
+- `tabs`: a tab each. `go` focuses it, and `ctrl+esc` does nothing there.
+- `background`: in no tab at all, out of sight. `go` (and `go --next`, the jump key,
+  the board's Enter) floats it over the coordinator's tab, with focus, and `ctrl+esc`
+  puts it back in the background.
+
+`bullpen config --reviewers` does the same for reviewers (full, light, follow-up and
+rebase-check reviews): `background` by default, or `float`, `tabs`, or `same` (where
+workers go). A reviewer is read through its findings rather than its screen; when one
+stops on a prompt or needs you, `go --next` and the board bring it up like a worker.
+The board's diff (`v`) floats, or gets a tab with `--workers tabs`, whatever these say.
+
+A change applies to panes made after it: a pane that's running stays where it is and
+shows and hides as before.
+
+A pane in the background still runs as any other: `peek`, `tell`, `answer`, the
+watcher and the board work the same. A notification about it comes from the board
+instead (a pane in no tab has nothing to open), and Rex's tab dots don't show it.
+
+Background panes don't survive a Rex server restart: Rex keeps them only while its
+server runs, and rexurrect doesn't save them. After one, `bullpen up` (or `go`) finds
+the pane gone and marks its task stopped, as for any pane that's gone; `bullpen resume
+BP-3` starts the worker again and continues its conversation. A reviewer lost that
+way costs only a new review: `bullpen check` reports its pane gone, and `bullpen review
+BP-3` (the coordinator's) starts a new one.
 
 `bullpen config --model opus` sets the model for workers and reviewers (follow-up
 and light reviews too); `--worker-model`, `--reviewer-model` and

@@ -10,8 +10,9 @@
 --   bullpen_coordinator  cmd+;>c  the coordinator
 --   bullpen_jump         cmd+;>j  type part of any open task, in any repository, and go to it
 --
--- and ctrl+escape, in a worker's or reviewer's floating pane, puts it back into
--- its capsule and returns to the board. Anywhere else the key goes through.
+-- and ctrl+escape, in a worker's or reviewer's floating pane, puts it away (back
+-- into its capsule, or into the background) and returns to the board. Anywhere
+-- else the key goes through.
 --
 -- Options: prefix = "ctrl+b" moves all four behind another key;
 -- keys = { next = "cmd+shift+j", hide = "cmd+." } sets single ones (false leaves one unbound;

@@ -71,10 +71,11 @@ age, then the line under it. `--json` keeps the raw status.
 `show` starts with that line and ends with `next:`, what you can do now
 (`next: bullpen reply BP-3 <answer>, or i on the board`).
 
-The board leaves its bottom row empty: Rex draws minimized panes (the workers'
-and reviewers' capsules) over the bottom right of the window, which would cover
-the end of the key line. `bullpen config --board-bottom-gap 0` takes the row
-back (or give more rows); a board too short to spare it drops the gap first.
+While workers or reviewers float, the board leaves its bottom row empty: Rex draws
+minimized panes (their capsules) over the bottom right of the window, which would
+cover the end of the key line. With neither floating there are no capsules, and no
+gap. `bullpen config --board-bottom-gap 0` takes the row back either way (or give
+more rows); a board too short to spare it drops the gap first.
 
 The key line at the bottom shows the selected task's keys. The board's keys,
 in the order `?` lists them:

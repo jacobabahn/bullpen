@@ -87,15 +87,21 @@ moves it.
 ## Where a pane lives
 
 A worker's, reviewer's or diff's pane goes where its placement in `panes.py` puts it:
-`FLOAT` (a capsule in its coordinator's tab, the default) or `TABS` (a tab of its own),
-picked by the `workers` setting (`for_new`). Each placement has the same steps:
-`place` (make the pane; a floating one gets the hide key's hint in its label), `show`,
-`hide` (False when it has no away, so `hide` exits 3), `find` (by ID, else label, after
-a Rex restart), and what `gather` does to keep it home. Code that makes, shows, hides or
-finds one of these panes calls `panes.place`, `show`, `hide`, `find` and `gather`, and
-never reads the setting. Showing and hiding go by where the pane is now
-(`placement_at`), so a pane started before the setting changed keeps working. A new
-placement is a new class there, added to `PLACEMENTS`.
+`FLOAT` (a capsule in its coordinator's tab, the default), `TABS` (a tab of its own) or
+`BACKGROUND` (a detached Rex block, in no tab), picked by the `workers` and `reviewers`
+settings (`for_new`; a diff never goes to the background). Each placement has the same
+steps: `place` (make the pane; one the hide key puts away gets its hint in its label),
+`show`, `hide` (False when it has no away, so `hide` exits 3), `find` (by ID, else
+label, after a Rex restart), and what `gather` does to keep it home. Code that makes,
+shows, hides or finds one of these panes calls `panes.place`, `show`, `hide`, `find`
+and `gather`, and never reads the settings. `place` returns the placement's name with
+the block, and the caller records it with the pane (the task's `pane`, its review's
+`pane`): a background pane that's up floats like a capsule, so the record is what
+says to detach it rather than minimize it. Otherwise showing and hiding go by where the
+pane is now (`placement_at`), so a pane started before the settings changed keeps
+working. Rex's `session.view` lists only placed blocks: `BACKGROUND.find` asks
+`session.list_blocks` for the detached ones, once per view. A new placement is a new
+class there, added to `PLACEMENTS`.
 
 ## Local mode and remote mode
 

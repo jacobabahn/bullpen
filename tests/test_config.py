@@ -462,7 +462,8 @@ class ConfigTest(BullpenTest):
         out = self.bp("config", "--help").stdout
         out = " ".join(out.split())
         for says in ("(default 3)", "(default 40)", "(default sonnet)", "(default rebase)",
-                     "(default on)", "(default off)", "(default 20)", "(default needs)", "(default 1)"):
+                     "(default on)", "(default off)", "(default 20)", "(default needs)", "(default background)",
+                     "(default 1 while workers or reviewers float, else 0)"):
             self.assertIn(says, out)
         self.assertNotIn("--coordinators", out)  # the command lists and the coordinators are file-only
         self.assertNotIn("--worker ", out)
