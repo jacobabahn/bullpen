@@ -7,10 +7,11 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from .core import (
-    Fail, HOME, SELF, file_hash, git, now, read_json, write_json,
+    Fail, HOME, Repo, SELF, file_hash, git, now, read_json, repo_root, write_json,
 )
 from .jobs import background
 from .news import news
@@ -29,6 +30,10 @@ from .watcher import restart_watcher
 BUILD_LOCK = TARGET / "build.lock"
 BUILD_LOG = TARGET / "build.log"
 SHARED = ("Cargo.toml", "Cargo.lock")  # the workspace's: both programs are built from them
+# How long a call waits for a build that's running before it says it's stuck (the tests set it)
+BUILD_WAIT = float(os.environ.get("BULLPEN_BUILD_WAIT") or 600)
+# The commands that build: Rust's since T5. An older build hands them to the Python (BP-119)
+BUILD_ENTRIES = ("build", "build-board", "_build_board")
 
 
 class Program:
@@ -109,6 +114,38 @@ def lock_build(wait):
     return f
 
 
+def mark(lock, pid):
+    """Write the build's pid in the lock file it holds, for a call that waits on it to name."""
+    lock.truncate(0)
+    lock.write(f"{pid}\n")
+    lock.flush()
+
+
+def holder():
+    """The pid in the lock file, when that process is running: the build that holds it."""
+    try:
+        pid = int(BUILD_LOCK.read_text().strip())
+        os.kill(pid, 0)
+        return pid
+    except (OSError, ValueError):
+        return None
+
+
+def wait_for_build():
+    """The build lock, once the build that's running is done: never longer than BUILD_WAIT.
+    Past it, the build is stuck (or its holder isn't building): say so and exit."""
+    deadline = time.monotonic() + BUILD_WAIT
+    while (lock := lock_build(wait=False)) is None:
+        if time.monotonic() > deadline:
+            pid = holder()
+            who, stop = (f" (pid {pid})", f"stop it (`kill {pid}`)") if pid else ("", "stop it")
+            print(f"bullpen: the build that's running{who} still isn't done after {BUILD_WAIT:g}s: if it's "
+                  f"stuck, {stop} and run this again (log: {BUILD_LOG})", file=sys.stderr)
+            sys.exit(1)
+        time.sleep(0.1)
+    return lock
+
+
 def names(progs):
     return " and ".join(p.what for p in progs)
 
@@ -138,8 +175,11 @@ def rebuild_if_stale(repo):
         if lock is None:
             return None  # a build is running: it checks the sources again when it's done
         with lock:  # the job keeps it; this command's copy closes here
-            background([SELF, "_build_board", "--lock-fd", str(lock.fileno())], repo.root, repo.dir / "jobs.log",
-                       f"Rebuilding {names(stale)}", pass_fds=(lock.fileno(),))
+            mark(lock, os.getpid())
+            job = background([SELF, "_build_board", "--lock-fd", str(lock.fileno())], repo.root,
+                             repo.dir / "jobs.log", f"Rebuilding {names(stale)}", pass_fds=(lock.fileno(),))
+            if job:
+                mark(lock, job)
         their = "their source" if len(stale) > 1 else "its source"
         boards = "; running boards reload when it's done" if BOARD_PROGRAM in stale else ""
         return f"rebuilding {names(stale)} in the background ({their} changed){boards}"
@@ -228,11 +268,14 @@ def watcher_after(built):
 def catch_up(argv):
     """The build handed over a command the Python doesn't have: an accept moved it, and
     the build is older than its source (the window between the merge and the new build,
-    or a build that never ran). Wait for the build that's running, or build the command
-    line now, then run the call again with the new build. Returns only when it can't:
-    no build, a source with uncommitted changes, a build that failed, no new build, or
-    a second try."""
-    if os.environ.get("BULLPEN_CAUGHT_UP") or CLI not in programs() or not os.access(CLI.installed, os.X_OK):
+    or a build that never ran). Wait for the build that's running (never for ever), or
+    build what's stale now, then run the call again with the new build. Returns only
+    when it can't: no build, a source with uncommitted changes, a build that failed, no
+    new build, or a second try. Never for a build entry (build_entry): this process may
+    be the build, and would wait for itself."""
+    # this very call, run again (the build and the Python exec, so the pid stays): not the
+    # jobs a call that caught up starts, which may need to catch up themselves
+    if os.environ.get("BULLPEN_CAUGHT_UP") == str(os.getpid()) or CLI not in programs() or not os.access(CLI.installed, os.X_OK):
         return
     if read_json(CLI.stamp, {}).get("failed") == CLI.source_hash():
         return
@@ -240,19 +283,83 @@ def catch_up(argv):
     lock = lock_build(wait=False)
     if lock is None:
         print(f"bullpen: `{argv[0]}` is in the build that's running: waiting for it", file=sys.stderr)
-        lock = lock_build(wait=True)
+        lock = wait_for_build()
     with lock:
         if CLI.stale() and not CLI.dirty():
             print(f"bullpen: `{argv[0]}` is newer than this build: building it first (log: {BUILD_LOG})",
                   file=sys.stderr)
-            failed, _, built = build([CLI], background=True)
-            if failed:
-                return
+            mark(lock, os.getpid())
+            # the board too: an accept's rebuild that finds this build running leaves it to it
+            failed, _, built = build(programs(background=True), background=True)
             watcher_after(built)
+            if CLI in failed:
+                return
     if os.stat(CLI.installed).st_ino == was or read_json(CLI.stamp, {}).get("source") != CLI.source_hash():
         return  # no new build: it would hand the call over again
     sys.stderr.flush()
-    os.execve(SELF, [SELF, *argv], {**os.environ, "BULLPEN_CAUGHT_UP": "1"})
+    os.execve(SELF, [SELF, *argv], {**os.environ, "BULLPEN_CAUGHT_UP": str(os.getpid())})
+
+
+def build_entry(argv):
+    """A build entry an older build handed over (it's Rust's since T5, and the merge
+    took the Python's away): build with this twin, so the new build is in place
+    whichever side the build that's installed thinks owns it. `_build_board` holds the
+    build lock already (--lock-fd): it builds, never waiting for the build that's running."""
+    if argv[0] != "_build_board":
+        return build_now()
+    import argparse
+    ap = argparse.ArgumentParser(prog="bullpen _build_board")
+    ap.add_argument("--lock-fd", type=int, required=True)
+    return build_bg(ap.parse_args(argv[1:]).lock_fd)
+
+
+def build_now():
+    """`build`: build bullpen's command line and the board now, whatever their source holds."""
+    progs = programs()
+    if not progs:
+        print(f"bullpen: {HOME} has no Cargo.toml: nothing to build", file=sys.stderr)
+        return 1
+    lock = lock_build(wait=False)
+    if lock is None:
+        print("another build of bullpen is running: waiting for it")
+        sys.stdout.flush()
+        lock = wait_for_build()
+    with lock:
+        mark(lock, os.getpid())
+        failed, why, built = build(progs)
+    watcher_after(built)
+    if failed:
+        were = "weren't" if len(failed) > 1 else "wasn't"
+        print(f"bullpen: {names(failed)} {were} built: {why} (log: {BUILD_LOG})", file=sys.stderr)
+        return 1
+    for p in built:
+        print(f"built {p.what}: {p.installed}")
+    return 0
+
+
+def build_bg(lock_fd):
+    """`_build_board`: `up` or accept started this, holding the build lock for it
+    (lock_fd), which it keeps until it's done, news included."""
+    with open(lock_fd, "a", closefd=True):
+        progs = programs(background=True)
+        try:
+            failed, why, built = build(progs, background=True)
+        except Exception as e:  # noqa: BLE001 - say it once, whatever it was
+            failed, why, built = [p for p in progs if p.stale()], f"{type(e).__name__}: {e}", []
+            for p in failed:
+                p.set_stamp(failed=p.source_hash())
+        watcher_after(built)
+        if not failed:
+            return 0
+        try:
+            repo = Repo(repo_root())
+        except (Fail, ValueError):
+            return 1
+        for p in failed:
+            tid, kind = p.news_as
+            news(repo, {"id": tid}, kind, f"{p.subject()} wasn't rebuilt: {why}. {p.keeps}. "
+                 f"Log: {BUILD_LOG}. Fix it, then run `bullpen build`.", everyone=True)
+        return 1
 
 
 def not_in_build(name):

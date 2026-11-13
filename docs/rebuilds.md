@@ -33,10 +33,28 @@ builds that program again in the background:
   none is, then runs with the new build: `` bullpen: `ls` is in the build that's
   running: waiting for it `` on stderr. When it can't (the source has uncommitted
   changes, or its build failed), it says to rebuild, with the log.
+- The build commands themselves (`build`, and `_build_board`, the background build)
+  are in that window too, after the merge that moved them (T5). An old build hands them
+  to the Python, which builds with its own copy of the build, so the new build is in
+  place whichever side the old one thinks owns them. The background build already holds
+  the build lock (accept passed it on), so it never waits for "the build that's running":
+  it is that build.
+- Nothing waits for a build for ever. The program that holds the build lock writes its
+  pid in `target/build.lock`, and a call that waits for it (a moved command, `bullpen
+  build`) gives up after 10 minutes: `` bullpen: the build that's running (pid 1234)
+  still isn't done after 600s: if it's stuck, stop it (`kill 1234`) and run this again ``,
+  exiting 1.
 - A new command line replaces the running watcher, so its calls run the new build.
 - cargo can be a mise shim with no Rust version set for bullpen's folder. Then
-  bullpen tries rustup's `~/.cargo/bin/cargo`, and failing that says to set a
+  bullpen (and `install.sh`) tries rustup's `~/.cargo/bin/cargo`, and failing that says to set a
   version. It never changes your mise config.
+
+From any state of the build (none, older than its source, a build that failed, a stuck
+one stopped by hand, or an old build that hands `build` itself to a Python that no
+longer has it), `bullpen build` builds both programs again, and so does
+`./install.sh`, which builds the command line with cargo itself first, every time
+(cargo does nothing when it's current), so it never depends on the build in place. Both
+find cargo the same way, mise shim included.
 
 With `BULLPEN_BOARD` set (a board program of your own), bullpen doesn't build the
 board by itself. Boards started from an older install's path

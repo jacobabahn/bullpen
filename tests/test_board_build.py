@@ -320,12 +320,35 @@ class BoardBuildTest(unittest.TestCase):
 
     def test_a_mise_shim_falls_back_to_rustups_cargo(self):
         (self.fake / "cargo_mise").write_text("")
+        self.rustups_cargo()
+        self.bp("build")
+        self.assertIn("fn main() {}", self.board())
+
+    def install(self):
+        shutil.copy2(ROOT / "install.sh", self.home / "install.sh")
+        return subprocess.run([str(self.home / "install.sh")], cwd=self.home, text=True, capture_output=True,
+                              env={**self.env, "BIN_DIR": str(self.tmp / "bin")})
+
+    def rustups_cargo(self):
         rustup = self.tmp / "home" / ".cargo" / "bin" / "cargo"
         rustup.parent.mkdir(parents=True)
         rustup.write_text(fake_cargo().replace('(d / "cargo_mise").exists()', "False"))
         rustup.chmod(0o755)
-        self.bp("build")
+
+    def test_install_with_a_mise_shim_falls_back_to_rustups_cargo(self):
+        (self.fake / "cargo_mise").write_text("")
+        self.rustups_cargo()
+        p = self.install()
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("is a mise shim with no version set here: trying", p.stderr)
         self.assertIn("fn main() {}", self.board())
+        self.assertTrue((self.tmp / "bin" / "bullpen").is_symlink())
+
+    def test_install_with_a_mise_shim_and_no_rustup_says_so(self):
+        (self.fake / "cargo_mise").write_text("")
+        p = self.install()
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("is a mise shim with no Rust version set for", p.stderr)
 
     def test_board_runs_the_built_copy(self):
         self.bp("build")

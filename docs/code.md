@@ -21,9 +21,12 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   runs on every call, so it stays small. Python given a command it doesn't have says
   it isn't in this build: the build is older than its source. First it waits for the
   build that's running, or builds it, and runs the call again with the new build
-  (`board_build.catch_up`); only when it can't does it say to run `bullpen build`.
-  With no build at all, it says to run `install.sh`, which builds the first copy with
-  cargo itself (`bullpen build` is the command line's own).
+  (`board_build.catch_up`, which waits at most `BUILD_WAIT`); only when it can't does
+  it say to run `bullpen build`. The build entries (`build`, `_build_board`) never go
+  to the catch-up, which would wait for the lock the background build holds itself:
+  `board_build.build_entry` builds with the Python's twin (BP-119).
+  With no build at all, it says to run `install.sh`, which builds the command line with
+  cargo itself, every time, before `bullpen build` (the command line's own).
 - The Rust is one cargo workspace (`Cargo.toml`, one `Cargo.lock`, built into
   `target/`): `core/` (`bullpen-core`: tasks, config, wording, what the command line
   and the board share), `cli/` (`bullpen-cli`, the program `bullpen`) and `board/`.
@@ -164,7 +167,8 @@ importing the one with the command being run, or all of them for `--help`):
 - `ready.py`: `ready` and `finish`
 - `board.py`: where the board's program is built (for board_build)
 - `board_build.py`: rebuilding bullpen's command line and the board when their source
-  changes (a twin, for accept), and the catch-up of a command an old build hands over
+  changes (a twin, for accept), the catch-up of a command an old build hands over, and
+  the build entries an old build hands over (`build_entry`)
 - `push_remote.py`: the push remote's background push (`_push`), in local mode
 - `keys.py`: bullpen's key bindings in the Rex config
 - `accept.py`: accepting a task, and rebasing the others after it

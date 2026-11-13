@@ -122,6 +122,8 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if not argv or argv[0] not in COMMANDS:
         build = module("board_build")
+        if argv and argv[0] in build.BUILD_ENTRIES:
+            return build.build_entry(argv)  # never the catch-up: it may be the build itself
         if argv:
             build.catch_up(argv)  # returns only when the new build can't run it
         print(build.not_in_build(argv[0] if argv else None), file=sys.stderr)

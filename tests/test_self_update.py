@@ -20,7 +20,7 @@ class SelfUpdateTest(unittest.TestCase):
     B = test_board_build.BoardBuildTest
     setUp_with_origin, setUp_home, bp, settle, builds, board = (
         B.setUp_with_origin, B.setUp, B.bp, B.settle, B.builds, B.board)
-    show, start_task, news_log, rex_calls = B.show, B.start_task, B.news_log, B.rex_calls
+    show, start_task, news_log, rex_calls, install = B.show, B.start_task, B.news_log, B.rex_calls, B.install
 
     def setUp(self):
         self.setUp_home()
@@ -88,6 +88,79 @@ class SelfUpdateTest(unittest.TestCase):
         self.assert_rebuilt_and_pushed()
         self.assertNotIn(" job: ", self.news_log())
 
+    def old_build(self, *moved):
+        """A build from before a port moved these commands to Rust: it hands them to the
+        Python, which no longer has them (the merge took them away)."""
+        build = self.target / "bullpen"
+        text = build.read_text()
+        build.write_text(text.replace("case $1 in ", f"case $1 in {'|'.join(moved)}) ;; ", 1))
+
+    def test_an_accept_that_moves_the_build_to_rust_rebuilds_with_the_old_build(self):
+        # BP-119: the old build handed the background build (_build_board) to the Python,
+        # which had none and waited for the build that's running: its own, for ever
+        self.bp("config", "--review", "off")
+        tid, wt = self.task_moving_keys()
+        self.old_build("build", "build-board", "_build_board", "up", "doctor", "guide")
+        self.bp("accept", tid)
+        self.wait_for("no rebuild", lambda: "keys()" in (self.board("bullpen") or ""), wait=8)
+        self.settle()
+        self.assertEqual(self.bp("keys").stdout, "keys runs in the new build\n")
+        self.assertNotIn("case $1 in build|", self.board("bullpen"))  # the new build is in place
+        self.bp("build")  # a moved command runs, in Rust
+
+    def with_a_stuck_build(self, *args):
+        """bullpen args while a build that never ends holds the lock (this test's pid in it)."""
+        lock = (self.target / "build.lock").open("a")
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        lock.truncate(0)
+        lock.write(f"{os.getpid()}\n")
+        lock.flush()
+        env = {**self.env, "BULLPEN_BUILD_WAIT": "0.5"}
+        try:
+            return subprocess.run([str(self.bin), *args], cwd=self.home, env=env, text=True,
+                                  capture_output=True, timeout=15)
+        finally:
+            lock.close()
+
+    def assert_stuck(self, p):
+        self.assertEqual(p.returncode, 1)
+        self.assertIn(f"the build that's running (pid {os.getpid()}) still isn't done after 0.5s: "
+                      f"if it's stuck, stop it (`kill {os.getpid()}`)", p.stderr)
+
+    def test_a_moved_command_stops_waiting_for_a_build_that_never_ends(self):
+        self.move_keys(self.home)
+        p = self.with_a_stuck_build("keys")
+        self.assertIn("`keys` is in the build that's running: waiting for it", p.stderr)
+        self.assert_stuck(p)
+        self.assertEqual(p.stdout, "")
+
+    def test_build_stops_waiting_for_a_build_that_never_ends(self):
+        p = self.with_a_stuck_build("build")
+        self.assertEqual(p.stdout, "another build of bullpen is running: waiting for it\n")
+        self.assert_stuck(p)
+
+    def failed_old_build(self):
+        """After T5's merge, by hand: the stuck build killed, its source's build marked
+        failed, the old build in place (BP-119)."""
+        self.move_keys(self.home)
+        self.old_build("build", "build-board", "_build_board", "up", "doctor", "guide")
+        (self.fake / "cargo_fails").write_text("")
+        self.bp("keys", ok=False)
+        (self.fake / "cargo_fails").unlink()
+        self.assertIn("its last build failed", self.bp("keys", ok=False).stderr)
+
+    def test_build_rebuilds_a_failed_build_with_the_old_build(self):
+        self.failed_old_build()
+        self.assertIn("built bullpen's command line", self.bp("build").stdout)
+        self.assertEqual(self.bp("keys").stdout, "keys runs in the new build\n")
+
+    def test_install_rebuilds_a_failed_build_with_the_old_build(self):
+        self.failed_old_build()
+        p = self.install()
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(self.bp("keys").stdout, "keys runs in the new build\n")
+        self.assertIn("keys()", self.board("bullpen"))
+
     def test_a_moved_command_before_its_build_builds_it_first(self):
         self.move_keys(self.home)  # merged, not yet built: the old build hands `keys` to the new Python
         p = self.bp("keys")
@@ -95,6 +168,11 @@ class SelfUpdateTest(unittest.TestCase):
         self.assertIn("`keys` is newer than this build: building it first", p.stderr)
         self.assertEqual(self.builds(), 2)
         self.assertEqual(self.bp("keys").stderr, "")  # the next call runs the new build at once
+
+    def test_a_job_of_a_call_that_caught_up_catches_up_too(self):
+        self.move_keys(self.home)
+        self.env["BULLPEN_CAUGHT_UP"] = "1"  # its parent's: an auto-accept that caught up, say
+        self.assertEqual(self.bp("keys").stdout, "keys runs in the new build\n")
 
     def test_a_moved_command_waits_for_the_build_that_is_running(self):
         self.move_keys(self.home)

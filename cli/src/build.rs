@@ -213,6 +213,53 @@ fn lock_build(wait: bool) -> Res<Option<File>> {
     Ok(bullpen_core::lock::take(&build_lock(), wait)?)
 }
 
+/// Write the build's pid in the lock file it holds, for a call that waits on it to name.
+fn mark(lock: &File, pid: u32) -> Res<()> {
+    lock.set_len(0)?;
+    let mut f = lock;
+    writeln!(f, "{pid}")?;
+    Ok(())
+}
+
+/// The pid in the lock file, when that process is running: the build that holds it.
+fn holder() -> Option<i32> {
+    let pid: i32 = strip(&std::fs::read_to_string(build_lock()).ok()?).parse().ok()?;
+    // SAFETY: signal 0 only asks whether the process is there
+    (pid > 0 && unsafe { libc::kill(pid, 0) } == 0).then_some(pid)
+}
+
+/// How long a call waits for a build that's running before it says it's stuck (the tests set it).
+fn build_wait() -> f64 {
+    std::env::var("BULLPEN_BUILD_WAIT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(600.0)
+}
+
+/// The build lock, once the build that's running is done: never longer than build_wait().
+/// Past it, the build is stuck (or its holder isn't building): say so (board_build.py's twin).
+fn wait_for_build() -> Res<File> {
+    let wait = build_wait();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs_f64(wait);
+    loop {
+        if let Some(lock) = lock_build(false)? {
+            return Ok(lock);
+        }
+        if std::time::Instant::now() > deadline {
+            let (who, stop) = match holder() {
+                Some(pid) => (format!(" (pid {pid})"), format!("stop it (`kill {pid}`)")),
+                None => (String::new(), "stop it".into()),
+            };
+            return fail(format!(
+                "the build that's running{who} still isn't done after {wait}s: if it's stuck, {stop} and run \
+                 this again (log: {})",
+                build_log().display()
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
 /// Is a build running (holding the lock)?
 pub fn building() -> Res<bool> {
     if !build_lock().exists() {
@@ -282,7 +329,10 @@ fn start_rebuild(repo: &Repo) -> Res<Option<String>> {
         task: None,
         pass_fds: vec![fd],
     };
-    background(&job, false);
+    mark(&lock, std::process::id())?;
+    if let Some(pid) = background(&job, false) {
+        mark(&lock, pid)?;
+    }
     drop(lock); // the job keeps it; this command's copy closes here
     let their = if stale.len() > 1 { "their source" } else { "its source" };
     let boards = if stale.contains(&&BOARD) {
@@ -478,9 +528,11 @@ pub fn cmd_build(argv: &[String]) -> Res<i32> {
         Some(lock) => lock,
         None => {
             println!("another build of bullpen is running: waiting for it");
-            lock_build(true)?.expect("a lock, once waited for")
+            let _ = std::io::stdout().flush();
+            wait_for_build()?
         }
     };
+    mark(&lock, std::process::id())?;
     let done = build(progs, false, false)?;
     drop(lock);
     if let Some(why) = done.why {
