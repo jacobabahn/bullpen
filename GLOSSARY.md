@@ -43,6 +43,8 @@ _Avoid_: reason (for the recorded stop), needs (for any stop).
 
 **Close step**: the one way a task ends, for accept, close, drop and auto-accept: its reviewer, its PR, its worktree and branch, its status, the news, and its worker's pane last. `close` in `cli/src/close.rs`.
 
+**Kept branch**: a task ended with `close --keep-branch`: unmerged, its branch pushed (to origin, or the push remote) and kept. It is `done` with a `kept` record, and says "branch kept", never dropped; tasks after it stay queued. `cli/src/keep.rs`.
+
 ## Where work goes
 
 **Remote mode**: a repository with an `origin` remote. `ready` pushes the task's branch and opens a pull request; `accept` merges it on GitHub.

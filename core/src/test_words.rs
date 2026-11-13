@@ -157,3 +157,22 @@ fn test_only_the_agent_a_task_waits_on_is_stuck_or_limited() {
     assert!(!is_stuck(&task(json!({"status": "working", "stuck": 1}))));
     assert!(!is_limited(&task(json!({"status": "working", "limit": "x"}))));
 }
+
+#[test]
+fn test_a_task_closed_with_its_branch_kept() {
+    let cfg = config(json!({}));
+    let pushed = task(json!({"id": "BP-2", "status": "done", "kept": {"branch": "rust", "remote": "github"}}));
+    let every = every(&[pushed.clone()]);
+    assert_eq!(
+        status_detail(&cfg, &pushed, "", None),
+        "Closed, branch kept: rust on github."
+    );
+    let here = task(json!({"status": "done", "kept": {"branch": "rust", "remote": null}}));
+    assert_eq!(
+        status_detail(&cfg, &here, "", None),
+        "Closed, branch kept here: rust, not pushed."
+    );
+    // what waits on it keeps waiting: its work isn't on the base branch
+    let after = task(json!({"id": "BP-3", "status": "todo", "after": ["BP-2"]}));
+    assert_eq!(waits_phrase(&after, &every), "Waits on BP-2 (branch kept, not merged)");
+}

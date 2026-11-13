@@ -73,6 +73,8 @@ bullpen adopt BP-3          # make another coordinator's task yours (only when t
 bullpen accept BP-3         # only when the person asks: merge its PR or local branch, clean up;
                             # on a finished task, close it: its worktree, branch and pane go
 bullpen close BP-3          # the same as accept, for a finished task only
+bullpen close BP-3 --keep-branch [--as NAME]  # only when the person asks: end it unmerged,
+                            # its branch kept (pushed to origin or the push remote first)
 bullpen drop BP-3           # only when the person asks: close it and remove its worktree
 ```
 
@@ -108,6 +110,15 @@ anything against its base. The person reads the summary and closes the task
 (`bullpen accept`, or `a` on the board), which removes its worktree, branch and
 pane. A finished task whose worker starts working again is working again, and
 has to run `finish` (or `ready`) again.
+
+A task whose work stays on a side branch and never merges (an experiment, a port
+tried out) is the person's to end: `bullpen close <ID> --keep-branch`, with `--as
+<name>` to name the branch. It pushes the branch to origin, or to the push remote in
+local mode (never forced; a failed push refuses, and nothing changes), or with
+neither keeps the local branch. Then it closes the task like a drop, but keeps the
+branch, and the task shows as closed with its branch kept, not dropped. Tasks
+waiting on it stay queued, as after a drop. A worker whose `finish` refuses for
+commits it means to keep unmerged asks you: pass that on to the person.
 
 The person can ask for a guided tour of a ready task (or one in review): `bullpen
 tour <ID>` starts a cheap agent that writes the change out in reading order, one
@@ -322,9 +333,10 @@ bullpen · Your coordinator guide changed (section: News). Read the change below
 - Accepted or closed: the person did it somewhere else (the board, a shell). Tasks
   added `--after` it start by themselves, each with its own `started` line:
   nothing to do. Tasks without dependencies are yours to start, as before.
-  Dropped: just note it.
+  Dropped: just note it. Closed without merging, its branch kept: just note
+  where the branch is.
 - Started: a queued task started by itself. Nothing to do; watch it like any other.
-- A dependency was dropped: its dependents stay queued. Ask the person whether
+- A dependency was dropped (or closed with its branch kept): its dependents stay queued. Ask the person whether
   to go ahead without it (`bullpen after <ID> --none`, or other tasks, then
   `bullpen start <ID>`) or drop them too.
 - After an accept, the other open tasks are brought up to date: a working task is

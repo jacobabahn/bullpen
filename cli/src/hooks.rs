@@ -146,7 +146,8 @@ pub fn remove_worktree(repo: &Repo, t: &Obj, force: bool) -> Res<()> {
         git(&repo.root, &args, true)?;
     }
     let branch = s(t, "branch");
-    if !branch.is_empty() {
+    if !branch.is_empty() && !truthy(t.get("kept")) {
+        // a task closed with --keep-branch keeps it (close::keep_branch)
         git(&repo.root, &["branch", "-D", branch], false)?;
     }
     Ok(())

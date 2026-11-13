@@ -2,7 +2,7 @@
 //! finish's auto-accept share, and the `close` and `drop` commands.
 
 use crate::agents::pane;
-use crate::args::{flag, pos, Arg, Args, Nargs};
+use crate::args::{flag, pos, value, Arg, Args, Nargs};
 use crate::hooks::remove_worktree;
 use crate::modes::withdraw;
 use crate::news::{news, tell_coordinator, Opts};
@@ -12,6 +12,7 @@ use crate::saves::save;
 use bullpen_core::json::{s, truthy, Obj};
 use bullpen_core::proc::git;
 use bullpen_core::repo::{repo_root, unindex_block};
+use bullpen_core::settings::CLOSED;
 use bullpen_core::task::{is_status, set_status};
 use bullpen_core::text::strip;
 use bullpen_core::{fail, Repo, Res};
@@ -19,7 +20,14 @@ use serde_json::{json, Value};
 use std::path::Path;
 
 const ID: Arg = pos("id", Nargs::One, "the task, like BP-3");
-const CLOSE: &[Arg] = &[ID];
+const CLOSE: &[Arg] = &[
+    ID,
+    flag(
+        "--keep-branch",
+        "end any open task without merging, keeping its branch (pushed to origin or the push remote first)",
+    ),
+    value("--as", "NAME", "with --keep-branch: the name the branch is kept under"),
+];
 const DROP: &[Arg] = &[
     ID,
     flag("--force", "drop it even with uncommitted changes in its worktree"),
@@ -60,15 +68,25 @@ pub fn close(
 
 /// `close` (the person's call): close a finished task: its worktree, branch and pane
 /// go. `accept` does the same on a finished task; this stays as another name for it.
+/// With --keep-branch, any open task, its branch kept (keep.rs).
 pub fn cmd_close(argv: &[String]) -> Res<i32> {
     let a = Args::parse("close", argv, CLOSE);
     let repo = Repo::new(repo_root()?)?;
     let mut t = repo.task(a.arg("id").unwrap_or(""))?;
+    let name = a.opt("--as").filter(|n| !n.is_empty());
+    if a.flag("--keep-branch") {
+        crate::keep::keep_branch(&repo, &mut t, name)?;
+        return Ok(0);
+    }
+    if name.is_some() {
+        return fail("--as names the branch --keep-branch keeps: pass both");
+    }
     if s(&t, "status") != "finished" {
-        let hint = if s(&t, "status") == "ready" {
-            format!(": `accept {}` merges it", s(&t, "id"))
-        } else {
-            String::new()
+        let id = s(&t, "id");
+        let hint = match s(&t, "status") {
+            "ready" => format!(": `accept {id}` merges it"),
+            st if CLOSED.contains(&st) => String::new(),
+            _ => format!(": `close {id} --keep-branch` ends it and keeps its branch unmerged"),
         };
         return fail(format!("{}, not finished{hint}", is_status(&t)));
     }
@@ -121,6 +139,12 @@ pub fn cmd_drop(argv: &[String]) -> Res<i32> {
 
 /// t was dropped: the tasks waiting on it stay todo, with one news line.
 fn dropped_dep(repo: &Repo, t: &Obj) -> Res<()> {
+    waiting_dep(repo, t, "dropped")
+}
+
+/// t closed without its work reaching the base branch (how: "dropped", or "closed with
+/// its branch kept"): the tasks waiting on it stay todo, with one news line.
+pub fn waiting_dep(repo: &Repo, t: &Obj, how: &str) -> Res<()> {
     let id = s(t, "id");
     let waiting: Vec<String> = repo
         .tasks()?
@@ -135,7 +159,7 @@ fn dropped_dep(repo: &Repo, t: &Obj) -> Res<()> {
         repo,
         t,
         "dropped-dependency",
-        &dropped_line(&waiting, id),
+        &waiting_line(&waiting, id, how),
         Opts {
             everyone: true,
             ..Opts::default()
@@ -151,8 +175,8 @@ fn waits_on(o: &Obj, id: &str) -> bool {
     }
 }
 
-/// The news that waiting tasks wait on id, which was dropped.
-pub fn dropped_line(waiting: &[String], id: &str) -> String {
+/// The news that waiting tasks wait on id, which was closed unmerged (how).
+pub fn waiting_line(waiting: &[String], id: &str, how: &str) -> String {
     let one = waiting.len() == 1;
     let names = waiting.join(", ");
     let first = &waiting[0];
@@ -162,7 +186,7 @@ pub fn dropped_line(waiting: &[String], id: &str) -> String {
         ("wait", "they stay", "them")
     };
     format!(
-        "{names} {verb} on {id}, which was dropped, so {stays} queued. Ask the person what to do: \
+        "{names} {verb} on {id}, which was {how}, so {stays} queued. Ask the person what to do: \
          `bullpen after {first} --none` (or other tasks) to go ahead without it, then \
          `bullpen start {first}`; or drop {them}"
     )

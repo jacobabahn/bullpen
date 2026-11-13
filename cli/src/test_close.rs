@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn one_task_waiting_on_a_dropped_one_stays_queued() {
-    let line = dropped_line(&["BP-4".into()], "BP-2");
+    let line = waiting_line(&["BP-4".into()], "BP-2", "dropped");
     assert_eq!(
         line,
         "BP-4 waits on BP-2, which was dropped, so it stays queued. Ask the person what to do: \
@@ -13,7 +13,7 @@ fn one_task_waiting_on_a_dropped_one_stays_queued() {
 
 #[test]
 fn several_waiting_are_named_and_the_first_is_the_example() {
-    let line = dropped_line(&["BP-4".into(), "BP-7".into()], "BP-2");
+    let line = waiting_line(&["BP-4".into(), "BP-7".into()], "BP-2", "dropped");
     assert!(
         line.starts_with("BP-4, BP-7 wait on BP-2, which was dropped, so they stay queued."),
         "{line}"

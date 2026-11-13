@@ -39,6 +39,7 @@ bullpen note BP-1 "..."   # an informational line on the board
 bullpen accept BP-1   # merge its PR (or local branch; rebase), close its pane, remove its worktree;
                       # a finished task (nothing to merge): remove its worktree, branch and pane
 bullpen close BP-1    # the same as accept, for a finished task only
+bullpen close BP-1 --keep-branch --as port  # end it unmerged, its branch kept as port (see finish.md)
 bullpen drop BP-1     # close its PR, pane and worktree without merging
 bullpen build         # build bullpen's command line and the board now (see Rebuilds)
 ```

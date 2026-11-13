@@ -81,7 +81,10 @@ pub fn cmd_start(argv: &[String]) -> Res<i32> {
         if !deps.is_empty() {
             let said: Vec<String> = deps
                 .iter()
-                .map(|(d, st)| format!("{d} ({})", st.map_or("no such task".into(), status_words)))
+                .map(|(d, st)| match st {
+                    Some("done") => format!("{d} (closed with its branch kept, not merged)"),
+                    st => format!("{d} ({})", st.map_or("no such task".into(), status_words)),
+                })
                 .collect();
             return fail(format!(
                 "{id} waits on {}: it starts by itself once they're accepted; `start {id} --force` starts it now",
@@ -225,6 +228,7 @@ fn deps_section(repo: &Repo, t: &Obj) -> Res<String> {
         };
         let status = s(o, "status");
         let state = match status {
+            "done" if truthy(o.get("kept")) => "closed with its branch kept, not merged".to_string(),
             "done" if truthy(o.get("closed")) => "finished with nothing to merge, closed".to_string(),
             "done" => "accepted".to_string(),
             _ => format!("{status}, not accepted yet"),

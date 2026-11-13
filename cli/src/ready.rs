@@ -177,7 +177,9 @@ fn finish(repo: &Repo, t: &mut Obj, a: &Args) -> Res<()> {
     if !git(&wt, &["diff", "--quiet", &format!("{base_ref}...HEAD")], false)?.ok() {
         let changes = shortstat(&wt, &base_ref)?.unwrap_or_else(|| "files".into());
         return fail(format!(
-            "your branch changes {changes} against {base_ref}, so there is something to merge: run `ready` instead"
+            "your branch changes {changes} against {base_ref}, so there is something to merge: run `ready` instead. \
+             If this work is to stay on its own branch and never merge, say so to the person and end your turn: \
+             they end the task with `bullpen close {id} --keep-branch`"
         ));
     }
     let summary = summary_text(a, "summary", true)?;

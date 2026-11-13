@@ -141,6 +141,7 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `ready.rs`: `ready`, `finish`, and the summary a worker or reviewer gives (`summary_text`)
 - `close.rs`: the one close step (`close`) that accept, close, drop and finish's
   auto-accept share, `close_task`, and the `close` and `drop` commands
+- `keep.rs`: `close --keep-branch`: push the branch, then the close step keeping it
 - `auto_accept.rs`: a reviewer's `verdict`; an approval with auto-accept runs
   `_auto_accept` as a job and waits for it, before the verdict closes the reviewer's
   pane; `_auto_accept` accepts, or waits for the PR's checks (`checks`, `pr_view`);

@@ -162,6 +162,7 @@ pub fn pr_phrase(t: &Obj) -> String {
 }
 
 /// start.open_deps: the tasks t waits on that aren't done, with their status (None: no such task).
+/// A task closed with its branch kept is open still: its work never reached the base branch.
 pub fn open_deps<'a>(t: &'a Obj, every: &'a Every) -> Vec<(String, Option<&'a str>)> {
     let after = t
         .get("after")
@@ -172,10 +173,12 @@ pub fn open_deps<'a>(t: &'a Obj, every: &'a Every) -> Vec<(String, Option<&'a st
         .iter()
         .map(py_str)
         .map(|d| {
-            let st = every.get(&d).and_then(|o| o.get("status")).and_then(Value::as_str);
-            (d, st)
+            let o = every.get(&d);
+            let st = o.and_then(|o| o.get("status")).and_then(Value::as_str);
+            (d, st, o.is_some_and(|o| truthy(o.get("kept"))))
         })
-        .filter(|(_, st)| *st != Some("done"))
+        .filter(|(_, st, kept)| *st != Some("done") || *kept)
+        .map(|(d, st, _)| (d, st))
         .collect()
 }
 
@@ -193,6 +196,7 @@ pub fn waits_phrase(t: &Obj, every: &Every) -> String {
         .iter()
         .map(|(d, st)| match st {
             Some("dropped") => format!("{d} (dropped)"),
+            Some("done") => format!("{d} (branch kept, not merged)"),
             None => format!("{d} (missing)"),
             _ => d.clone(),
         })
@@ -380,6 +384,7 @@ pub fn status_detail(cfg: &Obj, t: &Obj, waits: &str, at: Option<Stamp>) -> Stri
         }
         "todo" if waits.is_empty() => "Not started. s starts it.".into(),
         "todo" => format!("{waits}."),
+        "done" if truthy(t.get("kept")) => kept_detail(obj(t, "kept")),
         "done" if truthy(t.get("local")) && !truthy(t.get("pr")) => {
             if truthy(t.get("merged")) && truthy(t.get("base")) {
                 format!("Accepted. Merged into {}.", py_str(&t["base"]))
@@ -392,6 +397,15 @@ pub fn status_detail(cfg: &Obj, t: &Obj, waits: &str, at: Option<Stamp>) -> Stri
         "done" => "Accepted.".into(),
         "dropped" => "Dropped.".into(),
         _ => String::new(),
+    }
+}
+
+/// A task closed with its branch kept (`close --keep-branch`): where the branch is.
+pub fn kept_detail(kept: &Obj) -> String {
+    let branch = s(kept, "branch");
+    match s(kept, "remote") {
+        "" => format!("Closed, branch kept here: {branch}, not pushed."),
+        remote => format!("Closed, branch kept: {branch} on {remote}."),
     }
 }
 

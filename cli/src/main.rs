@@ -23,6 +23,7 @@ mod guide;
 mod help;
 mod hooks;
 mod jobs;
+mod keep;
 mod keys;
 mod limit;
 mod line_edit;
