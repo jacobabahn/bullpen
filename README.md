@@ -111,3 +111,4 @@ Reference:
 - [GLOSSARY.md](GLOSSARY.md): the words bullpen uses
 - [docs/prd/](docs/prd/): design notes
 - [The Mojo experiment](docs/experiments/mojo.md): a partial port to Mojo and its benchmark (code on the `mojo` branch)
+- [The Rust experiment](docs/experiments/rust.md): the partial port to Rust and its benchmark that led to the full port (code on the `rust` branch)
