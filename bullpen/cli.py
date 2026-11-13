@@ -12,9 +12,8 @@ from .core import Fail, run_later
 
 # The modules with commands (cli/src/commands.rs lists their commands in `bullpen --help`'s order).
 MODULES = ("go", "board", "show", "answer", "accept", "close", "stepper", "tours", "pick", "start",
-           "triage", "check", "news", "guide", "ready", "auto_accept", "up", "config", "rules",
-           "push_remote", "board_build", "keys", "doctor", "coordinators", "notifications", "prs",
-           "events")
+           "triage", "check", "guide", "ready", "auto_accept", "up", "config", "rules",
+           "push_remote", "board_build", "keys", "doctor", "coordinators", "prs", "events")
 
 # Each command Python owns and the module that declares it, in --help's order. A call
 # imports only its command's module (and what that imports), not all of them: start-up
@@ -30,11 +29,9 @@ COMMANDS = {
     "tour": "stepper", "_tour": "stepper",
     "tour-comment": "tours",
     "pick": "pick",
-    "add": "start", "after": "start", "model": "start", "review-mode": "start", "start": "start",
-    "resume": "start", "tell": "start", "peek": "start",
-    "ask": "triage", "ok": "triage", "review": "triage", "note": "triage",
+    "start": "start", "resume": "start", "tell": "start", "peek": "start", "_queue": "start",
+    "review": "triage",
     "check": "check",
-    "news": "news",
     "guide": "guide",
     "ready": "ready", "finish": "ready",
     "verdict": "auto_accept", "_auto_accept": "auto_accept",
@@ -46,7 +43,6 @@ COMMANDS = {
     "keys": "keys",
     "doctor": "doctor",
     "_coordinator_gone": "coordinators",
-    "_flush": "notifications",
     "_prs": "prs",
     "_event": "events", "_stuck": "events", "_limit": "events", "_gone": "events",
 }

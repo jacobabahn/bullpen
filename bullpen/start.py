@@ -1,53 +1,21 @@
-"""Adding and starting tasks: what a task waits on, the run queue, an agent's pane, and
-handing a worker a message.
+"""Starting tasks: what a task waits on, the run queue, an agent's pane, and handing a
+worker a message. (Adding a task and setting what it waits on are Rust's: cli/src/start/.)
 """
 
-import re
-from pathlib import Path
-
 from .core import (
-    CLOSED, Fail, PLACES, PROMPTS, REVIEW_MODES, Repo, SELF, WAITING,
-    back_to_work, clip, command, git, home, index_block, is_claude, is_status, later, model_in, now,
+    CLOSED, Fail, PLACES, PROMPTS, Repo, SELF, WAITING,
+    back_to_work, clip, command, git, index_block, is_claude, is_status, later, model_in,
     on_save, pr_short, repo_root, resolve, set_auto_accept, set_status, slug, status_words,
-    unindex_block, with_model, write_json,
+    unindex_block, with_model,
 )
 from .modes import task_base_ref
 from .rex import rex_alive, rex_type, screen_end, type_to_worker
-from .coordinators import calling_coordinator, primary, session_for
+from .coordinators import session_for
 from .panes import place
 from .news import news
 from .limit import limit_active, limit_phrase
 from .hooks import hook_log, set_up
 from .rules import committed_rules_on, rule_sources, rules_text
-
-
-def cmd_add(args):
-    repo = Repo(repo_root())
-    brief = Path(args.brief_file).read_text() if args.brief_file else args.brief
-    if not brief:
-        raise Fail("give the task's brief with --brief or --brief-file")
-    tid = f"{repo.cfg['prefix']}-{repo.cfg['next']}"
-    after = check_after(repo, tid, dep_ids(repo, args.after))
-    repo.cfg["next"] += 1
-    repo.save()
-    t = {"id": tid, "title": args.title, "status": "todo", "created": now(),
-         "base": args.base or repo.base(), "branch": None, "worktree": None,
-         "block": None, "session": None, "pr": None, "why": None, "last": None}
-    c = calling_coordinator(repo) or primary(repo)  # who hears its news
-    if c:
-        t["coordinator"] = c["id"]
-    if after:
-        t["after"] = after
-    if args.model:
-        t["worker_model"] = args.model  # its own, over the config's, from its first start
-    if args.review_mode and args.review_mode != "auto":
-        t["review_mode"] = args.review_mode
-    set_auto_accept(t, args.auto_accept)
-    set_placement(t, args.pane)
-    (repo.dir / "briefs").mkdir(parents=True, exist_ok=True)
-    (repo.dir / "briefs" / f"{tid}.md").write_text(brief.rstrip() + "\n")
-    repo.save_task(t)
-    print(tid)
 
 
 # ---------- dependencies and the run queue ----------
@@ -59,48 +27,6 @@ def cmd_add(args):
 # a reviewer is short and cheap. A task sent back from review works, and counts, again,
 # even if that puts the count over max_running: it's finishing work already started,
 # and the queue just starts nothing more until the count is under the limit.
-
-
-def dep_ids(repo, values):
-    """IDs from --after values, each one or several: "BP-8", "8,9", "BP-8 BP-9"."""
-    out = []
-    for v in values or []:
-        for part in re.split(r"[,\s]+", v.strip()):
-            if part and repo.norm(part) not in out:
-                out.append(repo.norm(part))
-    return out
-
-
-def check_after(repo, tid, after):
-    """after, if the task tid can wait on those tasks: each exists, isn't tid itself
-    or dropped, and none of them waits on tid already (a cycle)."""
-    tasks = {t["id"]: t for t in repo.tasks()}
-    for d in after:
-        if d == tid:
-            raise Fail(f"{tid} can't wait on itself")
-        if d not in tasks:
-            raise Fail(f"no task {d} in {home(repo.root)}: `bullpen ls --all` lists them")
-        if tasks[d]["status"] == "dropped":
-            raise Fail(f"{d} was dropped: {tid} would wait on it forever")
-        path = dep_path(tasks, d, tid)
-        if path:
-            raise Fail(f"{d} already waits on {tid} ({' → '.join(path)}): that would be a cycle")
-    return after
-
-
-def dep_path(tasks, start, goal, seen=None):
-    """[start, ..., goal] if start waits on goal, directly or through others, else None."""
-    seen = seen if seen is not None else set()
-    if start == goal:
-        return [goal]
-    if start in seen:
-        return None
-    seen.add(start)
-    for d in (tasks.get(start) or {}).get("after") or []:
-        rest = dep_path(tasks, d, goal, seen)
-        if rest:
-            return [start, *rest]
-    return None
 
 
 def open_deps(repo, t, tasks=None):
@@ -118,61 +44,6 @@ def waits_phrase(repo, t, tasks=None):
     if not deps:
         return ""
     return "Waits on " + ", ".join(d + {"dropped": " (dropped)", None: " (missing)"}.get(st, "") for d, st in deps)
-
-
-def cmd_after(args):
-    """Set what a task waits on, or clear it with --none."""
-    repo = Repo(repo_root())
-    t = repo.task(args.id)
-    if args.none == bool(args.deps):
-        raise Fail("give the tasks it waits on, or --none")
-    if t["status"] in CLOSED:
-        raise Fail(is_status(t))
-    after = [] if args.none else check_after(repo, t["id"], dep_ids(repo, args.deps))
-    if after:
-        t["after"] = after
-    else:
-        t.pop("after", None)
-    write_json(repo.task_path(t["id"]), t)  # not save_task: the status didn't change
-    print(f"{t['id']} waits on {', '.join(after)}" if after else f"{t['id']} waits on nothing")
-
-
-def cmd_model(args):
-    """Set, change or clear the worker model a task starts and resumes with."""
-    repo = Repo(repo_root())
-    t = repo.task(args.id)
-    if args.clear == bool(args.model):
-        raise Fail("give the model (an alias like opus, or a model ID), or --clear")
-    if t["status"] in CLOSED:
-        raise Fail(is_status(t))
-    if args.clear:
-        t.pop("worker_model", None)
-    else:
-        t["worker_model"] = args.model
-    write_json(repo.task_path(t["id"]), t)  # not save_task: the status didn't change
-    cfg = repo.cfg.get("worker_model")
-    said = (f"{t['id']} uses the config's worker model ({cfg})" if args.clear and cfg else
-            f"{t['id']} uses the worker command's own model" if args.clear else
-            f"{t['id']} uses {args.model}")
-    if rex_alive(t.get("session"), t.get("block")):
-        said += f"; its worker keeps running on {t.get('model') or 'its model'}: this takes effect at its next start or resume"
-    print(said)
-
-
-def cmd_review_mode(args):
-    """Set how a task's first review goes: full, light, or auto (by the size of the change)."""
-    repo = Repo(repo_root())
-    t = repo.task(args.id)
-    if t["status"] in CLOSED:
-        raise Fail(is_status(t))
-    if args.mode == "auto":
-        t.pop("review_mode", None)
-    else:
-        t["review_mode"] = args.mode
-    write_json(repo.task_path(t["id"]), t)  # not save_task: the status didn't change
-    r = t.get("review") or {}
-    later = " (it has had a review already: later rounds follow up on it, whatever the mode)" if r.get("round") else ""
-    print(f"{t['id']}'s first review: {args.mode}{later}")
 
 
 def running_count(repo):
@@ -239,6 +110,14 @@ def start_queued(repo, by, how):
             news(repo, t, "queue", f"{t['id']} couldn't start ({why}): {clip(str(e), 200)}")
             continue
         news(repo, t, "started", f"{t['id']} started ({why})")
+
+
+def cmd_queue(args):
+    """(Rust's save hook) start what the queue can, now that task `--by` freed a slot
+    (`--how`): the run queue's bridge from the Rust commands' saves until T6 moves it.
+    Reads the tasks fresh from disk, as the save that set it off is done."""
+    repo = Repo(args.repo)
+    start_queued(repo, repo.task(args.by), args.how)
 
 
 def dropped_dep(repo, t):
@@ -428,42 +307,8 @@ def cmd_peek(args):
 
 
 def commands(sub):
-    """This module's commands, for bullpen's parser."""
-    p = command(sub, "add", cmd_add, "Coordinator", help="add a task; prints its ID")
-    p.add_argument("title", help="a short name for the task")
-    p.add_argument("--brief", help="what the worker should do, as text")
-    p.add_argument("--brief-file", metavar="FILE", help="the same, read from a file (over --brief)")
-    p.add_argument("--base", help="branch to start from and open the PR against")
-    p.add_argument("--after", action="append", metavar="ID",
-                   help="a task this one waits on (repeat, or comma-separated): it starts once they're accepted")
-    p.add_argument("--model", help="claude's --model for this task's worker, over the config's, "
-                   "whenever it starts (by itself too) or resumes")
-    p.add_argument("--review", choices=REVIEW_MODES, dest="review_mode",
-                   help="its first review: full, light, or auto (light for a small or docs-only change; the default)")
-    p.add_argument("--auto-accept", dest="auto_accept", action="store_true", default=None,
-                   help="accept it by itself once review approves it, whatever config --auto-accept says")
-    p.add_argument("--no-auto-accept", dest="auto_accept", action="store_false",
-                   help="keep it for you to accept even with config --auto-accept on")
-    p.add_argument("--pane", choices=PLACES,
-                   help="where its worker's pane goes, over config --workers: float, tab, tabs or background")
-
-    p = command(sub, "after", cmd_after, "Coordinator",
-                help="set the tasks a task waits on (--none: nothing)")
-    p.add_argument("id", help="the task, like BP-3")
-    p.add_argument("deps", nargs="*", metavar="ID", help="the tasks it waits on: it starts once they're accepted")
-    p.add_argument("--none", action="store_true", help="it waits on nothing")
-
-    p = command(sub, "model", cmd_model, "Coordinator",
-                help="set the worker model a task starts and resumes with (--clear: the config's)")
-    p.add_argument("id", help="the task, like BP-3")
-    p.add_argument("model", nargs="?", help="an alias like opus, or a model ID; default: let Claude Code pick")
-    p.add_argument("--clear", action="store_true", help="use the config's worker model again")
-
-    p = command(sub, "review-mode", cmd_review_mode, "Coordinator",
-                help="set how a task's first review goes: full, light or auto")
-    p.add_argument("id", help="the task, like BP-3")
-    p.add_argument("mode", choices=REVIEW_MODES, help="light: a quick look; auto: light for a small or docs-only change")
-
+    """This module's commands, for bullpen's parser. (add, after, model and review-mode
+    are Rust's: cli/src/start/.)"""
     p = command(sub, "start", cmd_start, "Coordinator", help="make a task's worktree and start its worker")
     p.add_argument("id", help="the task, like BP-3")
     p.add_argument("--model", help="claude's --model for this task's worker, over the config's")
@@ -493,3 +338,8 @@ def commands(sub):
     p.add_argument("id", help="the task, like BP-3")
     p.add_argument("--lines", type=int, default=40, help="how many lines (default 40)")
     p.add_argument("--vt", action="store_true", help="keep the screen's colours, as terminal escape codes")
+
+    p = command(sub, "_queue", cmd_queue)
+    p.add_argument("--repo", required=True)
+    p.add_argument("--by", required=True)
+    p.add_argument("--how", required=True)

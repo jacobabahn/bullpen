@@ -4,15 +4,21 @@
 //! (`exec` of bin/bullpen-py, never bin/bullpen, so it can't loop) before anything is
 //! read or written.
 
-#[allow(dead_code)] // what later commands read their arguments with
+mod agents;
 mod args;
 mod commands;
 mod coordinators;
 mod help;
+mod modes;
+mod news;
+mod notifications;
 mod rex;
 mod saves;
 mod show;
+mod start;
+mod stops;
 mod task_line;
+mod triage;
 
 use bullpen_core::paths;
 use commands::Owner;

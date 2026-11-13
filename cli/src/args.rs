@@ -8,6 +8,9 @@
 
 use crate::help::{term_width, wrap};
 
+/// argparse.SUPPRESS as an argument's help: it is read, but left out of the usage and the help.
+pub const SUPPRESS: &str = "==SUPPRESS==";
+
 /// How many values a positional takes, as argparse's nargs.
 #[derive(Clone, Copy, PartialEq)]
 pub enum Nargs {
@@ -74,6 +77,10 @@ impl Arg {
 
     fn is_option(&self) -> bool {
         !matches!(self.kind, Kind::Pos(_))
+    }
+
+    fn shown(&self) -> bool {
+        self.help != SUPPRESS
     }
 
     /// How argparse shows it in the usage line.
@@ -349,7 +356,7 @@ fn assign<'a>(
 pub fn usage(cmd: &str, spec: &[Arg], width: usize) -> String {
     let prog = format!("bullpen {cmd}");
     let mut opts = vec!["[-h]".to_string()];
-    opts.extend(spec.iter().filter(|a| a.is_option()).map(Arg::usage));
+    opts.extend(spec.iter().filter(|a| a.is_option() && a.shown()).map(Arg::usage));
     let poss: Vec<String> = spec.iter().filter(|a| !a.is_option()).map(Arg::usage).collect();
     let all: Vec<&String> = opts.iter().chain(poss.iter()).collect();
     let line = format!(
@@ -406,7 +413,7 @@ pub fn help(cmd: &str, about: &str, spec: &[Arg], cols: usize) -> String {
     }
     let help_arg = flag("-h, --help", "show this help message and exit");
     let opts: Vec<&Arg> = std::iter::once(&help_arg)
-        .chain(spec.iter().filter(|a| a.is_option()))
+        .chain(spec.iter().filter(|a| a.is_option() && a.shown()))
         .collect();
     let poss: Vec<&Arg> = spec.iter().filter(|a| !a.is_option()).collect();
     let longest = opts

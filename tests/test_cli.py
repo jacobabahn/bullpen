@@ -270,7 +270,9 @@ class EntryTest(BullpenTest):
                 self.assertEqual((c["group"], c["help"] or None),
                                  (sub.choices[c["name"]].group, helps.get(c["name"])), c["name"])
         self.assertEqual({c["name"]: c["owner"] for c in table if c["owner"] != "python"},
-                         {"build-board": "alias of build", "_nop": "rust", "_commands": "rust", "ls": "rust", "show": "rust"})
+                         {"build-board": "alias of build", "_nop": "rust", "_commands": "rust",
+                          **dict.fromkeys(["ls", "show", "add", "after", "model", "review-mode", "ask", "ok", "note", "news",
+                                           "_flush"], "rust")})
 
     def test_help_and_an_unknown_command_come_from_rust(self):
         p = self.strict("--help")
@@ -430,7 +432,8 @@ class CodeTest(unittest.TestCase):
 
     def test_the_run_queue_moves_only_from_a_status_change(self):
         # no caller has to remember it: saving a task that frees a slot starts the queue
-        self.assertEqual(self.calls("start_queued"), [("start", "move_queue")])
+        # (a Rust save, through `_queue`: the bridge until T6)
+        self.assertEqual(self.calls("start_queued"), [("start", "move_queue"), ("start", "cmd_queue")])
         from bullpen import cli, core, start  # noqa: F401
         self.assertIn(start.move_queue, core.SAVED)
 

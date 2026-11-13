@@ -1,24 +1,17 @@
-"""News for the coordinators: a news line, the outboxes the watcher types into their
-panes, and `bullpen news` for one that follows it by monitor.
+"""News for the coordinators: a news line, and the outboxes the watcher types into
+their panes. A twin of cli/src/news/ for the Python commands; `bullpen news` (and
+--follow) is Rust's.
 """
 
-import argparse
-import fcntl
 import os
 import re
 import shlex
-import signal
-import sys
-import time
 from pathlib import Path
 
-from .core import (
-    Fail, REX, Repo, SELF, STATE, command, load_config, merge_base, now, repo_root, run, safe,
-    write_json,
-)
+from .core import REX, SELF, STATE, merge_base, now, run, safe, write_json
 from .modes import task_base_ref
 from .rex import rex_type, with_state
-from .coordinators import alive, calling_coordinator, coordinator_at, primary, sees_to
+from .coordinators import alive, calling_coordinator, sees_to
 
 
 NEWS_MARK = "bullpen · "
@@ -225,23 +218,11 @@ def deliver(repo):
     return done
 
 
-# ---------- news by monitor: `bullpen news [--follow]` ----------
+# ---------- news by monitor: `bullpen news [--follow]` is Rust's (cli/src/news/read.rs) ----------
 
 
 def cursor_path(repo, cid):
     return repo.dir / (f"news-{safe(cid)}.cursor" if cid else "news.cursor")
-
-
-def news_cursor(repo, cid=None):
-    """How far into news.log (in bytes) coordinator cid has read with `bullpen news`,
-    or None: never. (news.cursor: the one cursor from before several coordinators, or
-    the reader when there's no coordinator; c1 carries it on.)"""
-    for path in (cursor_path(repo, cid), *([cursor_path(repo, None)] if cid == "c1" else [])):
-        try:
-            return int(path.read_text())
-        except (FileNotFoundError, ValueError):
-            pass
-    return None
 
 
 def set_news_cursor(repo, offset, cid=None):
@@ -259,131 +240,6 @@ def news_size(repo):
         return 0
 
 
-def news_for(text, cid, listed):
-    """Is a logged line for coordinator cid? Lines name the coordinators they're for
-    as `[c1,c2]` before the task ID; lines without, or for coordinators no longer
-    listed, are for everyone."""
-    head = text.split(NEWS_MARK, 1)[0].split()
-    to = next((w[1:-1].split(",") for w in head if w.startswith("[") and w.endswith("]")), None)
-    return not cid or not to or cid in to or not any(x in listed for x in to)
-
-
-def print_news(repo, offset, cid=None):
-    """Print coordinator cid's news logged after offset, moving its cursor past each
-    line once it is out (or skipped: another coordinator's). A line's own lines after
-    it (each starting with a tab: a diff) go with it. Returns the new offset. A line
-    still being written waits."""
-    size = news_size(repo)
-    if offset > size:  # the log was removed or cut short: what's there now is new
-        offset = 0
-        set_news_cursor(repo, 0, cid)
-    if offset == size:
-        return offset
-    listed = {c["id"] for c in load_config(repo.dir)["coordinators"]}
-    with (repo.dir / "news.log").open("rb") as f:
-        f.seek(offset)
-        for raws in news_records(f):
-            text = raws[0].decode(errors="replace").rstrip("\n")
-            at = text.find(NEWS_MARK)
-            # Printing and moving the cursor go together: being stopped in between
-            # (a monitor expiring) would print the line again next time.
-            held = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGINT, signal.SIGHUP})
-            try:
-                # a tab-led line with no line before it (a cursor left between them) is skipped
-                if not text.startswith("\t") and news_for(text, cid, listed):
-                    rest = [r.decode(errors="replace")[1:].rstrip("\n") for r in raws[1:]]
-                    print("\n".join([text[at:] if at >= 0 else text, *rest]), flush=True)
-                offset += sum(len(r) for r in raws)
-                set_news_cursor(repo, offset, cid)  # after printing: if nobody was reading, it comes again
-            finally:
-                signal.pthread_sigmask(signal.SIG_SETMASK, held)
-    return offset
-
-
-def news_records(f):
-    """The whole news lines left in f, each with the tab-led lines that follow it, as
-    lists of raw lines. One still being written isn't given."""
-    rec = []
-    for raw in f:
-        if not raw.endswith(b"\n"):
-            return
-        if rec and not raw.startswith(b"\t"):
-            yield rec
-            rec = []
-        rec.append(raw)
-    if rec:
-        yield rec
-
-
-def news_reader(repo):
-    """Whose news `bullpen news` prints: the coordinator in whose pane it runs, else
-    the primary one. None (all news) when the repo has no coordinator."""
-    c = calling_coordinator(repo) or primary(repo)
-    return c and c["id"]
-
-
-def cmd_news(args):
-    """Print the news logged for this coordinator since the last time, once each;
-    --follow keeps going. Each coordinator has its own cursor."""
-    repo = Repo(repo_root())
-    repo.dir.mkdir(parents=True, exist_ok=True)
-    cid = news_reader(repo)
-    if not_a_reader(repo, cid):
-        if args.follow:  # the Monitor tool shows what's printed: say it there
-            return print(NOT_A_COORDINATOR, flush=True)
-        raise Fail(NOT_A_COORDINATOR.removeprefix(NEWS_MARK))
-    lock = (repo.dir / (f"news-{safe(cid)}.lock" if cid else "news.lock")).open("w")
-    try:
-        # One reader at a time, or lines would come twice. A second follower waits
-        # for the first to go (a monitor being replaced); a one-off read doesn't.
-        fcntl.flock(lock, fcntl.LOCK_EX if args.follow else fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        raise Fail("news is being followed already (`bullpen news --follow` is running)")
-    offset = news_cursor(repo, cid)
-    if offset is None:  # first time: old news stays old
-        offset = news_size(repo)
-        set_news_cursor(repo, offset, cid)
-    try:
-        while True:
-            if args.follow and not news_by_monitor(repo):
-                # Typed news is logged too: following it would give every line twice.
-                print(NEWS_MARK + "news is typed into your pane now (`bullpen config --news type`): "
-                      "don't start the monitor again", flush=True)
-                return
-            if args.follow and not_a_reader(repo, cid):  # dropped while following
-                return print(NOT_A_COORDINATOR, flush=True)
-            offset = print_news(repo, offset, cid)
-            if not args.follow:
-                return
-            time.sleep(args.every)
-    except BrokenPipeError:  # whoever was reading is gone; the cursor stays before the lost line
-        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
-    except KeyboardInterrupt:
-        pass
-
-
-NOT_A_COORDINATOR = (NEWS_MARK + "this pane isn't one of this repo's coordinators, so it doesn't read "
-                     "their news: don't start the monitor again (`bullpen up --here` here makes it one)")
-
-
-def not_a_reader(repo, cid):
-    """Is `bullpen news` running in a Rex pane other than coordinator cid's? Each line
-    is printed once, so a reader there (an agent that used to be the coordinator, a
-    shell) would take lines from the coordinator's own monitor. Outside Rex there's
-    no telling: it reads the primary's news, as before."""
-    block = os.environ.get("REX_BLOCK")
-    if not block or not cid:
-        return False
-    repo.cfg = load_config(repo.dir)  # read again: it can change while we follow
-    me = coordinator_at(repo, block, boards=False)
-    return not me or me["id"] != cid
-
-
-def news_by_monitor(repo):
-    """Is the setting `monitor` right now? Read again: it can change while we follow."""
-    return load_config(repo.dir).get("news") == "monitor"
-
-
 def follow_cmd():
     return shlex.join(with_state([SELF, "news", "--follow"]))
 
@@ -395,11 +251,3 @@ def news_mode_line(repo):
                 f"tool on `{follow_cmd()}` (its guide says how).")
     return ("news: typed into the coordinator's pane "
             "(`bullpen config --news monitor`: by Claude Code's Monitor tool instead).")
-
-
-def commands(sub):
-    """This module's commands, for bullpen's parser."""
-    p = command(sub, "news", cmd_news, "Coordinator",
-                help="print news logged since the last time; --follow keeps printing")
-    p.add_argument("--follow", action="store_true", help="keep running and print each line as it is logged")
-    p.add_argument("--every", type=float, default=0.5, help=argparse.SUPPRESS)  # seconds between looks

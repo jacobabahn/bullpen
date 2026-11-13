@@ -1,4 +1,5 @@
-"""The person's notifications: when a task comes to need them, or (notify all) is ready or done."""
+"""The person's notifications: when a task comes to need them, or (notify all) is ready or done.
+A twin of cli/src/notifications.rs, for the Python commands' saves; `_flush` is Rust's."""
 
 import contextlib
 import fcntl
@@ -8,14 +9,11 @@ import subprocess
 import time
 import tty
 
-from .core import (
-    Fail, Repo, STATE, clip, command, load_config, now, on_save, read_json,
-    write_json,
-)
+from .core import STATE, clip, now, on_save, read_json, write_json
 from .rex import pane_tty, rex_view
 from .agents import pane, placed, waits_on
 from .coordinators import home_of
-from .news import NEWS_MARK, deliver
+from .news import NEWS_MARK
 
 
 # A task that comes to need the person (a prompt, `ask`, a triage escalated), and with
@@ -116,29 +114,6 @@ def held(repo, t, text):
         return False
 
 
-def flush_notifications(repo):
-    """Send the held notifications once none has come for NOTIFY_QUIET seconds: one,
-    for all the tasks of the burst. False while some still wait."""
-    if not (repo.dir / "notify.json").exists():
-        return True
-    with notify_state(repo) as st:
-        hold = st.get("held") or []
-        if not hold:
-            return True
-        if time.time() - st.get("last", 0) < NOTIFY_QUIET:
-            return False
-        ids = st.get("ids") or []
-        text = hold[0][1] if len(hold) == 1 else f"{len(ids)} tasks need you: {', '.join(ids)}"
-        st.update(held=[], at=time.time())
-    try:
-        t = repo.task(hold[-1][0])
-        send_notification(repo, t, text)
-    except (Fail, OSError, ValueError, subprocess.SubprocessError) as e:
-        with (repo.dir / "notify.log").open("a") as f:
-            f.write(f"{now()} {hold[-1][0]} not sent: {e}: {text}\n")
-    return True
-
-
 def notify_panes(repo, t):
     """(session, block) of the panes a notification can come from, best first: the task's
     reviewer if it is what needs the person, its worker, its coordinator's board, its
@@ -187,27 +162,3 @@ def send_osc(tty, title, body):
 def log_notify(repo, t, text, how):
     with (repo.dir / "notify.log").open("a") as f:
         f.write(f"{now()} {t['id']} {how}: {text}\n")
-
-
-def cmd_flush(args):
-    """(watcher) deliver news, and send notifications, that had to wait."""
-    waiting = False
-    for d in {p.parent for p in (STATE / "repos").glob("*/outbox*.txt")}:
-        repo = Repo(read_json(d / "config.json", {}).get("root") or "/")
-        repo.dir = d
-        repo.cfg = load_config(d)
-        if not deliver(repo):
-            waiting = True
-    for d in {p.parent for p in (STATE / "repos").glob("*/notify.json")}:
-        repo = Repo(read_json(d / "config.json", {}).get("root") or "/")
-        repo.dir = d
-        repo.cfg = load_config(d)
-        if not flush_notifications(repo):
-            waiting = True
-    if not waiting:
-        (STATE / "outbox").unlink(missing_ok=True)
-
-
-def commands(sub):
-    """This module's commands, for bullpen's parser."""
-    command(sub, "_flush", cmd_flush)
