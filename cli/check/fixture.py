@@ -293,6 +293,28 @@ def main(d, now):
         say("blk62", "working", 600)
         wtask(63, "Stopped", "stopped", "blk63")
         say("blk63", "idle", 600)
+    if "prompts" in extras:  # tasks stopped at prompts, with their screens (answer and prompt)
+        at = {"by": "worker", "kind": "prompt"}
+        choice = ("\x1b[2mold output\x1b[0m\n" * 3 + "─" * 40 + "\n ☐ Drink\n\nDo you prefer tea or coffee?\n\n"
+                  "❯ 1. Tea\n     You prefer tea.\n  2. Coffee\n     You prefer coffee.\n  3. Type something.\n"
+                  + "─" * 40 + "\n  4. Chat about this\n\nEnter to select · ↑/↓ to navigate · Esc to cancel\n")
+        task(64, "Menu", "needs", 3, why="Needs you: tea or coffee?", stop=at, block="blk64", session="session:1")
+        live("blk64", choice)
+        boxed = ("╭" + "─" * 38 + "╮\n│ Bash command" + " " * 25 + "│\n│   npm test" + " " * 27 + "│\n│"
+                 + " " * 38 + "│\n│ Do you want to proceed?" + " " * 14 + "│\n│ ❯ 1. Yes" + " " * 29 + "│\n"
+                 "│   2. No, and tell Claude what to do  │\n╰" + "─" * 38 + "╯\n")
+        task(65, "Reviewer asks", "needs", 3, why="Reviewer needs you: run npm test?",
+             stop={"by": "reviewer", "kind": "prompt"}, block="blk4", session="session:1",
+             review={"round": 1, "kind": "full", "block": "blk65", "session": "session:2"})
+        live("blk65", boxed)
+        task(66, "Yes or no", "needs", 3, why="Needs you: overwrite?", stop=at, block="blk66")  # no session
+        live("blk66", "Some output\nOverwrite it? [y/N]\n\n")
+        task(67, "Gone past it", "needs", 3, why="Needs you: ok?", stop=at, block="blk67", session="session:1")
+        live("blk67", "Done.\n\n❯ \n")
+        task(68, "Asked, worker gone", "needs", 3, ask=True, why="Which database?",
+             stop={"by": "worker", "kind": "ended"}, block="blk68", session="session:1")
+        task(69, "Asked while in review", "needs", 3, ask=True, why="Ship it?",
+             asked_from={"status": "review", "why": "Reviewer is reading"})
     if "deadcoords" in extras:  # no coordinator is running
         for blk in ("blk1", "blk3"):
             (fake / "alive" / blk).unlink()

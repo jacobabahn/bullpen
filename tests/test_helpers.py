@@ -3,12 +3,11 @@
 import argparse
 import datetime as dt
 import re
-import textwrap
 import unittest
 
 from support import setUpModule, tearDownModule, ROOT  # a temp folder for each module
 from bullpen import (
-    agents, answer, cli, core, limit, line_edit, notifications, stepper,
+    agents, cli, core, limit, line_edit, notifications, stepper,
 )
 
 
@@ -265,68 +264,6 @@ class HelpersTest(unittest.TestCase):
 
     def test_split_keys_keeps_escape_sequences_whole(self):
         self.assertEqual(line_edit.split_keys("ab\x1b[Bc\x1bOA\x1b"), ["a", "b", "\x1b[B", "c", "\x1bOA", "\x1b"])
-
-    # ---------- reading prompts ----------
-
-    # Claude Code's AskUserQuestion menu, as `rex capture` shows it (a real one)
-    CHOICE = textwrap.dedent("""\
-        ────────────────────────────────────────
-         ☐ Drink
-
-        Do you prefer tea or coffee?
-
-        ❯ 1. Tea
-             You prefer tea.
-          2. Coffee
-             You prefer coffee.
-          3. Type something.
-        ────────────────────────────────────────
-          4. Chat about this
-
-        Enter to select · ↑/↓ to navigate · Esc to cancel
-        """)
-
-    # the boxed layout of older Claude Code versions
-    BOXED = textwrap.dedent("""\
-        ╭──────────────────────────────────────╮
-        │ Bash command                         │
-        │                                      │
-        │   npm test                           │
-        │                                      │
-        │ Do you want to proceed?              │
-        │ ❯ 1. Yes                             │
-        │   2. No, and tell Claude what to do  │
-        │      differently (esc)               │
-        ╰──────────────────────────────────────╯
-        """)
-
-    def test_a_choice_menu_is_read_without_type_something(self):
-        p = answer.read_prompt(self.CHOICE)
-        self.assertEqual(p["question"], "Do you prefer tea or coffee?")
-        self.assertEqual(p["options"], [["1", "Tea"], ["2", "Coffee"], ["4", "Chat about this"]])
-
-    def test_the_boxed_layout_is_read_too(self):
-        p = answer.read_prompt(self.BOXED)
-        self.assertEqual((p["question"], p["options"]),
-                         ("Do you want to proceed?", [["1", "Yes"], ["2", "No, and tell Claude what to do"]]))
-
-    def test_a_yes_no_question_is_answered_by_y_or_n(self):
-        p = answer.read_prompt("Some output\nOverwrite it? [y/N]\n\n")
-        self.assertEqual((p["question"], p["options"]), ("Overwrite it? [y/N]", [["y", "Yes"], ["n", "No"]]))
-
-    def test_what_the_agent_wrote_is_no_prompt(self):
-        listed = "● Two ways:\n  1. Patch it\n  2. Rewrite it\n\n────\n❯ \n────\n  ⏸ manual mode on\n"
-        self.assertIsNone(answer.read_prompt(listed))  # its input box is under it
-        self.assertIsNone(answer.read_prompt("● Two ways:\n  1. Patch it\n  2. Rewrite it\n"))  # no ❯ on one
-        self.assertIsNone(answer.read_prompt("Do you want to proceed?\n❯ 1. Yes\n  2. No\n" + "more\n" * 4))
-        self.assertIsNone(answer.read_prompt("❯ 2. Yes\n  3. No\n"))  # not counted from 1
-        self.assertIsNone(answer.read_prompt(""))
-
-    def test_a_prompt_id_tells_one_command_from_another(self):
-        a = answer.read_prompt(self.BOXED)
-        self.assertEqual(a["id"], answer.read_prompt("old output\n" * 20 + self.BOXED)["id"])
-        b = answer.read_prompt(self.BOXED.replace("npm test", "rm -rf /"))
-        self.assertNotEqual(a["id"], b["id"])
 
     # ---------- help and ls ----------
 

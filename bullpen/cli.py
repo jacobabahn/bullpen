@@ -11,7 +11,7 @@ from . import core
 from .core import Fail, run_later
 
 # The modules with commands (cli/src/commands.rs lists their commands in `bullpen --help`'s order).
-MODULES = ("answer", "accept", "stepper", "tours",
+MODULES = ("accept", "stepper", "tours",
            "auto_accept",
            "keys", "prs")
 
@@ -20,7 +20,6 @@ MODULES = ("answer", "accept", "stepper", "tours",
 # is most of a call's time. A test checks this against what the modules declare, and
 # another against the Rust entry's table (cli/src/commands.rs): a command is one side's.
 COMMANDS = {
-    "answer": "answer", "reply": "answer", "prompt": "answer",
     "accept": "accept",
     "tour": "stepper", "_tour": "stepper",
     "tour-comment": "tours",

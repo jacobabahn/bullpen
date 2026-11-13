@@ -148,6 +148,9 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   share (and accept from T9), `close_task`, and the `close` and `drop` commands
 - `auto_accept.rs`: a reviewer's `verdict`; an approval with auto-accept runs Python's
   `_auto_accept` as a job and waits for it, before the verdict closes the reviewer's pane
+- `answer.rs`: answering a prompt from the board (`prompt`, `answer`), and `reply`
+- `screen/prompt.rs`: the prompt a pane's screen ends with (`read_prompt`): its
+  question, its options and its ID
 
 ## The Python
 
@@ -178,7 +181,6 @@ importing the one with the command being run, or all of them for `--help`):
 - `saves.py`: the run queue's save hook (`move_queue`), which runs Rust's `_queue`
 - `start.py`: what a task waits on, an agent's pane, handing a worker a message (twins)
 - `review.py`: what a review covers, starting a reviewer (a twin)
-- `answer.py`: answering a prompt from the board, `reply`
 - `watcher.py`: starting the watcher, and replacing it when the code changes (a twin,
   for accept and board_build)
 - `close.py`: the one close step (`close`, `close_task`) for accept and auto-accept (a

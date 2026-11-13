@@ -5,6 +5,7 @@
 //! read or written.
 
 mod agents;
+mod answer;
 mod args;
 mod auto_accept;
 mod board;
