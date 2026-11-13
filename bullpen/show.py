@@ -11,17 +11,17 @@ from .core import (
     Fail, Repo, SELF, command, git, is_status, known_repos, listed, own_model, repo_root,
 )
 from .modes import task_base_ref
-from .rex import find_pane, rex_alive, rex_close, rex_focus, rex_run, rex_view
+from .rex import find_pane, rex_alive, rex_close, rex_focus, rex_view
 from .agents import is_limited
 from .coordinators import home_of, owner, session_for
 from .hooks import hook_log
-from .start import float_pane, waits_phrase
+from .panes import place, show
+from .start import waits_phrase
 from .review import review_kind
 from .task_line import (
     ago, board_detail, board_order, colored, is_stuck, pr_phrase, stuck_phrase, task_line,
     task_rows, term_width, text_width, wrap,
 )
-from .go import show_pane
 
 
 def cmd_ls(args):
@@ -243,11 +243,8 @@ def diff_pane(repo, t, args):
     if old:
         rex_close(session, old[2])  # one diff pane per task, showing the latest
     argv = [SELF, "diff", t["id"], "--back"]
-    if repo.cfg.get("workers") == "tabs":
-        block = rex_run(session, t["worktree"], diff_label(t), argv, focus=True)
-    else:
-        block = float_pane(repo, session, diff_label(t), t["worktree"], argv, t)
-    show_pane(repo, session, block)
+    block = place(repo, t, session, diff_label(t), argv, role="diff", hint=False, focus=True)
+    show(repo, session, block)
 
 
 def commands(sub):

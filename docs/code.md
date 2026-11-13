@@ -20,6 +20,8 @@ importing the one with the command being run, or all of them for `--help`):
   the one the task waits on (`waits_on`, `waited_on`). Code that needs either asks it,
   rather than reading the task's `block` or its review's `session`
 - `coordinators.py`: a repo's coordinators, and who sees to a task (`sees_to`)
+- `panes.py`: where a worker's, reviewer's or diff's pane lives: making, showing,
+  hiding and finding it again, and keeping it there (`gather`)
 - `news.py`: news lines, the outboxes typed into coordinators' panes, `bullpen news`
 - `notifications.py`: the person's notifications
 - `guide.py`: the coordinator's guide, and telling running coordinators it changed
@@ -48,7 +50,8 @@ importing the one with the command being run, or all of them for `--help`):
 - `auto_accept.py`: a reviewer's verdict, and auto-accept
 - `prs.py`: following a task's pull request after ready
 - `config.py`: `config`
-- `go.py`: `go`, `hide`, `adopt`, and putting a repo's panes back where they belong
+- `go.py`: `go`, `hide`, `adopt`, and finding a repo's panes again after a Rex restart
+  (`relink`)
 - `show.py`: `ls`, `show` and `diff`
 - `doctor.py`: `bullpen doctor`
 - `pick.py`: the jump picker
@@ -80,6 +83,19 @@ then what the caller says and does (`then`: news, and after an accept the rebase
 the other tasks), and the worker's pane last, since the step may run in it. Each
 caller says only what to tell and how to merge. Nothing calls the run queue: the save
 moves it.
+
+## Where a pane lives
+
+A worker's, reviewer's or diff's pane goes where its placement in `panes.py` puts it:
+`FLOAT` (a capsule in its coordinator's tab, the default) or `TABS` (a tab of its own),
+picked by the `workers` setting (`for_new`). Each placement has the same steps:
+`place` (make the pane; a floating one gets the hide key's hint in its label), `show`,
+`hide` (False when it has no away, so `hide` exits 3), `find` (by ID, else label, after
+a Rex restart), and what `gather` does to keep it home. Code that makes, shows, hides or
+finds one of these panes calls `panes.place`, `show`, `hide`, `find` and `gather`, and
+never reads the setting. Showing and hiding go by where the pane is now
+(`placement_at`), so a pane started before the setting changed keeps working. A new
+placement is a new class there, added to `PLACEMENTS`.
 
 ## Local mode and remote mode
 

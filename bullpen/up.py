@@ -5,13 +5,14 @@ import os
 from .core import Fail, Repo, SELF, command, repo_root, resolve
 from .rex import coordinator_label, rex_run
 from .coordinators import add_coordinator, coordinator_at, prune, session_for
+from .panes import gather
 from .news import news_mode_line
 from .guide import give_guide, guide_file, guide_text, tell_guide_changes
 from .watcher import ensure_watcher
 from .board import ensure_board
 from .board_build import rebuild_board_if_stale
 from .push_remote import catch_up_push
-from .go import gather, relink
+from .go import relink
 from .doctor import up_hint
 
 

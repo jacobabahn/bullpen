@@ -6,17 +6,18 @@ import sys
 from pathlib import Path
 
 from .core import (
-    CLOSED, FLOAT_BOUNDS, Fail, Repo, STATE, WAITING, command, find_repo, index_block,
+    CLOSED, Fail, Repo, STATE, WAITING, command, find_repo, index_block,
     is_status, known_repos, lookup_block, read_json, repo_root, safe, set_status, unindex_block,
 )
 from .rex import (
-    board_label, coordinator_label, find_pane, find_panes, review_label, rex_alive, rex_api,
-    rex_close, rex_focus, rex_view, set_layer,
+    board_label, coordinator_label, find_pane, find_panes, review_label, rex_alive, rex_close,
+    rex_focus, rex_view,
 )
 from .agents import is_limited, pane
 from .coordinators import (
     alive, calling_coordinator, coordinator_at, home_of, on_board, owner, primary, session_for,
 )
+from .panes import find, gather, hide, show
 from .board import ensure_board
 
 
@@ -176,7 +177,7 @@ def cmd_go(args):
     else:
         if args.board and args.id:
             select_on_board(repo, args.id)
-        show_pane(repo, session, block)
+        show(repo, session, block)
 
 
 def board_for_go(repo, args):
@@ -207,46 +208,21 @@ def go_home(args):
 
 
 def cmd_hide(args):
-    """Put the worker or reviewer pane you're in back into its capsule and go back
-    to the board. Exits 3 if that pane isn't one of bullpen's floating panes, so a
-    key binding can let the key through."""
+    """Put the worker or reviewer pane you're in away (back into its capsule) and go
+    back to the board. Exits 3 if its placement has no away (a tab of its own), or it
+    isn't one of bullpen's panes, so a key binding can let the key through."""
     repo, role = lookup_block(args.from_block)
     if not repo or role in ("coordinator", "board"):
         sys.exit(3)
     t = repo.task(role.split()[0])
     session = args.session or pane(t, "reviewer" if role.endswith(" review") else "worker")[0]
-    where = find_pane(rex_view(session), block=args.from_block)
-    if not where or where[1].get("kind") != "floating":
+    if not hide(session, args.from_block):
         sys.exit(3)
-    set_layer(session, where[1]["layer_id"], "minimized")
     c = home_of(repo, t)
     for p in (c.get("board") or {}, c):
         if rex_alive(p.get("session"), p.get("block")):
             rex_focus(p.get("session"), p["block"])
             break
-
-
-def show_pane(repo, session, block):
-    """Focus a pane. A worker's floating pane comes up from its capsule; any other
-    worker pane that's up goes back to being a capsule."""
-    gather(repo, session)
-    view = rex_view(session)
-    if view is None:
-        return rex_focus(session, block)
-    mine = {b for t in repo.tasks() for b in (t.get("block"), (t.get("review") or {}).get("block")) if b}
-    target = find_pane(view, block=block)
-    for w in view["windows"]:
-        for layer in w.get("layers", []):
-            if layer.get("kind") != "floating" or layer.get("state") == "minimized":
-                continue
-            if target and layer["layer_id"] == target[1]["layer_id"]:
-                continue
-            if any(b.get("block_id") in mine for b in layer.get("blocks", [])):
-                set_layer(session, layer["layer_id"], "minimized")
-    if target and target[1].get("kind") == "floating":
-        if set_layer(session, target[1]["layer_id"], "normal", focus=True):
-            return
-    rex_focus(session, block)
 
 
 # ---------- a repo's panes, back where they belong: `up`, `go`, `adopt` ----------
@@ -314,12 +290,12 @@ def relink(repo, session):
             print(f"board of {c['id']}: found again ({hit[2]})")
     repo.save()
     for t in repo.tasks():
-        if t["status"] in CLOSED or not t.get("block") or find_pane(view, block=t["block"]):
+        if t["status"] in CLOSED or not t.get("block") or find(session, view, block=t["block"]):
             continue
         if not ours(t.get("session")):
             continue
         unindex_block(t["block"])
-        hit = find_pane(view, label=f"bullpen: {t['id']}")
+        hit = find(session, view, label=f"bullpen: {t['id']}")
         if hit:
             t.update(block=hit[2], session=session)
             index_block(hit[2], repo, t["id"])
@@ -332,49 +308,13 @@ def relink(repo, session):
     relink_reviewers(repo, session, view)
 
 
-def gather(repo, session):
-    """Keep every worker and reviewer pane in its coordinator's tab, as capsules (the
-    primary coordinator's, when its own is gone). A coordinator that was restarted
-    opens in a new tab: move the panes there and close any tab that moving them left
-    empty."""
-    if repo.cfg.get("workers") == "tabs":
-        return
-    view = rex_view(session)
-    fallback = primary(repo) or {}
-    emptied = set()
-    for t in repo.tasks():
-        if t["status"] in CLOSED:
-            continue
-        c = home_of(repo, t)
-        home = find_pane(view, block=c.get("block"))
-        if not home:
-            c, home = fallback, find_pane(view, block=fallback.get("block"))
-        if not home:
-            continue
-        for b in (t.get("block"), (t.get("review") or {}).get("block")):
-            where = find_pane(view, block=b) if b else None
-            if not where or where[0] == home[0]:
-                continue
-            if rex_api(session, "session.move_block", {"block_id": b, "anchor_block_id": c["block"]},
-                       check=False) is None:
-                continue
-            r = rex_api(session, "session.float_block", {"block_id": b, "bounds": FLOAT_BOUNDS}, check=False)
-            if r:
-                set_layer(session, r["layer_id"], "minimized")
-            emptied.add(where[0])
-    if emptied:
-        for w in (rex_view(session) or {}).get("windows", []):
-            if w["window_id"] in emptied and not any(l.get("blocks") for l in w.get("layers", [])):
-                rex_api(session, "session.close_window", {"window_id": w["window_id"]}, check=False)
-
-
 def relink_reviewers(repo, session, view):
     for t in repo.tasks():
         r = t.get("review") or {}
-        if t["status"] in CLOSED or not r.get("block") or find_pane(view, block=r["block"]):
+        if t["status"] in CLOSED or not r.get("block") or find(session, view, block=r["block"]):
             continue
         unindex_block(r["block"])
-        hit = find_pane(view, label=review_label(t))
+        hit = find(session, view, label=review_label(t))
         r.update(block=hit[2] if hit else None, session=session)
         if hit:
             index_block(hit[2], repo, f"{t['id']} review")

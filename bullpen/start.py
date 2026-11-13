@@ -6,17 +6,15 @@ import re
 from pathlib import Path
 
 from .core import (
-    CLOSED, FLOAT_BOUNDS, Fail, PROMPTS, REVIEW_MODES, Repo, SELF, TERMINAL, WAITING,
+    CLOSED, Fail, PROMPTS, REVIEW_MODES, Repo, SELF, WAITING,
     back_to_work, clip, command, git, home, index_block, is_claude, is_status, later, model_in, now,
     on_save, pr_short, repo_root, resolve, set_auto_accept, set_status, slug, status_words,
     unindex_block, with_model, write_json,
 )
 from .modes import task_base_ref
-from .rex import (
-    HIDE_HINT, find_pane, rex_alive, rex_api, rex_run, rex_type, rex_view, screen_end,
-    set_layer, type_to_worker, with_state,
-)
-from .coordinators import calling_coordinator, home_of, primary, session_for
+from .rex import rex_alive, rex_type, screen_end, type_to_worker
+from .coordinators import calling_coordinator, primary, session_for
+from .panes import place
 from .news import news
 from .limit import limit_active, limit_phrase
 from .hooks import hook_log, set_up
@@ -354,10 +352,7 @@ def launch(repo, t, session, first, resume):
         ["-n", f"{t['id']}: {t['title']}", first]
     unindex_block(t.get("block"))
     label = f"bullpen: {t['id']}"
-    if repo.cfg.get("workers") == "tabs":
-        block = rex_run(session, t["worktree"], label, argv)
-    else:
-        block = float_pane(repo, session, label + HIDE_HINT, t["worktree"], argv, t)
+    block = place(repo, t, session, label, argv)
     index_block(block, repo, t["id"])
     set_status(t, "working")
     t.update(block=block, session=session, last=None)
@@ -381,20 +376,6 @@ def hand_back(repo, t, msg):
     t["last"] = None
     repo.save_task(t)
     return None
-
-
-def float_pane(repo, session, label, cwd, argv, t):
-    """Start argv in a minimized floating pane in the window of task t's coordinator:
-    it shows as a capsule at the bottom right until `bullpen go` brings it up."""
-    args = {"bounds": FLOAT_BOUNDS, "layout": {"block": {
-        "flavor": TERMINAL, "label": label,
-        "options": {"command": with_state(argv), "cwd": str(cwd)}}}}
-    where = find_pane(rex_view(session), block=home_of(repo, t).get("block"))
-    if where:
-        args["window_id"] = where[0]
-    r = rex_api(session, "session.new_layer", args)
-    set_layer(session, r["layer_id"], "minimized")
-    return r["block_ids"][0]
 
 
 def cmd_resume(args):

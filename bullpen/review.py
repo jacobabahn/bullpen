@@ -8,12 +8,12 @@ from .core import (
     PROMPTS, SELF, auto_accepts, commits, git, head, index_block, merge_base, resolve, run,
     set_status, unindex_block, where, with_model,
 )
-from .rex import HIDE_HINT, review_label, rex_close, rex_run
+from .rex import review_label, rex_close
 from .agents import pane, running
 from .coordinators import session_for
+from .panes import place
 from .news import ready_news
 from .rules import task_rules
-from .start import float_pane
 
 
 def review_at_ready(repo, t, base_ref):
@@ -280,10 +280,7 @@ def start_review(repo, t, base_ref, rebase=None):
     model = review_model(repo, kind)
     argv = resolve(with_model(repo.cfg["reviewer"], model)) + ["-n", f"{t['id']} review", first]
     session = t.get("session") or session_for(repo)
-    if repo.cfg.get("workers") == "tabs":
-        block = rex_run(session, t["worktree"], review_label(t), argv)
-    else:
-        block = float_pane(repo, session, review_label(t) + HIDE_HINT, t["worktree"], argv, t)
+    block = place(repo, t, session, review_label(t), argv, role="reviewer")
     index_block(block, repo, f"{t['id']} review")
     set_status(t, "review")
     t.update(review={
