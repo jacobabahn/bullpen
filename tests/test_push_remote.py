@@ -180,7 +180,10 @@ class PushRemoteTest(unittest.TestCase):
         # by the first save, after the merge) need what only the new agents.py has.
         for d in ("bin", "bullpen", "prompts", "lua"):
             shutil.copytree(support.ROOT / d, self.repo / d, ignore=shutil.ignore_patterns("__pycache__"))
-        (self.repo / ".gitignore").write_text("__pycache__/\n")
+        (self.repo / ".gitignore").write_text("__pycache__/\n/target/\n")
+        # its build, as every checkout has one (the run queue is Rust's `_queue`)
+        (self.repo / "target").mkdir()
+        shutil.copy2(support.ROOT / "target" / "bullpen", self.repo / "target" / "bullpen")
         self.git("add", ".")
         self.git("commit", "-qm", "bullpen")
         self.bp("config", "--review", "off")
