@@ -86,7 +86,30 @@ findings open, or any task while review is off. With a PR, it waits for the PR's
 checks: still running, the task stays ready and accepts once they pass; failing, or
 new comments from people, it isn't accepted and the news says why. A merge that is
 refused (a conflict, an uncommitted change in the way) leaves the task ready, with
-the reason as news. `bullpen add` or `start` with `--no-auto-accept` keeps one task
+the reason as news, except a conflict with its base (below). `bullpen add` or `start` with `--no-auto-accept` keeps one task
 for you while it's on (and `--auto-accept` auto-accepts one task while it's off).
 The board shows `· auto-accept` beside the repo's name while it's on, and a task
 held back says "Kept for you: no auto-accept."
+
+### Refused for a conflict
+
+Another task may land first, while this one is in review, and then its branch no
+longer rebases onto its base. When an auto-accept is refused, bullpen tries a
+rebase in the task's worktree (after `git fetch origin`, with a remote) and undoes
+it. If it conflicts, the task goes back to its worker, as `rebase-others` sends
+one back: the files it conflicts in, and to rebase onto its base, fix the
+conflicts, rerun the tests, commit and run `ready` again (resumed in a new pane if
+its pane is gone). The conflicts are noted on its review, so that `ready` gets the
+usual follow-up: its approval carried over, a rebase check of the resolution, or a
+follow-up review ([Review](review.md)), then the auto-accept again. The board says
+"Approved, rebasing onto main: its branch conflicted.", and the news:
+`BP-3 approved by review, but the auto-accept was refused: it conflicts with main
+in README.md. Sent back to its worker to rebase (trip 1 of 3)`.
+
+After 3 trips back for a conflict, bullpen stops sending it and leaves the task
+ready for you: `... it still conflicts with main in README.md after 3 trips back
+to rebase. Left for you`. If the message doesn't reach its worker, the task goes
+to its coordinator with news to `resume` or `tell` it. A refusal that isn't a
+conflict (uncommitted changes, a check GitHub requires, ...) leaves the task ready
+with the reason, as before; so does a refused `bullpen accept` of your own: it says
+why, and sends nothing back (`bullpen tell` the worker to rebase if you want it to).

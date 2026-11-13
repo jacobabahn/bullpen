@@ -372,6 +372,12 @@ pub fn status_detail(cfg: &Obj, t: &Obj, waits: &str, at: Option<Stamp>) -> Stri
         }
         "working" if sent_back_by_github(t) => "Fixing what GitHub said.".into(),
         "working" if s(r, "verdict") == "changes" => format!("Fixing what review round {rnd} found."),
+        "working" if s(r, "verdict") == "approved" && truthy(r.get("conflict")) => {
+            format!(
+                "Approved, rebasing onto {}: its branch conflicted.",
+                or_empty(t, "base")
+            )
+        }
         "todo" if waits.is_empty() => "Not started. s starts it.".into(),
         "todo" => format!("{waits}."),
         "done" if truthy(t.get("local")) && !truthy(t.get("pr")) => {

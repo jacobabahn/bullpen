@@ -170,7 +170,34 @@ class AcceptTest(BullpenTest):
         self.assertTrue(Path(wt).exists())
         self.assertIn("auto-accept was refused: merge refused: Pull request is not mergeable",
                       self.news_lines()[-1])
-        self.assertIn("Send it back to rebase", self.news_lines()[-1])
+        self.assertNotIn("conflict_sends", t)  # it merges cleanly: not a conflict, so not sent back
+
+    def test_auto_accept_refused_for_a_conflict_sends_it_back_to_rebase(self):
+        gh = self.fake / "gh"
+        gh.write_text(gh.read_text() + textwrap.dedent("""\
+            if sys.argv[1:3] == ["pr", "merge"]:
+                print("Pull request is not mergeable: the merge commit cannot be cleanly created", file=sys.stderr)
+                sys.exit(1)
+        """))
+        self.bp("up")
+        self.bp("config", "--auto-accept", "on")
+        tid = self.bp("add", "Fix the thing", "--brief", "Make it work.").stdout.strip()
+        self.bp("start", tid)
+        wt = self.show(tid)["worktree"]
+        self.commit_and_ready(tid)
+        (self.repo / "fix1.txt").write_text("fixed on main\n")  # what another task merged meanwhile
+        sh("git", "-C", str(self.repo), "add", ".")
+        sh("git", "-C", str(self.repo), "commit", "-qm", "Clash")
+        sh("git", "-C", str(self.repo), "push", "-q", "origin", "HEAD:main")
+        self.bp("verdict", tid, "approve", "--summary", "Looks right.", cwd=wt)
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["conflict_sends"]), ("working", 1))
+        line = [l for b, l in self.typed() if b == t["block"]][-1]
+        self.assertIn("doesn't rebase cleanly onto main: conflicts in fix1.txt", line)
+        self.assertIn("run `git fetch origin`, then rebase your branch onto origin/main", line)
+        self.assertEqual(self.news_lines()[-1], "bullpen · BP-1 approved by review, but the auto-accept was refused: "
+                                                "it conflicts with main in fix1.txt. Sent back to its worker to "
+                                                "rebase (trip 1 of 3)")
 
     def test_no_auto_accept_keeps_a_task_for_the_person(self):
         tid, _ = self.approved_with_auto_accept("--no-auto-accept")

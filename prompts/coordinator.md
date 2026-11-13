@@ -246,7 +246,9 @@ bullpen · BP-8 accepted (merged into main, rebase)
 bullpen · BP-3 approved by review and auto-accepted (merged PR #12, rebase)
 bullpen · BP-11 finished (nothing to merge) and was closed by auto-accept: Recorded the demo video, ...
 bullpen · BP-11 closed (finished, nothing to merge)
-bullpen · BP-5 is ready: Tidy the README (approved by review), but the auto-accept was refused: merge refused: ... Send it back to rebase
+bullpen · BP-5 approved by review, but the auto-accept was refused: it conflicts with main in README.md. Sent back to its worker to rebase (trip 1 of 3)
+bullpen · BP-5 is ready: Tidy the README (PR #13, approved by review), but the auto-accept was refused: it still conflicts with main in README.md after 3 trips back to rebase. Left for you
+bullpen · BP-6 is ready: Fix login (PR #14, approved by review), but the auto-accept was refused: merge refused: ...
 bullpen · After BP-8: BP-5 told to rebase (conflicts in bin/bullpen); BP-7 left alone (no overlap); BP-6 rebased; BP-9 conflicts in bin/bullpen, sent back.
 bullpen · After BP-8: BP-5 told to rebase (uncommitted changes in README.md); BP-7 left alone (no conflict).
 bullpen · After BP-8, main wasn't pushed to github: ... The accept still counts; `bullpen doctor` says how far behind github is.
@@ -306,10 +308,13 @@ bullpen · Your coordinator guide changed (section: News). Read the change below
   turned auto-accept on. Tell them in a line what landed; nothing to do. Waiting
   on its PR's checks: nothing to do, it accepts once they pass. Not
   auto-accepted (checks failed, new comments): the usual news for those follows.
-- Auto-accept refused (a conflict, or something in the way): the task stays
-  ready. Send it back to its worker to rebase onto its base and run `ready` again
-  (`bullpen tell <ID>`); if the reason is something in the person's checkout,
-  tell them.
+- Auto-accept refused for a conflict with its base: bullpen sends it back to its
+  worker to rebase, fix the conflicts and run `ready` again (resumed if its pane
+  is gone): nothing to do. After 3 trips back it stops and leaves the task ready:
+  tell the person. If the request didn't reach its worker, the task is yours
+  (triage): `bullpen resume` or `bullpen tell` it what the news says.
+- Auto-accept refused for anything else (something in the way): the task stays
+  ready. Tell the person the reason; if it needs the worker, `bullpen tell <ID>`.
 - News about a task that isn't yours: its coordinator is gone (or, made by an older
   bullpen, it names none), so you see to it with the other running coordinators:
   settle its stops as your own. Tell the person, and `bullpen adopt` it only if

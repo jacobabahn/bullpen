@@ -3,7 +3,7 @@
 //! accepted change meets its work, one between turns is rebased, and a running review
 //! is left be. One news line sums it up. Off with `config --rebase-others off`.
 
-use crate::modes::{refresh, task_base_ref};
+use crate::modes::{is_local, quiet_git, refresh, task_base_ref};
 use crate::news::{news, Opts};
 use crate::review::{is_doc, keep_approval, rebase_check, shortstat, start_review, Check};
 use crate::rex::{alive, rex_type};
@@ -421,23 +421,13 @@ fn rebase_conflict(
     shown: &str,
 ) -> Res<String> {
     let id = s(t, "id").to_string();
-    let names = if files.is_empty() {
-        "some files".to_string()
-    } else {
-        files.join(", ")
-    };
-    // resolved by hand: its next ready keeps the approval if its own lines are the same,
-    // gets a rebase check if they changed only in these files, else a follow-up review
-    save_conflicts(repo, t, files, shown)?;
-    let msg = format!(
-        "{} moved ({} was accepted) and your branch doesn't rebase cleanly onto it: conflicts in {names}. \
-         Your branch is as it was. Now {}, fix the conflicts, rerun the tests, commit, and run your ready \
-         command again.",
+    let why = format!(
+        "{} moved ({} was accepted) and your branch doesn't rebase cleanly onto it",
         py_str(t.get("base").unwrap_or(&Value::Null)),
         s(accepted, "id"),
-        onto(base_ref)
     );
-    if let Some(failed) = hand_back(repo, t, &msg)? {
+    let names = names_of(files);
+    if let Some(failed) = send_back_conflict(repo, t, &why, base_ref, files, shown)? {
         // left where it was
         return Ok(format!(
             "{id} conflicts in {names}, but the message didn't reach its worker ({failed}): \
@@ -445,6 +435,69 @@ fn rebase_conflict(
         ));
     }
     Ok(format!("{id} conflicts in {names}, sent back"))
+}
+
+/// The conflicting files in words.
+pub fn names_of(files: &[String]) -> String {
+    if files.is_empty() {
+        "some files".to_string()
+    } else {
+        files.join(", ")
+    }
+}
+
+/// Send a task whose branch doesn't rebase onto base_ref back to its worker (resumed if
+/// its pane is gone), why first: the files it conflicts in, and to rebase and fix them.
+/// The conflicts are noted on its review: its next ready keeps the approval if its own
+/// lines are the same, gets a rebase check if they changed only in these files, else a
+/// follow-up review. None, or why the message didn't reach the worker (left as it was).
+pub fn send_back_conflict(
+    repo: &Repo,
+    t: &mut Obj,
+    why: &str,
+    base_ref: &str,
+    files: &[String],
+    shown: &str,
+) -> Res<Option<String>> {
+    save_conflicts(repo, t, files, shown)?;
+    let msg = format!(
+        "{why}: conflicts in {}. Your branch is as it was. Now {}, fix the conflicts, rerun the tests, commit, \
+         and run your ready command again.",
+        names_of(files),
+        onto(base_ref)
+    );
+    hand_back(repo, t, &msg)
+}
+
+/// Whether the task's committed branch conflicts with its base as it is now (fetched
+/// first, with a remote): (base_ref, the files, the conflicts as git shows them), from a
+/// rebase tried in its worktree and undone. None when it rebases cleanly, or that can't
+/// be told (no worktree, uncommitted changes).
+pub fn base_conflict(repo: &Repo, t: &Obj) -> Res<Option<(String, Vec<String>, String)>> {
+    let wt = s(t, "worktree");
+    if wt.is_empty() || !Path::new(wt).is_dir() {
+        return Ok(None);
+    }
+    if !is_local(repo, t)? {
+        let base = py_str(t.get("base").unwrap_or(&Value::Null));
+        quiet_git(repo, &["fetch", "-q", "origin", &base], 60)?; // unfetched: it goes by what it has
+    }
+    let base_ref = task_base_ref(repo, t)?;
+    if git(wt, &["merge-base", "--is-ancestor", &base_ref, "HEAD"], false)?.ok()
+        || !strip(&git(wt, &["status", "--porcelain"], true)?.stdout).is_empty()
+    {
+        return Ok(None);
+    }
+    let old = strip(&git(wt, &["rev-parse", "HEAD"], true)?.stdout).to_string();
+    if git(wt, &["rebase", "-q", &base_ref], false)?.ok() {
+        git(wt, &["reset", "-q", "--hard", &old], true)?; // only a trial: the branch stays as it was
+        return Ok(None);
+    }
+    let unmerged = git(wt, &["diff", "--name-only", "--diff-filter=U"], false)?.stdout;
+    let files: Vec<String> = split(&unmerged).into_iter().map(String::from).collect();
+    let shown = git(wt, &["diff"], false)?.stdout;
+    git(wt, &["rebase", "--abort"], false)?;
+    Ok((!files.is_empty()).then_some((base_ref, files, shown)))
 }
 
 #[cfg(test)]

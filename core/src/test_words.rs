@@ -93,6 +93,15 @@ fn test_the_boards_sentence() {
     );
     assert_eq!(
         d(
+            json!({"id": "BP-1", "status": "working", "base": "main",
+                   "review": {"verdict": "approved", "conflict": ["a.txt"]}}),
+            &[],
+            none.clone()
+        ),
+        "Approved, rebasing onto main: its branch conflicted."
+    );
+    assert_eq!(
+        d(
             json!({"id": "BP-1", "status": "todo", "worker_model": "opus"}),
             &[],
             json!({"worker_model": "sonnet"})

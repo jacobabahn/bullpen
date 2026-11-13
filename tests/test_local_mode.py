@@ -1,6 +1,7 @@
 """A repository without an origin remote: no push, no gh; accept merges locally."""
 
 import json
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -257,15 +258,89 @@ class LocalModeTest(unittest.TestCase):
         self.assertEqual(self.show(tid)["status"], "ready")
         self.assertTrue(Path(wt).exists())
 
-    def test_a_refused_auto_accept_leaves_it_ready_with_news(self):
+    def approved_with_a_conflict(self, sends=0):
+        """An auto-accepted task whose branch conflicts with main (fix.txt), approved,
+        after sends earlier trips back to rebase."""
         self.bp("config", "--auto-accept", "on")
         tid, wt = self.ready_task(review=True)
         self.commit(self.repo, "fix.txt", "fixed differently\n", "Clash")
+        if sends:
+            f = next((self.tmp / "state").rglob(f"tasks/{tid}.json"))
+            t = json.loads(f.read_text())
+            f.write_text(json.dumps({**t, "conflict_sends": sends}))
+        head = self.git("rev-parse", "HEAD", cwd=wt)
+        self.bp("verdict", tid, "approve", "--summary", "Fine.", cwd=wt)
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=wt), head)  # its branch as it was
+        self.assertEqual(self.git("status", "--porcelain", cwd=wt), "")
+        return tid, wt
+
+    def test_an_auto_accept_refused_for_a_conflict_sends_it_back_to_rebase(self):
+        main = self.git("rev-parse", "HEAD")
+        tid, wt = self.approved_with_a_conflict()
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["conflict_sends"], t["review"]["conflict"]), ("working", 1, ["fix.txt"]))
+        block, line = [(b, l) for b, l in self.typed() if b == t["block"]][-1]
+        self.assertIn("Review approved your work, but the auto-accept was refused: your branch doesn't rebase "
+                      "cleanly onto main: conflicts in fix.txt.", line)
+        self.assertIn("rebase your branch onto main, fix the conflicts, rerun the tests, commit, and run your "
+                      "ready command again", line)
+        self.assertEqual(self.news_tail(), "bullpen · BP-1 approved by review, but the auto-accept was refused: "
+                                           "it conflicts with main in fix.txt. Sent back to its worker to rebase "
+                                           "(trip 1 of 3)")
+        self.assertIn("Approved, rebasing onto main: its branch conflicted.", self.bp("show", tid).stdout)
+        self.assertNotEqual(self.git("rev-parse", "main"), main)  # only the clash: nothing merged
+        self.assertEqual(self.git("show", "main:fix.txt"), "fixed differently")
+        # the worker rebases and fixes it: a rebase check, then the auto-accept again
+        subprocess.run(["git", "-C", wt, "rebase", "-q", "main"], capture_output=True)  # stops at the conflict
+        (Path(wt) / "fix.txt").write_text("fixed differently, and fixed\n")
+        self.git("add", "fix.txt", cwd=wt)
+        sh("git", "-C", wt, "-c", "core.editor=true", "rebase", "--continue")
+        self.bp("ready", tid, "--summary", "Rebased.", cwd=wt)
+        self.assertEqual(self.show(tid)["review"]["kind"], "rebase")
+        self.bp("verdict", tid, "approve", "--summary", "Resolved right.", cwd=wt)
+        self.assertEqual(self.show(tid)["status"], "done")
+        self.assertEqual(self.git("show", "main:fix.txt"), "fixed differently, and fixed")
+
+    def test_an_auto_accept_refused_for_a_conflict_resumes_a_worker_that_exited(self):
+        self.bp("config", "--auto-accept", "on")
+        tid, wt = self.ready_task(review=True)
+        self.commit(self.repo, "fix.txt", "fixed differently\n", "Clash")
+        (self.fake / "alive" / self.show(tid)["block"]).unlink()
+        self.bp("verdict", tid, "approve", "--summary", "Fine.", cwd=wt)
+        cmd = self.api("session.new_layer")[-1]["layout"]["block"]["options"]["command"]
+        self.assertIn("--continue", cmd)
+        self.assertTrue(any("conflicts in fix.txt" in x for x in cmd))
+        self.assertEqual(self.show(tid)["status"], "working")
+
+    def test_an_auto_accept_refused_for_a_conflict_too_often_is_left_for_the_person(self):
+        tid, wt = self.approved_with_a_conflict(sends=3)
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["conflict_sends"]), ("ready", 3))
+        self.assertFalse([l for b, l in self.typed() if b == t["block"] and "rebase" in l])
+        self.assertIn("(approved by review), but the auto-accept was refused: it still conflicts with main in "
+                      "fix.txt after 3 trips back to rebase. Left for you", self.news_tail())
+
+    def test_an_auto_accept_refused_but_not_for_a_conflict_leaves_it_ready(self):
+        self.bp("config", "--auto-accept", "on")
+        tid, wt = self.ready_task(review=True)
+        (Path(wt) / "scratch.txt").write_text("half done\n")
         main = self.git("rev-parse", "main")
         self.bp("verdict", tid, "approve", "--summary", "Fine.", cwd=wt)
-        self.assert_untouched(tid, wt, main)
-        self.assertIn("(approved by review), but the auto-accept was refused: merge refused", self.news_tail())
-        self.assertIn("Send it back to rebase", self.news_tail())
+        t = self.show(tid)
+        self.assertEqual((t["status"], t.get("conflict_sends")), ("ready", None))
+        self.assertEqual(self.git("rev-parse", "main"), main)
+        self.assertIn("(approved by review), but the auto-accept was refused: merge refused: BP-1 has uncommitted "
+                      "changes", self.news_tail())
+
+    def test_a_manual_accept_refused_for_a_conflict_sends_nothing_back(self):
+        tid, wt = self.ready_task()
+        self.commit(self.repo, "fix.txt", "fixed differently\n", "Clash")
+        before = self.typed()
+        p = self.bp("accept", tid, ok=False)
+        self.assertIn("merge refused: bullpen/bp-1-fix-the-thing doesn't rebase cleanly onto main", p.stderr)
+        t = self.show(tid)
+        self.assertEqual((t["status"], t.get("conflict_sends")), ("ready", None))
+        self.assertEqual(self.typed(), before)
 
     def test_accept_refuses_a_conflict_and_leaves_the_task(self):
         for mode in ("rebase", "squash", "merge"):

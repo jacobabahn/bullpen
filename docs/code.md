@@ -143,7 +143,9 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   auto-accept share, `close_task`, and the `close` and `drop` commands
 - `auto_accept.rs`: a reviewer's `verdict`; an approval with auto-accept runs
   `_auto_accept` as a job and waits for it, before the verdict closes the reviewer's
-  pane; `_auto_accept` accepts, or waits for the PR's checks (`checks`, `pr_view`)
+  pane; `_auto_accept` accepts, or waits for the PR's checks (`checks`, `pr_view`);
+  a merge refused for a conflict sends the task back to rebase (`base_conflict`,
+  `send_back_conflict` in `accept/rebase.rs`), at most `CONFLICT_SENDS` times
 - `accept/`: `mod.rs`: `accept`, and the steps after the merge, each on its own
   (`run_steps`: a failed one is said, the rest still run); `rebase.rs`: rebasing the
   other tasks onto the moved base (`rebase_others`, keeping both sides of a trivial

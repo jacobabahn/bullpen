@@ -6,10 +6,11 @@
 //! waits for the PR's checks ("auto_wait"), which the PR follow-up (prs.rs) looks at.
 
 use crate::accept::accept;
+use crate::accept::rebase::{base_conflict, names_of, send_back_conflict};
 use crate::agents::pane;
 use crate::args::{pos, Arg, Args, Nargs};
 use crate::jobs::{background, Job};
-use crate::news::ready_news;
+use crate::news::{ready_news, say};
 use crate::ready::{summary_text, SUMMARY, SUMMARY_FILE};
 use crate::review::{review_kind, rounds};
 use crate::rex::close_last;
@@ -226,7 +227,9 @@ pub fn pr_view(repo: &Repo, t: &Obj) -> Res<Option<Obj>> {
     })
 }
 
-/// The normal accept, as if the person ran it. A refused merge leaves the task ready.
+/// The normal accept, as if the person ran it. A merge refused for a conflict with the
+/// base sends the task back to its worker to rebase (up to CONFLICT_SENDS times); any
+/// other refusal, or one past that, leaves the task ready, with news.
 pub fn run_auto_accept(repo: &Repo, t: &mut Obj) -> Res<()> {
     std::env::set_current_dir(&repo.root)?; // we may be running in the worktree accept removes
     let Err(e) = accept(repo, t, true) else {
@@ -236,9 +239,57 @@ pub fn run_auto_accept(repo: &Repo, t: &mut Obj) -> Res<()> {
     t.shift_remove("auto_wait");
     write_obj(&repo.task_path(s(&t, "id")), &t)?;
     let facts = [where_(&t), "approved by review".to_string()];
-    let then = format!(", but the auto-accept was refused: {e}. Send it back to rebase");
-    ready_news(repo, &mut t, &facts, &then, false)
+    let Some((base_ref, files, shown)) = base_conflict(repo, &t)? else {
+        // not a conflict: the person sees to it
+        return ready_news(
+            repo,
+            &mut t,
+            &facts,
+            &format!(", but the auto-accept was refused: {e}"),
+            false,
+        );
+    };
+    let (id, names) = (s(&t, "id").to_string(), names_of(&files));
+    let base = py_str(t.get("base").unwrap_or(&Value::Null));
+    let sent = t.get("conflict_sends").and_then(Value::as_i64).unwrap_or(0);
+    if sent >= CONFLICT_SENDS {
+        let then = format!(
+            ", but the auto-accept was refused: it still conflicts with {base} in {names} after {sent} trips back to \
+             rebase. Left for you"
+        );
+        return ready_news(repo, &mut t, &facts, &then, false);
+    }
+    t.insert("conflict_sends".into(), json!(sent + 1));
+    let why = format!(
+        "Review approved your work, but the auto-accept was refused: your branch doesn't rebase cleanly onto {base}"
+    );
+    let failed = match send_back_conflict(repo, &mut t, &why, &base_ref, &files, &shown) {
+        Ok(failed) => failed,
+        Err(e) => Some(clip(&e.0, 160)),
+    };
+    let line = format!("{id} approved by review, but the auto-accept was refused: it conflicts with {base} in {names}");
+    match failed {
+        None => {
+            let line = format!(
+                "{line}. Sent back to its worker to rebase (trip {} of {CONFLICT_SENDS})",
+                sent + 1
+            );
+            say(repo, &t, "rebase_sent", &line)
+        }
+        Some(failed) => {
+            let line = format!(
+                "{line}, and sending it back to rebase didn't reach its worker ({failed}): `bullpen resume {id}` \
+                 or `bullpen tell {id}` it to rebase onto {base_ref} and fix them"
+            );
+            let why = "The request to rebase didn't reach its worker";
+            stop(repo, &mut t, "worker", "not_sent", why, &[line], "not-sent").map(|_| ())
+        }
+    }
 }
+
+/// How many times an auto-accept refused for a conflict sends a task back to rebase
+/// before it leaves it for the person.
+pub const CONFLICT_SENDS: i64 = 3;
 
 const FAILED_CHECK: [&str; 6] = [
     "FAILURE",
