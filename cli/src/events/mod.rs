@@ -452,3 +452,7 @@ pub fn gone(block: &str) -> Res<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "test_events.rs"]
+mod tests;

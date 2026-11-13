@@ -177,7 +177,7 @@ def main(d, now):
     for blk, text, st in (("blk13", "Running   the tests\nagain", "working"), ("blk14", "Reading diff", "working"),
                           ("blk4", "Old news", "idle")):
         (doing / f"{blk}.json").write_text(json.dumps({"state": st, "text": text, "at": at}))
-    for blk, role in (("blk1", "coordinator"), ("blk3", "coordinator"), ("blk4", "worker")):
+    for blk, role in (("blk1", "coordinator"), ("blk3", "coordinator"), ("blk4", "BP-3")):
         (blocks / f"{blk}.json").write_text(json.dumps({"repo": str(root), "role": role, "stuck_after": 15}))
 
     # news: for c1, c2, both, everyone; a diff's lines after one
@@ -224,13 +224,18 @@ def main(d, now):
             (fake / f"screen_{blk}").write_text(screen)
 
     if "check" in extras:  # a task for each thing `check` says (or doesn't)
+        def index(blk, role):  # the watcher's index: --fix's events find the task by it
+            (blocks / f"{blk}.json").write_text(json.dumps({"repo": str(root), "role": role, "stuck_after": 15}))
+
         def wtask(n, title, status, blk, mins=20, **kw):
             task(n, title, status, mins, block=blk, session="session:1", **kw)
             live(blk)
+            index(blk, f"BP-{n}")
 
         def rtask(n, title, status, blk, mins=20, **kw):
             task(n, title, status, mins, review={"round": 1, "kind": "full", "block": blk}, **kw)
             live(blk)
+            index(blk, f"BP-{n} review")
         wtask(40, "Blocked worker", "working", "blk40")
         say("blk40", "blocked", 600, kind="permission")
         wtask(41, "Failed turn", "working", "blk41")
@@ -282,6 +287,7 @@ def main(d, now):
         say("blk57", "idle", 600)
         task(58, "Reviewer gone", "needs", 20, why="Reviewer ended without a verdict",
              stop={"by": "reviewer", "kind": "ended"}, review={"round": 1, "block": "blk58"})
+        index("blk58", "BP-58 review")
         wtask(59, "Prompt on screen", "working", "blk59")
         live("blk59", "Do you want to proceed?\n❯ 1. Yes\n")
         wtask(60, "Empty record", "working", "blk60")
@@ -315,6 +321,16 @@ def main(d, now):
              stop={"by": "worker", "kind": "ended"}, block="blk68", session="session:1")
         task(69, "Asked while in review", "needs", 3, ask=True, why="Ship it?",
              asked_from={"status": "review", "why": "Reviewer is reading"})
+    if "limit" in extras:  # the usage limit has reset: BP-5's worker (pane alive) and BP-36's reviewer (pane gone)
+        (state / "limit.json").write_text(json.dumps({"at": stamp(60), "resets": stamp(10), "text": "limit"}))
+        live("blk6")
+        lim = json.loads((tasks / "BP-5.json").read_text())
+        lim["limit"] = {"who": "worker", "resets": stamp(10), "at": stamp(60), "text": "You've hit your limit"}
+        (tasks / "BP-5.json").write_text(json.dumps(lim, indent=2) + "\n")
+        rev = json.loads((tasks / "BP-36.json").read_text())
+        rev.update(limit={"who": "reviewer", "resets": stamp(10), "at": stamp(60), "text": "limit"}, worktree=wt17,
+                   branch="bullpen/bp-17-docs", session="session:1")
+        (tasks / "BP-36.json").write_text(json.dumps(rev, indent=2) + "\n")
     if "deadcoords" in extras:  # no coordinator is running
         for blk in ("blk1", "blk3"):
             (fake / "alive" / blk).unlink()

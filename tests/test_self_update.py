@@ -147,6 +147,25 @@ class SelfUpdateTest(unittest.TestCase):
                          r"`_push` is (newer than this build: building it first|in the build that's running)")
         self.assertNotIn(" job: ", self.news_log())
 
+    def test_a_gone_coordinators_look_through_the_old_build_catches_up(self):
+        # BP-119 for T10: _gone (Rust now) starts the _coordinator_gone job through the old
+        # build, which hands it to a Python that no longer has it: the job builds first
+        import json
+        self.bp("up")
+        cfg = next((self.tmp / "state" / "repos").glob("*/config.json"))
+        block = json.loads(cfg.read_text())["coordinators"][0]["block"]
+        (self.home / "cli" / "src" / "main.rs").write_text("// moved: keys\nfn main() { keys() }\n")
+        self.git("commit", "-qam", "_coordinator_gone moves to Rust")
+        self.old_build("_coordinator_gone")
+        (self.fake / "alive" / block).unlink()  # its pane closed
+        self.env["BULLPEN_GONE_WAIT"] = "0"  # look now, and wait for the look
+        self.bp("_gone", block)
+        self.assertEqual(json.loads(cfg.read_text())["coordinators"], [])  # dropped
+        self.assertNotIn("case $1 in _coordinator_gone|", self.board("bullpen"))  # the new build is in place
+        self.assertEqual(self.bp("keys").stdout, "keys runs in the new build\n")
+        self.settle()
+        self.assertNotIn(" job: ", self.news_log())
+
     def with_a_stuck_build(self, *args):
         """bullpen args while a build that never ends holds the lock (this test's pid in it)."""
         lock = (self.target / "build.lock").open("a")

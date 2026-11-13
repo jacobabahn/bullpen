@@ -44,10 +44,10 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   `watcher.py` (`refresh_watcher`), `board_build.py` (`rebuild_if_stale`, and the
   catch-up of a command an old build hands over), `board.py` (the board's paths, for
   board_build) and `jobs.py`; and `start.py` (`launch` and `hand_back` for accept,
-  events, prs and tours; `waits_phrase` for task_line),
+  prs and tours; `waits_phrase` for task_line),
   `rules.py` (`task_rules`, for review), `hooks.py` (the teardown, for close),
-  `limit.py` (for events), `review.py` (what a review covers, `start_review`,
-  `keep_approval`, `close_reviewer`, for accept, events, prs, tours and close)
+  `review.py` (what a review covers, `start_review`,
+  `keep_approval`, `close_reviewer`, for accept, prs, tours and close)
   and `close.py` (`close`, `close_task`, for accept and auto-accept). There is one bridge, the run queue: a Python save that frees a
   slot runs Rust's `bullpen _queue` (`saves.py`'s `move_queue`, which reads the tasks
   fresh) once the command is done.
@@ -104,12 +104,13 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
 - `diff.rs`: `diff` (the pager, `--stat`, `--pane`)
 - `agents.rs`: a task's worker and reviewer, and the one it waits on
 - `coordinators.rs`: a repo's coordinators, who sees to a task, whose board shows it
-  (`on_board`), the session to work in (`session_for`), and adding and pruning them
+  (`on_board`), the session to work in (`session_for`), adding and pruning them, and a
+  gone coordinator's pane looked at later, as a job (`coordinator_gone`, `_coordinator_gone`)
 - `news/`: `mod.rs`: a news line (`news`, `tell_coordinator`, `ready_news`), the outboxes and typing
   them into coordinators' panes (`deliver`, `has_draft`); `read.rs`: `news` and
   `news --follow`
 - `notifications.rs`: the person's notifications (the save hook) and `_flush`
-- `stops.rs`: a worker or reviewer stopping
+- `stops.rs`: a worker or reviewer stopping, and a triage passed on to the person
 - `hooks.rs`: a worktree's setup and teardown hooks (`set_up`), and removing a
   worktree (`remove_worktree`)
 - `rules.rs`: the rules every worker and reviewer gets (`task_rules`), and `rules`
@@ -150,8 +151,15 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
 - `auto_accept.rs`: a reviewer's `verdict`; an approval with auto-accept runs Python's
   `_auto_accept` as a job and waits for it, before the verdict closes the reviewer's pane
 - `answer.rs`: answering a prompt from the board (`prompt`, `answer`), and `reply`
-- `screen/prompt.rs`: the prompt a pane's screen ends with (`read_prompt`): its
-  question, its options and its ID
+- `screen/mod.rs`: what Claude Code's screen says, shared by events, check and answer
+  (a background shell still running, compacting, `screen_state`), with Python's
+  regexes matched by hand; `screen/prompt.rs`: the prompt a pane's screen ends with
+  (`read_prompt`): its question, its options and its ID
+- `events/`: what the watcher (lua/watch.lua) reports: `mod.rs`: an agent's events
+  (`_event`) and a pane that closed (`_gone`); `stuck.rs`: an agent that shows no
+  progress (`_stuck`) and the usage limit's reset (`_limit`)
+- `check.rs`: `check`, and `--fix`, which applies the events the watcher missed
+  through `events::event` and `events::gone`
 
 ## The Python
 
@@ -175,7 +183,6 @@ importing the one with the command being run, or all of them for `--help`):
 - `news.py`: news lines, and the outboxes typed into coordinators' panes
 - `notifications.py`: the person's notifications
 - `guide.py`: telling running coordinators their guide changed (a twin, for accept)
-- `limit.py`: the usage limit
 - `stops.py`: a worker or reviewer stopping: triage, or the person
 - `hooks.py`: a worktree's teardown hook, and removing a worktree (a twin, for close)
 - `rules.py`: the rules every worker and reviewer gets (a twin, for review)
@@ -197,9 +204,6 @@ importing the one with the command being run, or all of them for `--help`):
 - `accept.py`: accepting a task, and rebasing the others after it
 - `auto_accept.py`: auto-accept (`_auto_accept`, which `verdict` and `ready` start)
 - `prs.py`: following a task's pull request after ready
-- `events.py`: what the watcher reports: an agent's events, a pane that closed, no
-  progress, the usage limit's reset
-- `check.py`: `check`, which applies the events the watcher missed
 - `cli.py`: the parser and `main`. It keeps only the groups' titles (`GROUPS`), the
   modules with commands (`MODULES`), and which module declares each command Python
   owns (`COMMANDS`). The help comes from the Rust entry.
@@ -212,8 +216,7 @@ the modules declare) and its row in `cli/src/commands.rs`, which gives `bullpen 
 its order.
 
 A command function (`cmd_...`) only reads its arguments and calls plain functions;
-no other code calls it. Auto-accept calls `accept.accept`, and `check --fix` calls
-`events.event` and `events.gone`, as the watcher's commands do.
+no other code calls it. Auto-accept calls `accept.accept`.
 
 ## Closing a task
 

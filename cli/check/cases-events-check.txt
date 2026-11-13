@@ -1,0 +1,98 @@
+# T10: check (and --fix) and the watcher's calls: _event, _gone, _stuck, _limit, _coordinator_gone.
+# env:FIXTURE=check: a task for each thing check says; limit: the usage limit has reset.
+check
+check --quiet
+check BP-3 bp-12
+check 3 3 BP-11
+check BP-17
+check BP-404
+check --all-repos
+env:FIXTURE=check check
+env:FIXTURE=check check --quiet
+env:FIXTURE=check check BP-42 BP-57
+env:FIXTURE=deadcoords check
+env:FIXTURE=check,deadcoords check --all-repos
+check --quiet BP-3
+check BP-3 BP-404
+check --all-repos --quiet
+env:FIXTURE=check check BP-45 BP-58 BP-60 BP-61 BP-62 BP-63
+env:FIXTURE=check check --all-repos BP-52
+env:FIXTURE=deadcoords check --quiet
+check --fix
+env:FIXTURE=check check --fix
+env:FIXTURE=check check --fix --quiet
+env:FIXTURE=check check --fix BP-40
+env:FIXTURE=check check --fix BP-41
+env:FIXTURE=check check --fix BP-42
+env:FIXTURE=check check --fix BP-44
+env:FIXTURE=check check --fix BP-45
+env:FIXTURE=check check --fix BP-52
+env:FIXTURE=check check --fix BP-53
+env:FIXTURE=check check --fix BP-54
+env:FIXTURE=check check --fix BP-55
+env:FIXTURE=check check --fix BP-57
+env:FIXTURE=check check --fix BP-58
+env:FIXTURE=check check --fix BP-59
+env:FIXTURE=check,deadcoords check --fix
+env:FIXTURE=check,deadcoords check --fix --all-repos
+# usage check BP-3 --quiet BP-4: argparse refuses IDs on both sides of an option ("unrecognized arguments: BP-4"); the
+# shared reader (args.rs) takes them all. A difference of the reader, not of check: left as it is.
+usage check --nope
+_event blk4 working
+_event blk4 working "" Reading
+_event blk4 idle
+_event blk4 done
+_event blk4 blocked permission "permission prompt"
+_event blk4 blocked permission "Allow rm -rf build?"
+_event blk4 blocked "" ""
+_event blk4 error "" "API Error: 500"
+_event blk4 error "" "You've hit your 5-hour limit · resets 3pm"
+_event blk4 idle "" "Usage limit reached"
+_event blk4 working "" "Compacting conversation…"
+usage _event blk4 idle a b c
+_event blk5 working
+_event blk5 idle
+_event blk1 working
+_event blk2 idle
+_event blk99 idle
+env:FIXTURE=check _event blk40 working
+env:FIXTURE=check _event blk42 idle
+env:FIXTURE=check _event blk43 done
+env:FIXTURE=check _event blk44 working
+env:FIXTURE=check _event blk46 blocked question "Which one?"
+env:FIXTURE=check _event blk52 idle
+env:FIXTURE=check _event blk52 error "" "boom"
+env:FIXTURE=check _event blk53 blocked plan
+env:FIXTURE=check _event blk54 working
+env:FIXTURE=check _event blk55 idle
+env:FIXTURE=check _event blk56 done
+env:FIXTURE=check _event blk63 working
+env:FIXTURE=check _event blk52 idle "" "You've hit your session limit · resets 9am"
+env:FIXTURE=check,deadcoords _event blk41 error
+env:FIXTURE=approved _event blk4 working
+usage _event
+_gone blk4
+_gone blk5
+_gone blk2
+_gone blk99
+env:BULLPEN_GONE_WAIT=0 _gone blk3
+env:FIXTURE=check _gone blk52
+env:FIXTURE=check _gone blk54
+env:FIXTURE=check _gone blk63
+env:FIXTURE=check _gone blk58
+env:FIXTURE=check,deadcoords _gone blk41
+_stuck blk4 20
+_stuck blk5 20
+_stuck blk1 20
+_stuck blk99 20
+env:FIXTURE=check _stuck blk52 30
+env:FIXTURE=check _stuck blk54 30
+usage _stuck blk4 x
+usage _stuck blk4
+_limit
+env:FIXTURE=limit _limit
+env:FIXTURE=limit,deadcoords _limit
+_coordinator_gone c1 --wait 0
+_coordinator_gone c9 --wait 0
+env:FIXTURE=deadcoords _coordinator_gone c2 --wait 0
+usage _coordinator_gone c1 --wait x
