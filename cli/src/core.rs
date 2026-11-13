@@ -80,28 +80,6 @@ pub fn is_word(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-/// Text with each path under $HOME written with ~.
-pub fn homes(text: &str) -> String {
-    let h = user_home();
-    if h == "/" || h.is_empty() {
-        return text.into();
-    }
-    let mut out = String::new();
-    let mut rest = text;
-    while let Some(i) = rest.find(&h) {
-        let after = &rest[i + h.len()..];
-        out.push_str(&rest[..i]);
-        if after.chars().next().is_some_and(|c| is_word(c) || c == '.' || c == '-') {
-            out.push_str(&h);
-        } else {
-            out.push('~');
-        }
-        rest = after;
-    }
-    out.push_str(rest);
-    out
-}
-
 // ---------- running programs ----------
 
 pub struct Done {

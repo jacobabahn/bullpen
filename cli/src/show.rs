@@ -1,8 +1,8 @@
 //! `ls` and `show` (bullpen/show.py).
 
 use crate::args::Args;
-use crate::core::{self, home, known_repos, listed, own_model, repo_root, Repo, Res};
-use crate::json::{self, dumps, get, obj, py_str, s, truthy, Obj};
+use crate::core::{known_repos, listed, own_model, repo_root, Repo, Res};
+use crate::json::{dumps, get, obj, py_str, s, truthy, Obj};
 use crate::task_line::{
     ago, board_detail, board_order, colored, every, is_stuck, pr_phrase, stuck_phrase, task_line, task_rows,
     term_width, waits_phrase, Every,
