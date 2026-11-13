@@ -8,7 +8,7 @@
 # a fresh fixture (fixture.py) is made, the Python bullpen ($BULLPEN_PY, default this
 # checkout's bin/bullpen-py) runs in it, then a fresh one again for the Rust build
 # (target/release/bullpen): their stdout, stderr, exit code and the state
-# folder afterwards (every file but locks) must be the same. A case starting `tty `
+# folder and the global config.json afterwards (every file but locks) must be the same. A case starting `tty `
 # runs on a terminal 100 columns wide (`tty40 `: 40 wide). Leading `env:NAME=VALUE ` words
 # set NAME for the run, and for fixture.py (FIXTURE=a,b picks its extras). RUST_BIN: the binary to
 # check (default target/release/bullpen: run `cargo build --release -p bullpen-cli` first). Prints one line per case,
@@ -55,7 +55,7 @@ run_one() {  # run_one PROGRAM CASE OUTDIR
             echo $? >"$out/code"
         fi
     )
-    (cd "$work/fx" && find state -type f ! -name '*.lock' | sort | while read -r f; do echo "== $f"; cat "$f"; done) >"$out/state"
+    (cd "$work/fx" && find state config -type f ! -name '*.lock' | sort | while read -r f; do echo "== $f"; cat "$f"; done) >"$out/state"
     for f in rex.log reg.json; do [ -f "$work/fx/fake/$f" ] && cp "$work/fx/fake/$f" "$out/$f"; done
     sed -i "s#$work/fx#FX#g; s#$top#TOP#g; s#$pytop#TOP#g" "$out"/*
     python3 "$here/now_stamps.py" "$t0" "$(date +%s.%N)" "$out"/*

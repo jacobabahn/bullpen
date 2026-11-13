@@ -2,6 +2,7 @@
 //! and str's strip, split and splitlines, whose whitespace and line breaks are
 //! Python's, not Rust's.
 
+use crate::printable::NOT_PRINTABLE;
 use crate::widths::{COMBINING, WIDE};
 
 fn in_table(table: &[(u32, u32)], c: char) -> bool {
@@ -243,6 +244,16 @@ pub fn quote(word: &str) -> String {
 /// shlex.join: the words as one sh command line.
 pub fn shell_join<S: AsRef<str>>(words: &[S]) -> String {
     words.iter().map(|w| quote(w.as_ref())).collect::<Vec<_>>().join(" ")
+}
+
+/// Python's str.isprintable() of one character.
+pub fn is_printable(c: char) -> bool {
+    !in_table(&NOT_PRINTABLE, c)
+}
+
+/// Python's str.isprintable(): every character is ("" is too).
+pub fn printable(s: &str) -> bool {
+    s.chars().all(is_printable)
 }
 
 #[cfg(test)]

@@ -274,7 +274,7 @@ class EntryTest(BullpenTest):
                           **dict.fromkeys(["go", "hide", "adopt", "board", "ls", "show", "diff", "add", "after",
                                            "model", "review-mode", "peek", "ask", "ok", "note", "news", "guide",
                                            "up", "build", "_build_board", "doctor", "_flush", "start", "resume",
-                                           "tell", "_queue", "rules"],
+                                           "tell", "_queue", "rules", "pick", "config"],
                                           "rust")})
 
     def test_help_and_an_unknown_command_come_from_rust(self):
@@ -285,19 +285,32 @@ class EntryTest(BullpenTest):
         self.assertEqual((p.returncode, p.stderr), (2, "bullpen: no command `acept`. Did you mean `accept`? "
                                                        "`bullpen --help` lists them.\n"))
         self.assertEqual(self.strict("_nop").returncode, 0)
-        p = self.strict("config")  # Python's: handed over, which strict mode refuses
-        self.assertEqual((p.returncode, p.stderr), (3, "bullpen-rust: not in Rust: config\n"))
+        p = self.strict("keys")  # Python's: handed over, which strict mode refuses
+        self.assertEqual((p.returncode, p.stderr), (3, "bullpen-rust: not in Rust: keys\n"))
 
     def test_a_python_command_reaches_python_whole(self):
-        self.assertIn("worker_model", json.loads(self.bp("config", "--js").stdout))  # argparse's prefix rules
-        p = self.bp("config", "--reviewer-", ok=False)
-        self.assertEqual(p.stderr.splitlines()[-1], "bullpen config: error: ambiguous option: --reviewer- could match "
-                                                    "--reviewer-model, --reviewer-followup-model")
-        p = self.bp("config", "--bogus", ok=False)
-        self.assertEqual(p.returncode, 2)
-        self.assertEqual(p.stderr.splitlines()[-1], "bullpen: error: unrecognized arguments: --bogus")  # argparse says it from the top
         # the old name of build is build, as Python owns it
         self.assertTrue(self.bp("build-board", "--help").stdout.startswith("usage: bullpen build [-h]"))
+
+    def test_config_and_pick_are_rusts_with_argparses_rules(self):
+        self.assertIn("worker_model", json.loads(self.strict("config", "--js").stdout))  # argparse's prefix rules
+        p = self.strict("config", "--reviewer-")
+        self.assertEqual(p.stderr.splitlines()[-1], "bullpen config: error: ambiguous option: --reviewer- could match "
+                                                    "--reviewer-model, --reviewer-followup-model")
+        p = self.strict("config", "--bogus")
+        self.assertEqual(p.returncode, 2)
+        self.assertEqual(p.stderr.splitlines()[-1], "bullpen: error: unrecognized arguments: --bogus")  # argparse says it from the top
+        p = self.strict("config", "--max-running", "x")
+        self.assertEqual((p.returncode, p.stderr.splitlines()[-1]),
+                         (2, "bullpen config: error: argument --max-running: invalid int value: 'x'"))
+        self.assertEqual(self.strict("config", "--max-running", " 4 ", "--json").returncode, 0)  # int()'s spaces
+        p = self.strict("config", "--merge", "fast")
+        self.assertEqual(p.stderr.splitlines()[-1], "bullpen config: error: argument --merge: invalid choice: 'fast' "
+                                                    "(choose from rebase, squash, merge)")
+        p = self.strict("pick")  # no terminal
+        self.assertEqual((p.returncode, p.stderr),
+                         (1, "bullpen: pick needs a terminal (--filter prints the matching tasks instead)\n"))
+        self.assertEqual(self.strict("pick", "--fil", "zzzz").returncode, 0)
 
     def test_ls_and_show_are_rusts_with_argparses_rules(self):
         self.assertEqual(json.loads(self.strict("ls", "--js").stdout), [])
@@ -338,9 +351,9 @@ class EntryTest(BullpenTest):
             shutil.copytree(ROOT / d, home / d, ignore=shutil.ignore_patterns("__pycache__"))
         run = lambda *a: subprocess.run([str(home / "bin" / "bullpen"), *a], cwd=self.repo, env=self.env,
                                         text=True, capture_output=True)
-        p = run("config", "--json")
+        p = run("keys")
         self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertIn("worker_model", json.loads(p.stdout))
+        self.assertIn("keys.lua", p.stdout)
         p = run("--help")
         self.assertEqual(p.returncode, 2)
         self.assertEqual(p.stderr, f"bullpen: bullpen isn't built: run {home / 'install.sh'} (it needs cargo)\n")

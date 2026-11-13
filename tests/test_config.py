@@ -471,17 +471,29 @@ class ConfigTest(BullpenTest):
 
 class SettingsCopiesTest(unittest.TestCase):
     """The board and the watcher keep their own short copies of some settings: they
-    must agree with the table in bullpen/core.py."""
+    must agree with the table in core/src/settings.rs."""
 
     @classmethod
     def setUpClass(cls):
-        from bullpen import core
-        cls.bp = core
+        src = (ROOT / "core" / "src" / "settings.rs").read_text()
+        m = re.search(r"pub const REPO_ONLY: \[&str; \d+\] = \[([^\]]*)\]", src)
+        cls.REPO_ONLY = re.findall(r'"(\w+)"', m.group(1))
+        consts = {"AGENT": ["claude", "--permission-mode", "auto"]}
+        def val(v):
+            kind, _, arg = v.partition("(")
+            arg = arg[:-1]
+            if kind == "List":
+                return consts[arg[1:]] if arg.startswith("&") and arg[1:] in consts else re.findall(r'"([^"]*)"', arg)
+            return {"Null": lambda: None, "Bool": lambda: arg == "true", "Int": lambda: int(arg),
+                    "Str": lambda: json.loads(arg)}[kind]()
+        rows = re.findall(r'base\("(\w+)", (Null|Bool\(\w+\)|Int\(\d+\)|Str\("[^"]*"\)|List\([^)]*\))', src)
+        cls.DEFAULT_CONFIG = {k: val(v) for k, v in rows}
+        assert len(cls.DEFAULT_CONFIG) == int(re.search(r"SETTINGS: \[Setting; (\d+)\]", src).group(1))
 
     def test_the_boards_repo_only_settings_agree(self):
         src = (ROOT / "board" / "src" / "model" / "config.rs").read_text()
         m = re.search(r"const REPO_ONLY: \[&str; \d+\] = \[([^\]]*)\]", src)
-        self.assertEqual(sorted(re.findall(r'"(\w+)"', m.group(1))), sorted(self.bp.REPO_ONLY))
+        self.assertEqual(sorted(re.findall(r'"(\w+)"', m.group(1))), sorted(self.REPO_ONLY))
 
     def test_the_boards_defaults_agree(self):
         src = (ROOT / "board" / "src" / "model" / "config.rs").read_text()
@@ -490,7 +502,7 @@ class SettingsCopiesTest(unittest.TestCase):
         found = re.findall(r'v\["(\w+)"\]\.as_(\w+)\(\)\.unwrap_or\(([^)]*)\)', body)
         self.assertGreaterEqual(len(found), 7)
         for key, kind, default in found:
-            want = self.bp.DEFAULT_CONFIG[key]
+            want = self.DEFAULT_CONFIG[key]
             got = {"bool": lambda s: s == "true", "str": lambda s: json.loads(s),
                    "u64": int}[kind](default)
             self.assertEqual(got, want, key)
@@ -498,4 +510,4 @@ class SettingsCopiesTest(unittest.TestCase):
     def test_the_watchers_stuck_after_agrees(self):
         src = (ROOT / "lua" / "watch.lua").read_text()
         m = re.search(r'"stuck_after":%s\*\(%d\+\)\'\)\) or (\d+)', src)
-        self.assertEqual(int(m.group(1)), self.bp.DEFAULT_CONFIG["stuck_after"])
+        self.assertEqual(int(m.group(1)), self.DEFAULT_CONFIG["stuck_after"])

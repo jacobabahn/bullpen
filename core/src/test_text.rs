@@ -64,3 +64,14 @@ fn quote_is_shlexs() {
     assert_eq!(quote("é"), "'é'");
     assert_eq!(shell_join(&["env", "A=b c", "x"]), "env 'A=b c' x");
 }
+
+#[test]
+fn printable_is_pythons() {
+    assert!(printable("abc 宽 é"));
+    assert!(printable(""));
+    for c in [
+        '\x07', '\t', '\n', '\u{a0}', '\u{ad}', '\u{200b}', '\u{2028}', '\u{e000}', '\u{378}',
+    ] {
+        assert!(!is_printable(c), "{c:?}");
+    }
+}

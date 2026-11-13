@@ -7,6 +7,7 @@ pub mod fail;
 pub mod json;
 pub mod lock;
 pub mod paths;
+pub mod printable;
 pub mod proc;
 pub mod repo;
 pub mod settings;

@@ -8,79 +8,22 @@ import unittest
 
 from support import setUpModule, tearDownModule, ROOT  # a temp folder for each module
 from bullpen import (
-    agents, answer, check, cli, core, limit, line_edit, notifications, pick, stepper,
-    task_line,
+    agents, answer, check, cli, core, limit, line_edit, notifications, stepper,
 )
 
 
 class HelpersTest(unittest.TestCase):
-    # ---- one task line ----
-
-    def repo(self, *tasks, **cfg):
-        class R:
-            pass
-        r = R()
-        r.cfg, r.tasks = {"review_rounds": 2, **cfg}, lambda: list(tasks)
-        return r
-
-    def ago(self, minutes):
-        import datetime as dt
-        return (dt.datetime.now().astimezone() - dt.timedelta(minutes=minutes)).isoformat()
-
-    def test_board_order_puts_what_you_do_next_first(self):
-        ts = [{"id": f"BP-{i}", "status": s} for i, s in
-              enumerate(["todo", "working", "ready", "stopped", "needs", "triage", "done", "review", "finished"], 1)]
-        self.assertEqual([t["id"] for t in task_line.board_order(ts)],
-                         ["BP-4", "BP-5", "BP-6", "BP-3", "BP-9", "BP-8", "BP-2", "BP-1", "BP-7"])
-
-    def test_the_boards_sentence(self):
-        d = lambda t, *more, **cfg: task_line.board_detail(self.repo(t, *more, **cfg), t)
-        self.assertEqual(d({"id": "BP-1", "status": "stopped"}), "Its agent exited. r resumes it.")
-        self.assertEqual(d({"id": "BP-1", "status": "finished", "summary": "# Recorded the demo\n\nmore"}),
-                         "Finished, nothing to merge: Recorded the demo. a closes it.")
-        self.assertEqual(d({"id": "BP-1", "status": "ready", "pr": "https://github.com/a/b/pull/41",
-                            "review": {"verdict": "approved", "kind": "full"}, "gh": {"checks": "passing"}}),
-                         "PR #41, approved by full review. Checks passing.")
-        self.assertEqual(d({"id": "BP-1", "status": "review", "review": {"kind": "followup", "round": 2}}),
-                         "Follow-up review on round 2 of 2.")
-        self.assertEqual(d({"id": "BP-2", "status": "todo", "after": ["BP-1"]}, {"id": "BP-1", "status": "ready"}),
-                         "Waits on BP-1.")
-        self.assertEqual(d({"id": "BP-1", "status": "triage", "why": "Ended its turn without saying ready"}),
-                         "Ended its turn without ready.")
-        self.assertEqual(d({"id": "BP-1", "status": "todo", "worker_model": "opus"}, worker_model="sonnet"),
-                         "Not started. s starts it. Model: opus.")
-        self.assertEqual(d({"id": "BP-1", "status": "needs", "why": "Asks: x?", "note": "Looking"}), "Looking")
-
-    def test_a_task_line_fits_the_width_and_keeps_its_age(self):
-        t = {"id": "BP-3", "status": "needs", "title": "Fix the login redirect after sign-in",
-             "why": "Asks: python3 or python? The Makefile uses both.", "since": self.ago(12)}
-        r = task_line.task_line(self.repo(t), t)
-        self.assertEqual(r, "● BP-3  Fix the login redirect after sign-in  12m  Asks: python3 or python? The Makefile uses both.")
-        cut = task_line.task_line(self.repo(t), t, width=42)
-        self.assertEqual(cut, "● BP-3  Fix the login redirect after…  12m")  # no room for the sentence
-        self.assertEqual(task_line.task_line(self.repo(t), t, width=70),
-                         "● BP-3  Fix the login redirect after sign-in  12m  Asks: python3 or p…")  # 70 wide
-        colour = task_line.task_line(self.repo(t), t, color=True)
-        self.assertTrue(colour.startswith("\x1b[1;33m●\x1b[0m "))  # the mark amber, as on the board
-        self.assertIn("\x1b[1;31m12m", colour)  # needs you for over 5 minutes: the age turns red
-
-    def test_the_marks_are_the_boards(self):
-        # one mark per status everywhere: the board's mark() in board/src/model/groups.rs
-        src = (ROOT / "board" / "src" / "model" / "groups.rs").read_text()
-        body = src[src.index("pub fn mark(status: &str)"):]
-        body = body[:body.index("\n}\n")]
-        board = dict(re.findall(r'"(\w+)" => "(.)"', body))
-        self.assertEqual(task_line.MARKS, board)
-        # ready and closed are told apart
-        self.assertEqual((task_line.MARKS["ready"], task_line.MARKS["done"]), ("✔", "·"))
-
     def test_the_docs_tables_are_the_boards(self):
         # docs/board.md's marks and keys tables say what the board's `?` list says
         use = (ROOT / "docs" / "board.md").read_text()
         rows = [r.split(" | ") for r in re.findall(r"^\| (.+) \|$", use, re.M)]
         cells = {r[1]: r[0] for r in rows if len(r) == 2}
-        # every still mark, each in docs/board.md beside its words
-        for st, mark in task_line.MARKS.items():
+        # every still mark (the board's mark() in board/src/model/groups.rs), each in docs/board.md beside its words
+        src = (ROOT / "board" / "src" / "model" / "groups.rs").read_text()
+        body = src[src.index("pub fn mark(status: &str)"):]
+        marks = dict(re.findall(r'"(\w+)" => "(.)"', body[:body.index("\n}\n")]))
+        self.assertGreaterEqual(len(marks), 10)
+        for st, mark in marks.items():
             self.assertTrue(any(f"`{mark}`" in c for c in cells.values()), (st, mark))
         for words in ("needs you", "ready to accept", "dropped", "in review", "working"):
             self.assertIn(words, cells)
@@ -100,80 +43,6 @@ class HelpersTest(unittest.TestCase):
         table = [re.match(r"`([^`]+)`", c).group(1) for c in cells.values() if re.match(r"`[^`]+`", c)]
         listed = [k for k in table if k in board]
         self.assertEqual(listed, board)
-
-    def test_the_picker_shows_marks_in_colour(self):
-        p = pick.Picker(["● BP-1  Fix login", "◌ BP-2  Cover logout"], ["1;33", "2"])
-        out = p.screen(80, 5)
-        self.assertEqual(out[2], "\x1b[7m> \x1b[1;33m●\x1b[22;39m BP-1  Fix login\x1b[0m")  # still reversed after
-        self.assertEqual(out[3], "  \x1b[2m◌\x1b[22;39m BP-2  Cover logout")
-        self.assertEqual(p.lines, ["● BP-1  Fix login", "◌ BP-2  Cover logout"])  # what's searched has no colour
-
-    # ---- pick ----
-
-    def test_fuzzy_matches_each_word_in_order_ignoring_case(self):
-        f = pick.fuzzy_score
-        self.assertIsNotNone(f("lgn", "Fix the LOGIN redirect"))
-        self.assertIsNone(f("ngl", "Fix the login redirect"))  # out of order
-        self.assertIsNotNone(f("redirect fix", "Fix the login redirect"))  # words in any order
-        self.assertIsNone(f("fix logout", "Fix the login redirect"))  # every word must match
-        self.assertIsNone(f("digest", "Migrate sessions table"))  # each word in one word
-        self.assertIsNotNone(f("rl", "Rate-limit the endpoint"))
-        self.assertEqual(f("", "anything"), 0)
-
-    def test_fuzzy_ranks_letters_together_and_word_starts_first(self):
-        pf = pick.pick_filter
-        self.assertEqual(pf("log", ["lxoxg", "a login"]), [1, 0])  # together
-        self.assertEqual(pf("log", ["l o g", "a login"]), [1])  # not across words
-        self.assertEqual(pf("re", ["more", "redirect"]), [1, 0])  # the start of a word
-        self.assertEqual(pf("42", ["BP-142", "BP-42"]), [1, 0])
-        self.assertEqual(pf("bp", ["BP-1", "BP-2"]), [0, 1])  # ties keep their order
-        self.assertEqual(pf("x", ["a", "b"]), [])
-
-    def test_picker_keys(self):
-        p = pick.Picker(["BP-1  working  Fix login", "BP-2  queued  Cover logout", "BP-3  ready  Docs"])
-        self.assertEqual(p.shown, [0, 1, 2])
-        for k in "lo":
-            p.key(k)
-        self.assertEqual((p.query, p.shown, p.sel), ("lo", [0, 1], 0))
-        p.key("\x1b[B")
-        p.key("\x1b[B")  # can't go past the last
-        self.assertEqual(p.sel, 1)
-        self.assertEqual(p.key("\r"), "choose")
-        self.assertEqual(p.chosen(), 1)
-        p.key("\x7f")
-        self.assertEqual((p.query, p.sel), ("l", 0))  # a new search starts at the top
-        p.key("\x10")  # ctrl+p: can't go above the first
-        self.assertEqual(p.sel, 0)
-        for k in " zz":
-            p.key(k)
-        self.assertEqual(p.shown, [])
-        self.assertIsNone(p.key("\r"))  # nothing to choose
-        p.key("\x17")  # ctrl+w: the last word
-        self.assertEqual(p.query, "l ")
-        p.key("\x15")  # ctrl+u: all of it
-        self.assertEqual((p.query, p.shown), ("", [0, 1, 2]))
-        self.assertEqual(p.key("\x04"), "cancel")  # ctrl+d with nothing typed
-        self.assertEqual(p.key("\x1b"), "cancel")
-        self.assertEqual(p.key("\x03"), "cancel")
-        p.key("\x1b[C")  # another escape sequence does nothing
-        self.assertEqual(p.query, "")
-
-    def test_picker_screen_keeps_the_selected_task_in_view(self):
-        p = pick.Picker([f"BP-{n}  queued  Task number {n}" for n in range(1, 11)])
-        for _ in range(6):
-            p.key("\x0e")  # ctrl+n
-        out = p.screen(13, 5)  # the query, a hint and three tasks
-        self.assertEqual(out[0], "jump to> ")
-        self.assertIn("10/10", out[1])
-        self.assertEqual(out[2:], ["  BP-5  queu…", "  BP-6  queu…", "\x1b[7m> BP-7  queu…\x1b[0m"])
-        self.assertIn("no open tasks in any repository", pick.Picker([]).screen(80, 5)[1])
-
-    def test_picker_says_a_failure_in_the_normal_weight_after_the_count(self):
-        p = pick.Picker(["◌ BP-1  Fix login", "◌ BP-2  Cover logout"])
-        self.assertEqual(p.screen(42, 5)[1], "\x1b[2m2/2  ⏎ go · esc close · ↑↓ move\x1b[0m")
-        p.msg = "no board: run `bullpen up`"
-        self.assertEqual(p.screen(42, 5)[1], "\x1b[2m2/2\x1b[0m  no board: run `bullpen up`")
-        self.assertEqual(p.screen(20, 5)[1], "\x1b[2m2/2\x1b[0m  no board: run …")  # cut to the width
 
     def stepper(self, comments=()):
         tour = {"commit": "c1", "steps": [{"title": "One", "note": "Why one.", "hunks": [{"file": "a", "lines": [1, 2]}]},
@@ -390,20 +259,6 @@ class HelpersTest(unittest.TestCase):
         st.key("\x17")
         self.assertEqual(st.key("\r"), ("tell", "two"))
 
-    def test_the_picker_edits_its_query_at_the_cursor(self):
-        p = pick.Picker(["BP-1  working  Fix login", "BP-2  queued  Cover logout"])
-        for k in "lgn":
-            p.key(k)
-        p.key("\x1b[D")
-        p.key("\x1b[B")  # down moves the selection, not the cursor
-        self.assertEqual(p.sel, 1 if len(p.shown) > 1 else 0)
-        p.key("o")
-        self.assertEqual((p.query, p.sel), ("lgon", 0))  # a new search starts at the top
-        self.assertEqual(p.typed(42), ("lgon", 13))  # the cursor before n
-        p.key("\x1b[D")
-        self.assertEqual(p.sel, 0)  # moving the cursor isn't a new search
-        self.assertEqual(p.screen(42, 5)[0], "jump to> lgon")
-
     def test_split_keys_keeps_a_paste_and_alt_keys_whole(self):
         self.assertEqual(line_edit.split_keys("a\x1b[200~x\ny\x1b[201~\x1bb\x1b\r\x1b\x1b"),
                          ["a", "\x1b[200~x\ny\x1b[201~", "\x1bb", "\x1b\r", "\x1b", "\x1b"])
@@ -619,20 +474,9 @@ class HelpersTest(unittest.TestCase):
     def test_news_doesnt_say_local_branch_in_local_mode(self):
         self.assertEqual(core.where({"status": "ready", "pr": None, "local": True}), "")
 
-    def test_a_working_task_only_shows_what_github_sent_it_back_for(self):
-        gh = {"state": "open", "checks": "passing", "new": 0}
-        self.assertEqual(task_line.pr_phrase({"status": "working", "gh": gh}), "")
-        self.assertEqual(task_line.pr_phrase({"status": "working", "gh": {**gh, "sent": True}}), "checks passing")
-        self.assertEqual(task_line.pr_phrase({"status": "ready", "gh": gh}), "checks passing")
-
     def test_only_the_agent_a_task_waits_on_is_stuck_or_limited(self):
+        # (is_stuck and stuck_phrase: core/src/test_words.rs, under this name)
         import datetime as dt
-        ago = (dt.datetime.now().astimezone() - dt.timedelta(minutes=25)).isoformat()
-        t = {"status": "working", "stuck": {"who": "worker", "since": ago}}
-        self.assertTrue(task_line.is_stuck(t))
-        self.assertEqual(task_line.stuck_phrase(t), "no progress for 25 min")
-        self.assertFalse(task_line.is_stuck({**t, "status": "review"}))
-        self.assertFalse(task_line.is_stuck({"status": "working"}))
         at = dt.datetime(2026, 11, 11, 13, 0).astimezone()
         lim = {"who": "worker", "resets": at.replace(hour=15).isoformat(), "text": "x"}
         self.assertTrue(agents.is_limited({"status": "working", "limit": lim}))

@@ -35,8 +35,7 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   `cli`; the board isn't formatted yet.
 - Python code that still calls code that moved keeps its own copy, a twin: library
   code, frozen, deleted with its last Python caller. `bullpen/core.py` is `core/`'s
-  twin, and `task_line.py` is `core/src/words.rs`' and `cli/src/task_line.rs`' (for
-  `pick` and `config`); `news.py` (`news`, `tell_coordinator`, `ready_news`, the outboxes),
+  twin, and `line_edit.py` is `cli/src/line_edit.rs`' (for the stepper); `news.py` (`news`, `tell_coordinator`, `ready_news`, the outboxes),
   `notifications.py` (`notify`), `stops.py`, `agents.py`, `coordinators.py`, `modes.py`,
   `rex.py` and `panes.py` (for launch and review) are twins of `cli/src/`'s for the
   Python commands, and so are, for accept: `guide.py` (`tell_guide_changes`),
@@ -50,7 +49,7 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   fresh) once the command is done.
 - `cli/check/compare.sh` runs each case of `cli/check/cases-*.txt` with the Python and
   the Rust build in a fresh fixture, and compares stdout, stderr, exit code and the
-  state folder, byte for byte, and what the fake Rex was asked and its windows after. Each port adds cases for what it moves, and runs them
+  state folder (and the global config.json), byte for byte, and what the fake Rex was asked and its windows after. Each port adds cases for what it moves, and runs them
   against main's Python (`BULLPEN_PY=<main checkout>/bin/bullpen-py`).
 
 ## The Rust
@@ -60,13 +59,15 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
 - `fail.rs`: `Fail`, a command's error ("bullpen: ...", exit 1), and `Res`
 - `paths.rs`: bullpen's checkout (from the program's own resolved path), the state
   folder, Rex, `bin/bullpen` and `bin/bullpen-py`
-- `settings.rs`: the settings table, in `config`'s order
+- `settings.rs`: the settings table, in `config`'s order (watch.lua's and the board's
+  copies of some defaults are held to it by tests/test_config.py)
 - `config.rs`: the defaults, the global config, a repo's, and the migrations
 - `repo.rs`: `Repo`: its config and tasks, `save_task` (which returns the task as it
   was: the cli runs what a save sets off), the repo a command runs in
 - `task.rs`: a task's status (`set_status`), stops, and the board's words for it
 - `json.rs`: JSON as Python's `json` writes it (indent 2, ASCII only, keys in order)
-- `text.rs`, `widths.rs`: widths and cuts as Python's, and textwrap
+- `text.rs`, `widths.rs`, `printable.rs`: widths and cuts as Python's, textwrap,
+  `isprintable` and `shlex.join`
 - `words.rs`: what the board says about a task, for `ls`, `show` and the board: its
   mark, the board's order, its age, and the board's sentence (`board_detail`)
 - `timeutil.rs`: ISO stamps as Python's `isoformat`, ages, the clock
@@ -124,6 +125,10 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   the worker's brief and pane (`start_task`, `launch`) and `hand_back`; `queue.rs`: the
   run queue (`start_queued`) and `_queue`; `peek.rs`: `peek`
 - `triage.rs`: `ask`, `ok` and `note`
+- `config.rs`: `config`, its flags made from the settings table
+- `pick.rs`: the jump picker (`pick`, `--filter`, `--pane`)
+- `line_edit.rs`: typing on a terminal: raw mode, bracketed paste, the keys a read
+  gives, and the line editor the picker (and the stepper, from T11b) uses
 
 ## The Python
 
@@ -160,8 +165,7 @@ importing the one with the command being run, or all of them for `--help`):
   for accept and board_build)
 - `close.py`: the one close step (`close`) that accept, close, drop and auto-accept
   share, and the `close` and `drop` commands
-- `task_line.py`: one task line, as the board says it (a twin, for `pick` and `config`)
-- `line_edit.py`: typing on a terminal, for the picker and the stepper
+- `line_edit.py`: typing on a terminal, for the stepper (a twin of `line_edit.rs`)
 - `tours.py`: guided review tours and the person's comments on them
 - `stepper.py`: reading a tour on the board, and the `tour` command that opens it
 - `ready.py`: `ready` and `finish`
@@ -174,8 +178,6 @@ importing the one with the command being run, or all of them for `--help`):
 - `accept.py`: accepting a task, and rebasing the others after it
 - `auto_accept.py`: a reviewer's verdict, and auto-accept
 - `prs.py`: following a task's pull request after ready
-- `config.py`: `config`
-- `pick.py`: the jump picker
 - `events.py`: what the watcher reports: an agent's events, a pane that closed, no
   progress, the usage limit's reset
 - `check.py`: `check`, which applies the events the watcher missed
