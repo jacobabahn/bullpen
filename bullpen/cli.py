@@ -11,8 +11,8 @@ from . import core
 from .core import Fail, run_later
 
 # The modules with commands (cli/src/commands.rs lists their commands in `bullpen --help`'s order).
-MODULES = ("answer", "accept", "close", "stepper", "tours", "pick", "start",
-           "triage", "check", "ready", "auto_accept", "config", "rules",
+MODULES = ("answer", "accept", "close", "stepper", "tours", "pick",
+           "triage", "check", "ready", "auto_accept", "config",
            "push_remote", "keys", "coordinators", "prs", "events")
 
 # Each command Python owns and the module that declares it, in --help's order. A call
@@ -26,13 +26,11 @@ COMMANDS = {
     "tour": "stepper", "_tour": "stepper",
     "tour-comment": "tours",
     "pick": "pick",
-    "start": "start", "resume": "start", "tell": "start", "_queue": "start",
     "review": "triage",
     "check": "check",
     "ready": "ready", "finish": "ready",
     "verdict": "auto_accept", "_auto_accept": "auto_accept",
     "config": "config",
-    "rules": "rules",
     "_push": "push_remote",
     "keys": "keys",
     "_coordinator_gone": "coordinators",
@@ -42,7 +40,7 @@ COMMANDS = {
 
 # The modules that register what saving a task sets off (core.on_save), in the order
 # their hooks run: the run queue, the person's notification, the PR to follow.
-SAVERS = ("start", "notifications", "prs")
+SAVERS = ("saves", "notifications", "prs")
 
 # The groups a command's help may name (core.command). The Rust entry lists them in
 # `bullpen --help`, from its own table (cli/src/help.rs).

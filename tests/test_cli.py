@@ -273,7 +273,8 @@ class EntryTest(BullpenTest):
                          {"build-board": "alias of build", "_nop": "rust", "_commands": "rust",
                           **dict.fromkeys(["go", "hide", "adopt", "board", "ls", "show", "diff", "add", "after",
                                            "model", "review-mode", "peek", "ask", "ok", "note", "news", "guide",
-                                           "up", "build", "_build_board", "doctor", "_flush"],
+                                           "up", "build", "_build_board", "doctor", "_flush", "start", "resume",
+                                           "tell", "_queue", "rules"],
                                           "rust")})
 
     def test_help_and_an_unknown_command_come_from_rust(self):
@@ -409,10 +410,10 @@ class CodeTest(unittest.TestCase):
         self.assertIn(prs.follow_saved, core.SAVED)
 
     def test_the_save_hooks_run_in_one_order_whichever_module_loaded_first(self):
-        from bullpen import cli, core, notifications, prs, start
+        from bullpen import cli, core, notifications, prs, saves
         core.SAVED.reverse()
         cli.load_savers()
-        self.assertEqual(core.SAVED[:3], [start.move_queue, notifications.notify, prs.follow_saved])
+        self.assertEqual(core.SAVED[:3], [saves.move_queue, notifications.notify, prs.follow_saved])
 
     def test_each_command_is_found_in_the_module_that_declares_it(self):
         # main imports only a command's module: COMMANDS says which, in --help's order
@@ -424,14 +425,14 @@ class CodeTest(unittest.TestCase):
         self.assertEqual(declared, list(cli.COMMANDS.items()))
 
     def test_a_command_imports_only_what_it_needs(self):
-        code = ("import sys; sys.argv = ['bullpen', 'rules', '--help']\n"
+        code = ("import sys; sys.argv = ['bullpen', 'keys', '--help']\n"
                 "from bullpen import cli\n"
                 "try: cli.main()\n"
                 "except SystemExit: pass\n"
                 "print(' '.join(m for m in sys.modules if m.startswith('bullpen.')))")
         p = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True)
         loaded = set(p.stdout.split())
-        self.assertIn("bullpen.rules", loaded)
+        self.assertIn("bullpen.keys", loaded)
         self.assertNotIn("bullpen.accept", loaded)
         self.assertNotIn("bullpen.board", loaded)
 
@@ -447,10 +448,10 @@ class CodeTest(unittest.TestCase):
 
     def test_the_run_queue_moves_only_from_a_status_change(self):
         # no caller has to remember it: saving a task that frees a slot starts the queue
-        # (a Rust save, through `_queue`: the bridge until T6)
-        self.assertEqual(self.calls("start_queued"), [("start", "move_queue"), ("start", "cmd_queue")])
-        from bullpen import cli, core, start  # noqa: F401
-        self.assertIn(start.move_queue, core.SAVED)
+        # (a Python save, through Rust's `_queue`, the one bridge)
+        self.assertEqual(self.calls("run_queue"), [("saves", "move_queue")])
+        from bullpen import cli, core, saves  # noqa: F401
+        self.assertIn(saves.move_queue, core.SAVED)
 
     def test_only_the_mode_adapters_push(self):
         # one way to push: quiet_git, which never waits on a prompt, in modes.py (and the

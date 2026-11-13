@@ -1,7 +1,6 @@
-//! Adding tasks and what they wait on (bullpen/start.py): `add`, `after`, `model` and
+//! Tasks and what they wait on (bullpen/start.py): `add`, `after`, `model` and
 //! `review-mode`, the dependencies, and how a save moves the run queue (slot_freed).
-//! Starting, resuming and telling a worker, and the queue itself, stay with Python
-//! until T6.
+//! Starting, resuming and telling a worker are in launch.rs; the queue in queue.rs.
 //!
 //! A task can wait on others (`add --after`, `after`): its "after" is a list of IDs.
 //! `start` refuses it until they're all done. When a task is accepted or dropped, or its
@@ -21,7 +20,9 @@ use bullpen_core::{fail, Repo, Res};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
+pub mod launch;
 pub mod peek;
+pub mod queue;
 
 const ID: Arg = pos("id", Nargs::One, "the task, like BP-3");
 const PANE: &str = "where its worker's pane goes, over config --workers: float, tab, tabs or background";
@@ -89,9 +90,9 @@ const REVIEW_MODE: &[Arg] = &[
 ];
 
 /// The tasks by ID.
-type Tasks = HashMap<String, Obj>;
+pub type Tasks = HashMap<String, Obj>;
 
-fn by_id(repo: &Repo) -> Res<Tasks> {
+pub fn by_id(repo: &Repo) -> Res<Tasks> {
     Ok(repo
         .tasks()?
         .into_iter()

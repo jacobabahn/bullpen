@@ -363,6 +363,41 @@ def main(d, now):
                           ("blk12", "BP-27"), ("blk13", "BP-31"), ("blk15", "BP-40"), ("blk8", "BP-10 review")):
             (blocks / f"{blk}.json").write_text(json.dumps({"repo": str(root), "role": role, "stuck_after": 15}))
 
+    def config(**kw):
+        path = sdir / "config.json"
+        path.write_text(json.dumps({**json.loads(path.read_text()), **kw}, indent=2) + "\n")
+
+    def commit(name, text):  # a file committed on main
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(text)
+        g("add", "-A")
+        g("commit", "-qm", f"add {name}")
+
+    if "queued" in extras:  # tasks waiting on done ones, and room for two more to work (12 do)
+        for n, after in ((1, ["BP-23"]), (28, ["BP-25"]), (39, ["BP-23", "BP-24"])):
+            path = tasks / f"BP-{n}.json"
+            path.write_text(json.dumps({**json.loads(path.read_text()), "after": after}, indent=2) + "\n")
+        config(max_running=14)
+    if "full" in extras:  # as queued, with no room
+        config(max_running=3)
+    if "rules" in extras:  # the repo's rules, committed, and the person's own
+        commit(".bullpen/rules.md", "# Rules\n\nKeep functions small.\n\n")
+        (sdir / "rules.md").write_text("\nMy own rule.\n")
+    if "setup" in extras:  # a committed setup script that works
+        commit(".bullpen/setup.sh", "#!/bin/sh\necho \"setting up $BULLPEN_TASK on $BULLPEN_BRANCH\"\n")
+        (root / ".bullpen" / "setup.sh").chmod(0o755)
+    if "badsetup" in extras:  # a setup in the config that fails, over a committed one
+        commit(".bullpen/setup.sh", "echo committed\n")
+        config(setup="echo nope >&2; exit 3")
+    if "briefs" in extras:  # briefs for the tasks a case starts
+        for n in (1, 2, 13, 16, 28, 39):
+            (sdir / "briefs" / f"BP-{n}.md").write_text(f"Do task {n}.\n")
+        (sdir / "briefs" / "BP-23.review-1.findings.md").write_text("one\n")
+        (sdir / "briefs" / "BP-23.review-2.findings.md").write_text("two\n")
+        path = tasks / "BP-23.json"
+        path.write_text(json.dumps({**json.loads(path.read_text()), "summary": "  Merged the parser.\n"},
+                                   indent=2) + "\n")
+
     env = {"HOME": home, "BULLPEN_STATE": state, "BULLPEN_REX": fake / "rex", "FAKE_DIR": fake,
            "XDG_CONFIG_HOME": d / "config", "FIXTURE_ROOT": root}
     for k, v in env.items():

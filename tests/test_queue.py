@@ -210,7 +210,7 @@ class QueueTest(BullpenTest):
         self.assertIn(f"bullpen · BP-2 started ({dep} was accepted)", log.read_text())
 
     def test_which_status_changes_move_the_queue(self):
-        from bullpen.start import slot_freed
+        from bullpen.saves import slot_freed
         self.assertEqual(slot_freed({"status": "working"}, {"status": "review"}), "review")
         self.assertEqual(slot_freed({"status": "ready"}, {"status": "done"}), "accepted")
         self.assertEqual(slot_freed({"status": "finished"}, {"status": "done", "closed": True}), "closed")

@@ -1,4 +1,4 @@
-"""A worktree's setup and teardown hooks, and removing a worktree."""
+"""A worktree's teardown hook, and removing a worktree. (Its setup is Rust's: cli/src/hooks.rs.)"""
 
 import os
 import subprocess
@@ -7,7 +7,6 @@ from pathlib import Path
 
 from .core import Fail, git, now
 from .modes import task_base_ref
-from .stops import stop
 
 
 def hook_log(repo, t, name):
@@ -55,22 +54,6 @@ def run_hook(repo, t, name):
             code = 127
         f.write(f"# exit {code}\n")
     return code, log, source, over
-
-
-def set_up(repo, t):
-    """Run the task's setup in its new worktree. On failure the task stops (saved, news
-    sent) and this returns False; its next start or resume sets it up again."""
-    r = run_hook(repo, t, "setup")
-    if r and r[3]:
-        print(f"{t['id']}: running {r[2]}, over {r[3]}", file=sys.stderr)
-    if r and r[0] != 0:
-        code, log = r[0], r[1]
-        stop(repo, t, "worker", "setup", f"Setup failed (exit {code}): see {log}",
-             f"{t['id']}'s setup failed (exit {code}), so its worker didn't start: see {log}. "
-             f"`bullpen start {t['id']}` sets it up again")
-        return False
-    t.pop("needs_setup", None)
-    return True
 
 
 def tear_down(repo, t):

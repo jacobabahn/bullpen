@@ -1,10 +1,8 @@
-"""The rules every worker and reviewer gets: the repo's .bullpen/rules.md, then the person's own."""
+"""The rules every worker and reviewer gets: the repo's .bullpen/rules.md, then the person's own.
+A twin of cli/src/rules.rs (with the `rules` command) for review.py's task_rules."""
 
-import os
-import subprocess
-
-from .core import Repo, command, git, repo_root
-from .modes import repo_base_ref, task_base_ref
+from .core import git
+from .modes import task_base_ref
 
 
 RULES_FILE = ".bullpen/rules.md"
@@ -42,27 +40,3 @@ def task_rules(repo, t):
     if saved.exists():
         return saved.read_text().strip()
     return rules_text(rule_sources(repo, committed_rules_on(repo, task_base_ref(repo, t)), ""))
-
-
-def cmd_rules(args):
-    repo = Repo(repo_root())
-    if args.edit:
-        p = personal_rules(repo)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
-        subprocess.call([*editor.split(), str(p)])
-        return
-    ref = repo_base_ref(repo)
-    sources = rule_sources(repo, committed_rules_on(repo, ref), f"on {ref}")
-    if not sources:
-        print(f"No rules. Commit them as {RULES_FILE}, or keep your own in "
-              f"{personal_rules(repo)} (`bullpen rules --edit`).")
-        return
-    print("\n\n".join(f"# From {where}\n\n{text}" for where, text in sources))
-
-
-def commands(sub):
-    """This module's commands, for bullpen's parser."""
-    p = command(sub, "rules", cmd_rules, "Setup",
-                help="print the rules every worker and reviewer gets, and where they're from")
-    p.add_argument("--edit", action="store_true", help="edit your own rules for this repo in $EDITOR")

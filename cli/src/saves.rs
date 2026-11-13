@@ -5,15 +5,14 @@
 //! (the run queue starting the next task) goes in `later`, and main runs it when the
 //! command returns.
 //!
-//! The run queue is the one bridge to Python (until T6 moves it): a save that frees a
-//! slot runs `bullpen _queue` at later-time, which reads the tasks fresh from disk.
+//! The run queue is Rust's (start/queue.rs). The one bridge now goes the other way:
+//! Python's saves run `bullpen _queue` at later-time (bullpen/saves.py).
 
 use bullpen_core::fail::Res;
 use bullpen_core::json::{obj, s, truthy, Obj};
-use bullpen_core::paths::{self_bin, state};
+use bullpen_core::paths::state;
 use bullpen_core::repo::Repo;
 use std::cell::RefCell;
-use std::io::Write;
 
 /// Save the task, then run what the save sets off, in one fixed order.
 pub fn save(repo: &Repo, t: &mut Obj) -> Res<()> {
@@ -24,28 +23,20 @@ pub fn save(repo: &Repo, t: &mut Obj) -> Res<()> {
     Ok(())
 }
 
-/// start.move_queue: the run queue hears of every status change. When a task frees a
-/// slot or closes, the queue starts the next queued tasks once the command's own work
-/// is done: through the Python's `_queue` until T6.
+/// move_queue: the run queue hears of every status change. When a task frees a slot or
+/// closes, the queue starts the next queued tasks once the command's own work is done,
+/// reading the tasks fresh then.
 fn move_queue(repo: &Repo, t: &Obj, old: &Obj) {
     let Some(how) = crate::start::slot_freed(old, t) else {
         return;
     };
-    let (root, by) = (repo.root_str(), s(t, "id").to_string());
-    later(&format!("queue {root}"), move || run_queue(&root, &by, how));
-}
-
-/// `bullpen _queue`: start what the queue can, now that task `by` freed a slot (how).
-fn run_queue(root: &str, by: &str, how: &str) {
-    let _ = std::io::stdout().flush(); // its output comes after ours
-    let ran = std::process::Command::new(self_bin())
-        .args(["_queue", "--repo", root, "--by", by, "--how", how])
-        .current_dir(root)
-        .stdin(std::process::Stdio::null())
-        .status();
-    if let Err(e) = ran {
-        eprintln!("bullpen: couldn't move the run queue: {e}");
-    }
+    let (root, by) = (repo.root_str(), t.clone());
+    later(&format!("queue {root}"), move || {
+        let moved = Repo::new(&root).and_then(|repo| crate::start::queue::start_queued(&repo, &by, how));
+        if let Err(e) = moved {
+            eprintln!("bullpen: {e}");
+        }
+    });
 }
 
 /// prs.followed: does the watcher look at this task's PR? Only an open PR of a task that

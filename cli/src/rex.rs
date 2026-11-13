@@ -40,6 +40,30 @@ pub fn rex_type(session: &str, block: &str, text: &str) -> Res<()> {
     Ok(())
 }
 
+/// Type msg into the task's worker. None if it went through, else why not (the caller
+/// leaves the task where it was and says so).
+#[allow(dead_code)] // hand_back's: its callers move from T7 on
+pub fn type_to_worker(t: &Obj, msg: &str) -> Res<Option<String>> {
+    let (session, block) = (s(t, "session"), s(t, "block"));
+    for argv in [
+        rex_argv(session, &["send"], &["-b", block, msg]),
+        rex_argv(session, &["send-key"], &["-b", block, "enter"]),
+    ] {
+        let p = run(&argv, false)?;
+        if !p.ok() {
+            let said = if p.stderr.is_empty() { &p.stdout } else { &p.stderr };
+            let said = bullpen_core::text::squash(said);
+            let why = if said.is_empty() {
+                "typing into its pane failed".into()
+            } else {
+                said
+            };
+            return Ok(Some(bullpen_core::task::clip(&why, 160)));
+        }
+    }
+    Ok(None)
+}
+
 /// Call a Rex server API method; -s fills in session_id. None when it fails or says
 /// nothing; JSON that doesn't parse is an error, as json.loads raises.
 pub fn rex_api(session: &str, method: &str, args: &Value, check: bool) -> Res<Option<Value>> {

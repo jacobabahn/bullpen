@@ -358,7 +358,7 @@ def config_source(repo, key):
 # What saving a task sets off, beyond writing it: each fn(repo, t, old), old the
 # task as it was saved before. The modules that act on a change register here
 # (on_save): notifications.py tells the person, prs.py marks a PR for the watcher to
-# follow, and start.py moves the run queue when a task frees a slot. That keeps this
+# follow, and saves.py moves the run queue when a task frees a slot. That keeps this
 # module below them: it never imports them.
 SAVED = []
 # Loads the modules that register here, before the first save calls them: cli.main sets

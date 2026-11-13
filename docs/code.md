@@ -39,10 +39,12 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   Python commands, and so are, for accept: `guide.py` (`tell_guide_changes`),
   `watcher.py` (`refresh_watcher`), `board_build.py` (`rebuild_if_stale`, and the
   catch-up of a command an old build hands over), `board.py` (the board's paths, for
-  board_build) and `jobs.py`. There is one bridge,
-  the run queue: a Rust save that frees a slot runs `bullpen _queue` (Python's
-  `start_queued`, reading the tasks fresh) once the command is done, until T6 moves the
-  queue to Rust.
+  board_build) and `jobs.py`; and `start.py` (`launch` and `hand_back` for accept,
+  verdict, events, prs and tours; `dropped_dep` for drop; `waits_phrase` for task_line),
+  `rules.py` (`task_rules`, for review), `hooks.py` (the teardown, for close) and
+  `limit.py` (for events). There is one bridge, the run queue: a Python save that frees a
+  slot runs Rust's `bullpen _queue` (`saves.py`'s `move_queue`, which reads the tasks
+  fresh) once the command is done.
 - `cli/check/compare.sh` runs each case of `cli/check/cases-*.txt` with the Python and
   the Rust build in a fresh fixture, and compares stdout, stderr, exit code and the
   state folder, byte for byte, and what the fake Rex was asked and its windows after. Each port adds cases for what it moves, and runs them
@@ -77,8 +79,8 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
 - `show.rs`: `ls` and `show`
 - `task_line.rs`: one task line, as the board says it (or its rows, on a narrow
   terminal), cut to the terminal's width and coloured there
-- `saves.rs`: saving a task and what it sets off (`save`): the run queue (through
-  `bullpen _queue`), the person's notification, the PR to follow; `later` and `run_later`
+- `saves.rs`: saving a task and what it sets off (`save`): the run queue (at
+  later-time), the person's notification, the PR to follow; `later` and `run_later`
 - `rex.rs`: Rex: running its commands, finding (`find_pane`, by ID or label), typing
   into, focusing and closing panes, a pane's terminal and program, the end of its screen
   (`screen_end`)
@@ -96,7 +98,11 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
   them into coordinators' panes (`deliver`, `has_draft`); `read.rs`: `news` and
   `news --follow`
 - `notifications.rs`: the person's notifications (the save hook) and `_flush`
-- `stops.rs`: a worker or reviewer stopping (its callers move from T6 on)
+- `stops.rs`: a worker or reviewer stopping
+- `hooks.rs`: a worktree's setup hook (`set_up`; the teardown moves in T8)
+- `rules.rs`: the rules every worker and reviewer gets, and `rules`
+- `limit.rs`: the usage limit, as far as `start` and the queue need it (`limit_active`,
+  `limit_phrase`)
 - `modes.rs`: the task's and the repo's base ref, and the one way to push (`quiet_git`,
   `push_base`); the adapters move in T8
 - `jobs.rs`: starting a background job so it outlives the command and its pane (a
@@ -111,7 +117,9 @@ bullpen's command line is moving from Python to Rust, one group of commands at a
 - `push_remote.rs`: `up`'s catch-up push, and doctor's check of the push remote
 - `doctor/`: `mod.rs`: `doctor` and `up`'s hint; `checks.rs`: the checks
 - `start/mod.rs`: `add`, `after`, `model`, `review-mode`, what a task waits on, and
-  which saves move the run queue (`slot_freed`); `peek.rs`: `peek`
+  which saves move the run queue (`slot_freed`); `launch.rs`: `start`, `resume`, `tell`,
+  the worker's brief and pane (`start_task`, `launch`) and `hand_back`; `queue.rs`: the
+  run queue (`start_queued`) and `_queue`; `peek.rs`: `peek`
 - `triage.rs`: `ask`, `ok` and `note`
 
 ## The Python
@@ -138,11 +146,10 @@ importing the one with the command being run, or all of them for `--help`):
 - `guide.py`: telling running coordinators their guide changed (a twin, for accept)
 - `limit.py`: the usage limit
 - `stops.py`: a worker or reviewer stopping: triage, or the person
-- `hooks.py`: a worktree's setup and teardown hooks
-- `rules.py`: the rules every worker and reviewer gets
-- `start.py`: starting tasks: what a task waits on, the run queue (which moves by
-  itself, from a status change; `_queue` for a Rust save), an agent's pane, handing a
-  worker a message
+- `hooks.py`: a worktree's teardown hook, and removing a worktree
+- `rules.py`: the rules every worker and reviewer gets (a twin, for review)
+- `saves.py`: the run queue's save hook (`move_queue`), which runs Rust's `_queue`
+- `start.py`: what a task waits on, an agent's pane, handing a worker a message (twins)
 - `review.py`: what a review covers, starting a reviewer
 - `answer.py`: answering a prompt from the board, `reply`
 - `triage.py`: the coordinator's `review`
@@ -258,8 +265,8 @@ higher one, the higher one registers with the lower:
 - Saving a task (`Repo.save_task`) calls each function registered with
   `core.on_save(fn)`, as `fn(repo, t, old)`, `old` the task as it was saved before.
   `notifications.py` registers the person's notification, `prs.py` marks a PR
-  for the watcher to follow, and `start.py` moves the run queue when a task leaves
-  `working` or closes (`move_queue`). A command imports only its own module, so
+  for the watcher to follow, and `saves.py` moves the run queue when a task leaves
+  `working` or closes (`move_queue`, through Rust's `bullpen _queue`). A command imports only its own module, so
   `cli.main` has the first save import these three (`core.LOAD_SAVERS`), and their
   functions run in one order (`cli.SAVERS`) whichever the command imported first.
   A command that can replace bullpen's own code under itself imports them first

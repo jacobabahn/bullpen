@@ -77,11 +77,11 @@ pub const COMMANDS: &[Command] = &[
     c("after", COORDINATOR, "set the tasks a task waits on (--none: nothing)", Rust(crate::start::cmd_after)),
     c("model", COORDINATOR, "set the worker model a task starts and resumes with (--clear: the config's)", Rust(crate::start::cmd_model)),
     c("review-mode", COORDINATOR, "set how a task's first review goes: full, light or auto", Rust(crate::start::cmd_review_mode)),
-    c("start", COORDINATOR, "make a task's worktree and start its worker", Python),
-    c("resume", COORDINATOR, "restart a stopped worker, continuing its conversation", Python),
-    c("tell", COORDINATOR, "type a message to a task's worker", Python),
+    c("start", COORDINATOR, "make a task's worktree and start its worker", Rust(crate::start::launch::cmd_start)),
+    c("resume", COORDINATOR, "restart a stopped worker, continuing its conversation", Rust(crate::start::launch::cmd_resume)),
+    c("tell", COORDINATOR, "type a message to a task's worker", Rust(crate::start::launch::cmd_tell)),
     c("peek", COORDINATOR, "print the end of a worker's screen", Rust(crate::start::peek::cmd_peek)),
-    c("_queue", INTERNAL, "", Python), // the run queue, Rust's one bridge to Python until T6
+    c("_queue", INTERNAL, "", Rust(crate::start::queue::cmd_queue)), // the run queue: Python's saves call it
     c("ask", COORDINATOR, "(coordinator) the task needs the person: the question shows on the board", Rust(crate::triage::cmd_ask)),
     c("ok", COORDINATOR, "(coordinator) a task waiting on you is seen to: back to work, nothing typed", Rust(crate::triage::cmd_ok)),
     c("review", COORDINATOR, "(coordinator) a new reviewer in place of one that stopped without a verdict", Python),
@@ -95,7 +95,7 @@ pub const COMMANDS: &[Command] = &[
     c("_auto_accept", INTERNAL, "", Python),
     c("up", SETUP, "start (or register) this repo's coordinator and the watcher", Rust(crate::up::cmd_up)),
     c("config", SETUP, "show or change this repo's settings (--global: every repo's)", Python),
-    c("rules", SETUP, "print the rules every worker and reviewer gets, and where they're from", Python),
+    c("rules", SETUP, "print the rules every worker and reviewer gets, and where they're from", Rust(crate::rules::cmd_rules)),
     c("_push", INTERNAL, "", Python),
     c("build", SETUP, "build bullpen and the board now and put them in place (install.sh runs it)", Rust(crate::build::cmd_build)),
     alias("build-board", "build"), // its old name, until T13
