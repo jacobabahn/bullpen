@@ -121,10 +121,12 @@ class BoardBuildTest(unittest.TestCase):
         return line.split(None, 1)[0], line.split(": ", 1)[1]
 
     def test_up_builds_when_the_source_changed_and_not_otherwise(self):
-        out = self.bp("up").stdout
-        self.assertIn("rebuilding the board in the background", out)
+        out = self.bp("up").stdout  # nothing built yet: both programs, in one cargo run
+        self.assertIn("rebuilding bullpen's command line and the board in the background (their source changed); "
+                      "running boards reload when it's done", out)
         self.settle()
         self.assertEqual(self.builds(), 1)
+        self.assertIn("fn main() {}", self.board("bullpen"))
         self.assertIn("fn main() {}", self.board())
         self.assertEqual(self.doctor_board()[0], "ok")
         self.assertNotIn("rebuilding", self.bp("up").stdout)  # unchanged: no build
@@ -132,7 +134,7 @@ class BoardBuildTest(unittest.TestCase):
         self.assertEqual(self.builds(), 1)
         self.edit_board("fn main() { v2() }\n")
         self.assertEqual(self.doctor_board()[0], "FAIL")  # stale until it's built
-        self.bp("up")
+        self.assertIn("rebuilding the board in the background (its source changed)", self.bp("up").stdout)
         self.settle()
         self.assertEqual(self.builds(), 2)
         self.assertIn("v2()", self.board())
