@@ -14,6 +14,7 @@ from bullpen.timeutil import seconds_since
 from bullpen.textutil import stripped_lines, py_strip, cps, from_cps
 
 comptime SETTLE = 60.0  # seconds a new idle, blocked or error state is left alone
+comptime NO_AGE: Float64 = -1e300  # an age not known (Python's None)
 
 
 def screen_state(text: String) -> String:
@@ -32,14 +33,14 @@ def screen_state(text: String) -> String:
 
 
 struct AgentState(Copyable, Movable):
-    """agent_state's dict; state "" for None (unsure, or it just changed). age < 0: unknown."""
+    """agent_state's dict; state "" for None (unsure, or it just changed). age NO_AGE: unknown (None)."""
 
     var state: String
     var kind: String
     var msg: String
     var age: Float64
 
-    def __init__(out self, state: String, kind: String = "", msg: String = "", age: Float64 = -1):
+    def __init__(out self, state: String, kind: String = "", msg: String = "", age: Float64 = NO_AGE):
         self.state = state
         self.kind = kind
         self.msg = msg
@@ -54,13 +55,13 @@ def agent_state(session: String, block: String) raises -> AgentState:
     var out: AgentState
     if len(r.nodes) > 0 and r.is_true(0):
         var upd = r.str(0, "updated_at")
-        var age = seconds_since(upd) if r.truthy(0, "updated_at") else -1.0
+        var age = seconds_since(upd) if r.truthy(0, "updated_at") else NO_AGE
         var state = r.str(0, "state")
         if not r.truthy(0, "state"):
             state = "idle"
         if state != "working" and state != "blocked" and state != "error":
             state = "idle"
-        if state != "working" and age >= 0 and age < SETTLE:
+        if state != "working" and age != NO_AGE and age < SETTLE:
             return AgentState("")  # its event may still be on the way
         out = AgentState(state, r.str(0, "kind"), r.str(0, "msg"), age)
     else:  # no record to read: go by the screen
@@ -99,7 +100,7 @@ def doing(a: AgentState, who: String = "agent") -> String:
 
 def shell_minutes(a: AgentState, limit: Float64) -> Int:
     """Minutes idle with a background shell running, once past limit; else -1."""
-    if a.state != "shell" or a.age < 0 or a.age < limit * 60:
+    if a.state != "shell" or a.age == NO_AGE or a.age < limit * 60:
         return -1
     return Int(a.age // 60)
 
