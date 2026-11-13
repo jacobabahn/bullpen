@@ -22,8 +22,9 @@
 >
 > Measured since the port: a command takes about 4 ms (`_nop`, which times start-up), and the
 > `sh` entry `bin/bullpen` adds about 0.5 ms (docs/code.md, "Start-up"). The full test suite,
-> which runs `bin/bullpen` as a person does, takes about 45 s on 16 CPUs (docs/tests.md). The
-> tables below are the experiment's, against the Python of the time.
+> which runs `bin/bullpen` as a person does, takes about 43 s on 16 CPUs (docs/tests.md). The
+> tables under "Benchmark" are the experiment's, against the Python of the time; the last
+> all-Python commit against the full port is in "After the full port", right after them.
 
 **In short.** The same commands as BP-92's Mojo port are ported. That's the read-only
 commands (`ls`, `show`, `news`, `peek`, `diff --stat`, `check`) and the six state-changing ones
@@ -176,6 +177,84 @@ Python script, about 30 ms a call.
   RUNPATH into its venv.
 - **Toolchain:** rustup's (1.7 GB on this machine, already there for the board). Mojo needed 672 MB
   in the worktree's venv, plus 42 MB of cache.
+
+## After the full port
+
+Measured on 2026-11-13, once the full port was on main. The "Benchmark" above compares the
+experiment's partial port with the Python of its time, on BP-92's fixture; this compares the
+last all-Python commit with the whole Rust command line, on a smaller fixture. The two agree:
+a typical command goes from about 33 ms to about 4 ms.
+
+**Method.**
+- Python: the last all-Python commit, `e55c950` (2026-11-12), in a throwaway detached
+  worktree. Rust: main at `da76c47` (2026-11-13). Python 3.13.15. 16-core Linux server, no
+  workers running (load about 0.7).
+- Commands: a fresh git repo with 30 unstarted tasks made by the Python version, in its own
+  `BULLPEN_STATE` (a copy each, so `add` doesn't affect the other). Each command ran 60 times
+  after 5 warm-ups, the two versions alternating, timed around the whole process (spawn to
+  exit) with stdout and stderr discarded. `ls` and `show BP-5` gave identical output from both.
+- Suite: `python3 tests/run.py`, 3 runs each, alternating, 16 processes at nice 10.
+
+Commands, in ms:
+
+| Command | Python median | Python min | Rust median | Rust min | Faster by |
+| --- | --- | --- | --- | --- | --- |
+| `--help` | 44.8 | 42.1 | 2.0 | 1.3 | 22.8x |
+| `ls` | 32.8 | 30.5 | 4.2 | 3.3 | 7.8x |
+| `ls --all` | 32.3 | 30.5 | 4.4 | 2.9 | 7.3x |
+| `show BP-5` | 35.1 | 31.8 | 4.1 | 2.9 | 8.5x |
+| `config` | 35.4 | 32.7 | 4.1 | 2.9 | 8.6x |
+| `news` | 29.9 | 27.7 | 3.5 | 2.3 | 8.6x |
+| `add` | 44.7 | 42.0 | 7.6 | 6.0 | 5.8x |
+| `doctor` | 98.1 | 92.8 | 95.8 | 89.9 | 1.0x |
+
+`doctor` exited 1 in both (the fixture has no Rex session); its time goes to the outside
+programs it runs, so it's unchanged.
+
+The suite:
+
+| | Tests | Run 1 | Run 2 | Run 3 |
+| --- | --- | --- | --- | --- |
+| Python (`e55c950`) | 524 | 60.4 s | 60.4 s | 60.4 s |
+| Rust (`da76c47`) | 518 | 42.8 s | 42.8 s | 42.9 s |
+
+The two commits don't have the same tests (the port removed Python-only tests and added
+others), so this is close, not exact. The tests are still Python driving the built command
+line.
+
+Earlier informal figures (`ls` 138 ms to 14 ms, the suite 74 s to about 45 s) were taken with
+workers running and against the real repo's larger task list. These controlled numbers replace
+them.
+
+Binary sizes: `target/bullpen` 3.9 MB, `target/bullpen-board` 2.2 MB.
+
+The timing script, to repeat the run. It sits in a folder with `py/` (a detached worktree at
+the Python commit), `rs/` (a checkout of the Rust, built), `repo/` (the fixture repo) and
+`state-py/`, `state-rs/` (the two copies of its state):
+
+```python
+import os, subprocess, sys, time, statistics
+S = os.path.dirname(os.path.abspath(__file__))
+impl = {"python": (S + "/py/bin/bullpen", S + "/state-py"), "rust": (S + "/rs/bin/bullpen", S + "/state-rs")}
+cases = [["--help"], ["ls"], ["ls", "--all"], ["show", "BP-5"], ["config"], ["news"], ["doctor"],
+         ["add", "Bench task", "--brief", "A brief."]]
+N, WARM = 60, 5
+def run(name, args):
+    exe, state = impl[name]
+    env = dict(os.environ, BULLPEN_STATE=state)
+    t = time.perf_counter()
+    p = subprocess.run([exe, *args], cwd=S + "/repo", env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return (time.perf_counter() - t) * 1000, p.returncode
+print(f"{'command':<12} {'python med':>10} {'min':>7} {'rust med':>9} {'min':>7} {'ratio':>6}  exit")
+for args in cases:
+    times = {"python": [], "rust": []}; rc = {}
+    for i in range(N + WARM):
+        for name in ("python", "rust") if i % 2 else ("rust", "python"):
+            ms, code = run(name, args); rc[name] = code
+            if i >= WARM: times[name].append(ms)
+    p, r = times["python"], times["rust"]
+    print(f"{' '.join(args[:2]):<12} {statistics.median(p):>10.1f} {min(p):>7.1f} {statistics.median(r):>9.1f} {min(r):>7.1f} {statistics.median(p)/statistics.median(r):>5.1f}x  {rc['python']}/{rc['rust']}")
+```
 
 ## How it was built, and what was easy or hard compared with Mojo
 

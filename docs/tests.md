@@ -1,7 +1,7 @@
 # Tests
 
 ```sh
-python3 tests/run.py                  # builds the command line, then the whole suite, across CPUs: about 45 s on 16
+python3 tests/run.py                  # builds the command line, then the whole suite, across CPUs: about 43 s on 16
 python3 tests/run.py -j 8             # on 8 processes instead
 python3 tests/run.py tour local_mode  # only tests whose module, class or name has one of these
 python3 tests/run.py --slowest 20     # and list the 20 slowest
