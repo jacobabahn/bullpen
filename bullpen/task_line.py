@@ -3,7 +3,6 @@
 import datetime as dt
 import os
 import sys
-import textwrap
 import unicodedata
 
 from .core import CLOSED, STATE, own_model, pr_short, read_json, safe, seconds_since, stamp
@@ -220,6 +219,7 @@ def task_line(repo, t, every=None, idw=0, width=None, color=False, age=True, det
 
 def wrap(text, w, lines):
     """text in at most `lines` lines of w columns, the last ending in " …" when cut."""
+    import textwrap  # here, not at the top: only a narrow terminal wraps
     out = textwrap.wrap(text, max(w, 1), break_on_hyphens=False) or [""]
     if len(out) > lines:
         out = out[:lines]

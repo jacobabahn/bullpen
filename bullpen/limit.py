@@ -18,20 +18,22 @@ from .news import news
 # limit for every repo while it lasts; `start` refuses meanwhile.
 
 LIMIT_FILE = STATE / "limit.json"
-LIMIT_RE = re.compile(r"you['’]ve hit your [\w' -]*limit|usage limit reached|limit will reset"
-                      r"|out of usage credits", re.I)
+# The patterns are compiled on first use (re caches them), not on import: most calls
+# that import this module never read a limit.
+LIMIT_RE = (r"(?i)you['’]ve hit your [\w' -]*limit|usage limit reached|limit will reset"
+            r"|out of usage credits")
 LIMIT_STATES = ("error", "idle", "done")  # how a turn ends; a blocked agent waits on the person
 LIMIT_GRACE = 120          # seconds after the reset before continuing: Claude Code may do it itself
 LIMIT_FORGET = 5 * 3600    # seconds a limit with no known reset time holds `start` back
 LIMIT_CONTINUE = "The usage limit has reset. Carry on where you stopped."
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
-RESET_RE = re.compile(
-    r"resets?(?:\s+at)?\s+"
+RESET_RE = (
+    r"(?i)resets?(?:\s+at)?\s+"
     rf"(?:(?P<day>{'|'.join(DAYS)})[a-z]*,?\s+)?"
     rf"(?:(?P<month>{'|'.join(MONTHS)})[a-z]*\.?\s+(?P<date>\d{{1,2}})(?:,|\s+at)?\s+)?"
     r"(?P<h>\d{1,2})(?::(?P<m>\d{2}))?\s*(?P<ap>[ap])?(?(ap)\.?m\b\.?)"
-    r"(?:\s*\((?P<tz>[A-Za-z_]+(?:/[A-Za-z0-9_+-]+)*)\))?", re.I)
+    r"(?:\s*\((?P<tz>[A-Za-z_]+(?:/[A-Za-z0-9_+-]+)*)\))?")
 
 
 def limit_reset(text, at=None):
@@ -43,7 +45,7 @@ def limit_reset(text, at=None):
     m = re.search(r"limit reached\|(\d{10})\b", text)  # older Claude Code: a Unix time
     if m:
         return dt.datetime.fromtimestamp(int(m.group(1))).astimezone()
-    m = RESET_RE.search(text)
+    m = re.search(RESET_RE, text)
     if not m or not (m["ap"] or m["m"]):
         return None
     hour, minute = int(m["h"]), int(m["m"] or 0)
@@ -121,14 +123,14 @@ def limit_text(session, block, state, msg, seen=None):
     (`seen`) says nothing new."""
     if state not in LIMIT_STATES:
         return None
-    if LIMIT_RE.search(msg):
+    if re.search(LIMIT_RE, msg):
         return msg
     if state == "done":
         return None
     p = run([REX, "capture", *(["-s", session] if session else []), "-b", block], check=False)
     lines = [" ".join(l.split()) for l in p.stdout.splitlines() if l.strip()][-15:]
     for i in range(len(lines) - 1, -1, -1):
-        if LIMIT_RE.search(lines[i]):
+        if re.search(LIMIT_RE, lines[i]):
             text = clip(" ".join(lines[i:i + 2]), 200)  # with the next line: it may have wrapped
             return None if text == seen else text
     return None
