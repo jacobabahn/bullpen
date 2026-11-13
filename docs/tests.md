@@ -25,9 +25,11 @@ bullpen, with a fake cargo (`tests/test_board_build.py`).
 build and a Python, each in a fresh fixture (`cli/check/fixture.py`). The Python is by
 default the one of the commit this branch started from (`git merge-base HEAD main`):
 a `git archive` copy in the work folder, removed afterwards, with the Rust build
-copied in as its build. A case whose command that Python doesn't have shows as
-`NO PY`, naming that commit: compare it against one whose Python has it, with
-`BULLPEN_PY=<a worktree of it>/bin/bullpen-py`. Its fixtures set `BULLPEN_NO_BUILD`
+copied in as its build. A case whose command that Python doesn't have (a port moved
+it) shows as `NO PY`, isn't compared and isn't a failure: it names the commit that
+took the command out of the Python, to compare against that commit's parent, with
+`BULLPEN_PY=<a worktree of it>/bin/bullpen-py`. A port's own cases compare against
+the base, whose Python still has them. Its fixtures set `BULLPEN_NO_BUILD`
 too.
 
 The test processes run at low priority (nice 10), as does everything they start, so

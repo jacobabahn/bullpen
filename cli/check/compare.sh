@@ -20,8 +20,9 @@
 # HEAD main`), a `git archive` copy of it in the work folder (removed afterwards), with
 # RUST_BIN copied in as its build, so a command it hands over runs there. Never the live
 # main checkout: once main's Python loses a command, a case of it can't compare there.
-# A case whose command that Python doesn't have is NO PY, saying which commit to compare
-# against. BULLPEN_PY overrides. Every bullpen here runs with BULLPEN_NO_BUILD=1: none
+# A case whose command that Python doesn't have (a port moved it) is NO PY, not compared
+# and not a failure: it names the commit that took it out of the Python, to compare
+# against that commit's parent. BULLPEN_PY overrides. Every bullpen here runs with BULLPEN_NO_BUILD=1: none
 # builds, or takes the build lock in, the checkout it runs from (docs/rebuilds.md).
 here=$(cd "$(dirname "$0")" && pwd)
 top=$(cd "$here/../.." && pwd)
@@ -40,9 +41,29 @@ else
     rm -rf "$work/base" && mkdir -p "$work/base/target"
     git -C "$top" archive "$base" | tar -x -C "$work/base" || { echo "compare.sh: couldn't copy $base" >&2; exit 2; }
     cp "$rs" "$work/base/target/bullpen"
+    # no workspace: a Python from before BULLPEN_NO_BUILD has nothing to catch up, or build
+    rm -f "$work/base/Cargo.toml"
     py=$work/base/bin/bullpen-py
 fi
 pytop=$(cd "$(dirname "$py")/.." && pwd)
+
+no_py() {  # no_py CASE: which commit's Python has the case's command, in words
+    local cmd=$1 gone
+    while [[ $cmd == env:* ]]; do cmd=${cmd#* }; done
+    cmd=${cmd#usage }; cmd=${cmd#tty40 }; cmd=${cmd#tty }; cmd=${cmd%% *}
+    gone=$(git -C "$top" log -1 --format=%h -G"\"$cmd\": " "${base:-HEAD}" -- bullpen/cli.py)
+    local which="the Python of ${base:0:7}"
+    [ -z "$base" ] && which=$py
+    if [ -z "$gone" ]; then
+        echo "\`$cmd\` isn't in $which, and never was"
+    else
+        echo "\`$cmd\` isn't in $which: it left it in $gone; compare against $gone^, with BULLPEN_PY=<a worktree of $gone^>/bin/bullpen-py"
+    fi
+}
+gone() {  # gone OUTDIR: the run said its command isn't there (stderr; stdout on a terminal)
+    grep -qs "^bullpen: \`[^\`]*\` isn't in this build of bullpen\|^bullpen: bullpen isn't built" "$1/stderr" "$1/stdout"
+}
+nopy=0
 
 if [ $# -gt 0 ]; then cases=("$@"); else mapfile -t cases < <(cat "$here"/cases*.txt | grep -v '^\s*\(#\|$\)'); fi
 
@@ -86,16 +107,9 @@ for c in "${cases[@]}"; do
     now=$(date +%s.%N)  # per case: both runs of it see the same ages
     run_one "$py" "$c" "$work/py" || exit 2
     run_one "$rs" "$c" "$work/rust" || exit 2
-    if [ "$(cat "$work/py/code")" = 2 ] && grep -q "isn't in this build of bullpen\|bullpen isn't built" "$work/py/stderr" 2>/dev/null; then
-        echo "NO PY    $c"
-        if [ -n "$base" ]; then
-            echo "         the Python of $(git -C "$top" log -1 --format='%h (%s)' "$base" | cut -c1-80), where this branch"
-            echo "         started from main, doesn't have it: compare against a commit whose Python does,"
-            echo "         with BULLPEN_PY=<a worktree of it>/bin/bullpen-py"
-        else
-            echo "         $py doesn't have it: compare against a commit whose Python does (unset BULLPEN_PY: this branch's base)"
-        fi
-        fail=1
+    if gone "$work/py" && ! gone "$work/rust"; then
+        echo "NO PY    $c   ($(no_py "$c"))"
+        nopy=$((nopy + 1))
     elif diff -q "$work/py" "$work/rust" >/dev/null; then
         echo "same     $c"
     else
@@ -104,5 +118,6 @@ for c in "${cases[@]}"; do
         fail=1
     fi
 done
+[ "$nopy" -gt 0 ] && echo "$nopy case(s) not compared: their command isn't in the Python (NO PY above)"
 [ -z "$COMPARE_DIR" ] && rm -rf "$work"
 exit $fail
