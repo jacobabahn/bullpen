@@ -1,0 +1,14 @@
+[package]
+name = "bullpen-cli"
+version = "0.1.0"
+edition = "2021"
+description = "bullpen's command line: the commands moved to Rust, and the hand-over to the Python for the rest"
+
+[[bin]]
+name = "bullpen"
+path = "src/main.rs"
+
+[dependencies]
+bullpen-core = { path = "../core" }
+serde_json = { version = "1", features = ["preserve_order"] }
+libc = "0.2"
