@@ -531,7 +531,7 @@ def pr_short(url: String) -> String:
     var j = i + 6
     var n = url.byte_length()
     var k = j
-    while k < n and url.as_bytes()[k] >= ord("0") and url.as_bytes()[k] <= ord("9"):
+    while k < n and Int(url.as_bytes()[k]) >= ord("0") and Int(url.as_bytes()[k]) <= ord("9"):
         k += 1
     return "PR #" + String(url[byte=j:k]) if k > j else url
 
