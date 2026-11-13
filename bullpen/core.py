@@ -590,11 +590,6 @@ def reviewers_stop(t):
     return s.get("by") == "reviewer" and s.get("kind") != "limit"
 
 
-def on_reviewer(t):
-    """Is the task stopped on its reviewer (a prompt, or no verdict)?"""
-    return t["status"] in WAITING and reviewers_stop(t)
-
-
 def at_prompt(t):
     """Is the task's worker stopped at a prompt?"""
     return t.get("stop") == {"by": "worker", "kind": "prompt"}

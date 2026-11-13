@@ -9,14 +9,15 @@ from pathlib import Path
 
 from .core import (
     CLOSED, Fail, Repo, STATE, WAITING, back_to_work, clip, command, git, load_config,
-    lookup_block, mark_compacting, now, on_reviewer, read_json, seconds_since, set_status,
+    lookup_block, mark_compacting, now, read_json, seconds_since, set_status,
     task_base_ref, unindex_block,
 )
 from .rex import rex_alive, rex_type, screen
+from .agents import is_limited, on_reviewer, pane, whose_turn
 from .coordinators import coordinator_at, coordinator_gone
 from .news import news, ready_news
 from .limit import (
-    LIMIT_CONTINUE, LIMIT_FILE, LIMIT_GRACE, LIMIT_STATES, is_limited, limit_active, limit_hit,
+    LIMIT_CONTINUE, LIMIT_FILE, LIMIT_GRACE, LIMIT_STATES, limit_active, limit_hit,
     limit_over, limited,
 )
 from .stops import stop
@@ -159,7 +160,7 @@ def review_event(repo, t, ev):
     woke = unstick(t, "reviewer")
     if state in LIMIT_STATES and (limited(t, "reviewer") or limit_hit(repo, t, "reviewer", ev)):
         return
-    if state == "working" and stuck and compacting(r.get("session") or t.get("session"), r["block"], msg):
+    if state == "working" and stuck and compacting(*pane(t, "reviewer"), msg):
         # compacting by itself: it stays where its coordinator or the person has it
         if not r.get("compacting"):
             r["compacting"] = now()
@@ -183,7 +184,7 @@ def review_event(repo, t, ev):
              prompt_news(f"{t['id']}'s reviewer", kind, msg), "needs-you")
     elif state in ("done", "idle", "error") and t["status"] == "review":
         if (state != "error" and ev.shell_min is None
-                and shell_running(screen(r.get("session") or t.get("session"), r["block"]))):
+                and shell_running(screen(*pane(t, "reviewer")))):
             # a background shell of its own still runs (the tests?): it takes another turn
             if woke:
                 repo.save_task(t)
@@ -208,8 +209,7 @@ def cmd_stuck(args):
         return
     who = "reviewer" if role.endswith(" review") else "worker"
     t = repo.task(role.split()[0])
-    block = (t.get("review") or {}).get("block") if who == "reviewer" else t["block"]
-    if block != args.block or t.get("stuck") or t["status"] != ("review" if who == "reviewer" else "working"):
+    if pane(t, who)[1] != args.block or t.get("stuck") or t["status"] != ("review" if who == "reviewer" else "working"):
         return
     since = dt.datetime.now().astimezone() - dt.timedelta(minutes=args.minutes)
     t["stuck"] = {"who": who, "since": since.isoformat(timespec="seconds")}
@@ -256,7 +256,7 @@ def gone(block):
             r["block"] = None
             if limited(t, "reviewer"):
                 pass  # started again when the limit resets
-            elif (t["status"] == "review" or on_reviewer(t)) and not r.get("verdict"):
+            elif whose_turn(t) == "reviewer" and not r.get("verdict"):
                 stop(repo, t, "reviewer", "exited", "Reviewer exited without a verdict",
                      f"{t['id']}'s reviewer exited without a verdict: `bullpen review {t['id']}` starts a new one")
             repo.save_task(t)
@@ -336,8 +336,8 @@ def continue_limited(repo, t):
     r = t.get("review") or {}
     try:
         if lim["who"] == "reviewer":
-            if rex_alive(r.get("session"), r.get("block")):
-                rex_type(r["session"], r["block"], LIMIT_CONTINUE)
+            if rex_alive(*pane(t, "reviewer")):
+                rex_type(*pane(t, "reviewer"), LIMIT_CONTINUE)
                 repo.save_task(t)
                 return f"{t['id']}'s reviewer"
             r["round"] = max(0, r.get("round", 1) - 1)  # the round it didn't finish

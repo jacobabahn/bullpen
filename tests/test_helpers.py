@@ -8,7 +8,7 @@ import unittest
 
 from support import setUpModule, tearDownModule, ROOT  # a temp folder for each module
 from bullpen import (
-    answer, check, cli, core, doctor, limit, line_edit, notifications, pick, show, stepper,
+    agents, answer, check, cli, core, doctor, limit, line_edit, notifications, pick, show, stepper,
     task_line,
 )
 
@@ -599,7 +599,7 @@ class HelpersTest(unittest.TestCase):
         self.assertIsNone(n(t("working"), {}))
 
     def test_a_task_is_on_its_reviewer_by_its_stop(self):
-        on = core.on_reviewer
+        on = agents.on_reviewer
         self.assertTrue(on(self.stopped("needs", "reviewer", "prompt")))
         self.assertTrue(on(self.stopped("triage", "reviewer", "exited")))
         self.assertTrue(on(self.stopped("needs", "reviewer", "ended", why="Delete it?", ask=True)))
@@ -607,9 +607,34 @@ class HelpersTest(unittest.TestCase):
         self.assertFalse(on(self.stopped("triage", "worker", "ended")))
         self.assertFalse(on({"status": "review"}))
         t = self.stopped("needs", "reviewer", "ended", review={"block": "blk2", "session": "s"}, block="blk1")
-        self.assertEqual(check.waited_on(t), ("reviewer", "s", "blk2"))
+        self.assertEqual(agents.waited_on(t), ("reviewer", "s", "blk2"))
         t["stop"] = {"by": "worker", "kind": "failed"}
-        self.assertEqual(check.waited_on(t), ("worker", None, "blk1"))
+        self.assertEqual(agents.waited_on(t), ("worker", None, "blk1"))
+
+    def test_a_task_waits_on_its_reviewer_in_review_or_for_its_stop(self):
+        w = agents.waits_on
+        self.assertEqual(w({"status": "review"}), "reviewer")
+        self.assertEqual(w(self.stopped("needs", "reviewer", "prompt")), "reviewer")
+        self.assertEqual(w(self.stopped("triage", "reviewer", "limit")), "worker")  # seen to as its worker's
+        self.assertEqual(w(self.stopped("triage", "worker", "exited")), "worker")
+        self.assertIsNone(w(self.stopped("stopped", "worker", "pane_gone")))  # its pane is gone
+        self.assertEqual(w({"status": "working"}), "worker")
+        for status in ("todo", "ready", "finished", "done", "dropped"):
+            self.assertIsNone(w({"status": status}))
+        lim = {"who": "reviewer", "text": "limit"}
+        self.assertIsNone(w({"status": "review", "limit": lim}))  # waits on the usage limit
+        self.assertEqual(agents.whose_turn({"status": "review", "limit": lim}), "reviewer")
+        self.assertIsNone(w({"status": "working", "limit": {**lim, "who": "worker"}}))
+
+    def test_a_reviewer_pane_falls_back_to_its_workers_session(self):
+        t = {"status": "review", "session": "s1", "block": "b1", "review": {"block": "b2"}}
+        self.assertEqual(agents.pane(t, "worker"), ("s1", "b1"))
+        self.assertEqual(agents.pane(t, "reviewer"), ("s1", "b2"))
+        t["review"]["session"] = "s2"
+        self.assertEqual(agents.pane(t, "reviewer"), ("s2", "b2"))
+        self.assertEqual(agents.pane({"status": "todo"}, "reviewer"), (None, None))
+        self.assertIsNone(agents.waited_on({"status": "review", "block": "b1"}))  # no reviewer pane
+        self.assertFalse(agents.running({"status": "ready", "block": "b1"}))  # waits on no agent
 
     def test_a_new_status_ends_ask_ok_and_the_stop(self):
         t = self.stopped("triage", "worker", "ended", why="Ended its turn without saying ready", ok=True)
@@ -660,8 +685,8 @@ class HelpersTest(unittest.TestCase):
         self.assertFalse(task_line.is_stuck({"status": "working"}))
         at = dt.datetime(2026, 11, 11, 13, 0).astimezone()
         lim = {"who": "worker", "resets": at.replace(hour=15).isoformat(), "text": "x"}
-        self.assertTrue(limit.is_limited({"status": "working", "limit": lim}))
-        self.assertFalse(limit.is_limited({"status": "ready", "limit": lim}))
+        self.assertTrue(agents.is_limited({"status": "working", "limit": lim}))
+        self.assertFalse(agents.is_limited({"status": "ready", "limit": lim}))
         self.assertEqual(limit.limit_why(lim, at), "Usage limit, resets 3:00 PM")
 
     def test_reset_times_are_read(self):

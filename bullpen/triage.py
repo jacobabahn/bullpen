@@ -1,10 +1,10 @@
 """The coordinator's commands for a task that stopped: ask, ok and review; and note."""
 
 from .core import (
-    CLOSED, Fail, Repo, ask, command, is_status, ok, on_reviewer, repo_root, reviewers_stop,
+    CLOSED, Fail, Repo, ask, command, is_status, ok, repo_root,
     task_base_ref, write_json,
 )
-from .rex import rex_alive
+from .agents import running, waits_on, whose_turn
 from .news import tell_coordinator
 from .review import start_review
 
@@ -30,12 +30,11 @@ def cmd_ok(args):
     t = repo.task(args.id)
     if t["status"] != "triage":
         raise Fail(f"{is_status(t)}, not waiting on its coordinator")
-    if reviewers_stop(t):
-        r = t.get("review") or {}
-        if not rex_alive(r.get("session") or t.get("session"), r.get("block")):
+    if waits_on(t) == "reviewer":
+        if not running(t):
             raise Fail(f"{t['id']}'s reviewer isn't running: `bullpen review {t['id']}` starts a "
                        f"new one, or `bullpen ask` the person")
-    elif not rex_alive(t.get("session"), t.get("block")):
+    elif not running(t):
         raise Fail(f"{t['id']}'s worker isn't running: `bullpen resume {t['id']}` restarts it")
     ok(t)  # `check` leaves its agent idle; its next turn clears that
     repo.save_task(t)
@@ -53,7 +52,7 @@ def cmd_review(args):
         raise Fail(is_status(t) + ("" if t.get("worktree") else ", with no worktree"))
     if not r:
         raise Fail(f"{t['id']} has had no review: its worker starts one with `ready`")
-    if r.get("verdict") or not (t["status"] == "review" or on_reviewer(t)):
+    if r.get("verdict") or whose_turn(t) != "reviewer":
         raise Fail(f"{is_status(t)}, not waiting on a reviewer")
     rounds = repo.cfg["review_rounds"]
     if r.get("round", 0) >= rounds and r.get("kind") != "tour":

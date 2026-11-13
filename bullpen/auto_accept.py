@@ -9,6 +9,7 @@ from .core import (
     set_status, unindex_block, where, write_json,
 )
 from .rex import rex_close
+from .agents import pane
 from .news import ready_news
 from .stops import stop
 from .start import hand_back, start_queued
@@ -40,7 +41,7 @@ def cmd_verdict(args):
     findings.write_text(text + "\n")
     rounds = repo.cfg["review_rounds"]
     r.update(verdict="approved" if args.verdict == "approve" else "changes", findings=str(findings))
-    reviewer = (r.get("session"), r.get("block"))
+    reviewer = pane(t, "reviewer")
     unindex_block(r["block"])
     r["block"] = None
     pr = where(t)

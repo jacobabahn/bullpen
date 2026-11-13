@@ -14,6 +14,9 @@ importing all of them):
   helpers, a repo's config and tasks (`Repo`), a task's status (`set_status`) and the
   panes bullpen knows. It imports none of the others.
 - `rex.py`: Rex: running its commands, finding, typing into and closing panes
+- `agents.py`: a task's worker and reviewer: where each one's pane is (`pane`), and
+  the one the task waits on (`waits_on`, `waited_on`). Code that needs either asks it,
+  rather than reading the task's `block` or its review's `session`
 - `coordinators.py`: a repo's coordinators, and who sees to a task (`sees_to`)
 - `news.py`: news lines, the outboxes typed into coordinators' panes, `bullpen news`
 - `notifications.py`: the person's notifications

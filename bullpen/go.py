@@ -13,10 +13,10 @@ from .rex import (
     board_label, coordinator_label, find_pane, find_panes, review_label, rex_alive, rex_api,
     rex_close, rex_focus, rex_view, set_layer,
 )
+from .agents import is_limited, pane
 from .coordinators import (
     alive, calling_coordinator, coordinator_at, home_of, on_board, owner, primary, session_for,
 )
-from .limit import is_limited
 from .board import ensure_board
 
 
@@ -67,17 +67,18 @@ def pane_target(repo, args):
         return b.get("session"), b["block"], "board"
     if args.id and args.review:
         t = repo.task(args.id)
-        r = t.get("review") or {}
-        if not r.get("block"):
+        session, block = pane(t, "reviewer")
+        if not block:
             raise Fail(f"{t['id']} has no reviewer running")
-        return r.get("session") or t["session"], r["block"], f"{t['id']}'s reviewer"
+        return session, block, f"{t['id']}'s reviewer"
     if args.id:
         t = repo.task(args.id)
-        if not t.get("block"):
+        session, block = pane(t, "worker")
+        if not block:
             hint = f"`bullpen resume {t['id']}` starts it again" if t["status"] == "stopped" else \
                 is_status(t).replace(f"{t['id']} is ", "it's ", 1).replace(f"{t['id']} ", "it ", 1)
             raise Fail(f"{t['id']} has no pane: {hint}")
-        return t["session"], t["block"], t["id"]
+        return session, block, t["id"]
     c = coordinator_for(repo, args.from_block)
     if not c:
         raise Fail("no coordinator: run `bullpen up`")
@@ -213,7 +214,7 @@ def cmd_hide(args):
     if not repo or role in ("coordinator", "board"):
         sys.exit(3)
     t = repo.task(role.split()[0])
-    session = args.session or (t.get("review") or {}).get("session") or t.get("session")
+    session = args.session or pane(t, "reviewer" if role.endswith(" review") else "worker")[0]
     where = find_pane(rex_view(session), block=args.from_block)
     if not where or where[1].get("kind") != "floating":
         sys.exit(3)

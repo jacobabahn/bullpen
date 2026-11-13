@@ -5,10 +5,10 @@ from pathlib import Path
 
 from .core import (
     CLOSED, DEFAULT_CONFIG, Repo, WAITING, at_prompt, clip, command, git, known_repos, now,
-    on_reviewer, repo_root, seconds_since, task_base_ref, write_json,
+    repo_root, seconds_since, task_base_ref, write_json,
 )
 from .rex import program_status, rex_alive, screen
-from .limit import is_limited
+from .agents import waited_on
 from .stops import escalate, overdue
 from .events import Event, compacting, event, gone, shell_running
 
@@ -129,19 +129,6 @@ def reviewer_drift(t, a, limit):
         return f"{tid} is in review but {doing(a, 'reviewer')}", "blocked"
     if st in WAITING and a["state"] == "working":
         return f"{tid} is marked {st} ({needs_label(t.get('why'))}) but {doing(a, 'reviewer')}", "working"
-    return None
-
-
-def waited_on(t):
-    """("worker" or "reviewer", session, block) for the agent the task waits on now,
-    or None: nothing is running for it, or it waits on the usage limit."""
-    r = t.get("review") or {}
-    if is_limited(t):
-        return None
-    if t["status"] == "review" or on_reviewer(t):
-        return ("reviewer", r.get("session") or t.get("session"), r["block"]) if r.get("block") else None
-    if t["status"] in ("working", *WAITING) and t.get("block"):
-        return "worker", t.get("session"), t["block"]
     return None
 
 

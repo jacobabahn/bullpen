@@ -13,8 +13,8 @@ from .core import (
     task_base_ref,
 )
 from .rex import find_pane, rex_alive, rex_close, rex_focus, rex_run, rex_view
+from .agents import is_limited
 from .coordinators import home_of, owner, session_for
-from .limit import is_limited
 from .hooks import hook_log
 from .start import float_pane, waits_phrase
 from .review import review_kind

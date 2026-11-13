@@ -8,7 +8,8 @@ import textwrap
 import unicodedata
 
 from .core import CLOSED, STATE, own_model, pr_short, read_json, safe, seconds_since, stamp
-from .limit import clock, is_limited
+from .agents import is_limited
+from .limit import clock
 from .start import waits_phrase
 
 

@@ -6,6 +6,7 @@ import re
 from .core import (
     REX, STATE, WAITING, clip, now, read_json, run, seconds_since, set_status, write_json,
 )
+from .agents import is_limited, pane
 from .news import news
 
 
@@ -109,12 +110,6 @@ def limited(t, who):
     return is_limited(t) and t["limit"]["who"] == who
 
 
-def is_limited(t):
-    """Is the agent the task is waiting on stopped at the usage limit?"""
-    lim = t.get("limit")
-    return bool(lim) and t["status"] == ("review" if lim["who"] == "reviewer" else "working")
-
-
 def limit_why(lim, at=None):
     return f"Usage limit, {limit_phrase(lim.get('resets'), at)}"
 
@@ -143,8 +138,7 @@ def limit_hit(repo, t, who, ev):
     """Did this event say the agent stopped at the usage limit? Then note it on the
     task and for `start`, with one line of news, and return True. ev: the event
     (events.Event)."""
-    r = t.get("review") or {}
-    session = r.get("session") if who == "reviewer" else t.get("session")
+    session, _ = pane(t, who)
     text = limit_text(session, ev.block, ev.state, (ev.msg or "").strip(), t.get("limit_seen"))
     if not text:
         return False

@@ -242,6 +242,15 @@ class NewsTest(BullpenTest):
         self.assertEqual(self.layer_states(), {"lyr1": "minimized"})
         self.assertEqual(self.focused()[-1], "blk2")  # the board
 
+    def test_hide_finds_a_worker_in_its_own_session_not_its_reviewers(self):
+        tid = self.start_task()
+        path = next((self.tmp / "state" / "repos").iterdir()) / "tasks" / f"{tid}.json"
+        t = json.loads(path.read_text())
+        path.write_text(json.dumps({**t, "review": {"session": "elsewhere", "block": "blk9"}}))
+        self.bp("go", tid)
+        self.bp("hide", "--from", self.block(tid))
+        self.assertEqual(self.layer_states(), {"lyr1": "minimized"})
+
     def test_hide_lets_the_key_through_elsewhere(self):
         self.start_task()
         for pane in ("blk1", "blk2", "someone-elses"):  # coordinator, board, not ours

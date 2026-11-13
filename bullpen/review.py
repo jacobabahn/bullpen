@@ -9,7 +9,8 @@ from .core import (
     PROMPTS, SELF, auto_accepts, commits, git, head, index_block, merge_base, resolve, run,
     set_status, unindex_block, where, with_model,
 )
-from .rex import HIDE_HINT, review_label, rex_alive, rex_close, rex_run
+from .rex import HIDE_HINT, review_label, rex_close, rex_run
+from .agents import pane, running
 from .coordinators import session_for
 from .news import ready_news
 from .rules import task_rules
@@ -39,7 +40,7 @@ def review_at_ready(repo, t, base_ref):
             ready_news(repo, t, [commits(t.get("commits") or 0), where(t), f"its approval carried over: {kept}"])
         return f"Its review approval carries over ({kept}), so there's no new review: end your turn."
     if (t["status"] == "review" and r.get("block") and r.get("commit") == head(t["worktree"])
-            and rex_alive(r.get("session"), r["block"])):
+            and running(t, "reviewer")):
         repo.save_task(t)
         return ("A reviewer is already checking this commit: end your turn, and you'll hear back "
                 "if it asks for changes.")
@@ -306,5 +307,5 @@ def close_reviewer(t):
     r = t.get("review") or {}
     if r.get("block"):
         unindex_block(r["block"])
-        rex_close(r.get("session"), r["block"])
+        rex_close(*pane(t, "reviewer"))
         r["block"] = None

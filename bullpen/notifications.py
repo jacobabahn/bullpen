@@ -9,10 +9,11 @@ import time
 import tty
 
 from .core import (
-    Fail, Repo, STATE, clip, command, load_config, now, on_reviewer, on_save, read_json,
+    Fail, Repo, STATE, clip, command, load_config, now, on_save, read_json,
     write_json,
 )
 from .rex import pane_tty, rex_view
+from .agents import pane, waits_on
 from .coordinators import home_of
 from .news import NEWS_MARK, deliver
 
@@ -142,12 +143,10 @@ def notify_panes(repo, t):
     """(session, block) of the panes a notification can come from, best first: the task's
     reviewer if it is what needs the person, its worker, its coordinator's board, its
     coordinator. Clicking it opens the pane's tab."""
-    r = t.get("review") or {}
     c = home_of(repo, t)
     b = c.get("board") or {}
-    out = [(r.get("session") or t.get("session"), r.get("block")) if on_reviewer(t) else (None, None),
-           (t.get("session"), t.get("block")), (b.get("session"), b.get("block")),
-           (c.get("session"), c.get("block"))]
+    out = [pane(t, "reviewer") if waits_on(t) == "reviewer" else (None, None), pane(t, "worker"),
+           (b.get("session"), b.get("block")), (c.get("session"), c.get("block"))]
     return [p for p in out if p[1]]
 
 
@@ -155,10 +154,8 @@ def looking(repo, t):
     """Has the task's worker or reviewer pane, or its coordinator's board, focus in its
     session's active window? Then the person sees it already. (Rex can't say whether
     its app is in front, so this goes by the session alone.)"""
-    r = t.get("review") or {}
     b = home_of(repo, t).get("board") or {}
-    panes = [(t.get("session"), t.get("block")), (r.get("session") or t.get("session"), r.get("block")),
-             (b.get("session"), b.get("block"))]
+    panes = [pane(t, "worker"), pane(t, "reviewer"), (b.get("session"), b.get("block"))]
     blocks = {blk for _, blk in panes if blk}
     for session in {s for s, blk in panes if blk}:
         v = rex_view(session) or {}

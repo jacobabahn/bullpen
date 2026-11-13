@@ -4,8 +4,9 @@ import hashlib
 import json
 import re
 
-from .core import Fail, REX, Repo, clip, command, ok, repo_root, reviewers_stop, run, set_status
+from .core import Fail, REX, Repo, clip, command, ok, repo_root, run, set_status
 from .rex import rex_alive, screen, screen_end
+from .agents import pane, running, waits_on
 from .coordinators import sees_to
 from .news import news
 
@@ -101,11 +102,8 @@ def prompt_pane(t):
     s = t.get("stop") or {}
     if t["status"] != "needs" or s.get("kind") != "prompt":
         raise Fail(f"{t['id']} isn't waiting at a prompt")
-    if s.get("by") == "reviewer":
-        r = t.get("review") or {}
-        who, session, block = "reviewer", r.get("session") or t.get("session"), r.get("block")
-    else:
-        who, session, block = "worker", t.get("session"), t.get("block")
+    who = waits_on(t)
+    session, block = pane(t, who)
     if not rex_alive(session, block):
         raise Fail(f"{t['id']}'s {who} isn't running")
     return who, session, block
@@ -139,15 +137,6 @@ def cmd_answer(args):
     print(f"answered {t['id']}'s {who}: {args.key.lower()} ({label})")
 
 
-def agent_running(t):
-    """Is the pane of the agent the task is stopped on (its reviewer's, for its stop)
-    alive?"""
-    if reviewers_stop(t):
-        r = t.get("review") or {}
-        return rex_alive(r.get("session") or t.get("session"), r.get("block"))
-    return rex_alive(t.get("session"), t.get("block"))
-
-
 def cmd_reply(args):
     """The person's answer to what the coordinator asked about a task (`ask`). It goes
     to the task's coordinator as "BP-3: <answer>": typed into its pane, or as news with
@@ -168,7 +157,7 @@ def cmd_reply(args):
     if t.get("asked_from"):
         was = t["asked_from"]
         set_status(t, was["status"], was.get("why"))  # it wasn't stopped: back to what it was doing
-    elif agent_running(t):
+    elif running(t):
         ok(t)
     else:
         set_status(t, "triage", clip(f"The person answered: {text}", 160))
