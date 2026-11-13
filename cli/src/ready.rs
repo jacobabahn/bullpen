@@ -211,3 +211,7 @@ pub fn first_line(summary: &str) -> String {
     let line = bullpen_core::text::splitlines(summary).first().copied().unwrap_or("");
     strip(strip(line).trim_start_matches('#')).to_string()
 }
+
+#[cfg(test)]
+#[path = "test_ready.rs"]
+mod tests;
