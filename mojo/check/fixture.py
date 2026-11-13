@@ -206,6 +206,119 @@ def main(d, now):
     (fake / "status_blk12.json").write_text(json.dumps({"state": "idle", "kind": "", "msg": "", "updated_at": upd}))
     (fake / "status_blk8.json").write_text(json.dumps({"state": "working", "kind": "", "msg": "Reading", "updated_at": upd}))
 
+    # extras a case asks for with env:FIXTURE=a,b (compare.sh); none by default
+    extras = set(filter(None, os.environ.get("FIXTURE", "").split(",")))
+
+    def say(blk, state, ago, **kw):  # a status record for pane blk, updated ago seconds back
+        rec = {"state": state, "kind": "", "msg": "", **kw}
+        if ago is not None:
+            rec["updated_at"] = dt.datetime.fromtimestamp(now - ago).astimezone().isoformat()
+        (fake / f"status_{blk}.json").write_text(json.dumps(rec))
+
+    def live(blk, screen=None):
+        (fake / "alive" / blk).write_text("")
+        if screen is not None:
+            (fake / f"screen_{blk}").write_text(screen)
+
+    if "check" in extras:  # a task for each thing `check` says (or doesn't)
+        def wtask(n, title, status, blk, mins=20, **kw):
+            task(n, title, status, mins, block=blk, session="session:1", **kw)
+            live(blk)
+
+        def rtask(n, title, status, blk, mins=20, **kw):
+            task(n, title, status, mins, review={"round": 1, "kind": "full", "block": blk}, **kw)
+            live(blk)
+        wtask(40, "Blocked worker", "working", "blk40")
+        say("blk40", "blocked", 600, kind="permission")
+        wtask(41, "Failed turn", "working", "blk41")
+        say("blk41", "error", 600)
+        wtask(42, "Long shell", "working", "blk42")
+        say("blk42", "idle", 1200)
+        live("blk42", "❯ \n  2 background shells · ↓ to manage\n")
+        wtask(43, "Short shell", "working", "blk43")
+        say("blk43", "idle", 600)
+        live("blk43", "❯ \n  1 shell still running\n")
+        wtask(44, "Needs, working", "needs", "blk44", why="Needs you (permission): run x",
+              stop={"by": "worker", "kind": "failed"})
+        say("blk44", "working", 600, msg="Reading")
+        wtask(45, "Triage, blocked", "triage", "blk45", mins=30,
+              why="Failed: The tool crashed with a message that goes on past sixty characters for sure",
+              stop={"by": "worker", "kind": "failed"})
+        say("blk45", "blocked", 600)
+        wtask(46, "At its prompt", "needs", "blk46", why="Needs you: Do you want to?",
+              stop={"by": "worker", "kind": "prompt"})
+        say("blk46", "blocked", 600)
+        wtask(47, "Said ok", "working", "blk47", ok=True)
+        say("blk47", "idle", 600)
+        wtask(48, "Compacting, by its record", "working", "blk48")
+        say("blk48", "working", 600, msg="Compacting conversation…")
+        wtask(49, "Compacting, by its screen", "working", "blk49")
+        live("blk49", "✽ Compacting conversation… (esc to interrupt)\n")
+        # these two are "just now" for as long as the check runs: an hour after NOW
+        # (compare.sh's NOW is minutes old by its last case)
+        just = dt.datetime.fromtimestamp(now + 3600).astimezone().isoformat()
+        wtask(50, "Just went idle", "working", "blk50")
+        say("blk50", "idle", None, updated_at=just)
+        wtask(51, "Just started", "working", "blk51", since=just)
+        say("blk51", "idle", 600)
+        rtask(52, "Reviewer idle", "review", "blk52")
+        say("blk52", "idle", 600)
+        rtask(53, "Reviewer blocked", "review", "blk53")
+        say("blk53", "blocked", 600, kind="plan")
+        rtask(54, "Reviewer working again", "needs", "blk54", why="Reviewer needs you (plan): ok?",
+              stop={"by": "reviewer", "kind": "prompt"})
+        say("blk54", "working", 600)
+        rtask(55, "Reviewer shell", "review", "blk55")
+        say("blk55", "idle", 1200)
+        live("blk55", "3 Background Shells\n")
+        rtask(56, "Reviewer short shell", "review", "blk56")
+        say("blk56", "idle", 600)
+        live("blk56", "3 shells\n")
+        wt57 = worktree("BP-57", "bullpen/bp-57-done", {"done.py": "done = True\n"})
+        wtask(57, "Done, never said", "working", "blk57", branch="bullpen/bp-57-done", worktree=wt57)
+        say("blk57", "idle", 600)
+        task(58, "Reviewer gone", "needs", 20, why="Reviewer ended without a verdict",
+             stop={"by": "reviewer", "kind": "ended"}, review={"round": 1, "block": "blk58"})
+        wtask(59, "Prompt on screen", "working", "blk59")
+        live("blk59", "Do you want to proceed?\n❯ 1. Yes\n")
+        wtask(60, "Empty record", "working", "blk60")
+        (fake / "status_blk60.json").write_text("{}")
+        wtask(61, "Record without a stamp", "working", "blk61")
+        say("blk61", "", None)
+        wtask(62, "lowercase needs", "needs", "blk62", why="needs you (lower): hm",
+              stop={"by": "worker", "kind": "failed"})
+        say("blk62", "working", 600)
+        wtask(63, "Stopped", "stopped", "blk63")
+        say("blk63", "idle", 600)
+    if "deadcoords" in extras:  # no coordinator is running
+        for blk in ("blk1", "blk3"):
+            (fake / "alive" / blk).unlink()
+    if "nocoord" in extras:  # the repo has no coordinators
+        cfg.update(coordinators=[], next_coordinator=1)
+        (sdir / "config.json").write_text(json.dumps(cfg, indent=2) + "\n")
+    if "oldcursor" in extras:  # the one cursor from before several coordinators
+        (sdir / "news-c1.cursor").unlink()
+        (sdir / "news.cursor").write_text(f"{first}\n")
+    if "badcursor" in extras:
+        (sdir / "news-c1.cursor").write_text("junk\n")
+    if "pastend" in extras:  # the log was cut short
+        (sdir / "news-c1.cursor").write_text("99999\n")
+    if "nolog" in extras:
+        (sdir / "news.log").unlink()
+    if "midrecord" in extras:  # a cursor on a diff's line, and a line still being written
+        (sdir / "news-c1.cursor").write_text(f"{len(('\n'.join(news[:3]) + '\n').encode())}\n")
+        with (sdir / "news.log").open("a") as f:
+            f.write(f"{stamp(1)} [c1] BP-3 note: bullpen · half wri")
+    if "badbytes" in extras:  # a line that isn't UTF-8
+        with (sdir / "news.log").open("ab") as f:
+            f.write(stamp(1).encode() + b" BP-3 note: bullpen \xc2\xb7 caf\xe9 \xff\xfe ok\n")
+    if "locked" in extras:  # a follower holds c1's lock for a while
+        import fcntl
+        lk = open(sdir / "news-c1.lock", "w")
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        subprocess.Popen(["sleep", "5"], pass_fds=(lk.fileno(),), stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+
     env = {"HOME": home, "BULLPEN_STATE": state, "BULLPEN_REX": fake / "rex", "FAKE_DIR": fake,
            "XDG_CONFIG_HOME": d / "config", "FIXTURE_ROOT": root}
     for k, v in env.items():
