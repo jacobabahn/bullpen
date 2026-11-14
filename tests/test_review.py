@@ -364,6 +364,22 @@ class ReviewTest(BullpenTest):
         self.verdict("BP-2", "approve")
         self.assertIn("approved by review after a rebase", self.news()[-1])
 
+    def test_more_work_the_person_asked_for_then_a_rebase_gets_a_follow_up(self):
+        tid = self.approved_task()
+        self.bp("add", "Second", "--brief", "x")
+        self.bp("start", "BP-2")
+        wt = self.commit_file("BP-2", "two.txt", "two\n")
+        self.ready("BP-2")
+        self.verdict("BP-2", "approve")
+        self.bp("tell", "BP-2", "Handle the empty case too.")  # sent back for more
+        self.commit_file("BP-2", "three.txt", "three\n")
+        self.merge_on_github(tid)
+        self.bp("accept", tid)
+        sh("git", "-C", wt, "fetch", "-q", "origin")
+        sh("git", "-C", wt, "rebase", "-q", "origin/main")
+        self.assertIn("A reviewer checks it now (follow-up review)", self.ready("BP-2").stdout)
+        self.assertEqual(self.show("BP-2")["review"]["kind"], "followup")
+
     def test_a_round_past_the_limit_doesnt_say_of_how_many(self):
         self.bp("config", "--review-rounds", "1")
         self.base_file("list.txt", "a\nb\n")

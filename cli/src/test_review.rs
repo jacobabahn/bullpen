@@ -106,3 +106,29 @@ fn docs_are_docs_prompts_and_markdown() {
     assert!(is_doc("docs/a.txt") && is_doc("prompts/x") && is_doc("README.md"));
     assert!(!is_doc("src/main.rs"));
 }
+
+#[test]
+fn only_a_rebase_since_the_approval_means_a_review_after_a_rebase() {
+    let e = |v: Value| v.as_object().unwrap().clone();
+    let approved = e(json!({"event": "review_finished", "round": 1, "verdict": "approved"}));
+    let back = |why: &str| e(json!({"event": "status", "from": "ready", "to": "working", "back": why}));
+    let ready = e(json!({"event": "status", "from": "working", "to": "ready"}));
+    assert!(only_rebase_since_approval(&[
+        approved.clone(),
+        back("rebase"),
+        ready.clone()
+    ]));
+    assert!(only_rebase_since_approval(&[
+        back("person"),
+        approved.clone(),
+        back("rebase")
+    ]));
+    assert!(!only_rebase_since_approval(&[
+        approved.clone(),
+        back("person"),
+        ready,
+        back("rebase")
+    ]));
+    assert!(!only_rebase_since_approval(&[approved, back("pr")]));
+    assert!(!only_rebase_since_approval(&[back("rebase")]), "no approval on record");
+}

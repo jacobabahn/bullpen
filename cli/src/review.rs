@@ -481,7 +481,9 @@ pub fn shortstat_of(out: &str) -> Option<String> {
 /// verdict: its findings and what changed since. Comments the person sent back after a
 /// tour (tour_sent) get a review of their own, and an approved change whose own lines
 /// changed only where a rebase conflicted (rebase: those files) a rebase check of the
-/// resolution. A round after an approval and a rebase (rebased) checks only the fit. Both keep the round they follow: they don't count toward review_rounds.
+/// resolution. Both keep the round they follow: they don't count toward review_rounds.
+/// A round after an approval that only a rebase sent back (rebased) checks only the
+/// fit onto the new base; it counts as a round.
 pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec<String>>) -> Res<()> {
     let old = obj(t, "review").clone();
     close_reviewer(t)?;
@@ -513,7 +515,7 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
     } else if rebase.is_some() {
         ("rebase".to_string(), None)
     } else if let Some(p) = prev.as_ref().filter(|p| truthy(p.get("commit"))) {
-        (followup_kind(&wt, base_ref, p)?.to_string(), None)
+        (followup_kind(repo, &id, &wt, base_ref, p)?.to_string(), None)
     } else {
         prev = None;
         first_kind(repo, t, base_ref)?
@@ -644,17 +646,33 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
     save(repo, t)
 }
 
-/// The kind of a round after one with a verdict: "rebased" when that round approved and
-/// the branch has been rebased since (its base moved), so there are no findings to
-/// check, only the fit onto the new base; "followup" otherwise.
-fn followup_kind(wt: &str, base_ref: &str, prev: &Obj) -> Res<&'static str> {
+/// The kind of a round after one with a verdict: "rebased" when that round approved,
+/// the branch has been rebased since (its base moved) and nothing but a rebase sent it
+/// back to work, so there are no findings to check, only the fit onto the new base;
+/// "followup" otherwise (the person or the PR asked for more, say).
+fn followup_kind(repo: &Repo, id: &str, wt: &str, base_ref: &str, prev: &Obj) -> Res<&'static str> {
     let base = s(prev, "base");
     let moved = !base.is_empty() && merge_base(wt, base_ref)?.as_deref() != Some(base);
-    Ok(if s(prev, "verdict") == "approved" && moved {
+    let only_rebased =
+        || bullpen_core::timeline::read(&repo.dir, id).is_some_and(|events| only_rebase_since_approval(&events));
+    Ok(if s(prev, "verdict") == "approved" && moved && only_rebased() {
         "rebased"
     } else {
         "followup"
     })
+}
+
+/// Whether every send-back to work since the task's last approval was for a rebase (or
+/// the usage limit, which only continues the same work), as its timeline says.
+pub fn only_rebase_since_approval(events: &[Obj]) -> bool {
+    let approved = |e: &Obj| s(e, "event") == "review_finished" && s(e, "verdict") == "approved";
+    let Some(at) = events.iter().rposition(approved) else {
+        return false;
+    };
+    events[at + 1..]
+        .iter()
+        .filter(|e| s(e, "event") == "status")
+        .all(|e| matches!(s(e, "back"), "" | "rebase" | "limit"))
 }
 
 /// " of 2" for the header of a reviewer's brief, or "" when the round is past the
