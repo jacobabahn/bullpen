@@ -14,6 +14,14 @@ to accept once review approves, or after the last round with the open findings
 listed. `bullpen config --review off` skips review; `bullpen config --review-rounds 3`
 sets the rounds, and `reviewer` in the repo's `config.json` the reviewer's command.
 
+The reviewer's verdict file has two parts: `## Findings`, what must change (or, for
+an approval, what it checked), and an optional `## Notes`, things it saw that aren't
+worth another round (a small defect outside the brief, a stale rule, a follow-up
+worth a task). Notes go to the coordinator, not the worker: the ready and
+auto-accepted news say "approved by review with 2 notes", and `bullpen show BP-3`
+prints them. When a round asks for changes, the worker is told its notes aren't for
+it, and the next round's reviewer gets the findings without them.
+
 Review costs only what it has to:
 
 - **The first round** is a full review on the reviewer model (`--reviewer-model`):

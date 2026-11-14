@@ -564,7 +564,14 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
             Some(f) if Path::new(f).is_file() => read_text(Path::new(f))?.trim().to_string(),
             _ => "(none)".into(),
         };
-        let said = if s(prev, "verdict") == "approved" {
+        let approved = s(prev, "verdict") == "approved";
+        // a round that asked for changes: its notes went to the coordinator, not to be fixed
+        let findings = if approved {
+            findings
+        } else {
+            crate::notes::without_notes(&findings)
+        };
+        let said = if approved {
             "approved the change. Its notes"
         } else {
             "asked for changes. Its findings"

@@ -33,9 +33,16 @@ The worker's brief: `{brief}`
 
 ## Your verdict
 
-Write your findings to a file outside the worktree: one short paragraph per
-finding, each saying what is wrong, where (file and line), and what would fix
-it. For an approval, two or three sentences on what you checked. Then run one of
+Write your verdict to a file outside the worktree, in two parts:
+
+- `## Findings`: what must change before this merges. One short paragraph each:
+  what is wrong, where (file and line), and what would fix it. For an approval,
+  two or three sentences on what you checked and how.
+- `## Notes` (leave out if none): things you saw that aren't worth another round:
+  a small defect outside the brief, a stale comment or rule, a follow-up worth a
+  task. One line each. These go to the coordinator, not back to the worker.
+
+Then run one of
 
     {bin} verdict {id} approve --summary-file <that file>
     {bin} verdict {id} changes --summary-file <that file>

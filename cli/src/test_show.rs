@@ -108,3 +108,12 @@ fn test_next_says_what_you_can_do_now() {
     assert!(n(json!({"status": "stopped"})).contains("`bullpen resume BP-4`"));
     assert_eq!(n(json!({"status": "done"})), "nothing: it's closed");
 }
+
+#[test]
+fn notes_are_indented_under_their_label() {
+    let notes = "- one thing\n  goes on\n\n- another";
+    assert_eq!(
+        notes_lines(notes),
+        "    notes: - one thing\n             goes on\n\n           - another"
+    );
+}

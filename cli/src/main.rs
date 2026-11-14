@@ -29,6 +29,7 @@ mod limit;
 mod line_edit;
 mod modes;
 mod news;
+mod notes;
 mod notifications;
 mod overlap;
 mod panes;

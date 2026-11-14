@@ -104,6 +104,18 @@ class AcceptTest(BullpenTest):
         self.assertIn("bullpen · BP-1 approved by review and auto-accepted (merged PR #7, rebase)",
                       self.news_lines())
 
+    def test_auto_accept_says_the_reviewers_notes(self):
+        self.bp("up")
+        self.bp("config", "--auto-accept", "on")
+        tid = self.bp("add", "Fix the thing", "--brief", "Make it work.").stdout.strip()
+        self.bp("start", tid)
+        self.commit_and_ready(tid)
+        self.verdict(tid, "approve", "## Findings\n\nChecked it.\n\n## Notes\n\n- A stale rule in docs.\n")
+        self.assertEqual(self.show(tid)["status"], "done")
+        self.assertIn("bullpen · BP-1 approved by review with 1 note and auto-accepted (merged PR #7, rebase)",
+                      self.news_lines())
+        self.assertIn("    notes: - A stale rule in docs.", self.bp("show", tid).stdout)
+
     def test_auto_accept_notifies_with_notify_all(self):
         read = self.terminal("blk2")  # the board: the worker's pane closes on accept
         self.bp("config", "--notify", "all")

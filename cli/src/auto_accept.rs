@@ -11,6 +11,7 @@ use crate::agents::pane;
 use crate::args::{pos, Arg, Args, Nargs};
 use crate::jobs::{background, Job};
 use crate::news::{ready_news, say};
+use crate::notes::with_notes;
 use crate::ready::{summary_text, SUMMARY, SUMMARY_FILE};
 use crate::review::{remove_scratch, review_kind, rounds};
 use crate::rex::close_last;
@@ -95,10 +96,14 @@ pub fn cmd_verdict(argv: &[String]) -> Res<i32> {
             };
             let mut plain = r.clone();
             plain.insert("why".into(), Value::Null);
+            let notes = with_notes(&t);
             let said = if rebase {
-                "a rebase check approved the conflict resolution".to_string()
+                format!("a rebase check approved the conflict resolution{notes}")
             } else {
-                format!("approved by {}{why}", review_kind(&plain))
+                match (why.is_empty(), notes.is_empty()) {
+                    (false, false) => format!("approved by {}{why},{notes}", review_kind(&plain)),
+                    _ => format!("approved by {}{notes}{why}", review_kind(&plain)),
+                }
             };
             let done = t.get("commits").and_then(Value::as_i64).unwrap_or(0);
             ready_news(&repo, &mut t, &[commits(done), pr, said], "", false)?;
@@ -111,9 +116,13 @@ pub fn cmd_verdict(argv: &[String]) -> Res<i32> {
         } else {
             format!("The reviewer asked for changes (review round {n} of {rounds})")
         };
+        let fix = match crate::notes::notes_of(&text) {
+            Some(_) => "fix the findings you agree with (its Notes are for the coordinator, not you)",
+            None => "fix what you agree with",
+        };
         let msg = format!(
-            "{said}. Read {findings}, fix what you agree with, commit, and run your ready command again. If you \
-             disagree with a finding, say why in your ready summary."
+            "{said}. Read {findings}, {fix}, commit, and run your ready command again. If you disagree with a \
+             finding, say why in your ready summary."
         );
         if let Some(Value::Object(gh)) = t.get_mut("gh").filter(|v| truthy(Some(v))) {
             gh.shift_remove("sent"); // it's the review it is fixing now, not GitHub
@@ -180,7 +189,10 @@ pub fn cmd_auto_accept(argv: &[String]) -> Res<i32> {
 /// they pass. Anything that stops it leaves the task ready, with news.
 fn accept_approved(repo: &Repo, t: &mut Obj) -> Res<()> {
     if truthy(t.get("pr")) && !truthy(t.get("local")) {
-        let facts = [pr_short(&py_str(&t["pr"])), "approved by review".to_string()];
+        let facts = [
+            pr_short(&py_str(&t["pr"])),
+            format!("approved by review{}", with_notes(t)),
+        ];
         match pr_checks_now(repo, t)? {
             "failing" => {
                 refused(repo, t, "checks", "its PR's checks are failing");
@@ -240,7 +252,7 @@ pub fn run_auto_accept(repo: &Repo, t: &mut Obj) -> Res<()> {
     let mut t = repo.task(s(t, "id"))?;
     t.shift_remove("auto_wait");
     write_obj(&repo.task_path(s(&t, "id")), &t)?;
-    let facts = [where_(&t), "approved by review".to_string()];
+    let facts = [where_(&t), format!("approved by review{}", with_notes(&t))];
     let conflict = base_conflict(repo, &t)?;
     refused(repo, &t, if conflict.is_some() { "conflict" } else { "other" }, &e.0);
     let Some((base_ref, files, shown)) = conflict else {
@@ -271,7 +283,10 @@ pub fn run_auto_accept(repo: &Repo, t: &mut Obj) -> Res<()> {
         Ok(failed) => failed,
         Err(e) => Some(clip(&e.0, 160)),
     };
-    let line = format!("{id} approved by review, but the auto-accept was refused: it conflicts with {base} in {names}");
+    let line = format!(
+        "{id} approved by review{}, but the auto-accept was refused: it conflicts with {base} in {names}",
+        with_notes(&t)
+    );
     match failed {
         None => {
             let line = format!(

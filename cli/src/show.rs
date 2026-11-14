@@ -300,6 +300,9 @@ pub fn cmd_show(argv: &[String]) -> Res<i32> {
     if let Some(line) = review_line(&t) {
         out.push(line);
     }
+    if let Some(notes) = crate::notes::review_notes(&t) {
+        out.push(notes_lines(&notes));
+    }
     for name in ["setup", "teardown"] {
         let log = repo.dir.join("briefs").join(format!("{}.{name}.log", s(&t, "id")));
         if log.exists() {
@@ -354,6 +357,20 @@ fn review_line(t: &Obj) -> Option<String> {
         "   review: round {round} ({}{model}), {state}{findings}",
         review_kind(r)
     ))
+}
+
+/// "    notes: - ..." with the reviewer's notes under it, indented to the column.
+fn notes_lines(notes: &str) -> String {
+    let lines: Vec<String> = notes
+        .lines()
+        .enumerate()
+        .map(|(i, l)| match (i, l.trim().is_empty()) {
+            (0, _) => format!("    notes: {l}"),
+            (_, true) => String::new(),
+            _ => format!("{}{l}", " ".repeat(11)),
+        })
+        .collect();
+    lines.join("\n")
 }
 
 /// What you can do with the task now: the commands, with the board's keys.

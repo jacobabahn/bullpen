@@ -237,6 +237,7 @@ arrive like one of the person's messages:
 
 ```
 bullpen · BP-3 is ready: Fix login redirect (2 commits, PR #12, approved by full review)
+bullpen · BP-10 is ready: Add a --json flag (1 commit, PR #14, approved by full review with 2 notes)
 bullpen · BP-3 is ready again after a rebase: Fix login redirect (2 commits, PR #12, its approval carried over: only the base moved)
 bullpen · BP-4 is ready again after a rebase: Tidy the README (1 commit, PR #13, a rebase check approved the conflict resolution)
 bullpen · BP-8 is ready: Tidy the README (1 commit)
@@ -311,6 +312,9 @@ bullpen · Your coordinator guide changed (section: News). Read the change below
 - Ready: tell the person in one or two lines what it did and what review said
   (`bullpen show <ID>` has the summary; findings are in the review files it
   names), and that it waits for their accept: `a` on the board, or ask you.
+  "approved by review with 2 notes": the reviewer saw things not worth another
+  round (`bullpen show <ID>` prints them). Pass them on in a line, and offer a
+  task for one worth fixing.
 - Finished (nothing to merge): tell the person in a line or two what it did and
   where the result is (`bullpen show <ID>` has the whole summary), and that it
   waits for them to close it: `a` on the board, or ask you. Closed by
@@ -320,7 +324,8 @@ bullpen · Your coordinator guide changed (section: News). Read the change below
   (triage): `bullpen resume` it. Merged or closed outside bullpen: tell
   the person, and run the `accept` or `drop` only if they ask.
 - Auto-accepted: approved by review and merged by bullpen, because the person
-  turned auto-accept on. Tell them in a line what landed; nothing to do. Waiting
+  turned auto-accept on. Tell them in a line what landed; nothing to do, unless
+  it says "with 2 notes": pass those on the same way as for Ready. Waiting
   on its PR's checks: nothing to do, it accepts once they pass. Not
   auto-accepted (checks failed, new comments): the usual news for those follows.
 - Auto-accept refused for a conflict with its base: bullpen sends it back to its

@@ -467,3 +467,59 @@ class ReviewTest(BullpenTest):
                 break
             time.sleep(0.1)
         self.assertEqual(self.show(tid)["status"], "done")
+
+
+NOTES = ("## Findings\n\nRan the parser tests; the empty case is covered.\n\n"
+         "## Notes\n\n- `docs/x.md` still names the old flag.\n- The retry loop deserves its own task.\n")
+
+
+class NotesTest(BullpenTest):
+    """A reviewer's `## Notes`: to the coordinator, never to the worker as findings."""
+
+    def review_prompt(self, tid, n):
+        return next((self.tmp / "state").rglob(f"{tid}.review-{n}.md")).read_text()
+
+    def test_the_reviewer_is_told_where_notes_go(self):
+        tid = self.start_task()
+        self.commit_and_ready(tid)
+        prompt = self.review_prompt(tid, 1)
+        self.assertIn("- `## Notes` (leave out if none)", prompt)
+        self.assertIn("These go to the coordinator, not back to the worker.", prompt)
+
+    def test_an_approval_with_notes_says_how_many_and_show_prints_them(self):
+        tid = self.start_task()
+        self.commit_and_ready(tid)
+        self.verdict(tid, "approve", NOTES)
+        self.assertEqual(self.news()[-1], "bullpen · BP-1 is ready: Fix the thing (1 commit, PR #7, "
+                                          "approved by light review: 1 line in 1 file, with 2 notes)")
+        out = self.bp("show", tid).stdout
+        self.assertIn("    notes: - `docs/x.md` still names the old flag.\n"
+                      "           - The retry loop deserves its own task.\n", out)
+
+    def test_an_approval_without_notes_says_nothing_of_them(self):
+        tid = self.start_task()
+        self.commit_and_ready(tid)
+        self.verdict(tid, "approve", "## Findings\n\nChecked it.\n\n## Notes\n\nNone.\n")
+        self.assertEqual(self.news()[-1], "bullpen · BP-1 is ready: Fix the thing (1 commit, PR #7, "
+                                          "approved by light review: 1 line in 1 file)")
+        self.assertNotIn("notes:", self.bp("show", tid).stdout)
+
+    def test_changes_keep_the_notes_from_the_worker_and_the_next_round(self):
+        tid = self.start_task()
+        self.bp("review-mode", tid, "full")
+        self.commit_and_ready(tid)
+        found = "## Findings\n\nfix1.txt misses the empty case.\n\n## Notes\n\n- An old comment in core.\n"
+        self.verdict(tid, "changes", found)
+        told = [l for b, l in self.typed() if b == self.block(tid)][-1]
+        self.assertIn("fix the findings you agree with (its Notes are for the coordinator, not you)", told)
+        self.commit_and_ready(tid, 2)
+        prompt = self.review_prompt(tid, 2)
+        self.assertIn("fix1.txt misses the empty case.", prompt)
+        self.assertNotIn("An old comment in core.", prompt)
+
+    def test_changes_without_notes_say_it_as_before(self):
+        tid = self.start_task()
+        self.commit_and_ready(tid)
+        self.verdict(tid, "changes", "fix1.txt misses the empty case.")
+        told = [l for b, l in self.typed() if b == self.block(tid)][-1]
+        self.assertIn("findings.md, fix what you agree with, commit", told)
