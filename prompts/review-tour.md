@@ -21,8 +21,7 @@ again.
    reason sound? A comment left as it was without a good reason still stands:
    say which, and why.
 2. Is what changed since the comments correct, and did it break anything
-   around it? Run only the tests you need to check that, never the whole suite:
-   the worker ran it before `ready`.
+   around it?
 
 Only report findings that matter. If every comment is addressed and nothing
 broke, approve.

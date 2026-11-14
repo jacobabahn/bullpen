@@ -5,7 +5,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from support import setUpModule, tearDownModule, sh, BullpenTest  # a temp folder for each module
+from support import setUpModule, tearDownModule, sh, BullpenTest, BULLPEN  # a temp folder for each module
 
 
 class ReviewTest(BullpenTest):
@@ -169,6 +169,31 @@ class ReviewTest(BullpenTest):
         r = self.show(tid)["review"]
         self.assertEqual((r["round"], r["kind"]), (2, "followup"))
         self.assertIn("x should be 2.", self.review_prompt(tid, 2))
+
+    def test_the_reviewer_gets_a_scratch_folder_the_checkout_and_the_suite_rule_once(self):
+        tid = self.start_task()
+        wt = self.show(tid)["worktree"]
+        self.commit_file(tid, "fix.py", "x = 1\n")
+        self.ready(tid)
+        scratch = Path(self.show(tid)["review"]["scratch"])
+        self.assertTrue(scratch.is_dir())
+        self.assertFalse(scratch.is_relative_to(wt))
+        for n, v in ((1, "changes"), (2, "approve")):
+            prompt = self.review_prompt(tid, n)
+            self.assertNotIn("{", prompt.replace("{}", ""))  # every placeholder filled
+            self.assertIn(f"Your own files go in\n  `{scratch}`", prompt)
+            self.assertIn(f"don't run anything against `{Path(BULLPEN).parent.parent}`", prompt)
+            self.assertIn(f"`cd {wt}` first", prompt)
+            self.assertEqual(prompt.count("suite"), 2)  # the one rule: "a whole suite", "the full suite"
+            (scratch / "notes.md").write_text("mine\n")
+            self.verdict(tid, v, "x should be 2.")
+            self.assertFalse(scratch.exists())  # the findings are copied; its own files go
+            if n == 1:
+                self.commit_file(tid, "fix.py", "x = 2\n")
+                self.ready(tid)
+                self.assertTrue(scratch.is_dir())  # a new round, a new one
+        for kind in ("full", "light", "followup", "tour", "rebase"):
+            self.assertNotIn("suite", (Path(BULLPEN).parent.parent / "prompts" / f"review-{kind}.md").read_text())
 
     def test_a_replaced_reviewer_keeps_its_rounds_kind(self):
         self.set_commands(review_rounds=3)

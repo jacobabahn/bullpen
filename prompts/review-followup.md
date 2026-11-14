@@ -20,8 +20,7 @@ nothing nearby. It isn't to review the whole change again: the code round
 1. Is each finding fixed? Where the worker disagrees in its summary, is its
    reason sound? A finding left as it was without a good reason still stands.
 2. Is what changed since round {prev_round} correct, and did it break anything
-   around it? Run only the tests you need to check that, never the whole suite:
-   the worker ran it before `ready`.
+   around it?
 
 Only report findings that matter: something wrong, missing or risky. Skip taste
 and nits. If you find nothing that matters, approve.

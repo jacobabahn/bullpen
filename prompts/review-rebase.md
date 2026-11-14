@@ -31,6 +31,5 @@ How the commits changed in the rebase (`{since}`):
 2. Did the resolution change anything beyond fitting the task's change onto the
    new base? It shouldn't.
 
-Don't review the rest of the change: round {prev_round} approved it. Run only a
-test you need to check a claim, never the whole suite. If the resolution is right,
-approve.
+Don't review the rest of the change: round {prev_round} approved it. If the
+resolution is right, approve.

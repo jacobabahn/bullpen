@@ -23,7 +23,7 @@ use crate::rules::task_rules;
 use crate::saves::save;
 use crate::start::launch::py_format;
 use bullpen_core::json::{get, obj, py_str, s, truthy, Obj};
-use bullpen_core::paths::{prompts, self_bin};
+use bullpen_core::paths::{home, prompts, self_bin};
 use bullpen_core::proc::{git, head, merge_base, resolve, run_input};
 use bullpen_core::repo::{index_block, repo_root, unindex_block};
 use bullpen_core::task::{auto_accepts, commits, is_closed, is_status, set_status, where_, with_model};
@@ -493,6 +493,8 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
     let id = s(t, "id").to_string();
     let briefs = repo.dir.join("briefs");
     let wt = s(t, "worktree").to_string();
+    let scratch = scratch_dir(repo, &id);
+    std::fs::create_dir_all(&scratch)?;
     // the round the next one follows up on: the last one with a verdict
     let mut prev: Option<Obj> = if truthy(old.get("verdict")) {
         let keys = ["round", "commit", "base", "findings", "verdict"];
@@ -528,6 +530,8 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
         ("branch", py_str(t.get("branch").unwrap_or(&Value::Null))),
         ("base_ref", base_ref.into()),
         ("bin", self_bin().display().to_string()),
+        ("scratch", scratch.display().to_string()),
+        ("root", home().display().to_string()),
         ("summary", summary),
         ("rules", review_rules(repo, t)?),
         ("why", why.clone().unwrap_or_default()),
@@ -622,6 +626,7 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
     r.insert("why".into(), json!(why));
     r.insert("model".into(), json!(model));
     r.insert("prev".into(), prev.map_or(Value::Null, Value::Object));
+    r.insert("scratch".into(), json!(scratch.display().to_string()));
     if let Some(sent) = &sent {
         r.insert("tour".into(), sent.get("n").cloned().unwrap_or(Value::Null));
     }
@@ -648,8 +653,24 @@ fn review_rules(repo: &Repo, t: &Obj) -> Res<String> {
     ))
 }
 
-/// Close the task's reviewer pane, if it has one.
+/// The folder a task's reviewer keeps its own files in, outside the worktree.
+pub fn scratch_dir(repo: &Repo, id: &str) -> std::path::PathBuf {
+    repo.dir.join("scratch").join(format!("{id}-review"))
+}
+
+/// Remove the review's scratch folder, if it made one (only a folder in a `scratch` folder).
+pub fn remove_scratch(r: &Obj) -> Res<()> {
+    let dir = Path::new(s(r, "scratch"));
+    let ours = dir.parent().and_then(Path::file_name).is_some_and(|n| n == "scratch");
+    if ours && dir.is_dir() {
+        std::fs::remove_dir_all(dir)?;
+    }
+    Ok(())
+}
+
+/// Close the task's reviewer pane, if it has one, and remove its scratch folder.
 pub fn close_reviewer(t: &mut Obj) -> Res<()> {
+    remove_scratch(obj(t, "review"))?;
     let block = s(obj(t, "review"), "block").to_string();
     if !truthy(obj(t, "review").get("block")) {
         return Ok(());

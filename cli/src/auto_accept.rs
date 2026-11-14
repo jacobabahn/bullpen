@@ -12,7 +12,7 @@ use crate::args::{pos, Arg, Args, Nargs};
 use crate::jobs::{background, Job};
 use crate::news::{ready_news, say};
 use crate::ready::{summary_text, SUMMARY, SUMMARY_FILE};
-use crate::review::{review_kind, rounds};
+use crate::review::{remove_scratch, review_kind, rounds};
 use crate::rex::close_last;
 use crate::saves::save;
 use crate::start::launch::hand_back;
@@ -67,6 +67,7 @@ pub fn cmd_verdict(argv: &[String]) -> Res<i32> {
     let findings = repo.dir.join("briefs").join(name);
     std::fs::write(&findings, format!("{text}\n"))?;
     let findings = findings.display().to_string();
+    remove_scratch(&r)?; // the findings are copied: the reviewer's own files can go
     let rounds = rounds(&repo);
     let reviewer = pane(&t, "reviewer");
     unindex_block(s(&r, "block"))?;

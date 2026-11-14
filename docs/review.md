@@ -4,8 +4,11 @@ When a worker runs `ready`, bullpen pushes its branch, opens the PR and starts a
 reviewer agent on it, in the background (`bullpen: BP-3 review`, in no tab; `go BP-3
 --review` or the board shows it, and `bullpen config --reviewers` puts reviewers in
 capsules or tabs instead: see [Where panes live](settings.md#where-panes-live)). The reviewer
-reads the brief and the diff, runs the tests, changes nothing, and ends with
-`bullpen verdict BP-3 approve` or `changes`. Changes go back to the worker,
+reads the brief and the diff, runs the tests that check a claim (never a whole
+suite: the worker's summary should say it passed), changes nothing, and ends with
+`bullpen verdict BP-3 approve` or `changes`, run from the worktree. Its own files go
+in a scratch folder bullpen makes for it (`scratch/BP-3-review` in the repo's state
+folder) and removes at the verdict or when the reviewer closes. Changes go back to the worker,
 which fixes them and runs `ready` again, for up to 2 rounds. The task is ready
 to accept once review approves, or after the last round with the open findings
 listed. `bullpen config --review off` skips review; `bullpen config --review-rounds 3`
