@@ -2,6 +2,7 @@
 the board's tables say what the board does."""
 
 import re
+import subprocess
 import unittest
 
 from support import setUpModule, tearDownModule, ROOT  # a temp folder for each module
@@ -26,7 +27,33 @@ def links(path):
         yield text.count("\n", 0, m.start()) + 1, m.group(1)
 
 
+def rules_paths(text):
+    """Each path named in backticks: a word with a slash or a file's extension, not a
+    placeholder (`<name>`), nor outside the repo (`~/...`)."""
+    for span in re.findall(r"`([^`\n]+)`", text):
+        for word in span.split():
+            if "<" in word or word.startswith(("~", "-")):
+                continue
+            if "/" in word or re.fullmatch(r"[\w.-]+\.(md|rs|py|lua|toml|sh|json)", word):
+                yield word
+
+
 class DocsTest(unittest.TestCase):
+    def test_every_path_in_the_rules_exists(self):
+        # .bullpen/rules.md goes into every brief and review: a path it names that's gone
+        # sends every agent looking for it. target/ is the build's, made by tests/run.py.
+        tracked = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True,
+                                 check=True).stdout.split()
+        named = list(rules_paths((ROOT / ".bullpen" / "rules.md").read_text()))
+        self.assertGreater(len(named), 10)
+        missing = [p for p in named if p != "target/"
+                   and not any(t == p.rstrip("/") or t.startswith(p.rstrip("/") + "/") for t in tracked)]
+        self.assertEqual(missing, [])
+
+    def test_a_stale_path_in_the_rules_is_caught(self):
+        text = "- run by `bin/bullpen-py`, `bin/bullpen-cargo test <name>`, `test_<module>.rs`, `~/dev/x`, `rex`/`gh`"
+        self.assertEqual(list(rules_paths(text)), ["bin/bullpen-py", "bin/bullpen-cargo"])
+
     def test_every_link_and_anchor_resolves(self):
         pages = [ROOT / "README.md", ROOT / "GLOSSARY.md", *sorted((ROOT / "docs").rglob("*.md"))]
         broken, checked = [], 0

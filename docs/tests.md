@@ -6,7 +6,7 @@ python3 tests/run.py -j 8             # on 8 processes instead
 python3 tests/run.py tour local_mode  # only tests whose module, class or name has one of these
 python3 tests/run.py --slowest 20     # and list the 20 slowest
 python3 -m unittest discover -s tests # the same tests one at a time: about 9 minutes (build first)
-cargo test --workspace                # the Rust tests: core's, the command line's and the board's
+bin/bullpen-cargo test --workspace    # the Rust tests: core's, the command line's and the board's
 ```
 
 The tests run `bin/bullpen`, which runs the Rust build (`target/bullpen`). So
@@ -26,8 +26,9 @@ every CPU, and give way when anything else wants one.
 
 There's a module per area (`tests/test_tour.py`, `tests/test_news.py`, ...); what they
 share is in `tests/support.py`. Run the tests for what you're changing while you work,
-and the whole suite once before `ready`. Reviewers run only the tests that check a
-claim, never the whole suite.
+and the full suite once, right before `ready`: `python3 tests/run.py` plus
+`bin/bullpen-cargo test --workspace` (plain `cargo` isn't on an agent's PATH; see
+docs/rebuilds.md). Reviewers run only the tests that check a claim, never a whole suite.
 
 The tests use fake `rex` and `gh` programs and a local bare repository as origin, and
 run `bin/bullpen` as you do. A test of a function on its own is a Rust test, beside
