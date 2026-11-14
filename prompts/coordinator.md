@@ -102,7 +102,8 @@ commit, the same patch, or the same own lines after a rebase: "only the base
 moved"): the news says so, and there's no new round. After a rebase that
 conflicted, a change only in the conflicting files gets a rebase check of the
 resolution (cheap, not a round): "a rebase check approved the conflict
-resolution". Conflicts where both sides only added lines to a doc or test file,
+resolution"; a bigger change after the rebase gets a review after a rebase, which
+checks only that it still fits. Conflicts where both sides only added lines to a doc or test file,
 bullpen resolves itself by keeping both.
 
 A task whose result lives outside the repository (a video, research notes, an

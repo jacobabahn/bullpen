@@ -59,6 +59,7 @@ fn detail_says_which_kind_of_review() {
     assert_eq!(detail(&review("followup")), "Follow-up review on round 1 of 2.");
     assert_eq!(detail(&review("tour")), "Review of your comments on round 1 of 2.");
     assert_eq!(detail(&review("rebase")), "Rebase check on round 1 of 2.");
+    assert_eq!(detail(&review("rebased")), "Review after a rebase on round 1 of 2.");
     let ready = |k: &str| task("BP-1", "ready").with(json!({"pr": "https://x/pull/4", "review": approved(Some(k))}));
     assert_eq!(detail(&ready("full")), "PR #4, approved by full review.");
     assert_eq!(detail(&ready("light")), "PR #4, approved by light review.");

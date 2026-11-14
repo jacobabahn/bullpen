@@ -64,6 +64,15 @@ fn review_kind_in_words() {
         "review of the person's comments"
     );
     assert_eq!(review_kind(&r(json!({"kind": "rebase"}))), "rebase check");
+    assert_eq!(review_kind(&r(json!({"kind": "rebased"}))), "review after a rebase");
+}
+
+#[test]
+fn the_header_says_of_how_many_rounds_only_for_a_counted_round_within_the_limit() {
+    assert_eq!(of_rounds(2, 2, "followup"), " of 2");
+    assert_eq!(of_rounds(3, 2, "rebased"), "");
+    assert_eq!(of_rounds(1, 2, "rebase"), "");
+    assert_eq!(of_rounds(1, 2, "tour"), "");
 }
 
 #[test]

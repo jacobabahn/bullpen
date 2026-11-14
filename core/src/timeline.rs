@@ -10,7 +10,8 @@
 //!                    was sent back to work: review, rebase, person, pr, limit); outcome
 //!                    for a done one (accepted, closed, kept)
 //!   turn_ended       its worker ended a turn
-//!   review_started   a reviewer started: round, kind (full, light, followup, rebase, tour)
+//!   review_started   a reviewer started: round, kind (full, light, followup, rebase,
+//!                    rebased, tour)
 //!   review_finished  a reviewer gave its verdict: round, kind, verdict
 //!   accept_refused   an auto-accept didn't merge it: reason (conflict, checks, comments, other), why
 //!

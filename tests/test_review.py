@@ -323,7 +323,7 @@ class ReviewTest(BullpenTest):
         r = self.show("BP-2")["review"]
         self.assertEqual((r["round"], r["kind"], r["model"], r["rebase"]), (1, "rebase", "sonnet", ["list.txt"]))
         prompt = self.review_prompt("BP-2", "1.rebase")
-        self.assertIn("round 1 of 2 (rebase check)", prompt)
+        self.assertIn("round 1 (rebase check)", prompt)  # not a round: no "of 2"
         self.assertIn("This is a rebase check", prompt)
         self.assertIn("conflicts were resolved", prompt)
         self.assertIn("<<<<<<<", prompt)  # the conflicts as the rebase met them
@@ -348,13 +348,35 @@ class ReviewTest(BullpenTest):
         r = self.show("BP-2")["review"]
         self.assertEqual((r["round"], r["kind"]), (2, "followup"))
 
-    def test_after_accept_a_worker_that_changed_more_than_the_conflict_gets_a_follow_up(self):
+    def test_after_accept_a_worker_that_changed_more_than_the_conflict_gets_a_review_after_a_rebase(self):
         self.base_file("list.txt", "a\nb\n")
         wt = self.two_approved("list.txt", "a\nb\nc\n", "a\nb\nd\n")
         self.resolve(wt, {"list.txt": "a\nb\nc\nd\n"}, more="other.txt")
-        self.assertIn("A reviewer checks it now (follow-up review)", self.ready("BP-2").stdout)
+        self.assertIn("A reviewer checks it now (review after a rebase)", self.ready("BP-2").stdout)
         r = self.show("BP-2")["review"]
-        self.assertEqual((r["round"], r["kind"]), (2, "followup"))
+        self.assertEqual((r["round"], r["kind"], r["model"]), (2, "rebased", "sonnet"))
+        prompt = self.review_prompt("BP-2", 2)
+        self.assertIn("# BP-2 review, round 2 of 2 (review after a rebase): Second", prompt)
+        self.assertIn("Round 1 approved this change", prompt)
+        self.assertIn("rebased onto `origin/main`", prompt)
+        self.assertIn("Change other.txt", prompt)  # what changed since round 1 looked
+        self.assertNotIn("finding is fixed", prompt)
+        self.verdict("BP-2", "approve")
+        self.assertIn("approved by review after a rebase", self.news()[-1])
+
+    def test_a_round_past_the_limit_doesnt_say_of_how_many(self):
+        self.bp("config", "--review-rounds", "1")
+        self.base_file("list.txt", "a\nb\n")
+        wt = self.two_approved("list.txt", "a\nb\nc\n", "a\nb\nd\n")
+        self.resolve(wt, {"list.txt": "a\nb\nc\nd\n"}, more="other.txt")
+        self.ready("BP-2")
+        self.assertIn("# BP-2 review, round 2 (review after a rebase): Second", self.review_prompt("BP-2", 2))
+
+    def test_a_change_after_an_approval_without_a_rebase_is_a_follow_up(self):
+        tid = self.approved_task()
+        self.commit_file(tid, "fix1.txt", "fixed better\n")
+        self.ready(tid)
+        self.assertEqual(self.show(tid)["review"]["kind"], "followup")
 
     def test_after_accept_both_sides_adding_to_a_doc_are_kept_by_bullpen(self):
         self.base_file("docs/notes.md", "# Notes\n\nOne\n=======\n")

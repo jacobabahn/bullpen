@@ -181,6 +181,7 @@ fn review_kind(r: &Obj) -> String {
         "followup" => "follow-up review",
         "tour" => "review of the person's comments",
         "rebase" => "rebase check",
+        "rebased" => "review after a rebase",
         other => other,
     };
     match get(r, "why").filter(|v| truthy(Some(v))) {

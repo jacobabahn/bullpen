@@ -127,7 +127,7 @@ one back: the files it conflicts in, and to rebase onto its base, fix the
 conflicts, rerun the tests, commit and run `ready` again (resumed in a new pane if
 its pane is gone). The conflicts are noted on its review, so that `ready` gets the
 usual follow-up: its approval carried over, a rebase check of the resolution, or a
-follow-up review ([Review](review.md)), then the auto-accept again. The board says
+review after a rebase ([Review](review.md)), then the auto-accept again. The board says
 "Approved, rebasing onto main: its branch conflicted.", and the news:
 `BP-3 approved by review, but the auto-accept was refused: it conflicts with main
 in README.md. Sent back to its worker to rebase (trip 1 of 3)`.

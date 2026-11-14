@@ -48,9 +48,19 @@ Review costs only what it has to:
   change now and the range-diff, asking whether the resolution is right and keeps
   both sides. It doesn't count as a round. Its approval says `a rebase check
   approved the conflict resolution`; if it asks for changes, they go back to the
-  worker, and the next `ready` is a follow-up round. Own lines that changed
-  anywhere else (the worker changed more than the resolution) get a follow-up
-  review, as any change does.
+  worker, and the next `ready` is a follow-up round.
+- **A review after a rebase.** When the last round approved and the branch has
+  been rebased since (its base moved), but the worker changed more than a rebase
+  check covers (own lines changed outside the conflicting files, or a clean rebase
+  the worker then fixed up), the round is a **review after a rebase**: a
+  follow-up round with no findings to check, so it asks only whether what changed
+  since the approval just fits the change onto the new base, and whether that is
+  correct. It counts as a round. Without a rebase, a change after an approval
+  gets a follow-up review.
+
+A reviewer's brief is headed with its round and kind, `# BP-3 review, round 2 of 2
+(follow-up review)`; a rebase check or a tour's review, which don't count as rounds,
+and a round past the limit leave out the "of 2".
 
 The board, `show` and the ready news say which kind of review it was ("approved by
 light review (12 lines in 1 file)").

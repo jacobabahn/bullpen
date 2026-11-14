@@ -25,7 +25,8 @@ bullpen stats BP-3 --json       # as JSON, for a coordinator or a script (both f
   - waiting for the coordinator: its worker ended its turn without `ready`
   - stalled: a stop the coordinator sees to (its turn failed, its pane closed or was lost, a message that didn't reach it, the usage limit), or stopped
   - queued: added and not started yet
-- **Review rounds**, and the reviews by kind (full, light, followup, rebase check, tour).
+- **Review rounds**, and the reviews by kind (full, light, followup, rebase check,
+  rebased, tour).
 - **Trips back to work**, by reason:
   - review: a reviewer asked for changes
   - rebase: it conflicted with its base

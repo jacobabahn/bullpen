@@ -14,8 +14,9 @@ The whole change, for context: `git -C {worktree} diff {base_ref}...HEAD`.
 ## What to check
 
 Your job is to confirm that each finding is fixed and that the changes broke
-nothing nearby. It isn't to review the whole change again: the code round
-{prev_round} looked at and that hasn't changed is settled.
+nothing nearby. It isn't to review the whole change again. If fixing a finding
+shows a problem in code round {prev_round} already read, say so: that is a finding
+too.
 
 1. Is each finding fixed? Where the worker disagrees in its summary, is its
    reason sound? A finding left as it was without a good reason still stands.

@@ -10,7 +10,8 @@
 //! where it changed the context, or where a conflict was resolved by keeping both
 //! sides). After a rebase that conflicted, own lines that changed only in the files that
 //! conflicted get a rebase check (a short review of the resolution, which doesn't count
-//! as a round); a change anywhere else gets a follow-up review.
+//! as a round); a change anywhere else gets a review after a rebase (rebased: only that
+//! the change still fits, as there are no findings to check).
 
 use crate::agents::{pane, running, whose_turn};
 use crate::args::{pos, Arg, Args, Nargs};
@@ -359,6 +360,7 @@ pub fn review_kind(r: &Obj) -> String {
         "followup" => "follow-up review",
         "tour" => "review of the person's comments",
         "rebase" => "rebase check",
+        "rebased" => "review after a rebase",
         other => other,
     };
     match r.get("why").filter(|w| truthy(Some(w))) {
@@ -479,7 +481,7 @@ pub fn shortstat_of(out: &str) -> Option<String> {
 /// verdict: its findings and what changed since. Comments the person sent back after a
 /// tour (tour_sent) get a review of their own, and an approved change whose own lines
 /// changed only where a rebase conflicted (rebase: those files) a rebase check of the
-/// resolution. Both keep the round they follow: they don't count toward review_rounds.
+/// resolution. A round after an approval and a rebase (rebased) checks only the fit. Both keep the round they follow: they don't count toward review_rounds.
 pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec<String>>) -> Res<()> {
     let old = obj(t, "review").clone();
     close_reviewer(t)?;
@@ -510,8 +512,8 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
         ("tour".to_string(), None)
     } else if rebase.is_some() {
         ("rebase".to_string(), None)
-    } else if prev.as_ref().is_some_and(|p| truthy(p.get("commit"))) {
-        ("followup".to_string(), None)
+    } else if let Some(p) = prev.as_ref().filter(|p| truthy(p.get("commit"))) {
+        (followup_kind(&wt, base_ref, p)?.to_string(), None)
     } else {
         prev = None;
         first_kind(repo, t, base_ref)?
@@ -525,6 +527,7 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
         ("title", s(t, "title").into()),
         ("round", n.to_string()),
         ("rounds", rounds(repo).to_string()),
+        ("of_rounds", of_rounds(n, rounds(repo), &kind)),
         ("brief", briefs.join(format!("{id}.md")).display().to_string()),
         ("worktree", wt.clone()),
         ("branch", py_str(t.get("branch").unwrap_or(&Value::Null))),
@@ -639,6 +642,28 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
     r.insert("own".into(), Value::Object(own_lines(&wt, base_ref)?));
     t.insert("review".into(), Value::Object(r));
     save(repo, t)
+}
+
+/// The kind of a round after one with a verdict: "rebased" when that round approved and
+/// the branch has been rebased since (its base moved), so there are no findings to
+/// check, only the fit onto the new base; "followup" otherwise.
+fn followup_kind(wt: &str, base_ref: &str, prev: &Obj) -> Res<&'static str> {
+    let base = s(prev, "base");
+    let moved = !base.is_empty() && merge_base(wt, base_ref)?.as_deref() != Some(base);
+    Ok(if s(prev, "verdict") == "approved" && moved {
+        "rebased"
+    } else {
+        "followup"
+    })
+}
+
+/// " of 2" for the header of a reviewer's brief, or "" when the round is past the
+/// limit or doesn't count toward it (a rebase check, a tour's review).
+pub fn of_rounds(n: i64, rounds: i64, kind: &str) -> String {
+    if matches!(kind, "rebase" | "tour") || n > rounds {
+        return String::new();
+    }
+    format!(" of {rounds}")
 }
 
 /// The rules section of a reviewer's brief, or "".

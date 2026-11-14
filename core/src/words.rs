@@ -274,6 +274,7 @@ pub fn board_kind(kind: Option<&Value>) -> Option<&'static str> {
         "followup" => "follow-up review",
         "tour" => "review of your comments",
         "rebase" => "rebase check",
+        "rebased" => "review after a rebase",
         _ => return None,
     })
 }
