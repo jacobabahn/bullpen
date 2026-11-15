@@ -58,8 +58,15 @@ class SelfUpdateTest(unittest.TestCase):
                 self.fail(f"{what}; news: {self.news_log()}")
             time.sleep(0.05)
 
-    def assert_rebuilt_and_pushed(self, builds=2):
+    def wait_pushed(self):
+        """Wait for the background push of main to the backup to be over: git updates
+        backup/main here last, after the backup has it (a test that ended sooner would race
+        its clean-up and leave the ref behind)."""
         self.wait_for("no push", lambda: self.git("rev-parse", "main", cwd=self.backup) == self.git("rev-parse", "main"))
+        self.wait_for("push still running", lambda: self.git("rev-parse", "backup/main") == self.git("rev-parse", "main"))
+
+    def assert_rebuilt_and_pushed(self, builds=2):
+        self.wait_pushed()
         self.wait_for("no rebuild", lambda: "_t11b()" in (self.board("bullpen") or ""))
         self.settle()
         self.assertEqual(self.builds(), builds)
@@ -273,6 +280,7 @@ class SelfUpdateTest(unittest.TestCase):
         self.assertEqual({f.name: f.read_bytes() for f in self.target.iterdir() if f.is_file()}, before)  # no lock, no stamp
         self.assertIn("builds are off here", self.bp("build", ok=False).stderr)
         self.assertNotIn("rebuilding", self.bp("up").stdout)
+        self.wait_pushed()  # up catches up the push of the moved command, in the background
         self.assertEqual(self.builds(), 1)
         self.assertFalse((self.target / "build.lock").exists())
 
