@@ -113,4 +113,4 @@ Reference:
 - [docs/prd/](docs/prd/): design notes
 - [The Mojo experiment](docs/experiments/mojo.md): a partial port to Mojo and its benchmark (code on the `mojo` branch)
 - [The Rust experiment](docs/experiments/rust.md): the partial port to Rust and its benchmark that led to the full port (code on the `rust` branch)
-- [Where the test suite's time goes](docs/experiments/suite-time.md): a breakdown of the suite's 44 s, and why the fake `rex` and `gh` should move to Rust before the tests do
+- [Where the test suite's time goes](docs/experiments/suite-time.md): a breakdown of the suite's 44 s, why the fake `rex` and `gh` moved to Rust before the tests, and the 12 s after

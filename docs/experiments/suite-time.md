@@ -7,6 +7,8 @@ about 23 ms each. Rewriting only the fake `rex` and `gh` in Rust should take the
 the tests to Rust would save under 1 s more than that, for 10,000+ lines of new code.
 **Recommendation: rewrite the fakes in Rust (option 2), and leave the tests in Python.**
 
+**Done in BP-138:** the full run now takes **about 11.6 s** (see [After](#after)).
+
 Measured on 2026-11-13 at 0453a6b: Python 3.14.4, git 2.53.0, a release build of the CLI.
 Machine: AMD Ryzen 7 PRO 6850U, 8 cores with 2 threads each (16 CPUs), shared with other agents.
 
@@ -226,3 +228,57 @@ not something the shebang caused.
 
 **Not worth it for speed.** Option 2 gets almost all of the saving for about a twentieth of
 the code.
+
+## After
+
+BP-138 did option 2: the fakes are Rust, in `tests/fakes/` (about 770 lines with their
+tests and comments), and the three `test_accept.py` tests (and one in `test_stats.py`) that added
+Python to the fake `gh` drop switch files instead (`merge_refused`, `meanwhile`).
+
+Measured on 2026-11-14, on the same machine. Each timed run waited for the 1-minute load
+average to drop below 2.5 (mostly the decay of the run before); other processes used
+about 2% of the CPUs throughout (`top`). Before is the branch's base, run just before
+the change; after is the change.
+
+| Run | Before | After |
+|---|---|---|
+| full suite, `-j 16` (three runs) | 46.8, 46.8, 46.8 s | 11.6, 11.7, 11.6 s |
+| `tests/run.py review` (76 tests) | 9.2 s | 2.2 s |
+| one at a time (`python3 -m unittest discover -s tests`) | 352 s (BP-126) | 127 s |
+| CPU at `-j 16` (user + sys) | 594 CPU-s (BP-126) | 111 CPU-s |
+
+The full run is a little under the predicted 13–16 s. The prediction kept BP-126's
+8× parallel speed-up, which came with the machine saturated (two threads sharing each
+core, a lower clock): the serial run's work became 594 CPU-s at `-j 16`. Now the suite
+does less work than the machine has CPUs for, so it doesn't pay that: the `-j 16` run
+uses 111 CPU-s, about what the serial run uses (107 CPU-s), on 9.5 CPUs on average.
+
+What's left of the 11.6 s:
+
+- **Work**, about 107 CPU-s serial: `git` (about 60 s by BP-126's count), `bin/bullpen`
+  (about 22 s), the tests' own Python, and the fakes (about 10,800 calls at about 1 ms).
+- **Waits**, about 20 s serial (the serial run's wall time over its CPU time), as before.
+- **The tail.** The slowest tests are now the ones that wait: the slow fake cargo in
+  `up leaves the build running in the background` (3.2 s), triage's empty reads of a
+  terminal (2.8 s), and the tour stepper's polls (2.3 s and 1.5 s). One of these
+  starting late sets the run's end.
+
+The cheap wins in option 3 that are left are now the main ones: shorter waits in those
+tests and starting the slowest classes first (about 2–3 s together), and a fixture made
+once per process (about 1.5–2 s).
+
+**How the port was checked.** Before the Python fakes went, the full suite ran against
+each version (same 538 tests, all passing with both), and once more through a wrapper
+that ran every call of a fake both ways: the Rust one on the test's `FAKE_DIR` and the
+Python one on a copy of it made just before, comparing stdout, exit code, stderr (unless
+the Python raised), `reg.json`, `alive/` and the log line. Of about 10,800 calls, 8
+differed, all races, not behaviour: another call from a background job landed between
+the copy and the Rust call (a layer minimized, a block made meanwhile, or the test's
+folder already gone).
+
+**A race the speed-up showed.** Two `test_self_update` tests ended while a background
+`git push` to the backup was still running: one waited only for the backup to have the
+commit, the other didn't wait at all after `up` caught up a missed push. git then wrote
+`refs/remotes/backup/main` into the test's folder after its clean-up, and the module's
+check for leftover files failed (about one run in three with the faster fakes; once in
+BP-126's runs). Both now wait for that ref too.

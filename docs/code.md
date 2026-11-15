@@ -1,8 +1,8 @@
 # The code
 
 bullpen's command line is Rust (it was Python until the port of BP-101's
-`rust-port-plan.md`, BP-103 to BP-116). The tests, their fake Rex and fake gh are still
-Python (`tests/`, docs/tests.md).
+`rust-port-plan.md`, BP-103 to BP-116). The tests are still Python (`tests/`,
+docs/tests.md); their fake Rex and fake gh are Rust (`tests/fakes/`, BP-138).
 
 - `bin/bullpen` is the entry everything runs: people, `install.sh`'s link, Lua, the key
   bindings, the board and bullpen's own background jobs. It's a small `sh` script that
@@ -27,12 +27,14 @@ Python (`tests/`, docs/tests.md).
   (docs/rebuilds.md).
 - The Rust is one cargo workspace (`Cargo.toml`, one `Cargo.lock`, built into
   `target/`): `core/` (`bullpen-core`: tasks, config, wording, what the command line
-  and the board share), `cli/` (`bullpen-cli`, the program `bullpen`) and `board/`.
+  and the board share), `cli/` (`bullpen-cli`, the program `bullpen`), `board/` and
+  `tests/fakes/` (`bullpen-fakes`, the tests' fake `rex` and `gh`; only `tests/run.py`
+  builds it).
   `core` never depends on `cli`; the board depends on `core`. The crates are `serde_json`
   (with `preserve_order`), `chrono`, `libc` and `unicode-width` (the board's too, and
   ratatui's); ask before adding one. Rust tests sit beside each module as
-  `test_<module>.rs`. rustfmt with `max_width = 120` (`rustfmt.toml`) for `core` and
-  `cli`; the board isn't formatted yet.
+  `test_<module>.rs`. rustfmt with `max_width = 120` (`rustfmt.toml`) for `core`,
+  `cli` and `tests/fakes`; the board isn't formatted yet.
 - The files bullpen writes (tasks, config, news, stamps) are as the Python wrote them:
   JSON as Python's `json` (indent 2, ASCII only, keys in order), stamps as `isoformat`,
   cuts as Python's. Comments that say "as Python's" name what's kept. The width of text

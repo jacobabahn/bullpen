@@ -1,20 +1,21 @@
 # Tests
 
 ```sh
-python3 tests/run.py                  # builds the command line, then the whole suite, across CPUs: about 43 s on 16
+python3 tests/run.py                  # builds the command line and the fakes, then the whole suite, across CPUs: about 12 s on 16
 python3 tests/run.py -j 8             # on 8 processes instead
 python3 tests/run.py tour local_mode  # only tests whose module, class or name has one of these
 python3 tests/run.py --slowest 20     # and list the 20 slowest
-python3 -m unittest discover -s tests # the same tests one at a time: about 9 minutes (build first)
+python3 -m unittest discover -s tests # the same tests one at a time: about 2 minutes (build first)
 bin/bullpen-cargo test --workspace    # the Rust tests: core's, the command line's and the board's
 ```
 
-The tests run `bin/bullpen`, which runs the Rust build (`target/bullpen`). So
-`tests/run.py` builds the command line first, at low priority, when its source changed
-since the last build (it writes the build's stamp, as `bullpen build` does), and stops
-with cargo's error if it doesn't build. A test module run any other way
-says so when the build is missing or older than its source: run `tests/run.py`, or
-`bin/bullpen build`. The board isn't built for the tests: they give bullpen a fake one
+The tests run `bin/bullpen`, which runs the Rust build (`target/bullpen`), and the fake
+`rex` and `gh` (below). So `tests/run.py` builds the command line and the fakes first, at
+low priority, when their source changed since the last build (it writes the build's
+stamps, `target/bullpen.json` as `bullpen build` does and `target/fakes.json`), and
+stops with cargo's error if they don't build. A test module run any other way
+says so when a build is missing or older than its source: run `tests/run.py` (for the
+command line, `bin/bullpen build` does too). The board isn't built for the tests: they give bullpen a fake one
 (`BULLPEN_BOARD`). Nor is this checkout, by anything a test runs: `tests/support.py`
 sets `BULLPEN_NO_BUILD=1`, so bullpen never builds, or takes the build lock in, the
 checkout it runs from (docs/rebuilds.md). The tests about building build a copy of
@@ -31,7 +32,19 @@ and the full suite once, right before `ready`: `python3 tests/run.py` plus
 docs/rebuilds.md). Reviewers run only the tests that check a claim, never a whole suite.
 
 The tests use fake `rex` and `gh` programs and a local bare repository as origin, and
-run `bin/bullpen` as you do. A test of a function on its own is a Rust test, beside
+run `bin/bullpen` as you do. The fakes are Rust, in `tests/fakes/` (the crate
+`bullpen-fakes`, programs `fake-rex` and `fake-gh`), because bullpen runs them about
+10,000 times a suite and a Python one costs about 23 ms a call
+(docs/experiments/suite-time.md). Only `tests/run.py` builds them: `install.sh` and
+`bullpen build` don't. Each test's `fake/` folder links to them (`target/fake-rex`,
+`target/fake-gh`). They answer from files a test drops in that folder (`FAKE_DIR`): the
+fake Rex keeps its blocks, layers and windows in `reg.json` and logs each call to
+`rex.log`, and a file such as `send_fails_<block>`, `server_down` or `screen` changes
+what it does; the fake gh logs to `gh.log` and reads `pr.json`, `gh_signed_out`,
+`merge_refused` (a refused merge, saying the file's text) and `meanwhile` (a command
+`pr view` runs before it answers: a slow gh). The top of `tests/fakes/src/rex.rs` and
+`gh.rs` lists them all. They write JSON as Python's `json.dumps` does, since the tests
+read their files as text too. A test of a function on its own is a Rust test, beside
 its module (below). Each test removes its temp folder when it ends.
 Each module runs inside a temp folder of its own and fails if anything is left in it
 afterwards.
