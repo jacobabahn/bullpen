@@ -2,7 +2,6 @@
 
 import datetime as dt
 import json
-import textwrap
 
 from support import setUpModule, tearDownModule, sh, BullpenTest  # a temp folder for each module
 
@@ -123,12 +122,8 @@ class StatsTest(BullpenTest):
         self.assertEqual((every["count"], every["with_timeline"]), (1, 0))
 
     def test_an_auto_accept_refused_for_a_conflict_is_on_the_timeline(self):
-        gh = self.fake / "gh"
-        gh.write_text(gh.read_text() + textwrap.dedent("""\
-            if sys.argv[1:3] == ["pr", "merge"]:
-                print("Pull request is not mergeable: the merge commit cannot be cleanly created", file=sys.stderr)
-                sys.exit(1)
-        """))
+        (self.fake / "merge_refused").write_text(
+            "Pull request is not mergeable: the merge commit cannot be cleanly created")
         self.bp("config", "--auto-accept", "on")
         tid = self.start_task()
         wt = self.show(tid)["worktree"]

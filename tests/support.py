@@ -204,8 +204,12 @@ FAKE_GH = textwrap.dedent("""\
     if sys.argv[1:3] == ["pr", "create"]:
         print("https://github.com/me/repo/pull/7")
     elif sys.argv[1:3] == ["pr", "view"]:
+        if (d / "meanwhile").exists():  # a slow gh: what happens while it answers
+            import subprocess; subprocess.run(json.loads((d / "meanwhile").read_text()), check=True)
         pr = d / "pr.json"  # what the tests say GitHub has on the PR
         print(pr.read_text() if pr.exists() else json.dumps({"state": "OPEN"}))
+    elif sys.argv[1:3] == ["pr", "merge"] and (d / "merge_refused").exists():
+        sys.exit((d / "merge_refused").read_text())  # GitHub refuses the merge, saying this
 """)
 
 

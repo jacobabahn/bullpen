@@ -1,7 +1,6 @@
 """After ready: following the PR, auto-accept, rebasing the others."""
 
 import json
-import textwrap
 import unittest
 from pathlib import Path
 
@@ -173,12 +172,8 @@ class AcceptTest(BullpenTest):
         self.assertEqual(self.merges(), [])
 
     def test_auto_accept_refused_by_github_leaves_it_ready(self):
-        gh = self.fake / "gh"
-        gh.write_text(gh.read_text() + textwrap.dedent("""\
-            if sys.argv[1:3] == ["pr", "merge"]:
-                print("Pull request is not mergeable: the merge commit cannot be cleanly created", file=sys.stderr)
-                sys.exit(1)
-        """))
+        (self.fake / "merge_refused").write_text(
+            "Pull request is not mergeable: the merge commit cannot be cleanly created")
         tid, wt = self.approved_with_auto_accept()
         t = self.show(tid)
         self.assertEqual(t["status"], "ready")
@@ -188,12 +183,8 @@ class AcceptTest(BullpenTest):
         self.assertNotIn("conflict_sends", t)  # it merges cleanly: not a conflict, so not sent back
 
     def test_auto_accept_refused_for_a_conflict_sends_it_back_to_rebase(self):
-        gh = self.fake / "gh"
-        gh.write_text(gh.read_text() + textwrap.dedent("""\
-            if sys.argv[1:3] == ["pr", "merge"]:
-                print("Pull request is not mergeable: the merge commit cannot be cleanly created", file=sys.stderr)
-                sys.exit(1)
-        """))
+        (self.fake / "merge_refused").write_text(
+            "Pull request is not mergeable: the merge commit cannot be cleanly created")
         self.bp("up")
         self.bp("config", "--auto-accept", "on")
         tid = self.bp("add", "Fix the thing", "--brief", "Make it work.").stdout.strip()
@@ -392,12 +383,7 @@ class AcceptTest(BullpenTest):
         self.bp("config", "--review", "off")
         self.commit_and_ready_no_review(tid)
         self.github(statusCheckRollup=self.FAILING)
-        # gh is slow: the person accepts the task while it answers
-        slow = (self.fake / "gh").read_text().replace(
-            'elif sys.argv[1:3] == ["pr", "view"]:',
-            'elif sys.argv[1:3] == ["pr", "view"]:\n'
-            '    import subprocess; subprocess.run(json.loads((d / "meanwhile").read_text()), check=True)')
-        (self.fake / "gh").write_text(slow)
+        # gh is slow: the person accepts the task while it answers (meanwhile, below)
         accepted = json.loads(self.bp("show", tid, "--json").stdout)
         accepted.update(status="done", block=None, worktree=None)
         path = next((self.tmp / "state").rglob(f"tasks/{tid}.json"))
