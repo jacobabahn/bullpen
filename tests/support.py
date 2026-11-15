@@ -1,5 +1,5 @@
-"""What the tests share: fake `rex` and `gh`, and a project with a local bare repo as
-origin.
+"""What the tests share: fake `rex` and `gh` (tests/fakes, in Rust), and a project with a
+local bare repo as origin.
 
 Run the tests: python3 tests/run.py (or python3 -m unittest discover -s tests).
 """
@@ -13,7 +13,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import textwrap
 import time
 import unittest
 from pathlib import Path
@@ -22,197 +21,6 @@ ROOT = Path(__file__).resolve().parent.parent
 BULLPEN = ROOT / "bin" / "bullpen"
 sys.path.insert(0, str(ROOT))  # the bullpen package, for the tests that call it directly
 
-FAKE_REX = textwrap.dedent("""\
-    #!/usr/bin/env python3
-    import json, os, sys
-    from pathlib import Path
-    d = Path(os.environ["FAKE_DIR"])
-    a = sys.argv[1:]
-    with open(d / "rex.log", "a") as f:
-        f.write(json.dumps(a) + "\\n")
-    alive = d / "alive"
-    alive.mkdir(exist_ok=True)
-    reg = d / "reg.json"  # blocks: {id: {label, layer, window}}; layers: {id: state}; windows
-    R = json.loads(reg.read_text()) if reg.exists() else {"blocks": {}, "layers": {}, "windows": []}
-
-    def new_block(label, layer=None, window=None):
-        n = len(R["blocks"]) + 1
-        (alive / f"blk{n}").write_text("")
-        R["blocks"][f"blk{n}"] = {"label": label, "layer": layer, "window": window}
-        return f"blk{n}"
-
-    def new_window():
-        w = f"w{len(R['windows']) + 1}"
-        R["windows"].append(w)
-        return w
-
-    if a[0] in ("send", "send-key") and (d / f"send_fails_{a[a.index('-b') + 1]}").exists():
-        sys.exit("rex: couldn't send to the block")  # what the tests make a pane refuse
-    if a[0] == "run":
-        b = new_block(a[a.index("--label") + 1] if "--label" in a else None, window=new_window())
-        print(json.dumps({"window_id": R["blocks"][b]["window"], "block_ids": [b]}))
-    elif a[0] == "split":
-        anchor = R["blocks"].get(a[a.index("-b") + 1]) if "-b" in a else None
-        b = new_block(a[a.index("--label") + 1] if "--label" in a else None,
-                      window=anchor["window"] if anchor else new_window())
-        print(json.dumps({"block_ids": [b]}))
-    elif a[:2] == ["block", "inspect"]:
-        sys.exit(0 if (alive / a[2]).exists() else 1)
-    elif a[:2] == ["block", "close"]:
-        (alive / a[2]).unlink(missing_ok=True)
-        if (d / f"kills_tree_{a[2]}").exists():
-            # its program is Claude Code, which kills the tree of the command it ran (the one
-            # closing it, here) as it ends: every descendant by parent, new sessions too
-            import signal, subprocess
-            kids = {}
-            for row in subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True).stdout.splitlines():
-                pid, ppid = map(int, row.split())
-                kids.setdefault(ppid, []).append(pid)
-            tree = [os.getppid()]
-            for pid in tree:
-                tree += kids.get(pid, [])
-            reg.write_text(json.dumps(R))
-            for pid in tree:
-                if pid != os.getpid():
-                    try:
-                        os.kill(pid, signal.SIGKILL)
-                    except OSError:
-                        pass
-            sys.exit(0)
-    elif a[0] == "capture":
-        own = d / f"screen_{a[a.index('-b') + 1]}"  # one pane's screen, else every pane's
-        screen = own if own.exists() else d / "screen"  # what the tests put on screen, else two lines
-        print(screen.read_text() if screen.exists() else "line one\\nline two\\n\\n")
-    elif a[:2] == ["block", "call"] and a[-1] == "process":
-        pid = d / f"pid_{a[a.index('-b') + 1]}"  # a process the tests run on a terminal of their own
-        prog = d / f"prog_{a[a.index('-b') + 1]}"  # the program the tests say a pane runs
-        if not pid.exists() and not prog.exists():
-            sys.exit("rex: no such block")
-        child = {"pid": int(pid.read_text())} if pid.exists() else {}
-        if prog.exists():
-            child.update(path=prog.read_text(), invoked_path=prog.read_text(), argv0=prog.read_text())
-        print(json.dumps({"child": child}))
-    elif a[:2] == ["block", "call"] and a[-1] == "program_status":
-        rec = d / f"status_{a[a.index('-b') + 1]}.json"  # the record the tests give a pane
-        if not rec.exists():
-            sys.exit("rex: no such method")  # an older Rex: bullpen goes by the screen
-        print(json.dumps({"records": [json.loads(rec.read_text())]}))
-    elif a[:2] == ["server", "status"]:
-        if (d / "server_down").exists():
-            sys.exit("rex: no server")
-        version = d / "server_version"  # what the tests say the server is; else Rex says nothing
-        if version.exists():
-            print(json.dumps({"rex_version": version.read_text()}))
-    elif a[:2] == ["config", "reload"] and (d / "reload_fails").exists():
-        sys.exit("rex: no server")
-    elif a[0] == "actions":
-        acts = d / "actions.json"  # the actions the tests say the Rex config defines
-        if acts.exists():
-            print(acts.read_text())
-    elif a[:2] == ["api", "call"]:
-        rest = a[2:]
-        sid = R.get("session", "session:1")
-        if rest[0] == "-s":
-            if rest[1] not in (sid, "main"):  # a session that no longer exists
-                sys.exit(1)
-            rest = rest[2:]
-        method, args = rest[0], json.loads(rest[1]) if len(rest) > 1 else {}
-        if method == "session.new_layer":
-            lid = f"lyr{len(R['layers']) + 1}"
-            R["layers"][lid] = "normal"
-            b = new_block(args["layout"]["block"]["label"], lid,
-                          args.get("window_id") or (R["windows"] or [new_window()])[0])
-            print(json.dumps({"layer_id": lid, "block_ids": [b]}))
-        elif method == "session.new_window":
-            w = new_window()
-            R.setdefault("labels", {})[w] = args.get("window_label")
-            print(json.dumps({"window_id": w, "block_ids": [new_block(args["layout"]["block"]["label"], window=w)]}))
-        elif method == "session.new_block":
-            print(json.dumps({"block_id": new_block(args["label"], "detached")}))
-        elif method == "session.move_block":
-            blk, anchor = R["blocks"][args["block_id"]], R["blocks"][args["anchor_block_id"]]
-            # beside a floating block, as in Rex, it joins that block's layer
-            blk.update(layer=anchor["layer"] if anchor["layer"] != "detached" else None, window=anchor["window"])
-            print("{}")
-        elif method == "session.float_block":
-            lid = f"lyr{len(R['layers']) + 1}"
-            R["layers"][lid] = "normal"
-            R["blocks"][args["block_id"]]["layer"] = lid
-            print(json.dumps({"layer_id": lid}))
-        elif method == "session.detach_block":
-            R["blocks"][args["block_id"]].update(layer="detached", window=None)
-            print("{}")
-        elif method == "session.list_blocks":
-            print(json.dumps({"blocks": [
-                {"block_id": b, "label": info["label"],
-                 **({"placement": "detached"} if info["layer"] == "detached" else
-                    {"placement": "placed", "window_id": info["window"]})}
-                for b, info in R["blocks"].items() if (alive / b).exists()]}))
-        elif method == "session.close_window":
-            R["windows"].remove(args["window_id"])
-            print("{}")
-        elif method == "session.set_layer_state":
-            w = next(i["window"] for i in R["blocks"].values() if i["layer"] == args["layer_id"])
-            up = [b for b, i in R["blocks"].items() if i["window"] == w and (alive / b).exists()
-                  and i["layer"] != args["layer_id"] and (not i["layer"] or R["layers"][i["layer"]] == "normal")]
-            if args["state"] == "minimized" and not up:
-                sys.exit("rex: cannot minimize layer: it has the window's last visible panes")
-            R["layers"][args["layer_id"]] = args["state"]
-            print("{}")
-        elif method == "session.view":
-            windows = []
-            for w in R["windows"]:
-                tiled = {"layer_id": f"tiled-{w}", "kind": "tiled", "blocks": []}
-                layers = [tiled]
-                for b, info in R["blocks"].items():
-                    if not (alive / b).exists() or info["layer"] == "detached" or info["window"] != w:
-                        continue
-                    entry = {"block_id": b, "label": info["label"]}
-                    if info["layer"]:
-                        layer = next((l for l in layers if l["layer_id"] == info["layer"]), None)
-                        if not layer:
-                            layer = {"layer_id": info["layer"], "kind": "floating",
-                                     "state": R["layers"][info["layer"]], "blocks": []}
-                            layers.append(layer)
-                        layer["blocks"].append(entry)
-                    else:
-                        tiled["blocks"].append(entry)
-                windows.append({"window_id": w, "layers": layers,
-                                **({"label": R["labels"][w]} if R.get("labels", {}).get(w) else {})})
-            view = {"session_id": sid, "label": "main", "windows": windows}
-            focused = d / "focused"  # the block the tests say has focus, in the active window
-            if focused.exists():
-                b = focused.read_text()
-                view["active_window_id"] = R["blocks"][b]["window"]
-                for w in windows:
-                    if w["window_id"] == view["active_window_id"]:
-                        w["focused_block_id"] = b
-            print(json.dumps(view))
-    reg.write_text(json.dumps(R))
-""")
-
-FAKE_GH = textwrap.dedent("""\
-    #!/usr/bin/env python3
-    import json, os, sys
-    from pathlib import Path
-    d = Path(os.environ["FAKE_DIR"])
-    body = sys.stdin.read()  # like a gh that waits for input: it must get none
-    with open(d / "gh.log", "a") as f:
-        f.write(json.dumps({"argv": sys.argv[1:], "body": body}) + "\\n")
-    if sys.argv[1:3] == ["auth", "status"] and (d / "gh_signed_out").exists():
-        sys.exit("You are not logged into any GitHub hosts.")
-    if sys.argv[1:3] == ["pr", "create"]:
-        print("https://github.com/me/repo/pull/7")
-    elif sys.argv[1:3] == ["pr", "view"]:
-        if (d / "meanwhile").exists():  # a slow gh: what happens while it answers
-            import subprocess; subprocess.run(json.loads((d / "meanwhile").read_text()), check=True)
-        pr = d / "pr.json"  # what the tests say GitHub has on the PR
-        print(pr.read_text() if pr.exists() else json.dumps({"state": "OPEN"}))
-    elif sys.argv[1:3] == ["pr", "merge"] and (d / "merge_refused").exists():
-        sys.exit((d / "merge_refused").read_text())  # GitHub refuses the merge, saying this
-""")
-
-
 def sh(*cmd, cwd=None):
     return subprocess.run(cmd, cwd=cwd, check=True, text=True, capture_output=True).stdout
 
@@ -220,31 +28,56 @@ def sh(*cmd, cwd=None):
 def cli_source_hash():
     """The hash of the command line's source that its build stamp (target/bullpen.json)
     records: cli/src/build.rs's source_hash, for bullpen-cli."""
+    return source_hash(("Cargo.toml", "Cargo.lock", "core/Cargo.toml", "core/src", "cli/Cargo.toml", "cli/src"))
+
+
+def source_hash(rels):
     files = []
-    for rel in ("Cargo.toml", "Cargo.lock", "core/Cargo.toml", "core/src", "cli/Cargo.toml", "cli/src"):
+    for rel in rels:
         p = ROOT / rel
         files += sorted(f for f in p.rglob("*") if f.is_file()) if p.is_dir() else [p]
     parts = {str(f.relative_to(ROOT)): hashlib.sha256(f.read_bytes()).hexdigest() for f in files if f.is_file()}
     return hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()
 
 
-def cli_built():
-    """Is target/bullpen built from the command line's source as it is?"""
+def fakes_source_hash():
+    """The hash of the fakes' source (tests/fakes) that their stamp (target/fakes.json) records."""
+    return source_hash(("Cargo.toml", "Cargo.lock", "tests/fakes/Cargo.toml", "tests/fakes/src"))
+
+
+FAKES = ("fake-rex", "fake-gh")  # in target/, where tests/run.py puts them
+
+
+def stamped(name, source, programs):
+    """Are target/<programs> built from the source as it is (target/<name>.json says so)?"""
     try:
-        stamp = json.loads((ROOT / "target" / "bullpen.json").read_text())
+        stamp = json.loads((ROOT / "target" / f"{name}.json").read_text())
     except (OSError, ValueError):
         return False
-    return (ROOT / "target" / "bullpen").exists() and stamp.get("source") == cli_source_hash()
+    return all((ROOT / "target" / p).exists() for p in programs) and stamp.get("source") == source
+
+
+def cli_built():
+    """Is target/bullpen built from the command line's source as it is?"""
+    return stamped("bullpen", cli_source_hash(), ["bullpen"])
+
+
+def fakes_built():
+    """Are the fake rex and gh (target/fake-rex, target/fake-gh) built from their source as it is?"""
+    return stamped("fakes", fakes_source_hash(), FAKES)
 
 
 def check_build():
-    """The tests run bin/bullpen, which runs the Rust build: it must be built from the
-    source as it is (tests/run.py builds it first)."""
+    """The tests run bin/bullpen, which runs the Rust build, and the fake rex and gh: they
+    must be built from the source as it is (tests/run.py builds them first)."""
     if os.environ.get("BULLPEN_TESTS_BUILT"):
         return
     if not cli_built():
         raise RuntimeError("bullpen's command line isn't built from its source as it is: "
                            "run the tests with tests/run.py (it builds first), or run `bin/bullpen build`")
+    if not fakes_built():
+        raise RuntimeError("the tests' fake rex and gh (tests/fakes) aren't built from their source as it is: "
+                           "run the tests with tests/run.py (it builds them first)")
 
 
 def setUpModule():
@@ -276,10 +109,8 @@ class BullpenTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         fake = self.tmp / "fake"
         fake.mkdir()
-        for name, src in (("rex", FAKE_REX), ("gh", FAKE_GH)):
-            p = fake / name
-            p.write_text(src)
-            p.chmod(0o755)
+        for name in ("rex", "gh"):  # tests/fakes, built by tests/run.py
+            (fake / name).symlink_to(ROOT / "target" / f"fake-{name}")
         self.fake = fake
         origin = self.tmp / "origin.git"
         sh("git", "init", "-q", "--bare", "-b", "main", str(origin))

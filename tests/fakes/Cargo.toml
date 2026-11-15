@@ -1,0 +1,25 @@
+# The tests' fake Rex and fake gh (tests/support.py puts them in each test's fake/ folder).
+# Only tests/run.py builds this (-p bullpen-fakes): install.sh and `bullpen build` don't.
+[package]
+name = "bullpen-fakes"
+version = "0.1.0"
+edition = "2021"
+description = "the tests' fake rex and gh: what the tests say Rex and GitHub do"
+publish = false
+
+[lib]
+name = "bullpen_fakes"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fake-rex"
+path = "src/rex.rs"
+
+[[bin]]
+name = "fake-gh"
+path = "src/gh.rs"
+
+[dependencies]
+# preserve_order: reg.json and the output keep their keys in the order the fakes add them
+serde_json = { version = "1", features = ["preserve_order"] }
+libc = "0.2"

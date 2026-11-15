@@ -1,8 +1,9 @@
-# One workspace: core (what the command line and the board share), cli (bin "bullpen")
-# and board (bin "bullpen-board"). Built products go to target/; bullpen runs the copies
+# One workspace: core (what the command line and the board share), cli (bin "bullpen"),
+# board (bin "bullpen-board") and tests/fakes (the tests' fake rex and gh; only
+# tests/run.py builds it). Built products go to target/; bullpen runs the copies
 # it renames into place there (target/bullpen, target/bullpen-board), never cargo's own.
 [workspace]
-members = ["core", "cli", "board"]
+members = ["core", "cli", "board", "tests/fakes"]
 resolver = "2"
 
 [profile.release]
