@@ -14,7 +14,8 @@
 //!
 //! It's worked out at every step that makes a task ready with a change, so it follows
 //! the code: a kept approval (only the base moved) works the rules out again, which
-//! say the same for the same lines, and keeps the reviewer's part.
+//! say the same for the same lines, and keeps the reviewer's part. A task made ready
+//! without one (by an older copy of bullpen) gets it from `check` (risk_late.rs).
 
 use crate::review::kind_of_change;
 use bullpen_core::json::{get, obj, s, Obj};
@@ -33,6 +34,9 @@ pub enum Said<'a> {
     Approval(&'a str),
     /// an approval kept (the code is as approved): the reviewer's part stays
     Kept,
+    /// the findings of the round whose approval stands, read later (risk_late.rs): the
+    /// reviewer's part is theirs
+    Round(&'a str),
     /// no approval (review off, or the rounds ran out): rules alone
     Nothing,
 }
@@ -82,7 +86,7 @@ pub fn assess(repo: &Repo, t: &mut Obj, base_ref: &str, said: Said) -> Res<()> {
         Said::Nothing => None,
         Said::Kept => before,
         Said::Approval(_) if s(r, "kind") == "rebase" => before,
-        Said::Approval(text) => match reviewer_of(text) {
+        Said::Approval(text) | Said::Round(text) => match reviewer_of(text) {
             Some(p) => {
                 let mut o = p.to_obj().as_object().cloned().unwrap_or_default();
                 o.insert("round".into(), r.get("round").cloned().unwrap_or(Value::Null));

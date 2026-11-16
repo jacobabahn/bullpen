@@ -45,6 +45,7 @@ mod repos;
 mod review;
 mod rex;
 mod risk;
+mod risk_late;
 mod rules;
 mod saves;
 mod say;

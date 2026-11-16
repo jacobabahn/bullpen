@@ -180,6 +180,9 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `risk.rs`: a ready task's risk label (docs/review.md): bullpen's rules on the diff
   (`rules_of`, `risk_paths`, `adds_dependency`), the reviewer's `## Risk`
   (`reviewer_of`), and `assess`, which each step that makes a task ready calls
+- `risk_late.rs`: the label of a ready task that has none (made ready by an older
+  copy of bullpen): `check` finds it (`unlabelled`), `check --fix` labels it with
+  `assess`, says it in one news line and notes that copy for doctor (`label_late`)
 - `close.rs`: the one close step (`close`) that accept, close, drop and finish's
   auto-accept share, `close_task`, and the `close` and `drop` commands
 - `keep.rs`: `close --keep-branch`: push the branch, then the close step keeping it
@@ -209,7 +212,8 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   totals across tasks, in words or JSON; `totals.rs`: the time in each phase and the
   counts, from a timeline; `old.rs`: a task's news, for one from before timelines
 - `check.rs`: `check`, and `--fix`, which applies the events the watcher missed
-  through `events::event` and `events::gone`
+  through `events::event` and `events::gone`, and labels a ready task without a risk
+  label (`risk_late.rs`)
 - `tours/`: guided review tours. `mod.rs`: a tour's files, the diff it is written on
   (`diff_files`, `covers`), its state (`tour_state`, `tour_stale`) and a step's patch
   (`step_diff`); `write.rs`: the tour agent, `_tour` (run it, check its answer against

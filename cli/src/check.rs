@@ -4,7 +4,8 @@
 //! A task's status follows its agent's events; a missed one (a watcher or Rex restart, a
 //! bug) leaves it out of step. `check` compares each task that has an agent in a pane
 //! with what Rex says that agent is doing right now, and `--fix` applies the event that
-//! was missed, through the same paths (and news) as the watcher (events/).
+//! was missed, through the same paths (and news) as the watcher (events/). It also
+//! labels a ready task that has no risk label (risk_late.rs).
 
 use crate::agents::waited_on;
 use crate::args::{flag, pos, Arg, Args, Nargs};
@@ -285,6 +286,16 @@ fn check_repo(repo: &Repo, ids: &[String], fix: bool, quiet: bool) -> Res<usize>
                 s(&t, "id"),
                 late.1
             ));
+        }
+        if crate::risk_late::unlabelled(&t) {
+            drift += 1;
+            let tid = s(&t, "id");
+            match fix.then(|| crate::risk_late::label_late(repo, tid)) {
+                Some(Err(e)) => out(format!(
+                    "{tid} is ready without a risk label, and it can't be worked out: {e}"
+                )),
+                _ => out(format!("{tid} is ready without a risk label{fixed}")),
+            }
         }
         if stamp(&t).map_or(0.0, |st| seconds_since(st, None)) < SETTLE {
             continue; // bullpen just changed it (start, tell, ready): its agent has yet to say

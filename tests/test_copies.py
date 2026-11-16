@@ -210,6 +210,7 @@ class CopiesTest(unittest.TestCase):
         self.assertIn(f"`accept` was run here by another copy of bullpen ({self.other}, ", text)
         self.assertIn("whose source is older than this one's (2 commits behind), the one this repo's "
                       f"coordinator (c1) uses. Run this repo's commands with {self.bin}", text)
+        self.assertNotIn("risk label", text)  # neither copy has it
         # run by the other copy, doctor says it of itself
         mark, text = self.doctor(self.bp_other)["copy"]
         self.assertEqual(mark, "FAIL")
@@ -220,6 +221,35 @@ class CopiesTest(unittest.TestCase):
         # up from the coordinator's copy sees to it
         self.bp("up")
         self.assertEqual(self.doctor()["copy"][0], "ok")
+
+    def test_a_task_an_older_copy_made_ready_gets_its_label_and_doctor_names_the_copy(self):
+        self.bp("up")
+        self.commit(self.home, "cli/src/risk.rs", "// the label\n")  # the repository's copy has it
+        self.bp("build")
+        tid = self.bp("add", "Fix the thing", "--brief", "Make it work.").stdout.strip()
+        self.bp_other("start", tid)  # its brief names the other copy's bin/bullpen
+        wt = Path(self.show(tid)["worktree"])
+        self.commit(wt, "fix.txt", "fixed\n")
+        self.bp_other("ready", tid, "--summary", "Changed it.", cwd=wt)
+        # as a copy from before the label, and before copies were noted, leaves it
+        path = next((self.tmp / "state").rglob(f"tasks/{tid}.json"))
+        t = json.loads(path.read_text())
+        del t["risk"]
+        path.write_text(json.dumps(t))
+        note = self.config().parent / "other-copy.json"
+        note.unlink()
+        self.bp("up")
+        self.assertEqual(self.doctor()["copy"][0], "ok")
+        self.bp("check", "--fix", "--quiet")
+        self.assertEqual(self.show(tid)["risk"]["why"], "a small change (1 line in 1 file)")
+        self.assertIn(f"{tid} became ready without a risk label, so here it is: risk: low · a small change "
+                      "(1 line in 1 file). Tell the person", self.news_log().splitlines()[-1])
+        mark, text = self.doctor()["copy"]
+        self.assertEqual(mark, "FAIL")
+        self.assertIn(f"`ready` was run here by another copy of bullpen ({self.other}, ", text)
+        self.assertTrue(text.endswith(
+            "then `bullpen up` clears this. That copy has no risk label: a task it makes ready gets its label "
+            "late, from this one's `check --fix` (the watcher runs it)"), text)
 
     def test_doctor_says_which_is_older_of_a_worktree_on_a_branch_that_parted(self):
         # as it happened: the other copy is a worktree of the repository itself, on its own branch

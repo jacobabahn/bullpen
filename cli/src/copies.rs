@@ -92,11 +92,20 @@ fn note_path(repo: &Repo) -> PathBuf {
 /// repo was started from, note it for doctor (the last such command; once a command).
 pub fn note_command(repo: &Repo) {
     static NOTED: AtomicBool = AtomicBool::new(false);
-    if coordinator_copy(repo).is_none() || a_coordinators(repo, &home()) || NOTED.swap(true, Ordering::Relaxed) {
+    if NOTED.swap(true, Ordering::Relaxed) {
         return;
     }
-    let command = std::env::args().nth(1).unwrap_or_default();
-    let note = json!({"copy": home().display().to_string(), "command": command, "at": iso_now()});
+    note_copy(repo, &home(), &std::env::args().nth(1).unwrap_or_default());
+}
+
+/// Note that copy ran command in repo, unless it is one a coordinator of the repo was
+/// started from. A copy from before the note leaves none itself: what it left undone
+/// tells (risk_late.rs).
+pub fn note_copy(repo: &Repo, copy: &Path, command: &str) {
+    if coordinator_copy(repo).is_none() || a_coordinators(repo, copy) {
+        return;
+    }
+    let note = json!({"copy": copy.display().to_string(), "command": command, "at": iso_now()});
     let _ = write_obj(&note_path(repo), note.as_object().expect("an object"));
 }
 
@@ -157,6 +166,17 @@ pub fn age(a: &Path, b: &Path) -> (&'static str, String) {
         ),
         None => (by_date, "by its last commit".into()),
     }
+}
+
+/// What copy `ours` relies on that `theirs` has no code for, as a sentence to end a
+/// line with, or "". Told by a file of the source: cheap, and enough for a hint.
+fn lacks(ours: &Path, theirs: &Path) -> &'static str {
+    let risk = "cli/src/risk.rs";
+    if ours.join(risk).is_file() && !theirs.join(risk).is_file() {
+        return ". That copy has no risk label: a task it makes ready gets its label late, from this one's `check --fix` \
+                (the watcher runs it)";
+    }
+    ""
 }
 
 /// doctor's `copy`: the copy of bullpen this repo's first coordinator uses is there, the
@@ -250,11 +270,12 @@ pub fn check_copy(repo: Option<&Repo>, why_not: Option<&str>) -> Res<(&'static s
                 format!(
                     "`{}` was run here by another copy of bullpen ({}, {}), whose source is {how} this one's \
                      ({detail}), the one {who} uses. Run this repo's commands with {} (a board opened by the \
-                     other copy runs the other's: open it from here); then `bullpen up` clears this",
+                     other copy runs the other's: open it from here); then `bullpen up` clears this{}",
                     s(&note, "command"),
                     other.display(),
                     s(&note, "at"),
-                    bin.display()
+                    bin.display(),
+                    lacks(&copy, &other)
                 ),
             ));
         }

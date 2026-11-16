@@ -57,7 +57,13 @@ non-zero when anything fails. It checks:
     2026-11-16T10:02:11-08:00), whose source is older than this one's (it lacks 10 of
     the other's commits, and has 1 of its own), the one this repo's coordinator (c1)
     uses. Run this repo's commands with ~/dev/bullpen/bin/bullpen ...". Only the last
-    such command is kept; `bullpen up` from the coordinator's copy clears it.
+    such command is kept; `bullpen up` from the coordinator's copy clears it. A copy
+    from before this note leaves none itself: when `check --fix` labels a task that
+    such a copy made ready without a risk label, it notes the copy the task's brief
+    names (as `ready`). When the other copy's source has no risk label
+    (`cli/src/risk.rs`) and this one's has, the line ends "That copy has no risk
+    label: a task it makes ready gets its label late, from this one's `check --fix`
+    (the watcher runs it)".
 
   Source is the command line's (`core/`, `cli/`, the workspace's files) and
   `lua/watch.lua`; two copies with the same source are fine. Which is older is by

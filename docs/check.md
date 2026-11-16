@@ -42,7 +42,9 @@ still be on the way, and so is a task bullpen itself moved in the last minute
 (`start`, `tell`, `ready`): its agent has yet to report. `bullpen check BP-3` checks one task. An agent
 idle after the coordinator's `bullpen ok` isn't drift, nor is a task waiting on an
 `ask` whatever its agent does. `check` also passes a task left in triage too long to
-the person (see [Triage](triage.md)).
+the person (see [Triage](triage.md)), and finds a ready task that has no risk label
+("BP-3 is ready without a risk label"), which `--fix` labels (see
+[Review](review.md#the-risk-label)).
 
 `bullpen check --fix` applies what the missed event would have done, news
 included, as if it had come; it never types into an agent or approves anything.

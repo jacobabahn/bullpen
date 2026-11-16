@@ -132,6 +132,17 @@ lines), and keeps the reviewer's part; a change after the approval gets a new re
 round, whose approval labels it afresh. With review off, or after the last round
 with findings open, the rules alone label it.
 
+A task made ready by a copy of bullpen from before the label (a worktree of bullpen on
+an old commit: a task's worker and reviewer run the `bin/bullpen` of the copy that
+started it) has none. `bullpen check` says so ("BP-3 is ready without a risk
+label"), and `check --fix`, which the watcher runs every 3 minutes from the copy the
+coordinator uses, labels it as above, with the reviewer's part read from the findings
+of the round that approved it, and tells the coordinator once: "BP-3 became ready
+without a risk label, so here it is: risk: high · changes how accept merges. Tell the
+person". That line wakes a coordinator, as a ready line does. A task that has a label
+is never touched, nor one with nothing to merge. The `ready` entry of `stats`'
+timeline stays without it, and `doctor`'s `copy` check names the copy to update.
+
 `risk_paths` is a repository's list of sensitive paths, set in its `config.json` by
 hand, as `{"pattern": "why"}` (or a list of patterns, each "changes <pattern>"). A
 pattern ending in `/` is a folder, `*` is any run of characters, and anything else

@@ -113,3 +113,55 @@ class RiskTest(BullpenTest):
         self.commit_and_ready(tid)
         prompt = next((self.tmp / "state").rglob(f"{tid}.review-1.md")).read_text()
         self.assertIn("- `## Risk` (with an approval): one line, `low`, `medium` or `high`", prompt)
+
+
+class LateLabelTest(RiskTest):
+    """A task made ready by a copy of bullpen from before the label has no `risk` in its
+    record: `check --fix` (the watcher's) labels it and says so, once."""
+    def unlabel(self, tid):
+        """The task as an older copy leaves it: no `risk` key at all. Returns the label it had."""
+        path = next((self.tmp / "state").rglob(f"tasks/{tid}.json"))
+        t = json.loads(path.read_text())
+        risk = t.pop("risk")
+        path.write_text(json.dumps(t))
+        return risk
+
+    def test_a_ready_task_without_a_label_gets_it_and_one_news_line(self):
+        tid = self.ready_with_a_commit()
+        risk, told = self.unlabel(tid), len(self.news())
+        self.assertNotIn("risk", self.show(tid))
+        self.assertEqual(self.check(settle=False), [f"{tid} is ready without a risk label"])
+        self.assertEqual(self.bp("check", ok=False).returncode, 1)
+        self.assertNotIn("risk", self.show(tid))  # check alone changes nothing
+        self.assertEqual(self.check("--fix", settle=False), [f"{tid} is ready without a risk label (fixed)"])
+        self.assertEqual(self.show(tid)["risk"], risk)
+        self.assertEqual(self.news()[told:], [
+            f"bullpen · {tid} became ready without a risk label, so here it is: "
+            "risk: low · a small change (1 line in 1 file). Tell the person"])
+        self.assertIn("risk: low · a small change (1 line in 1 file)", self.bp("show", tid).stdout)
+        self.assertEqual(self.check("--fix", settle=False), [])  # once
+        self.assertEqual(len(self.news()), told + 1)
+
+    def test_the_late_label_has_the_reviewers_part_from_the_approvals_findings(self):
+        tid = self.start_task()
+        self.commit_and_ready(tid)
+        self.verdict(tid, "approve", APPROVE_HIGH)
+        risk = self.unlabel(tid)
+        self.assertEqual(risk["review"], {"level": "high", "why": "couldn't run the GitHub path", "round": 1})
+        self.bp("check", "--fix", "--quiet")
+        self.assertEqual(self.show(tid)["risk"], risk)
+        self.assertEqual(self.news()[-1], f"bullpen · {tid} became ready without a risk label, so here it is: "
+                                          "risk: high · couldn't run the GitHub path. Tell the person")
+
+    def test_a_task_with_a_label_or_with_nothing_to_merge_is_left_alone(self):
+        tid = self.ready_with_a_commit()
+        before, told = self.show(tid), len(self.news())
+        self.assertEqual(self.check("--fix", settle=False), [])
+        self.assertEqual(self.show(tid), before)
+        empty = self.start_task("Look into it")
+        self.bp("ready", empty, "--summary", "Nothing to change.")
+        self.assertIsNone(self.unlabel(empty))
+        told = len(self.news())
+        self.assertEqual(self.check("--fix", settle=False), [])
+        self.assertNotIn("risk", self.show(empty))
+        self.assertEqual(len(self.news()), told)
