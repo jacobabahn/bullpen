@@ -131,7 +131,7 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   `rebuild_if_stale` of `up` and accept, and the catch-up (`catch_up`)
 - `push_remote.rs`: the push remote's background push (`_push`, one at a time, under
   its lock), `up`'s catch-up push, and doctor's check of the push remote
-- `doctor/`: `mod.rs`: `doctor` and `up`'s hint; `checks.rs`: the checks
+- `doctor/`: `mod.rs`: `doctor` (and `--json`) and `up`'s hint; `all_repos.rs`: `doctor --all-repos`; `checks.rs`: the checks
 - `start/mod.rs`: `add`, `after`, `model`, `review-mode`, what a task waits on, and
   which saves move the run queue (`slot_freed`); `launch.rs`: `start`, `resume`, `tell`,
   the worker's brief and pane (`start_task`, `launch`) and `hand_back`; `queue.rs`: the

@@ -136,32 +136,44 @@ fn ahead(repo: &Repo, from: &str, to: &str) -> Res<i64> {
         .map_err(|_| bullpen_core::Fail(format!("git rev-list said {:?}", p.stdout)))
 }
 
-/// doctor: the push remote is there, reachable without a prompt, and how far behind the base.
-pub fn check_push(repo: Option<&Repo>, why_not: Option<&str>) -> Res<(&'static str, String)> {
+/// The repo, the push remote doctor checks and the base branch, or the check's result when there's
+/// nothing to check (none set, remote mode, no such remote).
+type Target<'a> = Result<(&'a Repo, String, String), (&'static str, String)>;
+
+fn push_target<'a>(repo: Option<&'a Repo>, why_not: Option<&str>) -> Res<Target<'a>> {
     let Some(repo) = repo else {
-        return Ok((
+        return Ok(Err((
             "skip",
             format!("can't tell: {}", why_not.unwrap_or("not in a git repository")),
-        ));
+        )));
     };
     let name = repo.cfg_str("push_remote");
     if name.is_empty() {
         let none = "none (`bullpen config --push-remote <remote>` backs up the base branch after each accept)";
-        return Ok(("skip", none.into()));
+        return Ok(Err(("skip", none.into())));
     }
     if repo.has_origin()? {
-        return Ok((
+        return Ok(Err((
             "skip",
             format!("{name} is set, but this repo has an origin remote (remote mode), so nothing is pushed to it"),
-        ));
+        )));
     }
     if !git(&repo.root, &["remote", "get-url", name], false)?.ok() {
-        return Ok((
+        return Ok(Err((
             "fail",
             format!("there's no remote {name}: `git remote add {name} <url>`, or `bullpen config --push-remote \"\"`"),
-        ));
+        )));
     }
-    let base = repo.base()?;
+    Ok(Ok((repo, name.to_string(), repo.base()?)))
+}
+
+/// doctor: the push remote is there, reachable without a prompt, and how far behind the base.
+pub fn check_push(repo: Option<&Repo>, why_not: Option<&str>) -> Res<(&'static str, String)> {
+    let (repo, name, base) = match push_target(repo, why_not)? {
+        Ok(t) => t,
+        Err(check) => return Ok(check),
+    };
+    let name = name.as_str();
     let local = format!("refs/heads/{base}");
     let p = quiet_git(repo, &["ls-remote", "--heads", name, &local], 20)?;
     if !p.ok() {
@@ -190,6 +202,48 @@ pub fn check_push(repo: Option<&Repo>, why_not: Option<&str>) -> Res<(&'static s
         ));
     }
     Ok(("ok", format!("{name} has {base} as it is here")))
+}
+
+/// doctor --all-repos: the push remote's base branch as this checkout last saw it (its
+/// last fetch or push), against the base. Local refs only: no network.
+pub fn check_push_seen(repo: Option<&Repo>, why_not: Option<&str>) -> Res<(&'static str, String)> {
+    let (repo, name, base) = match push_target(repo, why_not)? {
+        Ok(t) => t,
+        Err(check) => return Ok(check),
+    };
+    let local = format!("refs/heads/{base}");
+    let seen = format!("refs/remotes/{name}/{base}");
+    if !git(&repo.root, &["rev-parse", "-q", "--verify", &seen], false)?.ok() {
+        return Ok((
+            "skip",
+            format!(
+                "can't tell without the network: this checkout has never seen {name}'s {base} (`git fetch {name}`)"
+            ),
+        ));
+    }
+    if !git(&repo.root, &["merge-base", "--is-ancestor", &seen, &local], false)?.ok() {
+        return Ok((
+            "fail",
+            format!(
+                "{name}'s {base}, as this checkout last saw it, has commits this one doesn't, so pushes are \
+                 rejected: `git pull {name} {base}`, then `git push {name} {base}`"
+            ),
+        ));
+    }
+    let n = ahead(repo, &seen, &local)?;
+    if n != 0 {
+        return Ok((
+            "fail",
+            format!(
+                "{name} is {} behind {base}, as this checkout last saw it: `git push {name} {base}`",
+                commits(n)
+            ),
+        ));
+    }
+    Ok((
+        "ok",
+        format!("{name} had {base} as it is here, when this checkout last saw it"),
+    ))
 }
 
 #[cfg(test)]

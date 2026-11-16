@@ -431,6 +431,20 @@ class BullpenTest(unittest.TestCase):
             lines[name] = (mark, text)
         return p, lines
 
+    def doctor_all(self, cwd=None):
+        """doctor --all-repos: (the run, {section: {check: (mark, text)}}), each section
+        named by its heading's first word ("Setup", then each repo's name)."""
+        p = self.bp("doctor", "--all-repos", ok=False, cwd=cwd)
+        sections = {}
+        for block in p.stdout.split("\n\n")[:-1]:
+            head, *rest = block.splitlines()
+            checks = sections.setdefault(head.split()[0].rstrip(","), {})
+            for line in rest:
+                mark, more = line.split(None, 1)
+                name, text = more.split(": ", 1)
+                checks[name] = (mark, text)
+        return p, sections
+
     def commit_hook(self, name, text):
         """Commit .bullpen/<name>.sh on main and push it: the task's base."""
         d = self.repo / ".bullpen"

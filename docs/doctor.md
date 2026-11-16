@@ -40,3 +40,30 @@ non-zero when anything fails. It checks:
 network, nor the watcher and coordinators, which `up` sees to itself) and, if any fail, prints one
 line: "2 problems: run `bullpen doctor`". Doctor itself ends with the failed checks'
 names ("2 problems: keys, watcher."), and writes paths in your home folder with `~`.
+
+## Every repo at once
+
+`bullpen doctor --all-repos` checks every repository bullpen has state for (as
+`ls --all-repos` does, it works from anywhere, and leaves out a repo whose checkout is
+gone). The checks about the setup, which are the same for every repo (`rex`,
+`bullpen`, `board`, `cargo`, `keys`, `watcher`, `state`, `global`), run once, under
+"Setup, for every repo". Then each repo gets its own (`gh`, `agents`, `config`,
+`setup`, `teardown`, `coordinators`, `push`) under its name and folder. A repo whose
+board runs an older build shows up on its `coordinators` line, and one whose
+`config.json` doesn't parse is named by its state folder. The last line names each
+problem, a repo's as `repo/check`: "2 problems: keys, shop/coordinators."
+
+Here the push remote is checked from local refs only, with no network: the remote's
+base branch as this checkout last saw it (its last fetch, or bullpen's last push to
+it) against the base. "backup is 1 commit behind main, as this checkout last saw it".
+Plain `doctor` in a repo asks the remote itself.
+
+## As JSON
+
+`--json`, alone or with `--all-repos`, prints the same checks for a script or the
+mission screen's health line. Each check is `{name, state, text}`, with `state` one of
+`ok`, `fail` or `skip` and the text as doctor prints it. Alone it is
+`{repo, checks, problems}` (`repo` is null outside a repository); with `--all-repos`,
+`{shared, repos: [{repo, name, checks}], problems}` (`repo` is null for a repo whose
+`config.json` doesn't parse). `problems` lists the failed checks' names, as the last
+line does. Either way doctor exits non-zero when anything fails.

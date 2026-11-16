@@ -1,5 +1,5 @@
 use super::checks::{json_error, rex_version_key, shebang_program, shlex_split, REX_MIN};
-use super::problems_phrase;
+use super::{problems_phrase, summary};
 
 #[test]
 fn test_rex_versions_compare_previews_before_releases() {
@@ -130,4 +130,11 @@ fn json_errors_read_as_pythons() {
     for (text, said) in cases {
         assert_eq!(decode_error(text), said, "{text:?}");
     }
+}
+
+#[test]
+fn the_last_line_names_the_problems() {
+    assert_eq!(summary(&[]), "All good.");
+    let failed = ["keys".to_string(), "shop/coordinators".to_string()];
+    assert_eq!(summary(&failed), "2 problems: keys, shop/coordinators.");
 }

@@ -28,6 +28,7 @@ class PushRemoteTest(unittest.TestCase):
     commit = test_local_mode.LocalModeTest.commit
     ready_task = test_local_mode.LocalModeTest.ready_task
     doctor = BullpenTest.doctor
+    doctor_all = BullpenTest.doctor_all
 
     def setUp(self):
         self.setUp_local()
@@ -113,6 +114,23 @@ class PushRemoteTest(unittest.TestCase):
         self.assertNotIn("pushing", self.bp("up").stdout)  # caught up: nothing to push
         _, lines = self.doctor()
         self.assertEqual(lines["push"], ("ok", "backup has main as it is here"))
+
+    def test_doctor_all_repos_reads_the_push_remote_from_local_refs_only(self):
+        seen = lambda: self.doctor_all()[1]["proj"]["push"]
+        self.assertEqual(seen(), ("ok", "backup had main as it is here, when this checkout last saw it"))
+        self.commit(self.repo, "by-hand.txt", "x\n", "Merged by hand")
+        self.backup.rename(self.tmp / "away.git")  # offline: it doesn't ask the remote
+        behind = ("FAIL", "backup is 1 commit behind main, as this checkout last saw it: `git push backup main`")
+        self.assertEqual(seen(), behind)
+        (self.tmp / "away.git").rename(self.backup)
+        self.bp("up")  # catches up the push, which moves backup/main here too
+        self.assertEqual(seen()[0], "ok")
+        self.git("reset", "-q", "--hard", "HEAD~1")  # main goes another way than backup's
+        self.commit(self.repo, "other.txt", "y\n", "Another")
+        self.assertIn("as this checkout last saw it, has commits this one doesn't", seen()[1])
+        self.git("update-ref", "-d", "refs/remotes/backup/main")
+        self.assertEqual(seen(), ("--", "can't tell without the network: this checkout has never seen backup's "
+                                        "main (`git fetch backup`)"))
 
     def test_close_pushes_nothing(self):
         tid = self.start_task()
