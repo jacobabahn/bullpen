@@ -43,6 +43,6 @@ live](settings.md#where-panes-live).
 
 Rex reads `keys.lua` only when its config loads. An accept that changes it says
 "Keys changed: run `rex config reload`" once, on the board's message line (in place
-of "Accepted") and in the news. `cmd+;` then `b` with no board running (it was
+of "Accepted") and in the news, where it tells the coordinator to tell you. `cmd+;` then `b` with no board running (it was
 quit, or its coordinator was started with `--no-board`) starts one beside the
 coordinator, as `bullpen up` would, and shows it.

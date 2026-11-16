@@ -184,16 +184,60 @@ mode `--follow` always does that, and plain `bullpen news` still works. News
 logged in `monitor` or `wake` mode but not yet read when you switch back is not typed:
 `bullpen news` prints it.
 
+## The guide, and what a news line has to say
+
+The coordinator's guide is `prompts/coordinator.md`: the rules, how to plan and brief,
+the commands, how to read news, triage, and how to report to you. Sections that only
+some repositories need are files of their own in `prompts/coordinator/`, and a
+repository's guide has one only when it applies:
+
+| Section | File | In the guide when |
+|---------|------|-------------------|
+| News by wake | `news-wake.md` | `news` is `wake` |
+| News by monitor | `news-monitor.md` | `news` is `monitor` |
+| Pull requests | `prs.md` | the repository has an `origin` remote |
+| Auto-accept | `auto-accept.md` | `auto_accept` is on, or `pickup` with `pickup_auto_accept` |
+| Pickup | `pickup.md` | `pickup` is on |
+| Other coordinators | `others.md` | the repository has more than one coordinator |
+
+`bullpen guide` prints the guide for the repository it runs in; `bullpen guide --all`
+(and `bullpen guide` outside a repository) prints it with every section.
+
+The guide doesn't list news lines. It has one rule and a short table: a line says
+what happened and, when there is something for the coordinator to do, what (a command
+to run, or who to tell); a line that says nothing of the kind matches a row of the
+table (`For the coordinator:`, a task that needs you, your answer, ready or finished,
+the lines that need nothing, two tasks that changed the same file). So a new news line
+has to carry its own instruction or fit a row. The tests hold every line they send to
+that: `tests/support.py` (`check_news`) fails a test whose news does neither, and
+`tests/test_guide.py` checks that the table's rows are the ones the tests use.
+
 ## A changed guide
 
-When the coordinator's guide changes. A coordinator gets its guide
-(`prompts/coordinator.md`) once: in its system prompt, or by reading `bullpen guide`
+When the coordinator's guide changes. A coordinator gets its guide once: in its
+system prompt, or by reading `bullpen guide`
 after `up --here`, and a running agent can't load it again. So each coordinator
 records the hash of the guide it was given, and the text is kept in
-`~/.local/state/bullpen/guides/<hash>.md`. When `bullpen up` or `bullpen accept` (a
-pull or a merge may have changed it) finds that a running coordinator's guide is
+`~/.local/state/bullpen/guides/<hash>.md`. When `bullpen up`, `bullpen accept` (a
+pull or a merge may have changed it) or `bullpen config` (a setting may have brought
+a section) finds that a running coordinator's guide is
 out of date, in any repository, it sends that coordinator alone one news line, and
-records the new hash, so each change is told once. When the diff is short (40
+records the new hash, so each change is told once.
+
+When a setting brought the guide a section (auto-accept or pickup turned on, a second
+coordinator started, a remote added), the section comes after the line, whole:
+
+```
+bullpen · Your coordinator guide changed with this repo's settings: it has the section Auto-accept now. Read it below and follow it from now on:
+## Auto-accept
+...
+```
+
+A section that only stopped applying is no news: following it does no harm. A switch
+of `news` to `wake` or `monitor` needs no such line either: the last typed line, which
+says news is no longer typed, carries the section for the new way.
+
+For any other change, when the diff is short (40
 lines or less) it comes after the line, as a unified diff (typed with it as one
 message, or printed after it by `bullpen news`, logged as lines starting with a
 tab):
@@ -209,7 +253,7 @@ bullpen · Your coordinator guide changed (section: News). Read the change below
 A longer change names the sections it touches instead:
 
 ```
-bullpen · Your coordinator guide changed (sections: Review, News), 63 lines of diff: run `bullpen guide` to read it all, and follow it from now on.
+bullpen · Your coordinator guide changed (sections: Plan, News), 63 lines of diff: run `bullpen guide` to read it all, and follow it from now on.
 ```
 
 A coordinator from before this (no hash),

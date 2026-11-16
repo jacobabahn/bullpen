@@ -15,6 +15,10 @@ coordinator's pane, its board or one of its workers skips the tasks its board
 hides, as do the board's `n` and selection. With one coordinator, every board
 shows every task.
 
+A coordinator's guide has its "Other coordinators" section only while the repository
+has more than one. When a second one starts, the first gets that section as news
+(see [News](news.md)).
+
 A task belongs to the coordinator that added it: the one whose pane ran `bullpen
 add`, or the first coordinator when `add` ran anywhere else (`bullpen show`
 says which, with several). One rule says who **sees to** a task: its own

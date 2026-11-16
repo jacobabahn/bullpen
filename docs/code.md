@@ -143,8 +143,9 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `jobs.rs`: starting a background job so it outlives the command and its pane (a
   double fork), with its output in `jobs.log` and its failure in the news
 - `up.rs`: `up`
-- `guide.rs`: `guide`, and telling running coordinators their guide changed (with
-  difflib's diff, ported)
+- `guide.rs`: `guide`: the guide for a repo, `prompts/coordinator.md` with the sections
+  of `prompts/coordinator/` that apply to it; and telling running coordinators their
+  guide changed (a section that came, whole; else difflib's diff, ported)
 - `watcher.rs`: starting the watcher from the copy of bullpen the repo's coordinator
   uses, and replacing it when that copy's `watch.lua` or build changes (its stamp:
   their hashes); after a merge (`refresh_watcher`) or a build

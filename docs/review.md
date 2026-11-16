@@ -177,7 +177,7 @@ every 2 minutes (one `gh pr view` per PR; none when no task has one open):
 - New comments, or changes requested, by people on GitHub (not bots, not
   approvals): the same, with the comment text.
 - A PR merged or closed on GitHub: one news line saying so. Nothing else changes:
-  `bullpen accept` (merged) or `drop` (closed) cleans up.
+  `bullpen accept` (merged) or `drop` (closed) cleans up; the coordinator tells you, and runs it when you say so.
 
 Each failure or comment is reported once. If the worker's pane is gone, the task
 goes to the coordinator (triage) instead; if the worker is stopped mid-turn (a

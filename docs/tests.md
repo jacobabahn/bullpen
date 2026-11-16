@@ -26,7 +26,11 @@ several agents can run the suite at once and the machine stays responsive. They 
 every CPU, and give way when anything else wants one.
 
 There's a module per area (`tests/test_tour.py`, `tests/test_news.py`, ...); what they
-share is in `tests/support.py`. Run the tests for what you're changing while you work,
+share is in `tests/support.py`. Every test built on it is also held to one rule about
+news: each line bullpen logged during the test has to say what the coordinator does
+(a command, or who to tell) or match a row of the table in the coordinator's guide
+(`check_news`, with the rows in `NEWS_ROWS`; see [News](news.md)). A new news line
+that does neither fails the test that sent it: give it its instruction, or a row. Run the tests for what you're changing while you work,
 and the full suite once, right before `ready`: `python3 tests/run.py` plus
 `bin/bullpen-cargo test --workspace` (plain `cargo` isn't on an agent's PATH; see
 docs/rebuilds.md). Reviewers run only the tests that check a claim, never a whole suite.

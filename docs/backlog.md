@@ -92,7 +92,8 @@ It starts at most one item a run, and only when all of these hold:
   you haven't answered comes before new work.
 - **No pile**: fewer than `pickup_waiting` (2) self-started tasks wait for you (ready,
   finished, needs, stopped). At the cap it pauses, with one news line and one
-  notification, once a pause: `Pickup paused: BP-140 and BP-141 wait for you`. The
+  notification, once a pause: `Pickup paused: BP-140 and BP-141 wait for you` (the
+  coordinator's line says to tell you). The
   pause lasts until the pile is gone, even while something else (a task that needs you)
   holds pickup back too, so it isn't said again when that's answered.
 - **Room**: fewer than `max_running` tasks work, and fewer than `pickup_running` (1)
