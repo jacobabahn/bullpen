@@ -137,8 +137,10 @@ the person a task is ready, pass its label on, word for word, so they know which
 ones need a careful look. It only labels: it changes nothing about what
 auto-accepts.
 
-A small or docs-only change gets a light review (one round, on a cheaper model);
-later rounds only check the last findings and what changed since. If the person
+A small or docs-only change gets a light review (one round, on a cheaper model),
+but never one that touches `prompts/` or `.bullpen/rules.md`: that gets a full
+review however small. Later rounds only check the last findings and what changed
+since. If the person
 wants a small but risky change reviewed in full, `bullpen add --review full` (or
 `bullpen review-mode <ID> full` before its `ready`); `light` the other way. An
 approval carries over when `ready` runs again with the code unchanged (the same

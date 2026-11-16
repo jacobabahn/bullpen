@@ -117,10 +117,36 @@ class ReviewTest(BullpenTest):
         self.bp("add", "Docs", "--brief", "x")
         self.bp("start", "BP-2")
         self.commit_file("BP-2", "docs/guide.md", "line\n" * 300)
-        self.commit_file("BP-2", "prompts/x.txt", "line\n" * 300)
+        self.commit_file("BP-2", "NOTES.md", "line\n" * 300)
         self.ready("BP-2")
         self.assertEqual(self.show("BP-2")["review"]["kind"], "light")
         self.assertEqual(self.show("BP-2")["review"]["why"], "docs only")
+
+    def test_a_change_to_a_prompt_or_the_rules_gets_a_full_review(self):
+        tid = self.start_task()
+        self.commit_file(tid, "prompts/worker.md", "Be careful.\n")
+        self.ready(tid)
+        r = self.show(tid)["review"]
+        self.assertEqual((r["kind"], r["why"], r["model"]), ("full", "changes a prompt", None))
+        prompt = self.review_prompt(tid, 1)
+        self.assertIn("(full review (changes a prompt))", prompt.splitlines()[0])
+        self.assertNotIn("This is a light review", prompt)
+        self.assertIn("(full review (changes a prompt))", self.bp("show", tid).stdout)
+        self.verdict(tid, "approve")
+        self.assertIn("approved by full review: changes a prompt)", self.news()[-1])
+        self.bp("add", "Rules", "--brief", "x")
+        self.bp("start", "BP-2")
+        self.commit_file("BP-2", ".bullpen/rules.md", "- Be kind.\n")
+        self.ready("BP-2")
+        r = self.show("BP-2")["review"]
+        self.assertEqual((r["kind"], r["why"]), ("full", "changes the rules"))
+        # an explicit light still wins
+        self.bp("add", "Typo", "--brief", "x", "--review", "light")
+        self.bp("start", "BP-3")
+        self.commit_file("BP-3", "prompts/worker.md", "Be careful.\n")
+        self.ready("BP-3")
+        r = self.show("BP-3")["review"]
+        self.assertEqual((r["kind"], r["why"]), ("light", "set for BP-3"))
 
     def test_a_bigger_change_gets_a_full_review(self):
         self.bp("config", "--light-review-lines", "40")

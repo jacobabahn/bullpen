@@ -149,6 +149,11 @@ fn a_light_review_set_on_a_big_change_is_at_least_medium() {
     let set = r(json!({"kind": "light", "why": "set for BP-3"}));
     assert_eq!(light_floor(&set, big, 40).map(|p| p.level), Some("medium"));
     assert_eq!(light_floor(&set, "3\t0\tcli/src/x.rs\n", 40), None); // its size calls for a light one anyway
+    let prompt = light_floor(&set, "1\t0\tprompts/worker.md\n", 40).unwrap(); // small, but a prompt
+    assert_eq!(
+        (prompt.level, prompt.why.as_str()),
+        ("medium", "a light review, though it changes a prompt")
+    );
     assert_eq!(
         light_floor(&r(json!({"kind": "light", "why": "docs only"})), big, 40),
         None

@@ -28,11 +28,15 @@ Review costs only what it has to:
 - **The first round** is a full review on the reviewer model (`--reviewer-model`):
   the brief, the whole diff, the tests. A small change gets a **light review**
   instead: one round on the follow-up model, checking that it's correct and matches
-  the brief. Small means docs only (every changed file under `docs/` or `prompts/`,
-  or ending in `.md`), or at most `light_review_lines` changed lines (40 by default,
-  `config --light-review-lines`) in at most 2 files. `bullpen add --review
-  full|light|auto` or `bullpen review-mode BP-3 full|light|auto` overrides that
-  for one task; auto, the default, goes by the size.
+  the brief. Small means docs only (every changed file under `docs/` or ending in
+  `.md`), or at most `light_review_lines` changed lines (40 by default,
+  `config --light-review-lines`) in at most 2 files. A change that touches
+  `prompts/` or `.bullpen/rules.md` is never small: those are what agents are told
+  to do, a wrong one changes behaviour, so it gets a full review however few lines
+  it is ("full review (changes a prompt)", "full review (changes the rules)").
+  `bullpen add --review full|light|auto` or `bullpen review-mode BP-3
+  full|light|auto` overrides that for one task, a light one for a prompt too; auto,
+  the default, goes by what the change touches and its size.
 - **Later rounds follow up**: the reviewer gets the last round's findings and the
   diff since the commit it reviewed (a range-diff after a rebase), with the whole
   diff for context, and checks that each finding is fixed and that the fixes broke
@@ -71,8 +75,9 @@ A reviewer's brief is headed with its round and kind, `# BP-3 review, round 2 of
 (follow-up review)`; a rebase check or a tour's review, which don't count as rounds,
 and a round past the limit leave out the "of 2".
 
-The board, `show` and the ready news say which kind of review it was ("approved by
-light review (12 lines in 1 file)").
+The reviewer's brief, `show` and the ready news say which kind of review it was and
+why ("approved by light review: 12 lines in 1 file", "full review (changes a
+prompt)"); the board says the kind.
 
 ## The risk label
 
@@ -95,9 +100,10 @@ auto-accepts. It has two parts, and the higher wins (on a tie, the reviewer's wh
   see: a subtle change in behaviour, something it couldn't run or check, a claim in
   the summary it couldn't confirm. It comes from the round that approved; a round
   that gives none, and a rebase check, keep the last round's. A light review that was
-  set for the task (`review-mode light`) on a change whose size calls for a full one
+  set for the task (`review-mode light`) on a change that calls for a full one
   makes the label at least medium ("a light review where its size calls for a full
-  one"): it looked at less than the change needs.
+  one", "a light review, though it changes a prompt"): it looked at less than the
+  change needs.
 
 It follows the code. Each step that makes a task ready works the rules out again:
 an approval kept after a rebase that only moved the base says the same (the same

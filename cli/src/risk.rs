@@ -10,13 +10,13 @@
 //! - **review**, the reviewer's judgement with its verdict (a `## Risk` part in its
 //!   findings: `medium: ...`), from the round that approved it. A round that gives none,
 //!   and a rebase check, keep the last one's. A light review that was set for a change
-//!   whose size calls for a full one is at least medium.
+//!   that calls for a full one (by its size, or a prompt or the rules) is at least medium.
 //!
 //! It's worked out at every step that makes a task ready with a change, so it follows
 //! the code: a kept approval (only the base moved) works the rules out again, which
 //! say the same for the same lines, and keeps the reviewer's part.
 
-use crate::review::{change_size_of, kind_by_size};
+use crate::review::kind_of_change;
 use bullpen_core::json::{get, obj, s, Obj};
 use bullpen_core::proc::{git, head};
 use bullpen_core::risk::rank;
@@ -126,8 +126,8 @@ fn part_of(o: &Obj) -> Option<Part> {
     Some(part(level, s(o, "why")))
 }
 
-/// A light review set for the task (`--review light`) of a change whose size calls for
-/// a full one: it looked at less than the change needs, so the label is at least medium.
+/// A light review set for the task (`--review light`) of a change that calls for a full
+/// one, by its size or because it changes a prompt or the rules: it looked at less than the change needs, so the label is at least medium.
 fn light_floor(r: &Obj, numstat: &str, small: i64) -> Option<Part> {
     let set = r
         .get("why")
@@ -136,9 +136,11 @@ fn light_floor(r: &Obj, numstat: &str, small: i64) -> Option<Part> {
     if s(r, "kind") != "light" || !set {
         return None;
     }
-    let (files, lines, docs) = change_size_of(numstat);
-    (kind_by_size(files, lines, docs, small).0 == "full")
-        .then(|| part("medium", "a light review where its size calls for a full one"))
+    let (kind, why) = kind_of_change(numstat, small);
+    (kind == "full").then(|| match why {
+        Some(why) => part("medium", &format!("a light review, though it {why}")),
+        None => part("medium", "a light review where its size calls for a full one"),
+    })
 }
 
 // ---------- the rules ----------

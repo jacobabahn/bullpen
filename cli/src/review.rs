@@ -286,11 +286,33 @@ pub fn is_doc(path: &str) -> bool {
     path.starts_with("docs/") || path.starts_with("prompts/") || path.ends_with(".md")
 }
 
-/// (files, lines, docs_only) of the branch's change; lines is None if a binary file changed.
-fn change_size(wt: &str, base_ref: &str) -> Res<(i64, Option<i64>, bool)> {
-    let range = format!("{base_ref}...HEAD");
-    let out = git(wt, &["diff", "--numstat", "--no-renames", &range], true)?.stdout;
-    Ok(change_size_of(&out))
+/// Why a change to this path gets a full review however small: a prompt or the
+/// repository's rules is what agents are told to do, so a wrong one changes behaviour.
+fn full_reason(path: &str) -> Option<&'static str> {
+    if path.starts_with("prompts/") {
+        Some("changes a prompt")
+    } else if path == crate::rules::RULES_FILE {
+        Some("changes the rules")
+    } else {
+        None
+    }
+}
+
+/// full_reason of the first such path in `git diff --numstat`'s rows.
+fn full_reason_of(numstat: &str) -> Option<&'static str> {
+    bullpen_core::text::splitlines(numstat)
+        .into_iter()
+        .find_map(|row| full_reason(row.splitn(3, '\t').nth(2).unwrap_or("")))
+}
+
+/// The first review's kind and why for a change, from `git diff --numstat`'s rows: full
+/// if it touches a prompt or the rules, else by its size.
+pub fn kind_of_change(numstat: &str, limit: i64) -> (String, Option<String>) {
+    if let Some(why) = full_reason_of(numstat) {
+        return ("full".into(), Some(why.into()));
+    }
+    let (files, lines, docs) = change_size_of(numstat);
+    kind_by_size(files, lines, docs, limit)
 }
 
 /// change_size from `git diff --numstat`'s rows.
@@ -316,7 +338,7 @@ pub fn change_size_of(numstat: &str) -> (i64, Option<i64>, bool) {
 }
 
 /// (kind, why) for a task's first review: "full" or "light", by its own review mode,
-/// else by the change's size.
+/// else by what the change touches and its size.
 fn first_kind(repo: &Repo, t: &Obj, base_ref: &str) -> Res<(String, Option<String>)> {
     let mode = match s(t, "review_mode") {
         "" => "auto",
@@ -325,9 +347,10 @@ fn first_kind(repo: &Repo, t: &Obj, base_ref: &str) -> Res<(String, Option<Strin
     if mode != "auto" {
         return Ok((mode.into(), Some(format!("set for {}", s(t, "id")))));
     }
-    let (files, lines, docs) = change_size(s(t, "worktree"), base_ref)?;
+    let range = format!("{base_ref}...HEAD");
+    let numstat = git(s(t, "worktree"), &["diff", "--numstat", "--no-renames", &range], true)?.stdout;
     let limit = repo.cfg.get("light_review_lines").and_then(Value::as_i64).unwrap_or(0);
-    Ok(kind_by_size(files, lines, docs, limit))
+    Ok(kind_of_change(&numstat, limit))
 }
 
 /// The first review's kind for a change of this size.
@@ -352,7 +375,8 @@ fn plural(n: i64) -> &'static str {
     }
 }
 
-/// "full review", "light review (docs only)", "follow-up review".
+/// "full review", "full review (changes a prompt)", "light review (docs only)",
+/// "follow-up review".
 pub fn review_kind(r: &Obj) -> String {
     let word = match s(r, "kind") {
         "" => return "review".into(),

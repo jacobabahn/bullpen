@@ -48,12 +48,53 @@ fn first_review_is_light_for_docs_or_a_small_change() {
 }
 
 #[test]
+fn a_change_to_a_prompt_or_the_rules_gets_a_full_review_however_small() {
+    let full = |why: &str| ("full".to_string(), Some(why.to_string()));
+    assert_eq!(
+        kind_of_change("1\t1\tprompts/worker.md\n", 40),
+        full("changes a prompt")
+    );
+    assert_eq!(
+        kind_of_change("1\t0\t.bullpen/rules.md\n", 40),
+        full("changes the rules")
+    );
+    // among docs, and beside code that is small enough for a light review
+    assert_eq!(
+        kind_of_change("3\t1\tdocs/a.md\n1\t1\tprompts/p.txt\n", 40),
+        full("changes a prompt")
+    );
+    assert_eq!(
+        kind_of_change("1\t0\tcli/src/a.rs\n1\t0\t.bullpen/rules.md\n", 40),
+        full("changes the rules")
+    );
+    // the first of the two, in the diff's order
+    assert_eq!(
+        kind_of_change("1\t0\t.bullpen/rules.md\n1\t0\tprompts/p.md\n", 40),
+        full("changes the rules")
+    );
+    // other docs, a prompts folder elsewhere and another rules.md go by size as before
+    assert_eq!(
+        kind_of_change("300\t0\tdocs/a.md\n1\t0\tsrc/prompts/p.md\n1\t0\tdocs/rules.md\n", 40),
+        ("light".into(), Some("docs only".into()))
+    );
+    assert_eq!(
+        kind_of_change("1\t0\ta.rs\n", 40),
+        ("light".into(), Some("1 line in 1 file".into()))
+    );
+    assert_eq!(kind_of_change("41\t0\ta.rs\n", 40), ("full".into(), None));
+}
+
+#[test]
 fn review_kind_in_words() {
     let r = |v: Value| v.as_object().unwrap().clone();
     assert_eq!(review_kind(&r(json!({}))), "review");
     assert_eq!(
         review_kind(&r(json!({"kind": "light", "why": "docs only"}))),
         "light review (docs only)"
+    );
+    assert_eq!(
+        review_kind(&r(json!({"kind": "full", "why": "changes a prompt"}))),
+        "full review (changes a prompt)"
     );
     assert_eq!(
         review_kind(&r(json!({"kind": "followup", "why": null}))),
