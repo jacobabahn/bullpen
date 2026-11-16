@@ -62,8 +62,10 @@ While some repository has `issues` on, the watcher reads its issues every `issue
 minutes (30; `bullpen config --issues-every 10`), the same read as `bullpen issues
 --now`. It runs as a background job (its output in the repository's `jobs.log`), so a
 slow gh holds nothing up. With issues off everywhere it costs nothing: the watcher only
-looks at `~/.local/state/bullpen/issues`, which `bullpen config --issues on` makes and
-which holds when the next read is due. A watcher that wasn't running catches up at its
+looks at `~/.local/state/bullpen/issues`, which `bullpen config --issues on` makes
+(and `bullpen up`, in a repository with issues on, when it is missing) and which holds
+when the next read is due. Turning issues off and on again doesn't read at once: the
+next read is still `issues_every` after the last one. A watcher that wasn't running catches up at its
 first look.
 
 New issues are one news line for the lot, to every coordinator of the repository:

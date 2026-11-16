@@ -193,10 +193,6 @@ pub fn cmd_config(argv: &[String]) -> Res<i32> {
         std::fs::create_dir_all(bullpen_core::paths::state())?;
         crate::news::touch(&crate::backlog::pickup::flag())?;
     }
-    if a.opt("--issues") == Some("on") || a.opt("--issues-every").is_some() {
-        // the watcher's timer looks at its next tick (`_issues` reads only where a read is due)
-        crate::issues::timer::soon()?;
-    }
     if a.flag("--global") {
         return config_global(&a);
     }
@@ -236,12 +232,23 @@ pub fn cmd_config(argv: &[String]) -> Res<i32> {
         crate::guide::told_by_switch(&mut repo, &told)?;
     }
     repo.save()?;
+    issues_soon(&a)?;
     reindex(&repo)?;
     if changed {
         crate::guide::tell_guide_changes_quietly(&mut repo); // a setting may have brought its guide a section
     }
     show_config(Some(&repo), a.flag("--json"))?;
     Ok(0)
+}
+
+/// `--issues on` or `--issues-every`, once the setting is saved: the watcher's timer
+/// looks at its next tick (`_issues` reads only where a read is due). After the save,
+/// as an `_issues` that found the file but no repo with `issues` on would remove it.
+fn issues_soon(a: &Args) -> Res<()> {
+    if a.opt("--issues") == Some("on") || a.opt("--issues-every").is_some() {
+        crate::issues::timer::soon()?;
+    }
+    Ok(())
 }
 
 /// The flags that are per repository, for --global's refusal: the repo-only settings',
@@ -276,6 +283,7 @@ fn config_global(a: &Args) -> Res<i32> {
             g.insert(k, v);
         }
         json::write_obj(&path, &g)?;
+        issues_soon(a)?;
         for cfg in config_files() {
             let root = json::read_obj(&cfg)?.unwrap_or_default();
             match root.get("root") {

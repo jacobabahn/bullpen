@@ -38,6 +38,16 @@ pub fn soon() -> Res<()> {
     Ok(std::fs::write(flag(), "")?)
 }
 
+/// `up`, in a repo with `issues` on: the watcher's file is there. It is missing where
+/// `issues` was turned on before there was a timer, or after an `_issues` that couldn't
+/// read this repo's config just then and so found no repo with issues on.
+pub fn ensure(repo: &Repo) -> Res<()> {
+    if on(repo) && !flag().exists() {
+        soon()?;
+    }
+    Ok(())
+}
+
 fn on(repo: &Repo) -> bool {
     truthy(repo.cfg.get("issues"))
 }

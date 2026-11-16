@@ -117,6 +117,7 @@ pub fn cmd_up(argv: &[String]) -> Res<i32> {
         println!("{}", news_mode_line(&repo));
     }
     crate::backlog::pickup::soon(&repo); // a Rex session now: there may be room
+    crate::issues::timer::ensure(&repo)?; // the watcher's file for the issues timer, if it is missing
     Ok(0)
 }
 

@@ -410,6 +410,27 @@ class IssuesTimerTest(IssuesBase):
         self.bp("config", "--issues", "on")
         self.assertTrue(self.flag.exists())
 
+    def test_up_makes_the_watchers_file_where_issues_are_on_without_it(self):
+        self.flag.unlink()  # on since before the timer, or the file was lost
+        self.bp("up")
+        self.assertEqual(self.flag.read_text(), "")
+        self.flag.write_text("123\n")
+        self.bp("up")  # there already: when the next read is due stays
+        self.assertEqual(self.flag.read_text(), "123\n")
+        self.bp("config", "--issues", "off")
+        self.flag.unlink()
+        self.bp("up")
+        self.assertFalse(self.flag.exists())
+
+    def test_config_makes_the_file_only_once_the_setting_is_saved(self):
+        self.bp("config", "--issues", "off")
+        self.bp("_issues")
+        self.assertFalse(self.flag.exists())
+        self.assertIn("1 or more", self.bp("config", "--issues", "on", "--issues-every", "0", ok=False).stderr)
+        self.assertFalse(self.flag.exists())  # refused: nothing saved, no file
+        self.bp("config", "--global", "--issues", "on")
+        self.assertEqual(self.flag.read_text(), "")
+
     def test_doctor_checks_gh_in_local_mode_while_issues_are_on(self):
         self.healthy()
         gh = self.fake / "gh"
