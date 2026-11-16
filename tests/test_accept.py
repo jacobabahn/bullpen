@@ -200,7 +200,9 @@ class AcceptTest(BullpenTest):
         self.assertEqual((t["status"], t["conflict_sends"]), ("working", 1))
         line = [l for b, l in self.typed() if b == t["block"]][-1]
         self.assertIn("doesn't rebase cleanly onto main: conflicts in fix1.txt", line)
-        self.assertIn("run `git fetch origin`, then rebase your branch onto origin/main", line)
+        self.assertIn("run `git fetch origin`, then rebase your branch onto origin/main; where both sides changed "
+                      "the same place, keep both. Run the full suite again, commit, and run your ready command "
+                      "again.", line)
         self.assertEqual(self.news_lines()[-1], "bullpen · BP-1 approved by review, but the auto-accept was refused: "
                                                 "it conflicts with main in fix1.txt. Sent back to its worker to "
                                                 "rebase (trip 1 of 3)")
@@ -439,6 +441,18 @@ class AcceptTest(BullpenTest):
         self.assertEqual(t["rebased"], "main")  # the board says "Rebased onto main."
         self.assertEqual(self.news_lines()[-1], "bullpen · After BP-1: BP-2 rebased.")
 
+    def test_show_says_when_a_ready_task_no_longer_rebases_onto_origins_base(self):
+        self.two_tasks()
+        self.assertNotIn("rebase:", self.bp("show", "BP-1").stdout)
+        (self.repo / "one.txt").write_text("landed first\n")  # what another change merged meanwhile
+        sh("git", "-C", str(self.repo), "add", ".")
+        sh("git", "-C", str(self.repo), "commit", "-qm", "Clash")
+        sh("git", "-C", str(self.repo), "push", "-q", "origin", "HEAD:main")
+        sh("git", "-C", str(self.repo), "fetch", "-q", "origin")
+        self.assertIn("   rebase: no longer rebases onto main: conflicts in one.txt. `bullpen tell BP-1` it to "
+                      "rebase and run ready again\n", self.bp("show", "BP-1").stdout)
+        self.assertNotIn("rebase:", self.bp("show", "BP-2").stdout)  # working: its next ready sees to it
+
     def test_after_accept_a_working_task_with_no_overlap_is_left_alone(self):
         self.two_tasks()
         wt = self.show("BP-2")["worktree"]
@@ -459,10 +473,11 @@ class AcceptTest(BullpenTest):
         head = sh("git", "-C", wt, "rev-parse", "HEAD")
         line = self.accept_first()
         self.assertEqual(sh("git", "-C", wt, "rev-parse", "HEAD"), head)  # its worktree isn't touched
-        self.assertIn("BP-1 was just accepted, and your branch conflicts with it in shared.txt", line)
-        self.assertIn("run `git fetch origin`, then rebase your branch onto origin/main and fix the conflicts",
-                      line)
-        self.assertNotIn("rerun the tests", line)
+        self.assertIn("main moved: BP-1 (First) was just accepted, and your branch conflicts with it in shared.txt. "
+                      "At a good point, ", line)
+        self.assertIn("run `git fetch origin`, then rebase your branch onto origin/main; where both sides changed "
+                      "the same place, keep both.", line)
+        self.assertNotIn("suite", line)
         self.assertEqual(self.show("BP-2")["status"], "working")
         self.assertEqual(self.news_lines()[-1],
                          "bullpen · After BP-1: BP-2 told to rebase (conflicts in shared.txt).")
@@ -472,7 +487,9 @@ class AcceptTest(BullpenTest):
         wt = self.show("BP-2")["worktree"]
         (Path(wt) / "one.txt").write_text("mine\n")  # untracked, where BP-1 added it
         line = self.accept_first()
-        self.assertIn("it changed one.txt, where you have uncommitted changes", line)
+        self.assertIn("it changed one.txt, where you have uncommitted changes. Commit them at a good point, then "
+                      "run `git fetch origin`, then rebase your branch onto origin/main.", line)
+        self.assertNotIn("conflict", line)
         self.assertEqual((Path(wt) / "one.txt").read_text(), "mine\n")
         self.assertEqual(self.news_lines()[-1],
                          "bullpen · After BP-1: BP-2 told to rebase (uncommitted changes in one.txt).")

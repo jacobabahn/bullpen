@@ -301,6 +301,9 @@ pub fn cmd_show(argv: &[String]) -> Res<i32> {
     for (other, files) in crate::overlap::overlaps_of(&repo, s(&t, "id"), &all) {
         out.push(format!("  overlap: {other} changed {} too", files.join(", ")));
     }
+    if let Some(files) = crate::accept::rebase::stale_conflicts(&repo, &t)? {
+        out.push(crate::accept::rebase::stale_line(&t, &files));
+    }
     if let Some(line) = review_line(&t) {
         out.push(line);
     }

@@ -259,6 +259,16 @@ class LocalModeTest(unittest.TestCase):
         self.assertEqual(self.show(tid)["status"], "ready")
         self.assertTrue(Path(wt).exists())
 
+    def test_show_says_when_a_ready_task_no_longer_rebases(self):
+        tid, wt = self.ready_task()  # main gained other.txt since: it still rebases
+        self.assertNotIn("rebase:", self.bp("show", tid).stdout)
+        self.commit(self.repo, "fix.txt", "fixed differently\n", "Clash")
+        head = self.git("rev-parse", "HEAD", cwd=wt)
+        self.assertIn(f"   rebase: no longer rebases onto main: conflicts in fix.txt. `bullpen tell {tid}` it to "
+                      "rebase and run ready again\n", self.bp("show", tid).stdout)
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=wt), head)  # only a trial: nothing is written
+        self.assertEqual(self.git("status", "--porcelain", cwd=wt), "")
+
     def approved_with_a_conflict(self, sends=0):
         """An auto-accepted task whose branch conflicts with main (fix.txt), approved,
         after sends earlier trips back to rebase."""
@@ -283,8 +293,8 @@ class LocalModeTest(unittest.TestCase):
         block, line = [(b, l) for b, l in self.typed() if b == t["block"]][-1]
         self.assertIn("Review approved your work, but the auto-accept was refused: your branch doesn't rebase "
                       "cleanly onto main: conflicts in fix.txt.", line)
-        self.assertIn("rebase your branch onto main, fix the conflicts, rerun the tests, commit, and run your "
-                      "ready command again", line)
+        self.assertIn("Now rebase your branch onto main; where both sides changed the same place, keep both. "
+                      "Run the full suite again, commit, and run your ready command again.", line)
         self.assertEqual(self.news_tail(), "bullpen · BP-1 approved by review, but the auto-accept was refused: "
                                            "it conflicts with main in fix.txt. Sent back to its worker to rebase "
                                            "(trip 1 of 3)")

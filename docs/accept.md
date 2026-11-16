@@ -10,13 +10,20 @@ on that base up to date, and they don't drift behind and conflict later:
   (committed on its branch, uncommitted, or untracked). No overlap: left alone.
   Overlap: a trial merge (`git merge-tree`, which writes nothing) tells whether its
   committed work conflicts. A conflict, or uncommitted changes in a file the
-  accepted change touched, and its worker is told the base moved, which files, and
-  to rebase onto it at a good point (after `git fetch origin`, with a remote) and
-  fix the conflicts. Otherwise it's left alone: nothing needs a working task to be
+  accepted change touched, and its worker is told the base moved, which task landed
+  (its ID and title), which files, and to rebase onto it at a good point (after
+  `git fetch origin`, with a remote), keeping both where both sides changed the
+  same place. With uncommitted changes it's told to commit them first, and nothing
+  about conflicts: there are none yet. Otherwise it's left alone: nothing needs a working task to be
   on top of its base (`accept` rebases when it merges). Its worktree isn't touched
   under it.
 - In review, or with its reviewer waiting on you: left alone. Its next `ready`
-  brings it up to date.
+  brings it up to date. If it's approved meanwhile, it comes back ready on the old
+  base: `bullpen show <ID>` then has a `rebase:` line when its branch no longer
+  rebases onto its base (`no longer rebases onto main: conflicts in README.md`),
+  as it has for any ready task. It's a trial merge against the base as it is here:
+  nothing is fetched or written. `bullpen tell` the task to rebase and run `ready`
+  again, rather than wait for the accept to fail.
 - Waiting on you or the coordinator mid-turn (a permission prompt, a failure): not
   rebased, and the news says so.
 - Between turns (needs you, triage, stopped, ready): bullpen rebases its branch itself,
@@ -123,8 +130,9 @@ Another task may land first, while this one is in review, and then its branch no
 longer rebases onto its base. When an auto-accept is refused, bullpen tries a
 rebase in the task's worktree (after `git fetch origin`, with a remote) and undoes
 it. If it conflicts, the task goes back to its worker, as `rebase-others` sends
-one back: the files it conflicts in, and to rebase onto its base, fix the
-conflicts, rerun the tests, commit and run `ready` again (resumed in a new pane if
+one back: the files it conflicts in, and to rebase onto its base (keeping both
+where both sides changed the same place), run the full suite again, commit and
+run `ready` again (resumed in a new pane if
 its pane is gone). The conflicts are noted on its review, so that `ready` gets the
 usual follow-up: its approval carried over, a rebase check of the resolution, or a
 review after a rebase ([Review](review.md)), then the auto-accept again. The board says

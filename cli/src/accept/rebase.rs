@@ -200,28 +200,10 @@ fn rebase_need(wt: &str, base_ref: &str, touched: Option<&BTreeSet<String>>) -> 
     let mut conflicts = BTreeSet::new();
     let in_committed: BTreeSet<String> = touched.intersection(&committed).cloned().collect();
     if !in_committed.is_empty() {
-        let args = [
-            "merge-tree",
-            "--write-tree",
-            "--name-only",
-            "--no-messages",
-            "-z",
-            base_ref,
-            "HEAD",
-        ];
-        let p = git(wt, &args, false)?;
-        if p.code == 1 {
-            // the tree, then the conflicted files
-            conflicts = p
-                .stdout
-                .split('\0')
-                .skip(1)
-                .filter(|f| !f.is_empty())
-                .map(String::from)
-                .collect();
-        } else if !p.ok() {
-            conflicts = in_committed.clone(); // it couldn't tell: say so to the worker rather than guess
-        }
+        conflicts = match merge_conflicts(wt, base_ref, "HEAD")? {
+            Some(files) => files.into_iter().collect(),
+            None => in_committed.clone(), // it couldn't tell: say so to the worker rather than guess
+        };
     }
     let in_uncommitted: Vec<String> = touched.intersection(&uncommitted).cloned().collect();
     Ok(conflict_or(
@@ -229,6 +211,35 @@ fn rebase_need(wt: &str, base_ref: &str, touched: Option<&BTreeSet<String>>) -> 
         in_committed.is_empty() && in_uncommitted.is_empty(),
         in_uncommitted,
     ))
+}
+
+/// The files a merge of head into base_ref would conflict in (a trial merge, `git
+/// merge-tree`, which writes nothing); empty when it merges cleanly, None when git
+/// couldn't tell.
+fn merge_conflicts(dir: &str, base_ref: &str, head: &str) -> Res<Option<Vec<String>>> {
+    let args = [
+        "merge-tree",
+        "--write-tree",
+        "--name-only",
+        "--no-messages",
+        "-z",
+        base_ref,
+        head,
+    ];
+    let p = git(dir, &args, false)?;
+    Ok(match p.code {
+        0 => Some(Vec::new()),
+        // the tree, then the conflicted files
+        1 => Some(
+            p.stdout
+                .split('\0')
+                .skip(1)
+                .filter(|f| !f.is_empty())
+                .map(String::from)
+                .collect(),
+        ),
+        _ => None,
+    })
 }
 
 /// The need, from what was found: conflicts first, then uncommitted changes.
@@ -248,32 +259,43 @@ pub fn conflict_or(conflicts: BTreeSet<String>, no_overlap: bool, uncommitted: V
 /// work (a conflict, or uncommitted changes in the files the accepted change touched).
 fn tell_to_rebase(t: &Obj, accepted: &Obj, base_ref: &str, touched: Option<&BTreeSet<String>>) -> Res<String> {
     let id = s(t, "id");
-    let (what, said) = match rebase_need(s(t, "worktree"), base_ref, touched)? {
+    let need = rebase_need(s(t, "worktree"), base_ref, touched)?;
+    let said = match &need {
         Need::Alone(why) => return Ok(format!("{id} left alone ({why})")),
-        Need::Conflict(files) => {
-            let names = files.join(", ");
-            (
-                format!("your branch conflicts with it in {names}"),
-                format!("conflicts in {names}"),
-            )
-        }
-        Need::Uncommitted(files) => {
-            let names = files.join(", ");
-            (
-                format!("it changed {names}, where you have uncommitted changes"),
-                format!("uncommitted changes in {names}"),
-            )
-        }
+        Need::Conflict(files) => format!("conflicts in {}", files.join(", ")),
+        Need::Uncommitted(files) => format!("uncommitted changes in {}", files.join(", ")),
     };
     let base = py_str(t.get("base").unwrap_or(&Value::Null));
-    let msg = format!(
-        "{base} moved: {} was just accepted, and {what}. At a good point, {} and fix the conflicts.",
-        s(accepted, "id"),
-        onto(base_ref)
-    );
+    let msg = told(&base, accepted, &need, base_ref);
     rex_type(s(t, "session"), s(t, "block"), &msg)?;
     Ok(format!("{id} told to rebase ({said})"))
 }
+
+/// What a working task is told when the accepted change meets its work: what landed,
+/// where it meets the work, and to rebase at a good point (committing first, when the
+/// work is uncommitted). Nothing for a task that is left alone.
+pub fn told(base: &str, accepted: &Obj, need: &Need, base_ref: &str) -> String {
+    let title = match s(accepted, "title") {
+        "" => String::new(),
+        title => format!(" ({title})"),
+    };
+    let landed = format!("{base} moved: {}{title} was just accepted", s(accepted, "id"));
+    let onto = onto(base_ref);
+    match need {
+        Need::Alone(_) => String::new(),
+        Need::Conflict(files) => format!(
+            "{landed}, and your branch conflicts with it in {}. At a good point, {onto}; {KEEP_BOTH}.",
+            files.join(", ")
+        ),
+        Need::Uncommitted(files) => format!(
+            "{landed}, and it changed {}, where you have uncommitted changes. Commit them at a good point, then {onto}.",
+            files.join(", ")
+        ),
+    }
+}
+
+/// How a worker settles a conflict, in words for its prompt.
+const KEEP_BOTH: &str = "where both sides changed the same place, keep both";
 
 /// How a worker rebases onto base_ref, in words for its prompt.
 pub fn onto(base_ref: &str) -> String {
@@ -461,7 +483,7 @@ pub fn send_back_conflict(
 ) -> Res<Option<String>> {
     save_conflicts(repo, t, files, shown)?;
     let msg = format!(
-        "{why}: conflicts in {}. Your branch is as it was. Now {}, fix the conflicts, rerun the tests, commit, \
+        "{why}: conflicts in {}. Your branch is as it was. Now {}; {KEEP_BOTH}. Run the full suite again, commit, \
          and run your ready command again.",
         names_of(files),
         onto(base_ref)
@@ -498,6 +520,32 @@ pub fn base_conflict(repo: &Repo, t: &Obj) -> Res<Option<(String, Vec<String>, S
     let shown = git(wt, &["diff"], false)?.stdout;
     git(wt, &["rebase", "--abort"], false)?;
     Ok((!files.is_empty()).then_some((base_ref, files, shown)))
+}
+
+/// For `show`: the files a ready task's branch conflicts with its base in, as the base
+/// is here now (nothing is fetched or written: a trial merge). None when it still
+/// rebases, isn't ready, or that can't be told.
+pub fn stale_conflicts(repo: &Repo, t: &Obj) -> Res<Option<Vec<String>>> {
+    let branch = s(t, "branch");
+    if s(t, "status") != "ready" || branch.is_empty() {
+        return Ok(None);
+    }
+    let base_ref = task_base_ref(repo, t)?;
+    let head = format!("refs/heads/{branch}");
+    if git(&repo.root, &["merge-base", "--is-ancestor", &base_ref, &head], false)?.ok() {
+        return Ok(None); // on top of it (or the branch is gone, which merge-tree says below)
+    }
+    let root = repo.root.display().to_string();
+    Ok(merge_conflicts(&root, &base_ref, &head)?.filter(|files| !files.is_empty()))
+}
+
+/// `show`'s line for a ready task that no longer rebases onto its base.
+pub fn stale_line(t: &Obj, files: &[String]) -> String {
+    let (id, base) = (s(t, "id"), py_str(t.get("base").unwrap_or(&Value::Null)));
+    format!(
+        "   rebase: no longer rebases onto {base}: conflicts in {}. `bullpen tell {id}` it to rebase and run ready again",
+        files.join(", ")
+    )
 }
 
 #[cfg(test)]

@@ -179,7 +179,8 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `accept/`: `mod.rs`: `accept`, and the steps after the merge, each on its own
   (`run_steps`: a failed one is said, the rest still run); `rebase.rs`: rebasing the
   other tasks onto the moved base (`rebase_others`, keeping both sides of a trivial
-  conflict in a doc or test file)
+  conflict in a doc or test file), what a worker is told (`told`), and `show`'s line
+  for a ready task that no longer rebases (`stale_conflicts`)
 - `prs.rs`: `_prs`, following a task's pull request after ready: its checks, people's
   feedback, a merge or close outside bullpen, a waiting auto-accept
 - `keys.rs`: `keys` (and `--install`), and the hash accept checks to say keys.lua changed

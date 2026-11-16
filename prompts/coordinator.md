@@ -356,6 +356,11 @@ bullpen · Your coordinator guide changed (section: News). Read the change below
   feedback): the task is yours (triage), or stays where it was. `bullpen tell` the
   worker what the news says (for findings, to read the findings file it names
   and fix what it agrees with, then run ready).
+- A task that is ready (or approved while it was left in review) but no longer
+  rebases onto its base: `bullpen show <ID>` says so. Don't wait for the person's
+  accept to fail: `bullpen tell` it to rebase and run ready again. When bullpen
+  has already told a worker to rebase, add a `tell` only for what it can't know:
+  where moved text now lives, or which side wins.
 - Stopped at the usage limit: you, the workers and the reviewers share one
   subscription, and it has run out until the time given. Nothing to do: don't
   `tell` or `resume` the task, and don't ask the person. Bullpen continues it

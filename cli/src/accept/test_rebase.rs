@@ -1,4 +1,5 @@
 use super::*;
+use serde_json::json;
 
 fn set(files: &[&str]) -> BTreeSet<String> {
     files.iter().map(|f| f.to_string()).collect()
@@ -57,6 +58,48 @@ fn what_a_working_task_is_told() {
         Need::Uncommitted(vec!["c".into()])
     );
     assert_eq!(conflict_or(set(&[]), false, vec![]), Need::Alone("no conflict"));
+}
+
+fn task(v: Value) -> Obj {
+    v.as_object().unwrap().clone()
+}
+
+#[test]
+fn a_working_task_with_a_conflict_is_told_what_landed_and_to_keep_both() {
+    let accepted = task(json!({"id": "BP-1", "title": "Fix login"}));
+    assert_eq!(
+        told(
+            "main",
+            &accepted,
+            &Need::Conflict(vec!["a.txt".into(), "b.txt".into()]),
+            "origin/main"
+        ),
+        "main moved: BP-1 (Fix login) was just accepted, and your branch conflicts with it in a.txt, b.txt. \
+         At a good point, run `git fetch origin`, then rebase your branch onto origin/main; where both sides \
+         changed the same place, keep both."
+    );
+}
+
+#[test]
+fn a_working_task_with_uncommitted_changes_is_told_to_commit_then_rebase_and_of_no_conflicts() {
+    let accepted = task(json!({"id": "BP-1"}));
+    let msg = told("main", &accepted, &Need::Uncommitted(vec!["a.txt".into()]), "main");
+    assert_eq!(
+        msg,
+        "main moved: BP-1 was just accepted, and it changed a.txt, where you have uncommitted changes. \
+         Commit them at a good point, then rebase your branch onto main."
+    );
+    assert!(!msg.contains("conflict"));
+}
+
+#[test]
+fn show_says_a_ready_task_no_longer_rebases() {
+    let t = task(json!({"id": "BP-3", "base": "main"}));
+    assert_eq!(
+        stale_line(&t, &["a.txt".into(), "b.txt".into()]),
+        "   rebase: no longer rebases onto main: conflicts in a.txt, b.txt. `bullpen tell BP-3` it to rebase and \
+         run ready again"
+    );
 }
 
 #[test]
