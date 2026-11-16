@@ -196,6 +196,78 @@ class ReviewTest(BullpenTest):
         self.assertEqual((r["round"], r["kind"]), (2, "followup"))
         self.assertIn("x should be 2.", self.review_prompt(tid, 2))
 
+    def test_a_prompt_change_added_in_a_later_round_gets_a_full_review(self):
+        self.set_commands(review_rounds=4)
+        tid = self.start_task()
+        self.commit_file(tid, "fix.py", "x = 1\n")
+        self.ready(tid)
+        self.assertEqual(self.show(tid)["review"]["kind"], "light")
+        self.verdict(tid, "changes", "x should be 2.")
+        self.commit_file(tid, "fix.py", "x = 2\n")
+        self.commit_file(tid, "prompts/worker.md", "Be careful.\n")
+        self.assertIn("(full review (changes a prompt))", self.ready(tid).stdout)
+        r = self.show(tid)["review"]
+        self.assertEqual((r["round"], r["kind"], r["why"], r["model"]), (2, "full", "changes a prompt", None))
+        prompt = self.review_prompt(tid, 2)
+        self.assertIn("round 2 of 4 (full review (changes a prompt))", prompt.splitlines()[0])
+        self.assertIn("1. Does it do what the brief asked", prompt)  # the full review's checks
+        self.assertIn("Round 1 asked for changes.", prompt.replace("\n", " "))  # and the last round's findings
+        self.assertIn("x should be 2.", prompt)
+        self.assertNotIn("{", prompt.replace("{}", ""))
+        # a full review has read the prompt now: other lines moving is a follow-up
+        self.verdict(tid, "changes", "x should be 3.")
+        self.commit_file(tid, "fix.py", "x = 3\n")
+        self.ready(tid)
+        r = self.show(tid)["review"]
+        self.assertEqual((r["round"], r["kind"], r["why"]), (3, "followup", None))
+        # and so is the round after a follow-up, which keeps what the full one read
+        self.verdict(tid, "changes", "x should be 4.")
+        self.commit_file(tid, "fix.py", "x = 4\n")
+        self.ready(tid)
+        self.assertEqual(self.show(tid)["review"]["kind"], "followup")
+        # the prompt changed again since: full again, after an approval too
+        self.verdict(tid, "approve")
+        self.commit_file(tid, "prompts/worker.md", "Be very careful.\n")
+        self.ready(tid)
+        r = self.show(tid)["review"]
+        self.assertEqual((r["round"], r["kind"], r["why"]), (5, "full", "changes a prompt"))
+        self.assertIn("Round 4 approved the change.", self.review_prompt(tid, 5).replace("\n", " "))
+
+    def test_a_first_full_review_covers_its_prompt_change_in_later_rounds(self):
+        self.set_commands(review_rounds=3)
+        tid = self.start_task()
+        self.commit_file(tid, "prompts/worker.md", "Be careful.\n")
+        self.commit_file(tid, "fix.py", "x = 1\n")
+        self.ready(tid)
+        self.assertEqual(self.show(tid)["review"]["kind"], "full")
+        self.verdict(tid, "changes", "x should be 2.")
+        self.commit_file(tid, "fix.py", "x = 2\n")
+        self.ready(tid)
+        r = self.show(tid)["review"]
+        self.assertEqual((r["round"], r["kind"], r["why"]), (2, "followup", None))
+        # the rules file, new in round 3: full, and a reviewer that stopped is replaced by a full one
+        self.verdict(tid, "changes", "Say so in the rules.")
+        self.commit_file(tid, ".bullpen/rules.md", "- Be kind.\n")
+        self.ready(tid)
+        self.assertEqual(self.show(tid)["review"]["why"], "changes the rules")
+        self.bp("_event", self.show(tid)["review"]["block"], "idle", "", "")
+        self.set_commands(review_rounds=4)
+        self.bp("review", tid)
+        r = self.show(tid)["review"]
+        self.assertEqual((r["round"], r["kind"], r["why"]), (4, "full", "changes the rules"))
+
+    def test_an_explicit_light_keeps_a_later_prompt_change_a_follow_up(self):
+        self.bp("up")
+        tid = self.bp("add", "Typo", "--brief", "x", "--review", "light").stdout.strip()
+        self.bp("start", tid)
+        self.commit_file(tid, "fix.py", "x = 1\n")
+        self.ready(tid)
+        self.verdict(tid, "changes", "x should be 2.")
+        self.commit_file(tid, "prompts/worker.md", "Be careful.\n")
+        self.ready(tid)
+        r = self.show(tid)["review"]
+        self.assertEqual((r["round"], r["kind"], r["why"]), (2, "followup", None))
+
     def test_the_reviewer_gets_a_scratch_folder_the_checkout_and_the_suite_rule_once(self):
         tid = self.start_task()
         wt = self.show(tid)["worktree"]

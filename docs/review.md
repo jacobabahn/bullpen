@@ -50,6 +50,15 @@ Review costs only what it has to:
   nothing nearby. They run on `reviewer_followup_model` (`config
   --reviewer-followup-model`, sonnet by default; `null` in `config.json` uses the
   reviewer model).
+- **A later round is a full review** when the change now touches `prompts/` or
+  `.bullpen/rules.md` and no full review has read those lines: a prompt added in a
+  fix round after a light review, say, or one changed again since the full review
+  that read it. It runs on the reviewer model with the same reason ("full review
+  (changes a prompt)"), is given the last round's findings to check as well, and
+  counts as a round like any other. Once a full review has read the prompt change,
+  a round where only other lines moved follows up as usual. A light review set for
+  the task (`--review light`) still wins: its later rounds follow up. A rebase
+  check and a review of the person's comments stay what they are.
 - **An approval is kept while the code doesn't change.** Each review records the
   commit it looked at, a patch-id of the task's diff against its base (`git diff
   base...HEAD | git patch-id --stable`), and the task's own lines: what it adds

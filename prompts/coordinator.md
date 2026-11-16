@@ -143,7 +143,8 @@ auto-accepts.
 A small or docs-only change gets a light review (one round, on a cheaper model),
 but never one that touches `prompts/` or `.bullpen/rules.md`: that gets a full
 review however small. Later rounds only check the last findings and what changed
-since. If the person
+since, unless a prompt or the rules changed in a way no full review has read: that
+round is a full review too. If the person
 wants a small but risky change reviewed in full, `bullpen add --review full` (or
 `bullpen review-mode <ID> full` before its `ready`); `light` the other way. An
 approval carries over when `ready` runs again with the code unchanged (the same

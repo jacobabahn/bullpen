@@ -85,6 +85,47 @@ fn a_change_to_a_prompt_or_the_rules_gets_a_full_review_however_small() {
 }
 
 #[test]
+fn a_later_round_is_full_for_prompt_or_rules_lines_no_full_review_has_read() {
+    let o = |v: Value| v.as_object().unwrap().clone();
+    let own = o(json!({"a.rs": "1", "prompts/p.md": "2", ".bullpen/rules.md": "3"}));
+    assert_eq!(uncovered_reason(&own, &o(json!({}))), Some("changes a prompt"));
+    assert_eq!(
+        uncovered_reason(&own, &o(json!({"prompts/p.md": "2"}))),
+        Some("changes the rules")
+    );
+    // read, but changed since
+    assert_eq!(
+        uncovered_reason(&own, &o(json!({"prompts/p.md": "0", ".bullpen/rules.md": "3"}))),
+        Some("changes a prompt")
+    );
+    let all = o(json!({"prompts/p.md": "2", ".bullpen/rules.md": "3", "prompts/gone.md": "9"}));
+    assert_eq!(uncovered_reason(&own, &all), None);
+    assert_eq!(
+        uncovered_reason(&o(json!({"a.rs": "1", "docs/a.md": "2"})), &o(json!({}))),
+        None
+    );
+}
+
+#[test]
+fn what_a_full_review_has_read_is_kept_from_round_to_round() {
+    let o = |v: Value| v.as_object().unwrap().clone();
+    // a full round: its own lines in prompts and the rules
+    let full = o(json!({"kind": "full", "own": {"a.rs": "1", "prompts/p.md": "2"}, "prev": {"covered": {"x": "y"}}}));
+    assert_eq!(covered_after(&full), json!({"prompts/p.md": "2"}));
+    // any other round: what the round before knew, nothing after a first round
+    let followup =
+        o(json!({"kind": "followup", "own": {"prompts/p.md": "5"}, "prev": {"covered": {"prompts/p.md": "2"}}}));
+    assert_eq!(covered_after(&followup), json!({"prompts/p.md": "2"}));
+    assert_eq!(covered_after(&o(json!({"kind": "light", "prev": null}))), json!({}));
+    // rounds from before bullpen kept this: not known
+    assert_eq!(
+        covered_after(&o(json!({"kind": "followup", "prev": {"round": 1}}))),
+        Value::Null
+    );
+    assert_eq!(covered_after(&o(json!({"kind": "full"}))), Value::Null);
+}
+
+#[test]
 fn review_kind_in_words() {
     let r = |v: Value| v.as_object().unwrap().clone();
     assert_eq!(review_kind(&r(json!({}))), "review");

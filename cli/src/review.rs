@@ -305,6 +305,47 @@ fn full_reason_of(numstat: &str) -> Option<&'static str> {
         .find_map(|row| full_reason(row.splitn(3, '\t').nth(2).unwrap_or("")))
 }
 
+/// Why a later round is a full review, or None: the first prompt or rules path in the
+/// task's own lines (`own`, {path: hash}) that no full review has read as it is now
+/// (`covered`: those paths' lines as the last full review with a verdict read them).
+pub fn uncovered_reason(own: &Obj, covered: &Obj) -> Option<&'static str> {
+    own.iter()
+        .filter(|(path, lines)| covered.get(*path) != Some(*lines))
+        .find_map(|(path, _)| full_reason(path))
+}
+
+/// What a full review has read of the task's prompts and rules once the round `old` has
+/// its verdict: `old`'s own lines in those paths when it was a full review, else what
+/// the round before it knew. Null when bullpen can't tell (a review from before it kept
+/// this), and then no later round is made full for it.
+pub fn covered_after(old: &Obj) -> Value {
+    if s(old, "kind") == "full" {
+        return match old.get("own") {
+            Some(Value::Object(own)) => {
+                let read = own.iter().filter(|(path, _)| full_reason(path).is_some());
+                Value::Object(read.map(|(p, h)| (p.clone(), h.clone())).collect())
+            }
+            _ => Value::Null,
+        };
+    }
+    match old.get("prev") {
+        Some(Value::Object(prev)) => prev.get("covered").cloned().unwrap_or(Value::Null),
+        _ => json!({}),
+    }
+}
+
+/// uncovered_reason for the task's branch now, after the round `prev`. A light review
+/// set for the task (`--review light`) still wins: None.
+fn later_full_reason(t: &Obj, base_ref: &str, prev: &Obj) -> Res<Option<&'static str>> {
+    let Some(Value::Object(covered)) = prev.get("covered") else {
+        return Ok(None);
+    };
+    if s(t, "review_mode") == "light" {
+        return Ok(None);
+    }
+    Ok(uncovered_reason(&own_lines(s(t, "worktree"), base_ref)?, covered))
+}
+
 /// The first review's kind and why for a change, from `git diff --numstat`'s rows: full
 /// if it touches a prompt or the rules, else by its size.
 pub fn kind_of_change(numstat: &str, limit: i64) -> (String, Option<String>) {
@@ -503,7 +544,8 @@ pub fn shortstat_of(out: &str) -> Option<String> {
 
 /// Start a reviewer agent on the task's branch, in its own capsule. The first round is
 /// a full review, or a light one for a small change; later rounds follow up on the last
-/// verdict: its findings and what changed since. Comments the person sent back after a
+/// verdict: its findings and what changed since, or are a full review when the change
+/// now touches a prompt or the rules in a way no full review has read. Comments the person sent back after a
 /// tour (tour_sent) get a review of their own, and an approved change whose own lines
 /// changed only where a rebase conflicted (rebase: those files) a rebase check of the
 /// resolution. Both keep the round they follow: they don't count toward review_rounds.
@@ -529,11 +571,12 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
     // the round the next one follows up on: the last one with a verdict
     let mut prev: Option<Obj> = if truthy(old.get("verdict")) {
         let keys = ["round", "commit", "base", "findings", "verdict", "brief"];
-        Some(
-            keys.iter()
-                .map(|k| (k.to_string(), old.get(*k).cloned().unwrap_or(Value::Null)))
-                .collect(),
-        )
+        let mut p: Obj = keys
+            .iter()
+            .map(|k| (k.to_string(), old.get(*k).cloned().unwrap_or(Value::Null)))
+            .collect();
+        p.insert("covered".into(), covered_after(&old));
+        Some(p)
     } else {
         old.get("prev").and_then(Value::as_object).cloned()
     };
@@ -542,7 +585,10 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
     } else if rebase.is_some() {
         ("rebase".to_string(), None)
     } else if let Some(p) = prev.as_ref().filter(|p| truthy(p.get("commit"))) {
-        (followup_kind(repo, &id, &wt, base_ref, p)?.to_string(), None)
+        match later_full_reason(t, base_ref, p)? {
+            Some(why) => ("full".to_string(), Some(why.to_string())),
+            None => (followup_kind(repo, &id, &wt, base_ref, p)?.to_string(), None),
+        }
     } else {
         prev = None;
         first_kind(repo, t, base_ref)?
@@ -626,7 +672,12 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
             ("now", clipped_diff(&now, &cmd)),
         ]);
     }
-    let look = py_format(&read_text(&prompts().join(format!("review-{kind}.md")))?, &vals);
+    let mut look = py_format(&read_text(&prompts().join(format!("review-{kind}.md")))?, &vals);
+    if kind == "full" && prev.is_some() {
+        // a later round made full: the last round's findings still want checking
+        look += "\n";
+        look += &py_format(&read_text(&prompts().join("review-full-later.md"))?, &vals);
+    }
     let name = match (&sent, &rebase) {
         (Some(sent), _) => format!("{id}.tour-{}.review.md", py_str(sent.get("n").unwrap_or(&Value::Null))),
         (None, Some(_)) => format!("{id}.review-{n}.rebase.md"),
