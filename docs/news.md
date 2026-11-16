@@ -54,6 +54,30 @@ for the first to end and then takes over. The first run starts
 from the end of the log, and switching to `monitor` starts from there too, so
 old news is never printed again.
 
+A monitor can lapse: it expires every 30 minutes, and the coordinator may not
+start it again. So news that isn't typed has a backstop. When a line worth
+acting on is logged, the watcher looks every 3 seconds (`bullpen _wake_check`,
+while `<state>/wake-due` exists). Once such a line has gone a minute unread by
+a coordinator whose pane is running, and no `news --follow` reads for it (one
+holds `news-c1.lock`), bullpen types every line since the coordinator's cursor
+into its pane, as `type` would, and moves the cursor: each line is typed once,
+and `bullpen news` won't print it again. It waits behind a draft in the input,
+as typed news does; if a draft holds it for 10 minutes, you get one
+notification for that batch ("Your coordinator (c1) has news it hasn't seen").
+
+Bookkeeping doesn't wake a coordinator by itself: lines for `started`,
+`rebased`, `accepted`, `closed`, `queue`, `pickup`, `kept`, `dropped`, `later`,
+`tour-sent` and `keys` ride along with the next line that does (or wait for
+`bullpen news`). Every other line wakes, a new kind of line too.
+
+To stop news reaching a coordinator unasked for a while, it runs
+`bullpen news --pause` in its own pane (when you ask it to). The backstop then
+types nothing to it; news is still logged, and `bullpen news` prints it.
+`bullpen news --resume` ends the pause, and so does the next `bullpen up` for
+that coordinator, with one line saying so. A pause has no timer. After a resume,
+news logged during the pause gets a minute for a reader before the backstop
+types it. With `type`, `--pause` refuses: there's nothing to pause.
+
 You can switch while a coordinator runs. Switching to `monitor` types one last
 line into its pane telling it to start the monitor (not when you run `config`
 from the coordinator's own pane: it sees the answer). Switching to `type` makes

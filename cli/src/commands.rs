@@ -80,6 +80,7 @@ pub const COMMANDS: &[Command] = &[
     c("doctor", SETUP, "check bullpen's setup: one line per check, with the fix for what's wrong", crate::doctor::cmd_doctor),
     c("_coordinator_gone", INTERNAL, "", crate::coordinators::cmd_coordinator_gone),
     c("_flush", INTERNAL, "", crate::notifications::cmd_flush),
+    c("_wake_check", INTERNAL, "", crate::news::wake::cmd_wake_check),
     c("_prs", INTERNAL, "", crate::prs::cmd_prs),
     c("_pickup", INTERNAL, "", crate::backlog::pickup::cmd_pickup),
     c("_event", INTERNAL, "", crate::events::cmd_event),

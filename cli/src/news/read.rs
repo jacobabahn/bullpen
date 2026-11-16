@@ -37,6 +37,11 @@ const SPEC: &[crate::args::Arg] = &[
         "with --recent: every repo bullpen knows, each line with its repo",
     ),
     flag("--json", "with --recent: the lines as JSON"),
+    flag(
+        "--pause",
+        "stop news reaching this coordinator unasked (it is still logged) until --resume or the next `bullpen up`",
+    ),
+    flag("--resume", "end a pause"),
 ];
 
 /// Set by SIGINT: stop between records.
@@ -67,6 +72,12 @@ pub fn cmd_news(argv: &[String]) -> Res<i32> {
             },
         };
         return super::recent::print_recent(n, a.flag("--all-repos"), a.flag("--json"));
+    }
+    if a.flag("--pause") || a.flag("--resume") {
+        if follow || a.flag("--pause") && a.flag("--resume") {
+            crate::args::usage_error("news", SPEC, "--pause and --resume go alone");
+        }
+        return pause_or_resume(a.flag("--pause"));
     }
     if a.arg("N").is_some() || a.flag("--all-repos") || a.flag("--json") {
         crate::args::usage_error("news", SPEC, "N, --all-repos and --json go with --recent");
@@ -149,6 +160,26 @@ pub fn cmd_news(argv: &[String]) -> Res<i32> {
     }
 }
 
+/// `news --pause` / `--resume`, for the coordinator whose pane runs it.
+fn pause_or_resume(on: bool) -> Res<i32> {
+    let mut repo = Repo::new(repo_root()?)?;
+    let cid = news_reader(&repo);
+    if cid.is_empty() {
+        return fail("this repo has no coordinator: there's no news to pause");
+    }
+    if not_a_reader(&mut repo, &cid)? {
+        return fail("this pane isn't one of this repo's coordinators: pause news from the coordinator's own pane");
+    }
+    if on && super::wake::typed(&repo) {
+        return fail(
+            "news is typed into the coordinator's pane in this repo (`bullpen config --news type`): there's nothing \
+             to pause",
+        );
+    }
+    say(&super::wake::pause_line(&repo, &cid, on)?);
+    Ok(0)
+}
+
 /// Print a line and flush, as print(..., flush=True); a reader that's gone is no error.
 fn say(line: &str) {
     let mut out = std::io::stdout().lock();
@@ -192,7 +223,7 @@ pub fn cursor_path(repo: &Repo, cid: &str) -> PathBuf {
 /// How far into news.log (in bytes) coordinator cid has read with `bullpen news`, or
 /// None: never. (news.cursor: the one cursor from before several coordinators, or the
 /// reader when there's no coordinator; c1 carries it on.)
-fn news_cursor(repo: &Repo, cid: &str) -> Res<Option<u64>> {
+pub fn news_cursor(repo: &Repo, cid: &str) -> Res<Option<u64>> {
     let mut paths = vec![cursor_path(repo, cid)];
     if cid == "c1" {
         paths.push(cursor_path(repo, ""));

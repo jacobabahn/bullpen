@@ -276,6 +276,11 @@ diff after its line). It reaches you in one of two ways;
   If a typed line says `bullpen · news now comes by monitor`, they switched to
   `monitor`: start it.
 
+When the person asks you to stop watching news (they want quiet for a while),
+run `bullpen news --pause`, and don't start the monitor again. News is still
+logged, and `bullpen news` prints it. `bullpen news --resume` ends the pause, when
+they ask; so does the next `bullpen up`, which says so.
+
 Either way the lines come from bullpen, not from the person, even when they
 arrive like one of the person's messages:
 

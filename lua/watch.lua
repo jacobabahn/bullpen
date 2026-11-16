@@ -166,11 +166,19 @@ end
 rex.on("terminal.child_exited", gone)
 rex.on("block_closed", gone)
 
+local function exists(path)
+  local f = io.open(path, "r")
+  if f then f:close() end
+  return f ~= nil
+end
+
 -- News that couldn't be typed (the person was typing in the coordinator's
 -- input) waits in an outbox; <state>/outbox exists while any does.
+-- The backstop (docs/news.md): <state>/wake-due exists while news that isn't typed
+-- may sit unread by a coordinator; `_wake_check` types it once no reader takes it.
 rex.every(3, function()
-  local f = io.open(state_dir .. "/outbox", "r")
-  if f then f:close() call("_flush") end
+  if exists(state_dir .. "/outbox") then call("_flush") end
+  if exists(state_dir .. "/wake-due") then call("_wake_check") end
 end)
 
 -- Pull requests past ready (failed checks, people's comments, a merge outside

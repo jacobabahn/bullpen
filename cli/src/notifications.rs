@@ -137,6 +137,33 @@ pub fn tell_person(repo: &Repo, t: &Obj, text: &str) {
     }
 }
 
+/// A notification about a coordinator, not a task (its news held behind a draft), sent
+/// from its board's pane, else its own. Never fails, as notify.
+pub fn tell_person_from_coordinator(repo: &Repo, c: &Obj, text: &str) {
+    if repo.cfg_str("notify") == "off" {
+        return;
+    }
+    let cid = s(c, "id");
+    let b = obj(c, "board");
+    let sent = (|| -> Res<()> {
+        let title = format!("{NEWS_MARK}{}", repo.name());
+        for (session, block) in [(s(b, "session"), s(b, "block")), (s(c, "session"), s(c, "block"))] {
+            if block.is_empty() {
+                continue;
+            }
+            if let Some(tty) = pane_tty(session, block)? {
+                if send_osc(&tty, &title, text)? {
+                    return log_notify(repo, cid, text, &format!("sent to {block}"));
+                }
+            }
+        }
+        log_notify(repo, cid, text, "not sent: no pane to send it from")
+    })();
+    if let Err(e) = sent {
+        let _ = log_notify(repo, cid, text, &format!("not sent: {e}"));
+    }
+}
+
 fn send_notification(repo: &Repo, t: &Obj, text: &str) -> Res<()> {
     let title = format!("{NEWS_MARK}{}", repo.name());
     for (session, block) in notify_panes(repo, t)? {
@@ -368,7 +395,7 @@ fn log_notify(repo: &Repo, tid: &str, text: &str, how: &str) -> Res<()> {
 }
 
 /// The repo whose state folder is d: its root from its config, its folder d.
-fn repo_at(d: &Path) -> Res<Repo> {
+pub(crate) fn repo_at(d: &Path) -> Res<Repo> {
     let cfg = json::read_obj(&d.join("config.json"))?.unwrap_or_default();
     let root = cfg
         .get("root")
@@ -381,7 +408,7 @@ fn repo_at(d: &Path) -> Res<Repo> {
 }
 
 /// The state folders (<state>/repos/*) that have a file matching want.
-fn folders_with(want: impl Fn(&str) -> bool) -> Vec<PathBuf> {
+pub(crate) fn folders_with(want: impl Fn(&str) -> bool) -> Vec<PathBuf> {
     let Ok(repos) = std::fs::read_dir(state().join("repos")) else {
         return Vec::new();
     };

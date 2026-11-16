@@ -7,6 +7,7 @@ use crate::coordinators::{add_coordinator, coordinator_at, coordinator_mut, coor
 use crate::go::relink::relink;
 use crate::guide::{give_guide, guide_file, guide_text, tell_guide_changes};
 use crate::news::news_mode_line;
+use crate::news::wake::{after_up, end_pause_at_up};
 use crate::panes::gather;
 use crate::push_remote::catch_up_push;
 use crate::rex::{coordinator_label, rex_run};
@@ -82,6 +83,11 @@ pub fn cmd_up(argv: &[String]) -> Res<i32> {
         vec![cid]
     };
     repo.save()?;
+    let mut unpaused = Vec::new();
+    for cid in &mine {
+        unpaused.extend(end_pause_at_up(&repo, cid)?);
+    }
+    after_up(&repo)?;
     tell_guide_changes(&mut repo); // the others (all of them, without --here), after a pull
     if !a.flag("--no-board") {
         for cid in &mine {
@@ -96,6 +102,9 @@ pub fn cmd_up(argv: &[String]) -> Res<i32> {
         }
     } else if !said.is_empty() {
         println!("{}", up_line(&said, !a.flag("--here") && live.is_empty()));
+    }
+    for line in &unpaused {
+        println!("{line}");
     }
     if let Some(pushed) = catch_up_push(&repo)? {
         println!("{pushed}");

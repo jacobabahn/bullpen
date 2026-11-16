@@ -1,0 +1,372 @@
+//! The backstop for news no coordinator reads, and `news --pause` / `--resume`.
+//!
+//! When news isn't typed (`config --news monitor`), a coordinator hears it only while a
+//! reader runs: its Monitor on `news --follow`. A Monitor expires after 30 minutes, and
+//! news that comes while none runs would sit unseen until the person speaks. So a line
+//! worth a wake (`wakes`) touches `<state>/wake-due`, and while that exists the watcher
+//! runs `_wake_check` every 3 s. For each live coordinator that isn't paused and has
+//! such news past its cursor, a minute old, with no live reader, it types every line
+//! since the cursor into the coordinator's pane, as typed news is, and moves the cursor:
+//! each line is typed once. It waits behind a draft in the input, as typed news does;
+//! after 10 minutes of that it tells the person once for the batch.
+//!
+//! A pause (`news-<cid>.wait`, `{"paused": <stamp>}`) quiets the backstop for that
+//! coordinator until `news --resume` or its next `bullpen up`; news is still logged.
+
+use super::read::{news_cursor, news_for, news_records, news_size, set_news_cursor};
+use super::{has_draft, touch, LINE_BREAK, NEWS_MARK};
+use crate::coordinators::{alive, coordinators};
+use crate::rex;
+use bullpen_core::json::{self, s, Obj};
+use bullpen_core::paths::{safe, state};
+use bullpen_core::timeutil::{iso_now, seconds_since};
+use bullpen_core::{Repo, Res};
+use serde_json::{json, Value};
+use std::io::{Read, Seek, SeekFrom};
+use std::path::PathBuf;
+
+/// News of these events rides along with the next wake (or `bullpen news`) and doesn't
+/// wake a coordinator by itself: bookkeeping, nothing to act on. Any other event wakes,
+/// so a new event can't go unheard.
+pub const RIDES_ALONG: &[&str] = &[
+    "started",
+    "rebased",
+    "accepted",
+    "closed",
+    "queue",
+    "pickup",
+    "kept",
+    "dropped",
+    "later",
+    "tour-sent",
+    "keys",
+];
+
+/// Seconds wake-worthy news waits for a reader before the backstop types it.
+pub const UNREAD_FOR: f64 = 60.0;
+/// Seconds the backstop waits behind a draft before it tells the person.
+pub const DRAFT_FOR: f64 = 600.0;
+
+/// Is news of this event worth waking a coordinator for?
+pub fn wakes(event: &str) -> bool {
+    !RIDES_ALONG.contains(&event)
+}
+
+/// Is news typed into the coordinators' panes? (As news() decides it.) Then the backstop
+/// has nothing to do.
+pub fn typed(repo: &Repo) -> bool {
+    repo.cfg_str("news") != "monitor"
+}
+
+pub fn wake_due_path() -> PathBuf {
+    state().join("wake-due")
+}
+
+/// Before news() logs a line that isn't typed: a coordinator it is for that has never
+/// read news starts reading here, so the line is new to it (old news stays old, as for
+/// a first `bullpen news`).
+pub fn before_logged(repo: &Repo, to: &[String]) -> Res<()> {
+    if typed(repo) {
+        return Ok(());
+    }
+    let all: Vec<String> = coordinators(repo).iter().map(|c| s(c, "id").to_string()).collect();
+    let size = news_size(repo);
+    for cid in if to.is_empty() { &all } else { to } {
+        if news_cursor(repo, cid)?.is_none() {
+            set_news_cursor(repo, size, cid)?;
+        }
+    }
+    Ok(())
+}
+
+/// After news() logged a line that isn't typed: the watcher looks for unread news.
+pub fn after_logged(repo: &Repo, event: &str) -> Res<()> {
+    if !typed(repo) && wakes(event) {
+        touch(&wake_due_path())?;
+    }
+    Ok(())
+}
+
+/// (stamp, event) of a news.log record's first line: `<stamp>[ [to]] <id> <event>: <line>`.
+pub fn stamp_and_event(line: &str) -> Option<(&str, &str)> {
+    let (stamp, rest) = line.split_once(' ')?;
+    let rest = match rest.strip_prefix('[') {
+        Some(r) => r.split_once("] ")?.1,
+        None => rest,
+    };
+    let (_id, rest) = rest.split_once(' ')?;
+    let (event, _) = rest.split_once(": ")?;
+    (!stamp.is_empty() && !event.is_empty() && !event.contains([' ', ':'])).then_some((stamp, event))
+}
+
+/// A record past a coordinator's cursor: where it ends, and what typing it says (None:
+/// not for this coordinator, skipped).
+struct Unread {
+    end: u64,
+    said: Option<String>,
+    /// when it was logged, if it is worth a wake
+    wakes_since: Option<String>,
+}
+
+/// The whole records after offset, for coordinator cid or not.
+fn unread(repo: &Repo, offset: u64, cid: &str, listed: &[String]) -> Res<Vec<Unread>> {
+    let Ok(mut f) = std::fs::File::open(repo.dir.join("news.log")) else {
+        return Ok(Vec::new());
+    };
+    f.seek(SeekFrom::Start(offset))?;
+    let mut data = Vec::new();
+    f.read_to_end(&mut data)?;
+    let mut out = Vec::new();
+    let mut end = offset;
+    for raws in news_records(&data) {
+        end += raws.iter().map(|r| r.len() as u64).sum::<u64>();
+        let first = String::from_utf8_lossy(raws[0]).trim_end_matches('\n').to_string();
+        let mine = !first.starts_with('\t') && news_for(&first, cid, listed);
+        if !mine {
+            out.push(Unread {
+                end,
+                said: None,
+                wakes_since: None,
+            });
+            continue;
+        }
+        let at = first.find(NEWS_MARK).unwrap_or(0);
+        let mut lines = vec![first[at..].to_string()];
+        for raw in &raws[1..] {
+            lines.push(
+                String::from_utf8_lossy(raw)
+                    .trim_end_matches('\n')
+                    .chars()
+                    .skip(1)
+                    .collect(),
+            );
+        }
+        let wakes_since = stamp_and_event(&first)
+            .filter(|(_, event)| wakes(event))
+            .map(|(stamp, _)| stamp.to_string());
+        out.push(Unread {
+            end,
+            said: Some(lines.join(LINE_BREAK)),
+            wakes_since,
+        });
+    }
+    Ok(out)
+}
+
+/// The pause and the backstop's notes for coordinator cid live in `news-<cid>.wait`.
+fn wait_path(repo: &Repo, cid: &str) -> PathBuf {
+    repo.dir.join(format!("news-{}.wait", safe(cid)))
+}
+
+fn wait_file(repo: &Repo, cid: &str) -> Obj {
+    json::read_obj(&wait_path(repo, cid)).ok().flatten().unwrap_or_default()
+}
+
+fn save_wait_file(repo: &Repo, cid: &str, w: &Obj) -> Res<()> {
+    let path = wait_path(repo, cid);
+    if w.is_empty() {
+        return match std::fs::remove_file(&path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+            _ => Ok(()),
+        };
+    }
+    json::write_obj(&path, w)?; // by rename
+    Ok(())
+}
+
+pub fn paused(repo: &Repo, cid: &str) -> bool {
+    wait_file(repo, cid).contains_key("paused")
+}
+
+/// Pause coordinator cid's news. False if it was paused already.
+pub fn pause(repo: &Repo, cid: &str) -> Res<bool> {
+    let mut w = wait_file(repo, cid);
+    if w.contains_key("paused") {
+        return Ok(false);
+    }
+    w.insert("paused".into(), json!(iso_now()));
+    save_wait_file(repo, cid, &w)?;
+    Ok(true)
+}
+
+/// End coordinator cid's pause. False if it wasn't paused. News logged during the pause
+/// gets a minute from now for a reader to take it, before the backstop types it.
+pub fn resume(repo: &Repo, cid: &str) -> Res<bool> {
+    let mut w = wait_file(repo, cid);
+    if w.remove("paused").is_none() {
+        return Ok(false);
+    }
+    w.insert("resumed".into(), json!(iso_now()));
+    save_wait_file(repo, cid, &w)?;
+    touch(&wake_due_path())?;
+    Ok(true)
+}
+
+/// Is a reader taking coordinator cid's news right now? A `news --follow` holds its lock.
+/// (The Stop hook's waiter, later, will count too.)
+fn live_reader(repo: &Repo, cid: &str) -> Res<bool> {
+    Ok(bullpen_core::lock::try_lock(&lock_path(repo, cid))?.is_none())
+}
+
+fn lock_path(repo: &Repo, cid: &str) -> PathBuf {
+    repo.dir.join(format!("news-{}.lock", safe(cid)))
+}
+
+/// How the backstop left a coordinator.
+#[derive(Debug, PartialEq)]
+pub enum Left {
+    /// nothing unread worth a wake (or typed now)
+    Done,
+    /// news waits: for its minute, a reader, or an empty input
+    Waits,
+}
+
+/// The backstop for one live coordinator.
+fn check(repo: &Repo, c: &Obj, listed: &[String]) -> Res<Left> {
+    let cid = s(c, "id");
+    if paused(repo, cid) {
+        return Ok(Left::Done); // resume looks again
+    }
+    let Some(cursor) = news_cursor(repo, cid)? else {
+        return Ok(Left::Done); // never read: before_logged starts it before a line that wakes
+    };
+    let cursor = cursor.min(news_size(repo));
+    let records = unread(repo, cursor, cid, listed)?;
+    let Some(first) = records.iter().find_map(|r| r.wakes_since.as_deref()) else {
+        return Ok(Left::Done);
+    };
+    if !alive(Some(c))? {
+        return Ok(Left::Done); // `up` looks again when it's back
+    }
+    let w = wait_file(repo, cid);
+    let resumed = w.get("resumed").map(json::py_str).unwrap_or_default();
+    let unread_for = seconds_since(first, None).min(if resumed.is_empty() {
+        f64::INFINITY
+    } else {
+        seconds_since(&resumed, None)
+    });
+    if unread_for < UNREAD_FOR || live_reader(repo, cid)? {
+        return Ok(Left::Waits);
+    }
+    if has_draft(s(c, "session"), s(c, "block"))? {
+        held_by_draft(repo, c, cursor, w)?;
+        return Ok(Left::Waits);
+    }
+    let Some(_lock) = bullpen_core::lock::try_lock(&lock_path(repo, cid))? else {
+        return Ok(Left::Waits); // a reader came
+    };
+    // again under the lock: a reader may have moved the cursor since
+    let cursor = news_cursor(repo, cid)?.unwrap_or(cursor).min(news_size(repo));
+    for r in unread(repo, cursor, cid, listed)? {
+        if let Some(said) = &r.said {
+            rex::rex_type(s(c, "session"), s(c, "block"), &said.replace(LINE_BREAK, "\n"))?;
+        }
+        set_news_cursor(repo, r.end, cid)?; // after typing: each line is typed once
+    }
+    let mut w = wait_file(repo, cid);
+    for key in ["held", "resumed"] {
+        w.remove(key);
+    }
+    save_wait_file(repo, cid, &w)?;
+    Ok(Left::Done)
+}
+
+/// A draft holds the batch that starts at the cursor: after DRAFT_FOR, the person hears
+/// once for it.
+fn held_by_draft(repo: &Repo, c: &Obj, cursor: u64, mut w: Obj) -> Res<()> {
+    let cid = s(c, "id");
+    let held = w.get("held").and_then(Value::as_object).cloned().unwrap_or_default();
+    let same = held.get("batch").and_then(Value::as_u64) == Some(cursor);
+    if !same {
+        w.insert(
+            "held".into(),
+            json!({"batch": cursor, "since": iso_now(), "told": false}),
+        );
+        return save_wait_file(repo, cid, &w);
+    }
+    let since = held.get("since").map(json::py_str).unwrap_or_default();
+    if json::truthy(held.get("told")) || seconds_since(&since, None) < DRAFT_FOR {
+        return Ok(());
+    }
+    let mut held = held;
+    held.insert("told".into(), json!(true));
+    w.insert("held".into(), Value::Object(held));
+    save_wait_file(repo, cid, &w)?; // first: told once, even if sending fails
+    let text = format!(
+        "Your coordinator ({cid}) has news it hasn't seen: your draft in its input has held it for {} minutes.",
+        (DRAFT_FOR / 60.0) as i64
+    );
+    crate::notifications::tell_person_from_coordinator(repo, c, &text);
+    Ok(())
+}
+
+/// The backstop for every coordinator of a repo whose news isn't typed. Waits if news
+/// waits for any of them.
+pub fn check_repo(repo: &Repo) -> Res<Left> {
+    if typed(repo) {
+        return Ok(Left::Done);
+    }
+    let listed: Vec<String> = coordinators(repo).iter().map(|c| s(c, "id").to_string()).collect();
+    let mut left = Left::Done;
+    for c in coordinators(repo) {
+        if check(repo, c, &listed)? == Left::Waits {
+            left = Left::Waits;
+        }
+    }
+    Ok(left)
+}
+
+/// `_wake_check` (the watcher, while `<state>/wake-due` exists): the backstop, for every
+/// repo; wake-due goes when nothing waits.
+pub fn cmd_wake_check(argv: &[String]) -> Res<i32> {
+    crate::args::Args::parse("_wake_check", argv, &[]);
+    let mut waits = false;
+    for d in crate::notifications::folders_with(|n| n == "news.log") {
+        let repo = crate::notifications::repo_at(&d)?;
+        if check_repo(&repo)? == Left::Waits {
+            waits = true;
+        }
+    }
+    if !waits {
+        match std::fs::remove_file(wake_due_path()) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+            _ => {}
+        }
+    }
+    Ok(0)
+}
+
+/// `news --pause` / `--resume` for coordinator cid: what to say.
+pub fn pause_line(repo: &Repo, cid: &str, on: bool) -> Res<String> {
+    if on {
+        let was = !pause(repo, cid)?;
+        return Ok(format!(
+            "{NEWS_MARK}news for {cid} is paused{}: nothing types it into your pane until `bullpen news --resume` \
+             (or the next `bullpen up`). It is still logged, and `bullpen news` prints it.",
+            if was { " already" } else { "" }
+        ));
+    }
+    Ok(if resume(repo, cid)? {
+        format!("{NEWS_MARK}news for {cid} is on again. What came during the pause: `bullpen news` prints it.")
+    } else {
+        format!("{NEWS_MARK}news for {cid} wasn't paused.")
+    })
+}
+
+/// After `up`: a coordinator back may have news no reader took.
+pub fn after_up(repo: &Repo) -> Res<()> {
+    if !typed(repo) {
+        touch(&wake_due_path())?;
+    }
+    Ok(())
+}
+
+/// `up` for coordinator cid ends its pause: the line saying so, if it was paused.
+pub fn end_pause_at_up(repo: &Repo, cid: &str) -> Res<Option<String>> {
+    Ok(resume(repo, cid)?
+        .then(|| format!("News for {cid} was paused: `up` ended the pause (`bullpen news --pause` pauses it again).")))
+}
+
+#[cfg(test)]
+#[path = "test_wake.rs"]
+mod tests;

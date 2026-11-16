@@ -4,6 +4,7 @@
 
 pub mod read;
 pub mod recent;
+pub mod wake;
 
 use crate::coordinators::{alive, calling_coordinator, coordinators, sees_to};
 use crate::rex;
@@ -57,6 +58,7 @@ pub fn news(repo: &Repo, task: &Obj, event: &str, text: &str, o: Opts) -> Res<()
         }
     }
     std::fs::create_dir_all(&repo.dir)?;
+    wake::before_logged(repo, if waits { &[] } else { &to })?;
     let whom = if to.is_empty() {
         String::new()
     } else {
@@ -68,6 +70,7 @@ pub fn news(repo: &Repo, task: &Obj, event: &str, text: &str, o: Opts) -> Res<()
     }
     // one write: a reader never sees half
     append(&repo.dir.join("news.log"), &record)?;
+    wake::after_logged(repo, event)?;
     if repo.cfg_str("news") != "monitor" {
         // With no coordinator alive the line waits once, in the shared outbox: one copy
         // per coordinator would reach the first to come back once for each.

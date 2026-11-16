@@ -87,6 +87,11 @@ timers[300]()                             -- pickup has nothing: nothing to call
 f = io.open(args.state .. "/pickup", "w") f:close()
 timers[300]()
 timers[180]()                             -- status drift, every 3 minutes
+timers[3]()                               -- no outbox and no news unread: nothing to call
+f = io.open(args.state .. "/wake-due", "w") f:close()
+timers[3]()                               -- the backstop, while news may sit unread
+f = io.open(args.state .. "/outbox", "w") f:close()
+timers[3]()
 return table.concat(calls, "|")
 """
 
@@ -143,6 +148,9 @@ return table.concat(calls, "|")
             "_limit",                      # only while <state>/limit.json exists
             "_pickup",                     # only while <state>/pickup exists
             "check --fix --quiet --all-repos",
+            "_wake_check",                 # only while <state>/wake-due exists
+            "_flush",                      # and <state>/outbox, in the same tick
+            "_wake_check",
         ])
 
     def test_the_watcher_keeps_what_a_worker_is_doing_for_the_board(self):
