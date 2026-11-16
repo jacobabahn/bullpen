@@ -5,6 +5,7 @@ use crate::args::{flag, usage_error, value, Arg, Args};
 use crate::coordinators::{coordinator, coordinator_at, coordinator_mut, coordinators};
 use crate::news::news_mode_line;
 use crate::news::read::py_int;
+use crate::risk_paths;
 use crate::task_line::term_width;
 use bullpen_core::config::{config_source, global_config_path, inherited_config, read_global, read_global_file};
 use bullpen_core::json::{self, dumps, dumps_line, py_str, s, Obj};
@@ -65,6 +66,25 @@ fn spec() -> Vec<Arg> {
         });
     }
     out.extend([
+        value(
+            risk_paths::ADD,
+            "PATTERN",
+            "a sensitive path of this repository, for the risk label of a ready task that changes it: a file, a \
+             folder/ or a glob with * (with --level and --why; docs/review.md)",
+        ),
+        value(
+            risk_paths::LEVEL,
+            "",
+            "the risk of a change to --risk-path's path (default high)",
+        )
+        .choices(risk_paths::LEVELS),
+        value(
+            risk_paths::WHY,
+            "WHY",
+            "what a change to --risk-path's path does, as the label says it: \"changes how accept merges\" \
+             (default: changes PATTERN)",
+        ),
+        value(risk_paths::REMOVE, "PATTERN", "drop a sensitive path (repeatable)"),
         value(
             "--model",
             "MODEL",
@@ -200,8 +220,9 @@ pub fn cmd_config(argv: &[String]) -> Res<i32> {
     let ch = config_changes(&a)?;
     let unset = a.all("--unset");
     check_unset(&unset, Some(&repo))?;
+    let risk = risk_paths::changed(&repo, &a)?;
     let news_was = repo.cfg_str("news").to_string();
-    let changed = !ch.is_empty() || !unset.is_empty();
+    let changed = !ch.is_empty() || !unset.is_empty() || risk.is_some();
     for k in unset {
         repo.unset(k)?;
     }
@@ -225,6 +246,9 @@ pub fn cmd_config(argv: &[String]) -> Res<i32> {
     }
     for (k, v) in &ch {
         repo.set(k, v.clone());
+    }
+    if let Some(paths) = risk {
+        repo.set("risk_paths", paths);
     }
     if ch.contains_key("news") {
         let told = crate::news::switch::switched(&repo, &news_was)?; // before the save: `wake` can be refused
@@ -262,7 +286,8 @@ fn per_repo_flags() -> Vec<String> {
 /// `config --global`: change the global config.json, which every repository's settings
 /// fall back on.
 fn config_global(a: &Args) -> Res<i32> {
-    let per_repo: Vec<String> = per_repo_flags().into_iter().filter(|f| a.opt(f).is_some()).collect();
+    let mut per_repo: Vec<String> = per_repo_flags().into_iter().filter(|f| a.opt(f).is_some()).collect();
+    per_repo.extend(risk_paths::flags_given(a));
     if !per_repo.is_empty() {
         return fail(format!(
             "{} {} per repository, so not for the global config: run it without --global, in that repository",

@@ -186,8 +186,14 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   coordinator's `review`
 - `ready.rs`: `ready`, `finish` (and `finish --keep-branch`), and the summary a worker or reviewer gives (`summary_text`)
 - `risk.rs`: a ready task's risk label (docs/review.md): bullpen's rules on the diff
-  (`rules_of`, `risk_paths`, `adds_dependency`), the reviewer's `## Risk`
-  (`reviewer_of`), and `assess`, which each step that makes a task ready calls
+  (`rules_of`: the sensitive paths touched, `by_areas`; a new dependency,
+  `adds_dependency`; its kind and size, `by_size`, with the line counts in `Sizes`),
+  the reviewer's `## Risk` (`reviewer_of`), and `assess`, which each step that makes
+  a task ready calls
+- `risk_paths.rs`: a repo's `risk_paths`: reading each form into a level and a why
+  (`entries`), the area a path is in (`area_of`, `path_matches`), `config`'s
+  `--risk-path` and `--remove-risk-path` (`changed`), and doctor's `risk` line
+  (`check_risk`)
 - `risk_late.rs`: the label of a ready task that has none (made ready by an older
   copy of bullpen): `check` finds it (`unlabelled`), `check --fix` labels it with
   `assess`, says it in one news line and notes that copy for doctor (`label_late`)

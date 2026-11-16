@@ -107,15 +107,37 @@ one line of why (`risk: high · changes how accept merges`), so you can see at a
 glance which ones need a careful look. It only labels: it changes nothing about what
 auto-accepts. It has two parts, and the higher wins (on a tie, the reviewer's why):
 
-- **bullpen's rules**, from the diff, which the reviewer can't lower. A path in the
-  repository's `risk_paths` is high, and so is a new dependency in a `Cargo.toml` (a
-  name added under a dependencies table; a changed version isn't one). Docs alone
-  (under `docs/`, or a `.md` outside `prompts/`), tests alone (under `tests/`, or a
-  `test_` file), or both, are low. A prompt (under `prompts/`) is at least medium.
-  Other code goes by its size, docs and tests left out: at most
-  `light_review_lines` lines in at most 2 files is low ("a small change (12 lines
-  in 1 file)"), over 400 lines is high ("a large change"), and anything between is
-  medium. The rules read the repository's settings, never the branch's files.
+- **bullpen's rules**, from the diff, which the reviewer can't lower. They go mostly
+  by what the change touches and only partly by its size; the highest of these is
+  the rules' part:
+  - **The repository's sensitive paths** (`risk_paths`, below), each high or medium.
+    A high one is high however little of it changes, and the why says how much:
+    "changes how accept merges (3 lines)". A medium one goes by how much of it is
+    touched: at most 10 lines don't count (the change is what the rest of it says),
+    more than `risk_large_lines` lines there (400 by default) make it high
+    ("changes how review runs, and a lot of it (520 lines)"), and anything between
+    is medium ("changes how review runs (45 lines)"). The lines are those changed in
+    that path, not the whole change's. A test file beside a path's code (a `test_`
+    file in a sensitive folder) isn't counted, unless the pattern itself names tests
+    (`tests/fakes/`). With several touched, the why is the most sensitive one's (of
+    two alike, the one more changed) and says how many more there are: "..., and 2
+    more sensitive paths".
+  - **A new dependency** in a `Cargo.toml` is high (a name added under a
+    dependencies table; a changed version isn't one).
+  - **Its kind and size.** Docs alone (under `docs/`, or a `.md` outside
+    `prompts/`), tests alone (under `tests/`, or a `test_` file), or both, are low.
+    A prompt (under `prompts/`) is at least medium. Other code goes by its size,
+    docs and tests left out: at most `light_review_lines` lines in at most 2 files
+    is low ("a small change (12 lines in 1 file)") and more is medium ("120 lines
+    in 4 files"). Size alone makes a change high only far past that: more than
+    `risk_huge_lines` lines (1,200 by default; `0` for never) is "a very large
+    change (1662 lines in 19 files)".
+
+  The rules read the repository's settings, never the branch's files. A repository
+  with no `risk_paths` is labelled by the last two alone: a new dependency is high,
+  and the rest goes by kind and size, so nearly every change of code is low or
+  medium. `bullpen doctor` says so in its `risk` line, with the command that names
+  a path; it isn't a problem.
 - **the reviewer's judgement**, given with its verdict as a `## Risk` part of its
   findings (`medium: changes when the queue starts a task`), for what rules can't
   see: a subtle change in behaviour, something it couldn't run or check, a claim in
@@ -143,27 +165,56 @@ person". That line wakes a coordinator, as a ready line does. A task that has a 
 is never touched, nor one with nothing to merge. The `ready` entry of `stats`'
 timeline stays without it, and `doctor`'s `copy` check names the copy to update.
 
-`risk_paths` is a repository's list of sensitive paths, set in its `config.json` by
-hand, as `{"pattern": "why"}` (or a list of patterns, each "changes <pattern>"). A
-pattern ending in `/` is a folder, `*` is any run of characters, and anything else
-is a file (or a folder of that name). For bullpen itself:
+`risk_paths` is a repository's list of sensitive paths, each with a level and why.
+`bullpen config` sets it, in that repository only (`--global` refuses):
+
+```
+bullpen config --risk-path cli/src/accept/ --level high --why "changes how accept merges"
+bullpen config --risk-path cli/src/review.rs --level medium --why "changes how review runs"
+bullpen config --remove-risk-path cli/src/review.rs
+```
+
+`--risk-path` adds a path, or changes the one already there (it keeps its place);
+one a run. `--level` is `high` or `medium` (`high` when left out) and `--why` is what
+the label says ("changes <pattern>" when left out). `--remove-risk-path` drops one,
+and can be repeated. A pattern ending in `/` is a folder, `*` is any run of
+characters, and anything else is a file (or a folder of that name). A path that
+matches several patterns is in the most sensitive one's, then the first's.
+
+In `config.json` it is `{"pattern": {"level": "medium", "why": "..."}}`. The forms
+from before levels still read, as high: `{"pattern": "why"}` and a list of patterns
+(each "changes <pattern>"); the first `--risk-path` or `--remove-risk-path` rewrites
+them with their levels.
+
+The two line counts are settings too: `bullpen config --risk-large-lines 400
+--risk-huge-lines 1200`. 400 is what a large change has been here since the label
+came; 1,200 is three times that, far enough past it that of the last 33 tasks
+merged in bullpen's own repository only one (1,662 lines) is high by its size alone,
+where 12 were over 400.
+
+For bullpen itself, high is what merges, pushes, removes worktrees, builds or
+installs; medium is what decides a merge without doing it, and two files that most
+changes touch a line of:
 
 ```json
 "risk_paths": {
-  "cli/src/accept/": "changes how accept merges",
-  "cli/src/auto_accept.rs": "changes what auto-accepts",
-  "cli/src/modes.rs": "changes how bullpen merges and pushes",
-  "cli/src/push_remote.rs": "changes how bullpen pushes",
-  "cli/src/close.rs": "changes how a task's worktree and branch are removed",
-  "cli/src/keep.rs": "changes how a kept branch is pushed",
-  "cli/src/hooks.rs": "changes how worktrees are removed",
-  "cli/src/build.rs": "changes the build and self-update",
-  "cli/src/main.rs": "changes the build's catch-up",
-  "install.sh": "changes the install",
-  "bin/": "changes what everything runs",
-  "Cargo.lock": "changes the locked dependencies"
+  "cli/src/accept/": {"level": "high", "why": "changes how accept merges"},
+  "cli/src/modes.rs": {"level": "high", "why": "changes how bullpen merges and pushes"},
+  "cli/src/push_remote.rs": {"level": "high", "why": "changes how bullpen pushes"},
+  "cli/src/close.rs": {"level": "high", "why": "changes how a task's worktree and branch are removed"},
+  "cli/src/keep.rs": {"level": "high", "why": "changes how a kept branch is pushed"},
+  "cli/src/hooks.rs": {"level": "high", "why": "changes how worktrees are removed"},
+  "cli/src/build.rs": {"level": "high", "why": "changes the build and self-update"},
+  "install.sh": {"level": "high", "why": "changes the install"},
+  "bin/": {"level": "high", "why": "changes what everything runs"},
+  "cli/src/auto_accept.rs": {"level": "medium", "why": "changes what auto-accepts"},
+  "cli/src/main.rs": {"level": "medium", "why": "changes the build's catch-up"},
+  "Cargo.lock": {"level": "medium", "why": "changes the locked dependencies"}
 }
 ```
+
+`main.rs` is medium because a new module adds a `mod` line to it, which at 10 lines
+or fewer doesn't count; `Cargo.lock` because a new dependency is high already.
 
 Where it shows: the end of the ready news (`BP-3 is ready: ... (1 commit, PR #12,
 approved by full review); risk: high · changes how accept merges`), `show`'s `risk:`

@@ -3,10 +3,12 @@
 //!
 //! Two parts, the higher wins (a tie says the reviewer's why):
 //!
-//! - **rules**, bullpen's own, from the diff, which the reviewer can't lower: a path in
-//!   the repo's `risk_paths` or a new dependency in a `Cargo.toml` is high; docs or
-//!   tests alone are low; a prompt is medium; other code goes by its size. They read
-//!   the repo's settings, never the branch.
+//! - **rules**, bullpen's own, from the diff, which the reviewer can't lower. What the
+//!   change touches comes first: an area of the repo's `risk_paths` (risk_paths.rs) is
+//!   high or medium as the repo says, and a new dependency in a `Cargo.toml` is high.
+//!   Its size is the smaller part: docs or tests alone are low, a prompt is medium,
+//!   and other code is low when small, medium otherwise, and high only when very
+//!   large. They read the repo's settings, never the branch.
 //! - **review**, the reviewer's judgement with its verdict (a `## Risk` part in its
 //!   findings: `medium: ...`), from the round that approved it. A round that gives none,
 //!   and a rebase check, keep the last one's. A light review that was set for a change
@@ -18,15 +20,13 @@
 //! without one (by an older copy of bullpen) gets it from `check` (risk_late.rs).
 
 use crate::review::kind_of_change;
+use crate::risk_paths::{area_of, entries, Entry};
 use bullpen_core::json::{get, obj, s, Obj};
 use bullpen_core::proc::{git, head};
 use bullpen_core::risk::rank;
 use bullpen_core::text::splitlines;
 use bullpen_core::{Repo, Res};
 use serde_json::{json, Value};
-
-/// More changed lines of code than this is a large change: high.
-pub const LARGE_LINES: i64 = 400;
 
 /// What the reviewer said at the step that made the task ready.
 pub enum Said<'a> {
@@ -73,12 +73,13 @@ pub fn assess(repo: &Repo, t: &mut Obj, base_ref: &str, said: Said) -> Res<()> {
         true,
     )?
     .stdout;
-    let small = repo.cfg.get("light_review_lines").and_then(Value::as_i64).unwrap_or(0);
+    let sizes = Sizes::of(&repo.cfg);
+    let small = sizes.small;
     let rules = rules_of(
         &numstat,
         adds_dependency(&manifests),
         get(&repo.cfg, "risk_paths"),
-        small,
+        sizes,
     );
     let r = obj(t, "review");
     let before = obj(t, "risk").get("review").and_then(Value::as_object).cloned();
@@ -177,12 +178,36 @@ pub fn area(path: &str) -> Area {
     }
 }
 
-/// The rules' part, from `git diff --numstat`'s rows: a sensitive path (risk_paths) or
-/// a new dependency is high; docs and tests alone are low; a prompt is at least
-/// medium; other code is low when small (at most `small` lines in at most 2 files),
-/// high past LARGE_LINES, else medium.
-pub fn rules_of(numstat: &str, adds_dep: bool, risk_paths: Option<&Value>, small: i64) -> Part {
-    let rows: Vec<(Option<i64>, String)> = splitlines(numstat)
+/// The line counts the rules go by, from the repo's settings.
+#[derive(Debug, Clone, Copy)]
+pub struct Sizes {
+    /// at most this many lines of code in at most 2 files is a small change: low
+    pub small: i64,
+    /// more than this many lines in a medium area make it high
+    pub large: i64,
+    /// more than this many lines of code is high whatever it touches (0: never)
+    pub huge: i64,
+}
+
+impl Sizes {
+    pub fn of(cfg: &Obj) -> Sizes {
+        let n = |key: &str| cfg.get(key).and_then(Value::as_i64).unwrap_or(0);
+        Sizes {
+            small: n("light_review_lines"),
+            large: n("risk_large_lines"),
+            huge: n("risk_huge_lines"),
+        }
+    }
+}
+
+/// At most this many lines in a medium area don't count as touching it.
+pub const TINY_LINES: i64 = 10;
+
+/// A row of `git diff --numstat`: its changed lines (None: a binary file) and its path.
+type Row = (Option<i64>, String);
+
+fn rows_of(numstat: &str) -> Vec<Row> {
+    splitlines(numstat)
         .into_iter()
         .filter_map(|row| {
             let mut p = row.splitn(3, '\t');
@@ -194,25 +219,89 @@ pub fn rules_of(numstat: &str, adds_dep: bool, risk_paths: Option<&Value>, small
                 .map(|(a, d)| a + d);
             Some((lines, path.to_string()))
         })
-        .collect();
-    let sensitive: Vec<String> = rows.iter().filter_map(|(_, p)| sensitive_why(risk_paths, p)).collect();
-    if let Some(first) = sensitive.first() {
-        let others = sensitive.iter().filter(|w| *w != first).count();
-        return match others {
-            0 => part("high", first.clone()),
-            n => part("high", format!("{first}, and {n} more sensitive path{}", plural(n))),
+        .collect()
+}
+
+/// The rules' part, from `git diff --numstat`'s rows. What the change touches comes
+/// first, its size second; the highest of these, and on a tie the first:
+///
+/// - the areas of the repo's risk_paths it touches (`by_areas`);
+/// - a new dependency: high;
+/// - what kind of change it is and its size (`by_size`).
+pub fn rules_of(numstat: &str, adds_dep: bool, risk_paths: Option<&Value>, sizes: Sizes) -> Part {
+    let rows = rows_of(numstat);
+    let parts = [
+        by_areas(&rows, &entries(risk_paths), sizes),
+        adds_dep.then(|| part("high", "adds a dependency")),
+        Some(by_size(&rows, sizes)),
+    ];
+    let mut top: Option<Part> = None;
+    for p in parts.into_iter().flatten() {
+        if top.as_ref().is_none_or(|t| rank(p.level) > rank(t.level)) {
+            top = Some(p);
+        }
+    }
+    top.unwrap_or_else(|| part("low", "no change"))
+}
+
+/// The part the repo's sensitive areas give, or None when the change touches none. An
+/// area's level is its own, moved by how much of it is touched: more than `large`
+/// lines in a medium area is high, and at most TINY_LINES in one doesn't count (a high
+/// area is high at any size). A test file in an area isn't counted, unless the pattern
+/// is itself a test's path (`tests/fakes/`). The why is the most sensitive area's (then
+/// the one most changed), with the lines changed there, and how many more are touched.
+fn by_areas(rows: &[Row], entries: &[Entry], sizes: Sizes) -> Option<Part> {
+    // (lines changed in the area, whether a binary file is among them), per entry
+    let mut touched: Vec<Option<(i64, bool)>> = vec![None; entries.len()];
+    for (lines, path) in rows {
+        let Some(i) = area_of(entries, path) else { continue };
+        if area(path) == Area::Tests && area(&entries[i].pattern) != Area::Tests {
+            continue; // a test beside an area's code isn't the area, unless the pattern names tests
+        }
+        let (n, binary) = touched[i].unwrap_or((0, false));
+        touched[i] = Some((n + lines.unwrap_or(0), binary || lines.is_none()));
+    }
+    let mut found: Vec<Part> = Vec::new();
+    let mut most = 0;
+    for (e, t) in entries.iter().zip(&touched) {
+        let Some((n, binary)) = *t else { continue };
+        let lines = format!("{n} line{}", plural(n as usize));
+        let p = match e.level {
+            "medium" if n > sizes.large => part("high", format!("{}, and a lot of it ({lines})", e.why)),
+            "medium" if n <= TINY_LINES && !binary => continue,
+            level if n == 0 => part(level, e.why.clone()), // a binary file alone
+            level => part(level, format!("{} ({lines})", e.why)),
         };
+        let first = found.first().map_or(0, |f| rank(f.level));
+        if rank(p.level) > first || (rank(p.level) == first && n > most) {
+            most = n;
+            found.insert(0, p);
+        } else {
+            found.push(p);
+        }
     }
-    if adds_dep {
-        return part("high", "adds a dependency");
-    }
+    let top = found.first()?;
+    Some(match found.len() - 1 {
+        0 => top.clone(),
+        n => part(
+            top.level,
+            format!("{}, and {n} more sensitive path{}", top.why, plural(n)),
+        ),
+    })
+}
+
+/// The part a change's kind and size give: docs and tests alone are low; a prompt is
+/// at least medium; other code (docs and tests left out) is low when small (at most
+/// `small` lines in at most 2 files), high only when very large (more than `huge`
+/// lines), else medium.
+fn by_size(rows: &[Row], sizes: Sizes) -> Part {
     if rows.is_empty() {
         return part("low", "no change");
     }
     let areas: Vec<Area> = rows.iter().map(|(_, p)| area(p)).collect();
     let (docs, tests) = (areas.contains(&Area::Docs), areas.contains(&Area::Tests));
     let prompt = areas.contains(&Area::Prompt);
-    let code: Vec<&(Option<i64>, String)> = rows
+    let code: Vec<&Row> = rows
         .iter()
         .filter(|(_, p)| matches!(area(p), Area::Code | Area::Prompt))
         .collect();
@@ -239,9 +328,9 @@ pub fn rules_of(numstat: &str, adds_dep: bool, risk_paths: Option<&Value>, small
         plural(n as usize),
         plural(files as usize)
     );
-    let by_size = if n > LARGE_LINES {
-        part("high", format!("a large change ({size})"))
-    } else if n <= small && files <= 2 {
+    let by_size = if sizes.huge > 0 && n > sizes.huge {
+        part("high", format!("a very large change ({size})"))
+    } else if n <= sizes.small && files <= 2 {
         part("low", format!("a small change ({size})"))
     } else {
         part("medium", size)
@@ -257,47 +346,6 @@ fn plural(n: usize) -> &'static str {
         ""
     } else {
         "s"
-    }
-}
-
-/// Why a path is sensitive, by the repo's risk_paths ({pattern: why}, or a list of
-/// patterns), or None.
-pub fn sensitive_why(risk_paths: Option<&Value>, path: &str) -> Option<String> {
-    let said = |pat: &str, why: Option<&Value>| match why.and_then(Value::as_str).map(str::trim) {
-        Some(w) if !w.is_empty() => w.to_string(),
-        _ => format!("changes {pat}"),
-    };
-    match risk_paths? {
-        Value::Object(o) => o
-            .iter()
-            .find(|(p, _)| path_matches(p, path))
-            .map(|(p, w)| said(p, Some(w))),
-        Value::Array(a) => a
-            .iter()
-            .filter_map(Value::as_str)
-            .find(|p| path_matches(p, path))
-            .map(|p| said(p, None)),
-        _ => None,
-    }
-}
-
-/// A risk_paths pattern: a folder (ending in `/`, or a plain name that is a folder of
-/// the path), a file, or a glob where `*` is any run of characters.
-pub fn path_matches(pattern: &str, path: &str) -> bool {
-    if pattern.contains('*') {
-        return glob(pattern.as_bytes(), path.as_bytes());
-    }
-    if let Some(dir) = pattern.strip_suffix('/') {
-        return path.starts_with(&format!("{dir}/"));
-    }
-    path == pattern || path.starts_with(&format!("{pattern}/"))
-}
-
-fn glob(pat: &[u8], text: &[u8]) -> bool {
-    match pat.split_first() {
-        None => text.is_empty(),
-        Some((b'*', rest)) => (0..=text.len()).any(|i| glob(rest, &text[i..])),
-        Some((c, rest)) => text.first() == Some(c) && glob(rest, &text[1..]),
     }
 }
 

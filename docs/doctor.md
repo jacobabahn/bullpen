@@ -35,6 +35,10 @@ non-zero when anything fails. It checks:
 - the push remote, if one is set (see [Local mode](local-mode.md)): the remote is
   there, answers without a prompt, and has the base branch as it is here. Else, for
   one behind: "github is 2 commits behind main: `git push github main`"
+- the repository's sensitive paths (`risk`; see [Review](review.md#the-risk-label)):
+  how many it has, high and medium. With none it says so, once, and what a ready
+  task's risk label goes by then (its size), with the `config --risk-path` command
+  that names one. It is never a failure
 - the coordinators in `config.json` still have their panes and boards, and each
   running board runs the program `bullpen board` runs now (Rex says which program a
   pane runs). One from an older install's path never reloads by itself: "c1's board
@@ -114,7 +118,7 @@ names ("2 problems: keys, watcher."), and writes paths in your home folder with 
 gone). The checks about the setup, which are the same for every repo (`rex`,
 `bullpen`, `board`, `cargo`, `keys`, `watcher`, `state`, `global`), run once, under
 "Setup, for every repo". Then each repo gets its own (`gh`, `agents`, `config`,
-`setup`, `teardown`, `coordinators`, `copy`, `news`, `push`) under its name and folder. A repo whose
+`setup`, `teardown`, `coordinators`, `copy`, `risk`, `news`, `push`) under its name and folder. A repo whose
 board runs an older build shows up on its `coordinators` line, and one whose
 `config.json` doesn't parse is named by its state folder. The last line names each
 problem, a repo's as `repo/check`: "2 problems: keys, shop/coordinators." Two repos

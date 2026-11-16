@@ -7,7 +7,7 @@ import unittest
 from support import setUpModule, tearDownModule, BullpenTest  # a temp folder for each module
 
 SHARED = ["rex", "bullpen", "board", "cargo", "keys", "watcher", "state", "global"]
-EACH = ["gh", "agents", "config", "setup", "teardown", "coordinators", "copy", "news", "push"]
+EACH = ["gh", "agents", "config", "setup", "teardown", "coordinators", "copy", "risk", "news", "push"]
 
 
 class DoctorJsonTest(BullpenTest):
@@ -19,7 +19,7 @@ class DoctorJsonTest(BullpenTest):
         self.assertEqual(d["problems"], [])
         names = [c["name"] for c in d["checks"]]
         self.assertEqual(names, ["rex", "gh", "agents", "bullpen", "board", "cargo", "keys", "watcher", "state",
-                                 "global", "config", "setup", "teardown", "coordinators", "copy", "news", "push"])
+                                 "global", "config", "setup", "teardown", "coordinators", "copy", "risk", "news", "push"])
         _, lines = self.doctor()  # the same checks as the lines say them
         self.assertEqual({c["name"]: c["state"] for c in d["checks"]}["rex"], "ok")
         self.assertEqual([c["text"] for c in d["checks"]], [lines[n][1] for n in names])

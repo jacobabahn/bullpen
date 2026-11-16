@@ -117,6 +117,12 @@ fn doctor_checks(place: &Place, run: Run) -> Vec<Line> {
             false,
             Box::new(|| crate::copies::check_copy(repo, why_not)),
         ),
+        (
+            "risk",
+            false,
+            true,
+            Box::new(|| crate::risk_paths::check_risk(repo, why_not)),
+        ),
         ("news", false, true, Box::new(|| news::check_news(repo, why_not))),
         (
             "push",

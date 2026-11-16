@@ -20,10 +20,15 @@ bullpen config --global --unset merge    # and the global one back to the defaul
 `--unset` takes the setting's name as `config.json` has it (`worker_model`,
 `review_rounds`). `--global` works outside a repository too. The prefix, the base
 branch, the news mode, the push remote, the issues' repository and the coordinators belong to one repository,
-so `--global` refuses `--prefix`, `--base`, `--news`, `--push-remote`, `--issues-repo` and `--board-others`. The commands
+so `--global` refuses `--prefix`, `--base`, `--news`, `--push-remote`, `--issues-repo`, `--risk-path` and `--board-others`. The commands
 (`worker`, `reviewer`, `coordinator_cmd`, `tour`) have no flags: set them in either
-`config.json` by hand, and so is `risk_paths`, the paths that make a ready task's
-risk high ([Review](review.md#the-risk-label)). `bullpen config --help` gives each flag's default; the defaults
+`config.json` by hand. `risk_paths`, the paths whose change makes a ready task's
+risk high or medium, has its own flags, for one repository only: `bullpen config
+--risk-path PATTERN --level high|medium --why "..."` adds or changes a path and
+`--remove-risk-path PATTERN` drops one. `--risk-large-lines` (400) is how many changed
+lines in a medium path make it high, and `--risk-huge-lines` (1,200; `0` for never)
+how many lines of code make a change high whatever it touches
+([Review](review.md#the-risk-label)). `bullpen config --help` gives each flag's default; the defaults
 are in one table, `SETTINGS` in `core/src/settings.rs`, with each setting's kind and
 whether only a repository can hold it.
 

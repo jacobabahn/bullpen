@@ -42,7 +42,7 @@ class RiskTest(BullpenTest):
         self.commit_and_ready(tid)
         self.verdict(tid, "approve", APPROVE_LOW)
         r = self.show(tid)["risk"]
-        self.assertEqual((r["level"], r["why"]), ("high", "changes how accept merges"))
+        self.assertEqual((r["level"], r["why"]), ("high", "changes how accept merges (1 line)"))
         self.assertEqual(r["review"]["level"], "low")
 
     def test_review_off_labels_by_the_rules_alone(self):
@@ -97,6 +97,47 @@ class RiskTest(BullpenTest):
         self.verdict(tid, "approve", APPROVE_LOW)
         r = self.show(tid)["risk"]
         self.assertEqual((r["level"], r["why"]), ("medium", "a light review where its size calls for a full one"))
+
+    def test_size_alone_is_medium_until_far_past_the_line(self):
+        self.bp("config", "--review", "off", "--risk-huge-lines", "500")
+        tid = self.start_task()
+        self.commit_file(tid, "big.txt", "".join(f"line {i}\n" for i in range(450)))
+        self.ready(tid)
+        r = self.show(tid)["risk"]
+        self.assertEqual((r["level"], r["why"]), ("medium", "450 lines in 1 file"))  # high, before
+        self.bp("tell", tid, "More.")
+        self.commit_file(tid, "more.txt", "".join(f"line {i}\n" for i in range(51)))
+        self.ready(tid)
+        r = self.show(tid)["risk"]
+        self.assertEqual((r["level"], r["why"]), ("high", "a very large change (501 lines in 2 files)"))
+
+    def test_a_medium_area_by_how_much_of_it_is_touched(self):
+        self.bp("config", "--review", "off", "--risk-large-lines", "30")
+        self.bp("config", "--risk-path", "queue/", "--level", "medium", "--why", "changes when the queue starts a task")
+        tid = self.start_task()
+        self.commit_file(tid, "queue/start.txt", "".join(f"line {i}\n" for i in range(10)))
+        self.ready(tid)
+        r = self.show(tid)["risk"]  # a tiny touch doesn't count
+        self.assertEqual((r["level"], r["why"]), ("low", "a small change (10 lines in 1 file)"))
+        for lines, label in ((11, ("medium", "changes when the queue starts a task (11 lines)")),
+                             (31, ("high", "changes when the queue starts a task, and a lot of it (31 lines)"))):
+            self.bp("tell", tid, "More.")
+            self.commit_file(tid, "queue/start.txt", "".join(f"line {i}\n" for i in range(lines)))
+            self.ready(tid)
+            r = self.show(tid)["risk"]
+            self.assertEqual((r["level"], r["why"]), label)
+        self.assertTrue(self.news()[-1].endswith(
+            "; risk: high · changes when the queue starts a task, and a lot of it (31 lines)"))
+
+    def test_the_older_forms_of_risk_paths_are_high(self):
+        self.bp("config", "--review", "off")
+        for form, why in (({"fix.txt": "changes how accept merges"}, "changes how accept merges (1 line)"),
+                          (["fix.txt"], "changes fix.txt (1 line)")):
+            self.config(risk_paths=form)
+            tid = self.start_task()
+            self.commit_and_ready_no_review(tid)
+            r = self.show(tid)["risk"]
+            self.assertEqual((r["level"], r["why"]), ("high", why))
 
     def test_stats_timeline_says_the_label(self):
         tid = self.start_task()
@@ -165,3 +206,65 @@ class LateLabelTest(RiskTest):
         self.assertEqual(self.check("--fix", settle=False), [])
         self.assertNotIn("risk", self.show(empty))
         self.assertEqual(len(self.news()), told)
+
+
+class RiskPathsTest(RiskTest):
+    """`config --risk-path`: the repository's sensitive paths, set without editing config.json."""
+    def paths(self):
+        return json.loads(self.bp("config", "--json").stdout)["risk_paths"]
+
+    def test_config_adds_changes_and_removes_a_risk_path(self):
+        self.assertIsNone(self.paths())
+        self.bp("config", "--risk-path", "cli/src/accept/", "--why", "changes how accept merges")
+        self.bp("config", "--risk-path", "cli/src/review.rs", "--level", "medium", "--why", "changes how review runs")
+        self.bp("config", "--risk-path", "bin/")
+        self.assertEqual(self.paths(), {
+            "cli/src/accept/": {"level": "high", "why": "changes how accept merges"},  # high unless it says
+            "cli/src/review.rs": {"level": "medium", "why": "changes how review runs"},
+            "bin/": {"level": "high", "why": "changes bin/"}})
+        self.bp("config", "--risk-path", "cli/src/accept/", "--level", "medium", "--why", "changes accept")
+        self.assertEqual(list(self.paths()), ["cli/src/accept/", "cli/src/review.rs", "bin/"])  # in its place
+        self.assertEqual(self.paths()["cli/src/accept/"], {"level": "medium", "why": "changes accept"})
+        out = self.bp("config", "--remove-risk-path", "bin/", "--remove-risk-path", "cli/src/accept/").stdout
+        self.assertEqual(self.paths(), {"cli/src/review.rs": {"level": "medium", "why": "changes how review runs"}})
+        self.assertIn('{"cli/src/review.rs": {"level": "medium", "why": "changes how review runs"}}', out)  # listed
+        self.bp("config", "--remove-risk-path", "cli/src/review.rs")
+        self.assertEqual(self.paths(), {})
+
+    def test_a_list_or_whys_written_by_hand_get_their_levels_when_one_is_added(self):
+        self.bp("config", "--review", "off")  # its config.json is there
+        self.config(risk_paths={"install.sh": "changes the install"})
+        self.bp("config", "--risk-path", "lua/", "--level", "medium")
+        self.assertEqual(self.paths(), {"install.sh": {"level": "high", "why": "changes the install"},
+                                        "lua/": {"level": "medium", "why": "changes lua/"}})
+        self.config(risk_paths=["install.sh", "bin/"])
+        self.bp("config", "--remove-risk-path", "bin/")
+        self.assertEqual(self.paths(), {"install.sh": {"level": "high", "why": "changes install.sh"}})
+
+    def test_what_it_refuses(self):
+        for flags, says in (
+                (["--level", "medium"], "--level and --why go with --risk-path PATTERN"),
+                (["--why", "x"], "--level and --why go with --risk-path PATTERN"),
+                (["--risk-path", " "], "--risk-path takes a path in the repository"),
+                (["--risk-path", "a", "--risk-path", "b"], "--risk-path takes one pattern a run"),
+                (["--remove-risk-path", "bin/"], "no risk path bin/: this repository has none"),
+                (["--global", "--risk-path", "bin/", "--level", "high"],
+                 "--risk-path, --level are per repository, so not for the global config")):
+            self.assertIn(says, self.bp("config", *flags, ok=False).stderr)
+        self.assertIn("invalid choice: 'low'", self.bp("config", "--risk-path", "a", "--level", "low", ok=False).stderr)
+        self.bp("config", "--risk-path", "lua/")
+        p = self.bp("config", "--remove-risk-path", "bin/", ok=False)
+        self.assertIn("no risk path bin/: this repository has lua/", p.stderr)
+        self.assertEqual(list(self.paths()), ["lua/"])
+
+    def test_doctor_says_once_when_none_are_set_and_it_is_no_problem(self):
+        self.healthy()
+        p, lines = self.doctor()
+        self.assertEqual(lines["risk"], ("ok", "no risk paths set, so a ready task's risk goes by its size alone: "
+                                               "name the sensitive ones with "
+                                               '`bullpen config --risk-path PATTERN --level high|medium --why "..."`'))
+        self.assertEqual(p.returncode, 0)
+        self.assertEqual(p.stdout.count("risk path"), 1)
+        self.bp("config", "--risk-path", "bin/")
+        self.bp("config", "--risk-path", "lua/", "--level", "medium")
+        self.assertEqual(self.doctor()[1]["risk"], ("ok", "2 risk paths (1 high, 1 medium)"))

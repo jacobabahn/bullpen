@@ -48,6 +48,7 @@ mod review;
 mod rex;
 mod risk;
 mod risk_late;
+mod risk_paths;
 mod rules;
 mod saves;
 mod say;

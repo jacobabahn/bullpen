@@ -1,8 +1,18 @@
 use super::*;
 use serde_json::json;
 
+const SIZES: Sizes = Sizes {
+    small: 40,
+    large: 400,
+    huge: 1200,
+};
+
 fn rules(numstat: &str) -> Part {
-    rules_of(numstat, false, None, 40)
+    rules_of(numstat, false, None, SIZES)
+}
+
+fn with(paths: &serde_json::Value, numstat: &str) -> Part {
+    rules_of(numstat, false, Some(paths), SIZES)
 }
 
 #[test]
@@ -14,7 +24,7 @@ fn docs_or_tests_alone_are_low() {
         part("low", "tests only")
     );
     assert_eq!(
-        rules("900\t0\ttests/test_x.py\n1\t1\tdocs/x.md\n"),
+        rules("9000\t0\ttests/test_x.py\n1\t1\tdocs/x.md\n"),
         part("low", "docs and tests only")
     );
 }
@@ -33,7 +43,7 @@ fn a_prompt_is_at_least_medium() {
 }
 
 #[test]
-fn code_goes_by_its_size() {
+fn size_alone_makes_a_change_medium_and_high_only_far_past_the_line() {
     assert_eq!(
         rules("10\t2\tcli/src/x.rs\n"),
         part("low", "a small change (12 lines in 1 file)")
@@ -44,47 +54,142 @@ fn code_goes_by_its_size() {
         rules("10\t2\tcli/src/x.rs\n1\t0\tcli/src/y.rs\n1\t0\tcli/src/z.rs\n"),
         part("medium", "14 lines in 3 files")
     );
+    // what was "a large change", high: medium now
+    assert_eq!(rules("300\t101\tcli/src/x.rs\n"), part("medium", "401 lines in 1 file"));
+    assert_eq!(rules("1200\t0\tcli/src/x.rs\n").level, "medium");
     assert_eq!(
-        rules("300\t101\tcli/src/x.rs\n"),
-        part("high", "a large change (401 lines in 1 file)")
+        rules("1200\t1\tcli/src/x.rs\n"),
+        part("high", "a very large change (1201 lines in 1 file)")
     );
+    // risk_huge_lines 0: size alone never makes it high
+    let never = Sizes { huge: 0, ..SIZES };
+    assert_eq!(rules_of("9000\t0\tcli/src/x.rs\n", false, None, never).level, "medium");
     assert_eq!(rules("-\t-\tcli/logo.png\n"), part("medium", "changes a binary file"));
     assert_eq!(rules(""), part("low", "no change"));
 }
 
 #[test]
-fn a_sensitive_path_is_high_whatever_its_size() {
+fn a_high_area_is_high_whatever_its_size_and_says_its_lines() {
     let paths = json!({"cli/src/accept/": "changes how accept merges", "bin/": "", "install.sh": "changes install.sh"});
-    let r = rules_of("1\t0\tcli/src/accept/mod.rs\n", false, Some(&paths), 40);
-    assert_eq!(r, part("high", "changes how accept merges"));
-    let r = rules_of("1\t0\tbin/bullpen\n1\t0\tinstall.sh\n", false, Some(&paths), 40);
-    assert_eq!(r, part("high", "changes bin/, and 1 more sensitive path"));
-    // even in docs or tests
+    assert_eq!(
+        with(&paths, "2\t1\tcli/src/accept/mod.rs\n"),
+        part("high", "changes how accept merges (3 lines)")
+    );
+    // the lines in the area, not the change's
+    assert_eq!(
+        with(
+            &paths,
+            "200\t50\tcli/src/accept/mod.rs\n50\t0\tcli/src/accept/rebase.rs\n500\t0\tcli/src/x.rs\n"
+        ),
+        part("high", "changes how accept merges (300 lines)")
+    );
+    // several: the one most changed, and how many more
+    assert_eq!(
+        with(
+            &paths,
+            "1\t0\tbin/bullpen\n4\t0\tinstall.sh\n1\t0\tcli/src/accept/mod.rs\n"
+        ),
+        part("high", "changes install.sh (4 lines), and 2 more sensitive paths")
+    );
+    // a test beside the area's code isn't the area: tests alone are low
+    assert_eq!(
+        with(&paths, "40\t0\tcli/src/accept/test_rebase.rs\n"),
+        part("low", "tests only")
+    );
+    assert_eq!(
+        with(
+            &paths,
+            "40\t0\tcli/src/accept/test_rebase.rs\n2\t0\tcli/src/accept/rebase.rs\n"
+        ),
+        part("high", "changes how accept merges (2 lines)")
+    );
+    // unless the pattern names tests
+    assert_eq!(
+        with(
+            &json!({"tests/fakes/": "changes the fakes"}),
+            "3\t0\ttests/fakes/rex.rs\n"
+        ),
+        part("high", "changes the fakes (3 lines)")
+    );
+    // docs count, and a bare list reads
     let list = json!(["docs/secret.md"]);
     assert_eq!(
-        rules_of("1\t0\tdocs/secret.md\n", false, Some(&list), 40),
+        with(&list, "1\t0\tdocs/secret.md\n"),
+        part("high", "changes docs/secret.md (1 line)")
+    );
+    assert_eq!(
+        with(&list, "-\t-\tdocs/secret.md\n"),
         part("high", "changes docs/secret.md")
+    );
+}
+
+#[test]
+fn a_medium_area_goes_by_how_much_of_it_is_touched() {
+    let paths = json!({
+        "cli/src/review.rs": {"level": "medium", "why": "changes how review runs"},
+        "cli/src/accept/": {"level": "high", "why": "changes how accept merges"},
+    });
+    // a tiny touch doesn't count: the change is what its size says
+    assert_eq!(
+        with(&paths, "8\t2\tcli/src/review.rs\n"),
+        part("low", "a small change (10 lines in 1 file)")
+    );
+    assert_eq!(
+        with(&paths, "8\t3\tcli/src/review.rs\n"),
+        part("medium", "changes how review runs (11 lines)")
+    );
+    // over its size's medium: the area is the why
+    assert_eq!(
+        with(&paths, "100\t0\tcli/src/review.rs\n300\t0\tcli/src/x.rs\n"),
+        part("medium", "changes how review runs (100 lines)")
+    );
+    // a large change there is a step up
+    assert_eq!(with(&paths, "400\t0\tcli/src/review.rs\n").level, "medium");
+    assert_eq!(
+        with(&paths, "400\t1\tcli/src/review.rs\n"),
+        part("high", "changes how review runs, and a lot of it (401 lines)")
+    );
+    // the most sensitive area is the why, whatever the other's size
+    assert_eq!(
+        with(&paths, "100\t0\tcli/src/review.rs\n1\t0\tcli/src/accept/mod.rs\n"),
+        part("high", "changes how accept merges (1 line), and 1 more sensitive path")
+    );
+    // a tiny touch of the medium one isn't counted among them
+    assert_eq!(
+        with(&paths, "1\t0\tcli/src/review.rs\n1\t0\tcli/src/accept/mod.rs\n"),
+        part("high", "changes how accept merges (1 line)")
+    );
+    // a very large change that touches a medium area: its size is higher
+    assert_eq!(
+        with(&paths, "20\t0\tcli/src/review.rs\n1300\t0\tcli/src/x.rs\n"),
+        part("high", "a very large change (1320 lines in 2 files)")
+    );
+    // a binary file in a medium area counts
+    assert_eq!(
+        with(&paths, "-\t-\tcli/src/review.rs\n"),
+        part("medium", "changes how review runs")
     );
 }
 
 #[test]
 fn a_new_dependency_is_high() {
     assert_eq!(
-        rules_of("1\t0\tCargo.toml\n", true, None, 40),
+        rules_of("1\t0\tCargo.toml\n", true, None, SIZES),
+        part("high", "adds a dependency")
+    );
+    // beside a medium area, it is the why
+    let paths = json!({"Cargo.toml": {"level": "medium", "why": "changes the manifest"}});
+    assert_eq!(
+        rules_of("20\t0\tCargo.toml\n", true, Some(&paths), SIZES),
         part("high", "adds a dependency")
     );
 }
 
 #[test]
-fn patterns() {
-    assert!(path_matches("cli/src/accept/", "cli/src/accept/mod.rs"));
-    assert!(!path_matches("cli/src/accept/", "cli/src/accept.rs"));
-    assert!(path_matches("bin", "bin/bullpen"));
-    assert!(path_matches("install.sh", "install.sh"));
-    assert!(!path_matches("install.sh", "tests/install.sh"));
-    assert!(path_matches("*Cargo.lock", "Cargo.lock"));
-    assert!(path_matches("cli/src/*accept*.rs", "cli/src/auto_accept.rs"));
-    assert!(!path_matches("cli/src/*.rs", "core/src/x.rs"));
+fn the_sizes_come_from_the_settings() {
+    let cfg = bullpen_core::settings::defaults();
+    let s = Sizes::of(&cfg);
+    assert_eq!((s.small, s.large, s.huge), (40, 400, 1200));
 }
 
 const MANIFEST: &str = "diff --git a/cli/Cargo.toml b/cli/Cargo.toml\n--- a/cli/Cargo.toml\n+++ b/cli/Cargo.toml\n@@ -1,8 +1,9 @@\n [package]\n name = \"bullpen-cli\"\n-version = \"0.1.0\"\n+version = \"0.2.0\"\n \n [dependencies]\n";
