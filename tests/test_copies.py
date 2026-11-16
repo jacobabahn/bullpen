@@ -238,6 +238,28 @@ class CopiesTest(unittest.TestCase):
         self.assertIn("this one's source is older than that one's (it lacks 1 of the other's commits, and has 1 "
                       "of its own)", text)
 
+    def test_a_second_coordinator_started_from_another_copy_runs_its_own(self):
+        self.bp("up")
+        self.commit(self.home, "cli/src/main.rs", "fn main() { newer() }\n")
+        self.bp("build")
+        before = self.watcher()
+        tid = self.ready_task("fix.txt", "fixed\n")
+        pane = BullpenTest.new_pane(self)
+        env = self.env
+        self.env = {**env, "REX_BLOCK": pane}
+        self.bp_other("up", "--here")  # c2: an agent that was given the other copy's bullpen
+        copies = [c["bullpen"] for c in json.loads(self.config().read_text())["coordinators"]]
+        self.assertEqual(copies, [str(self.home), str(self.other)])
+        self.bp_other("accept", tid)  # c2's own command: not another copy's
+        self.env = env
+        self.assertEqual(self.watcher(), before)  # the watcher follows the first coordinator's copy
+        self.assertFalse((self.config().parent / "other-copy.json").exists())
+        self.assertEqual(self.doctor()["copy"], ("ok", f"this repo's first coordinator (c1) uses this copy, "
+                                                       f"{self.home}; c2 uses {self.other}"))
+        self.assertEqual(self.doctor(self.bp_other)["copy"],
+                         ("ok", f"this repo's first coordinator (c1) uses {self.home}, and the watcher runs "
+                                f"from that copy; c2 uses {self.other}"))
+
     def test_doctor_says_nothing_of_a_copy_with_the_same_source(self):
         self.bp("up")
         tid = self.ready_task("fix.txt", "fixed\n")

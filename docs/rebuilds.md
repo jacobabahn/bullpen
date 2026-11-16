@@ -127,7 +127,8 @@ builds nothing in another checkout, until it has this change itself.
 
 There is one watcher for the whole state folder: it forwards every repository's panes
 to one `bin/bullpen` (`watcher.json` records its pane, its stamp and the copy it runs,
-`home`). Which copy that is: the one the repository's coordinator was started from.
+`home`). Which copy that is: the one the repository's coordinator was started from
+(with several coordinators, the first one's: the watcher follows that copy).
 `up` records it in each coordinator it starts or registers (`bullpen` in the
 coordinator's entry in `config.json`); the coordinator's agent was told that copy's
 `bin/bullpen` and given its guide, so that is the copy the repository's agents
@@ -158,6 +159,9 @@ with its own code, which may be older (steps a newer accept has aren't in it). I
 warns of nothing as it runs. A command that saves a task notes that it ran
 (`other-copy.json` in the repository's state folder: the copy, the command, when), and
 `doctor` reports it while the two copies' source differs: see [Doctor](doctor.md).
+A copy that any of the repository's coordinators was started from is never "another
+copy" there: a second coordinator made with another copy's `up --here` runs that
+copy's commands, nothing is noted, and `doctor` names its copy beside the first's.
 
 ## Fixtures never build
 

@@ -35,6 +35,23 @@ pub fn coordinator_copy(repo: &Repo) -> Option<PathBuf> {
     primary(repo).and_then(copy_of)
 }
 
+/// Is copy the one some coordinator of the repo was started from (the first or a later one)?
+pub fn a_coordinators(repo: &Repo, copy: &Path) -> bool {
+    coordinators(repo)
+        .into_iter()
+        .filter_map(copy_of)
+        .any(|c| same(&c, copy))
+}
+
+/// The later coordinators recorded with another copy than the first's: "; c2 uses ~/wt/bullpen".
+fn others(repo: &Repo, first: &Path) -> String {
+    let named = coordinators(repo).into_iter().skip(1).filter_map(|c| {
+        let copy = copy_of(c).filter(|copy| !same(copy, first))?;
+        Some(format!("; {} uses {}", s(c, "id"), copy.display()))
+    });
+    named.collect()
+}
+
 /// Are these the same folder?
 pub fn same(a: &Path, b: &Path) -> bool {
     let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
@@ -71,12 +88,11 @@ fn note_path(repo: &Repo) -> PathBuf {
     repo.dir.join("other-copy.json")
 }
 
-/// A command that saved a task in repo: when this copy isn't the one the repo's
-/// coordinator uses, note it for doctor (the last such command; once a command).
+/// A command that saved a task in repo: when this copy isn't one a coordinator of the
+/// repo was started from, note it for doctor (the last such command; once a command).
 pub fn note_command(repo: &Repo) {
     static NOTED: AtomicBool = AtomicBool::new(false);
-    let Some(copy) = coordinator_copy(repo) else { return };
-    if same(&copy, &home()) || NOTED.swap(true, Ordering::Relaxed) {
+    if coordinator_copy(repo).is_none() || a_coordinators(repo, &home()) || NOTED.swap(true, Ordering::Relaxed) {
         return;
     }
     let command = std::env::args().nth(1).unwrap_or_default();
@@ -143,9 +159,9 @@ pub fn age(a: &Path, b: &Path) -> (&'static str, String) {
     }
 }
 
-/// doctor's `copy`: the copy of bullpen this repo's coordinator uses is there, the
-/// watcher runs from it, and no other copy with different source runs commands here
-/// (this one now, or one that noted it did).
+/// doctor's `copy`: the copy of bullpen this repo's first coordinator uses is there, the
+/// watcher runs from it, and no copy that none of the repo's coordinators was started
+/// from, with different source, runs commands here (this one now, or one that noted it did).
 pub fn check_copy(repo: Option<&Repo>, why_not: Option<&str>) -> Res<(&'static str, String)> {
     if let (None, Some(why)) = (repo, why_not) {
         return Ok(("skip", format!("can't tell: {why}")));
@@ -160,12 +176,12 @@ pub fn check_copy(repo: Option<&Repo>, why_not: Option<&str>) -> Res<(&'static s
             format!("{id} was started before bullpen recorded its copy: `bullpen up` from the copy it uses records it"),
         ));
     };
-    let multi = coordinators(repo).len() > 1;
-    let who = if multi {
-        format!("this repo's coordinators ({id} first)")
+    let who = if coordinators(repo).len() > 1 {
+        format!("this repo's first coordinator ({id})")
     } else {
         format!("this repo's coordinator ({id})")
     };
+    let also = others(repo, &copy);
     if !there(&copy) {
         return Ok((
             "fail",
@@ -179,6 +195,16 @@ pub fn check_copy(repo: Option<&Repo>, why_not: Option<&str>) -> Res<(&'static s
     }
     let bin = copy.join("bin/bullpen");
     if !same(&copy, &me) {
+        if a_coordinators(repo, &me) {
+            // a later coordinator's own copy: its agent was given this bin/bullpen
+            return Ok((
+                "ok",
+                format!(
+                    "{who} uses {}, and the watcher runs from that copy{also}",
+                    copy.display()
+                ),
+            ));
+        }
         if source(&copy)? == source(&me)? {
             return Ok((
                 "ok",
@@ -217,7 +243,7 @@ pub fn check_copy(repo: Option<&Repo>, why_not: Option<&str>) -> Res<(&'static s
     }
     if let Some(note) = read_obj(&note_path(repo))? {
         let other = PathBuf::from(s(&note, "copy"));
-        if there(&other) && !same(&other, &copy) && source(&other)? != source(&copy)? {
+        if there(&other) && !a_coordinators(repo, &other) && source(&other)? != source(&copy)? {
             let (how, detail) = age(&copy, &other);
             return Ok((
                 "fail",
@@ -233,7 +259,7 @@ pub fn check_copy(repo: Option<&Repo>, why_not: Option<&str>) -> Res<(&'static s
             ));
         }
     }
-    Ok(("ok", format!("{who} uses this copy, {}", copy.display())))
+    Ok(("ok", format!("{who} uses this copy, {}{also}", copy.display())))
 }
 
 #[cfg(test)]

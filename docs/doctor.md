@@ -39,16 +39,20 @@ non-zero when anything fails. It checks:
 
 - the copy of bullpen this repo's coordinator uses (`copy`; see
   [Rebuilds](rebuilds.md#one-watcher-from-the-coordinators-copy)): the one `up`
-  recorded when it started the coordinator. It fails when
+  recorded when it started the coordinator. With several coordinators it is the first
+  one's, which the watcher follows; a later coordinator recorded with another copy is
+  named ("this repo's first coordinator (c1) uses this copy, ~/dev/bullpen; c2 uses
+  ~/wt/bullpen"), and that copy counts as one of the repo's own below. It fails when
   - that copy is gone: "this repo's coordinator (c1) was started from ~/old/bullpen,
     which is gone ... Run `~/dev/bullpen/bin/bullpen up --here` in its pane to have it
     use this copy"
-  - doctor is run by another copy whose source differs: "this is ~/wt/bullpen's
+  - doctor is run by a copy no coordinator here was started from, whose source
+    differs: "this is ~/wt/bullpen's
     bullpen, but this repo's coordinator (c1) uses ~/dev/bullpen's, and this one's
     source is older than that one's (10 commits behind): run ~/dev/bullpen/bin/bullpen
     here"
   - the watcher runs from another copy than the coordinator's: `bullpen up` restarts it
-  - a command that saved a task here was run by another copy whose source differs:
+  - a command that saved a task here was run by such a copy, whose source differs:
     "`accept` was run here by another copy of bullpen (~/wt/bullpen,
     2026-11-16T10:02:11-08:00), whose source is older than this one's (it lacks 10 of
     the other's commits, and has 1 of its own), the one this repo's coordinator (c1)
