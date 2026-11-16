@@ -150,7 +150,9 @@ class KeepBranchLocalTest(unittest.TestCase):
         p = self.finish_keeping(tid, t, ok=False)
         self.assertIn(f"so there's no branch to keep: run `finish {tid}` without --keep-branch", p.stderr)
         (Path(t["worktree"]) / "dirty.txt").write_text("x\n")
-        self.assertIn("uncommitted changes", self.finish_keeping(tid, t, ok=False).stderr)
+        p = self.finish_keeping(tid, t, ok=False)
+        self.assertIn(f"uncommitted changes: commit them, then run `finish {tid} --keep-branch` again", p.stderr)
+        self.assertNotIn("ready", p.stderr)
         self.assertEqual(self.show(tid)["status"], "working")
 
     def test_close_and_accept_keep_the_branch_of_a_task_finished_that_way(self):

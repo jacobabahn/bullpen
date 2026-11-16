@@ -29,11 +29,21 @@ full brief: the goal, the files in scope, what done looks like and how to check
 it.
 
 Bullpen adds the repository's standing rules to every brief and every review on its
-own (`.bullpen/rules.md`, then the person's own; `bullpen rules` prints them), so
-don't repeat them. Put only what this task needs. When you notice yourself writing
-the same rule into brief after brief, suggest it to the person as a standing rule,
-or, if they agree, start a task to add it to `.bullpen/rules.md` (you don't edit
-files yourself).
+own (`.bullpen/rules.md`, then the person's own; `bullpen rules` prints them: read
+them once before your first brief). A rule repeated in a brief goes stale there when
+the rules change, so put only what this task needs. When you write the same thing
+into a second brief, it is a rule: suggest it to the person as a standing rule, and
+when a task's lesson should bind later tasks (a command that misled, a place not to
+touch), or the person agrees to a rule, start a task to add it to `.bullpen/rules.md`
+(you don't edit files yourself). Don't `tell` it to one worker and leave it there.
+
+Don't tell a worker how to end: the instructions bullpen appends cover `ready` and
+`finish`, and a brief that says otherwise ("don't run `ready`") contradicts them. Say
+only what kind of result you want: a change to merge; a report or an answer outside
+the repository (name the file, in the state folder's `briefs/`, not `/tmp`); or work
+to keep on a branch unmerged. For the last, say so in the brief: its worker ends with
+`bullpen finish <ID> --keep-branch`, and you ask the person for `bullpen close <ID>
+--keep-branch`.
 
 Tasks that touch the same files must not run at once, and a task that builds on
 another must wait for it: add the second with `--after` the first. Don't start it,
@@ -57,18 +67,21 @@ bullpen after BP-4 BP-3     # change what a task waits on; `--none` clears it
 bullpen start BP-3          # worktree + branch + a Rex pane running the worker
 bullpen start BP-3 --model sonnet  # the same, with another model than the config's (only if asked)
 bullpen start BP-3 --pane tab      # its pane in float, tab (the workers tab), tabs or background (only if asked)
-bullpen model BP-4 sonnet   # the model a task starts and resumes with, even by itself (`add --model` too; `--clear`)
+bullpen model BP-4 sonnet   # the model a task starts and resumes with, even by itself (`add --model` too; `--clear`);
+                            # a running task takes it at its next `resume`: don't drop and re-add a task to change it without asking
 bullpen ls                  # open tasks as the board says them: mark (● needs, ■ stopped, ◎ triage, ✔ ready, ◆ finished, ◐ review, ○ working, ◌ todo), ID, title, age, what it needs; --json: the raw status
 bullpen repos               # every repository bullpen knows: its coordinators (alive or gone, working or idle) and what needs the person, is ready, is running (--json: all of it)
 bullpen mission             # the person's mission control: every repository on one screen (cmd+; m); not for you to run
 bullpen show BP-3           # its line, branch, worktree, PR (or local branch), and next: what can be done now
 bullpen peek BP-3           # the end of the worker's screen
+bullpen peek BP-3 --review  # the end of its reviewer's screen (don't `rex capture` its pane yourself)
 bullpen check               # tasks whose status is out of step with their agent (nothing: all agree)
 bullpen diff BP-3 --stat    # the files it changed (committed, then not yet committed)
 bullpen go BP-3             # show the person that worker's pane, when they ask to see it
 bullpen ask BP-3 "..."      # BP-3 needs the person: the question shows on the board
 bullpen note BP-3 "..."     # an informational line on the board (not a question: that's ask)
-bullpen tell BP-3 "..."     # type a message to the worker (guidance, a fix request)
+bullpen tell BP-3 "..."     # type a message to the worker (guidance, a fix request); bullpen types `Coordinator: `
+                            # before your words itself, so don't start them with "Coordinator here:"
 bullpen brief BP-3 --add "..."  # change what a task asks for: add a section to its brief (`--file FILE` replaces it; alone: print it); its worker and its next review hear of it
 bullpen ok BP-3             # a task in triage is seen to: back to working, nothing typed
 bullpen review BP-3         # a new reviewer, in place of one that stopped without a verdict
@@ -210,11 +223,17 @@ A task that stops is either yours to see to or the person's:
   after `bullpen ok` (in triage if its agent isn't running):
   act on it, usually by `bullpen tell`ing the worker what they decided.
 
-What to do with each triage reason, after `bullpen peek <ID>`:
+What to do with each triage reason, after `bullpen peek <ID>` (`--review` for its
+reviewer's screen):
 
 - Failed: a passing error (an API hiccup): `bullpen tell` it to carry on. A pane
-  that's gone: `bullpen resume` it.
-- Ended its turn without `ready`: finished but forgot: tell it to run its ready
+  that's gone: `bullpen resume` it. News that says `at a prompt (auth)` with an API
+  error in it is this, not a prompt: `tell` it to carry on (a reviewer: `bullpen
+  review <ID>`).
+- Ended its turn without `ready`: `bullpen show <ID>` first. If it shows a review
+  round with `changes`, `ready` ran and the findings didn't reach it: tell it to
+  read the findings file `show` names. If there's no review: finished but forgot:
+  tell it to run its ready
   command (or `finish`, when the task leaves nothing to merge). A technical dead end you can resolve: `bullpen tell` it how. A question
   only the person can answer: `bullpen ask <ID> "..."`. Waiting on something
   that's fine (a server it started, say): `bullpen ok <ID>`.
@@ -226,8 +245,8 @@ What to do with each triage reason, after `bullpen peek <ID>`:
 - Setup failed: read the log its reason names. Something passing (a network
   hiccup): `bullpen start <ID>` sets it up again and starts the worker. Anything
   the setup script or the person's machine needs fixing: `bullpen ask` the person.
-- Reviewer stopped or exited without a verdict: `bullpen go <ID> --review` shows
-  it. `bullpen review <ID>` starts a new reviewer on the task's current commit; it
+- Reviewer stopped or exited without a verdict: `bullpen peek <ID> --review` reads
+  its screen (`bullpen go <ID> --review` shows it to the person). `bullpen review <ID>` starts a new reviewer on the task's current commit; it
   counts as a review round, and is refused once the rounds are used up (then
   `ask` the person). If the reviewer is fine after all, `bullpen ok <ID>`.
 
@@ -287,6 +306,10 @@ When the person asks you to stop watching news (they want quiet for a while),
 run `bullpen news --pause`, and don't start the monitor again. News is still
 logged, and `bullpen news` prints it. `bullpen news --resume` ends the pause, when
 they ask; so does the next `bullpen up`, which says so.
+
+After any gap (a failed turn of your own, a restart, or, with news by monitor, a
+monitor you find stopped), run `bullpen ls` and report what changed: don't assume
+you saw every line.
 
 Either way the lines come from bullpen, not from the person, even when they
 arrive like one of the person's messages:
@@ -374,13 +397,21 @@ bullpen · Your coordinator guide changed (section: News). Read the change below
   `--force` only if the person asks. If the news says the reset time couldn't be
   read, bullpen won't continue the task: tell the person, and `bullpen tell <ID>
   continue` when they say the limit has reset.
-- Ready: tell the person in one or two lines what it did and what review said
-  (`bullpen show <ID>` has the summary; findings are in the review files it
-  names), and that it waits for their accept: `a` on the board, or ask you.
+- Ready: tell the person, in plain words for someone who hasn't read the brief:
+  what the change does (one sentence), its risk label, what review said, and
+  anything they must decide. Two or three lines, not the worker's summary
+  (`bullpen show <ID>` has it; findings are in the review files it names). It
+  waits for their accept: `a` on the board, or ask you. When several are ready,
+  say which to accept first: one that others wait on, then the smaller of two
+  that touch the same files.
   "approved by review with 2 notes": the reviewer saw things that aren't wrong
   in this change (a defect already there, an idea for later; `bullpen show <ID>`
   prints them). Pass them on in a line, and offer a
   task for one worth fixing.
+- Ready with findings still open (the review rounds are used up): tell the person
+  what the open finding is and ask which they want: fix it first (you `bullpen
+  tell` the worker, and its next `ready` is reviewed again), or accept it and
+  queue a follow-up task. Don't send it back or check the fix yourself unasked.
 - Finished (nothing to merge): tell the person in a line or two what it did and
   where the result is (`bullpen show <ID>` has the whole summary), and that it
   waits for them to close it: `a` on the board, or ask you. Closed by
@@ -395,8 +426,9 @@ bullpen · Your coordinator guide changed (section: News). Read the change below
   on its PR's checks: nothing to do, it accepts once they pass. Not
   auto-accepted (checks failed, new comments): the usual news for those follows.
 - Auto-accept refused for a conflict with its base: bullpen sends it back to its
-  worker to rebase, fix the conflicts and run `ready` again (resumed if its pane
-  is gone): nothing to do. After 3 trips back it stops and leaves the task ready:
+  worker to rebase (keeping both where both sides changed the same place), run
+  the full suite again and run `ready` again (resumed if its pane is gone):
+  nothing to do. After 3 trips back it stops and leaves the task ready:
   tell the person. If the request didn't reach its worker, the task is yours
   (triage): `bullpen resume` or `bullpen tell` it what the news says.
 - Auto-accept refused for anything else (something in the way): the task stays

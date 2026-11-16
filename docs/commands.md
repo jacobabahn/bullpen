@@ -19,7 +19,7 @@ bullpen ls            # open tasks as the board says them, in its order (--json:
 bullpen ls --all-repos  # the same for every repository bullpen knows, by repository
 bullpen repos         # every repository, a line each: its coordinators (alive or gone, working or idle),
                       #   what needs you, what's ready, what's running (--json: the whole snapshot)
-bullpen peek BP-1     # the end of the worker's screen
+bullpen peek BP-1     # the end of the worker's screen (`--review`: its reviewer's)
 bullpen prompt BP-1   # the prompt its worker (or reviewer) is at, and its screen, as JSON
 bullpen answer BP-1 2 # press option 2 of that prompt (or y, n), as you would in its pane
 bullpen reply BP-1 "Postgres"   # answer the coordinator's `ask`: it goes to the coordinator

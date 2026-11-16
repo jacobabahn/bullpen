@@ -64,16 +64,7 @@ pub fn cmd_up(argv: &[String]) -> Res<i32> {
     } else {
         let label = coordinator_label(&repo);
         let mut argv = resolve(&strs(&repo.cfg, "coordinator_cmd"));
-        let prompt = format!(
-            "You are the bullpen coordinator for {}. The bullpen CLI is {me}. {}Run `{me} ls`, then say in one \
-             short line that you are ready.",
-            repo.root.display(),
-            if monitor {
-                "News comes by monitor: start it first, as your guide says. "
-            } else {
-                ""
-            }
-        );
+        let prompt = first_message(&repo.root.display().to_string(), &me, monitor);
         argv.extend(["-n".into(), label.clone(), "--append-system-prompt-file".into()]);
         argv.extend([guide_file(&repo)?.display().to_string(), prompt]);
         let block = rex_run(&session, &repo.root, &label, &argv, true)?;
@@ -120,6 +111,20 @@ pub fn cmd_up(argv: &[String]) -> Res<i32> {
     }
     crate::backlog::pickup::soon(&repo); // a Rex session now: there may be room
     Ok(0)
+}
+
+/// What a new coordinator is told first: who it is, where bullpen is, and to read the
+/// standing rules (so its briefs don't repeat them) and the tasks before it says it's ready.
+pub fn first_message(root: &str, me: &str, monitor: bool) -> String {
+    let follow = if monitor {
+        "News comes by monitor: start it first, as your guide says. "
+    } else {
+        ""
+    };
+    format!(
+        "You are the bullpen coordinator for {root}. The bullpen CLI is {me}. {follow}Run `{me} rules` and \
+         `{me} ls`, then say in one short line that you are ready."
+    )
 }
 
 /// `up --here`: the agent in this pane is a coordinator (it may be one already). Says

@@ -185,11 +185,16 @@ fn finish(repo: &Repo, t: &mut Obj, a: &Args) -> Res<()> {
         return fail(format!("{id} has no worktree"));
     }
     let wt = s(t, "worktree").to_string();
+    let keep = a.flag("--keep-branch");
     if !strip(&git(&wt, &["status", "--porcelain"], true)?.stdout).is_empty() {
+        if keep {
+            return fail(format!(
+                "uncommitted changes: commit them, then run `finish {id} --keep-branch` again"
+            ));
+        }
         return fail("uncommitted changes: commit them and run `ready`, or discard them and run finish again");
     }
     let base_ref = task_base_ref(repo, t)?;
-    let keep = a.flag("--keep-branch");
     if keep {
         let ahead = git(&wt, &["rev-list", "--count", &format!("{base_ref}..HEAD")], true)?.stdout;
         if strip(&ahead) == "0" {

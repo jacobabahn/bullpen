@@ -45,8 +45,8 @@ drop; workers and coordinators don't run it unasked) ends any open task that way
 
 A worker whose brief asks for its branch to be kept and not merged ends with
 `bullpen finish BP-3 --keep-branch --summary-file <file>` (its instructions say so).
-It refuses uncommitted changes and a branch with no commits on its base (plain
-`finish` is for that). Otherwise the task is `finished` with `keep_branch: true`: no
+It refuses uncommitted changes (commit them and run it again) and a branch with no
+commits on its base (plain `finish` is for that). Otherwise the task is `finished` with `keep_branch: true`: no
 PR, no review, nothing pushed yet, and the worktree and pane stay.
 
 - The news says `BP-3 finished (branch to be kept, not merged): <first line of the

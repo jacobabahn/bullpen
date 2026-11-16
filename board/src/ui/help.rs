@@ -87,7 +87,7 @@ fn help_lines(w: usize) -> Vec<Line<'static>> {
         m("stopped", "stopped: its agent exited"),
         m("triage", "the coordinator is on it"),
         m("ready", "ready to accept"),
-        m("finished", "finished, nothing to merge"),
+        m("finished", "finished: nothing to merge, or a branch to keep"),
         (format!("{} {}", REVIEW[0], model::mark("review")), "in review (it turns)", mark_style("review")),
         (format!("{} {}", WORKING[0], model::mark("working")), "working (it turns)", Style::new()),
         m("todo", "queued, not started"),

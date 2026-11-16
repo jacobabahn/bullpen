@@ -28,3 +28,14 @@ fn an_up_again_says_what_was_running_and_what_started() {
         "Coordinators c1 and c2 already running. Board started. Watcher restarted (watch.lua or bullpen changed)."
     );
 }
+
+#[test]
+fn the_first_message_has_the_rules_read_before_ls() {
+    assert_eq!(
+        first_message("/r", "/b/bullpen", false),
+        "You are the bullpen coordinator for /r. The bullpen CLI is /b/bullpen. Run `/b/bullpen rules` and \
+         `/b/bullpen ls`, then say in one short line that you are ready."
+    );
+    let m = first_message("/r", "bp", true);
+    assert!(m.contains("bp. News comes by monitor: start it first, as your guide says. Run `bp rules` and `bp ls`,"));
+}

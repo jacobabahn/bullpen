@@ -1,4 +1,4 @@
-//! `peek`: the end of a worker's screen (start.py's cmd_peek).
+//! `peek`: the end of a worker's screen (start.py's cmd_peek), or of its reviewer's.
 
 use crate::args::{flag, pos, usage_error, value, Arg, Args, Nargs};
 use crate::rex::screen_end;
@@ -10,6 +10,7 @@ const PEEK: &[Arg] = &[
     pos("id", Nargs::One, "the task, like BP-3"),
     value("--lines", "LINES", "how many lines (default 40)"),
     flag("--vt", "keep the screen's colours, as terminal escape codes"),
+    flag("--review", "the task's reviewer, not its worker"),
 ];
 
 /// Python's int() of a str: digits (single underscores between them), a sign, and
@@ -33,7 +34,7 @@ pub fn py_int(text: &str) -> Option<i64> {
     Some(if neg { -n } else { n })
 }
 
-/// `peek`: print the end of a worker's screen.
+/// `peek`: print the end of a worker's screen, or with --review of its reviewer's.
 pub fn cmd_peek(argv: &[String]) -> Res<i32> {
     let a = Args::parse("peek", argv, PEEK);
     let n = match a.opt("--lines") {
@@ -45,9 +46,14 @@ pub fn cmd_peek(argv: &[String]) -> Res<i32> {
     };
     let repo = Repo::new(repo_root()?)?;
     let t = repo.task(a.arg("id").unwrap_or(""))?;
-    let (session, block) = crate::agents::pane(&t, "worker");
+    let review = a.flag("--review");
+    let (session, block) = crate::agents::pane(&t, if review { "reviewer" } else { "worker" });
+    if review && block.is_empty() {
+        return fail(format!("{} has no reviewer running", s(&t, "id")));
+    }
     if !crate::rex::alive(&session, &block)? {
-        return fail(format!("{}'s agent isn't running", s(&t, "id")));
+        let whose = if review { "reviewer" } else { "agent" };
+        return fail(format!("{}'s {whose} isn't running", s(&t, "id")));
     }
     println!("{}", screen_end(&session, &block, n, a.flag("--vt"))?.join("\n"));
     Ok(0)

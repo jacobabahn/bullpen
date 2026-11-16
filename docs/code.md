@@ -151,7 +151,7 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `start/mod.rs`: `add`, `after`, `model`, `review-mode`, what a task waits on, and
   which saves move the run queue (`slot_freed`); `launch.rs`: `start`, `resume`, `tell`,
   the worker's brief and pane (`start_task`, `write_full`, `launch`) and `hand_back`; `queue.rs`: the
-  run queue (`start_queued`); `peek.rs`: `peek`
+  run queue (`start_queued`); `peek.rs`: `peek` (and `peek --review`)
 - `triage.rs`: `ask`, `ok` and `note`
 - `brief.rs`: `brief`: a task's brief printed, replaced or added to; the change kept
   (`briefs/<ID>.brief-<n>.md`, the task's `brief_changes`), its worker told what changed

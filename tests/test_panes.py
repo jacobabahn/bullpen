@@ -245,6 +245,20 @@ class ReviewersTest(PanesBase):
         R = json.loads((self.fake / "reg.json").read_text())
         self.assertEqual(R["blocks"][reviewer]["layer"], "detached")
 
+    def test_peek_review_prints_the_reviewers_screen(self):
+        tid = self.start_task()
+        p = self.bp("peek", tid, "--review", ok=False)
+        self.assertEqual(p.stderr, f"bullpen: {tid} has no reviewer running\n")
+        reviewer = self.commit_and_ready(tid)
+        (self.fake / f"screen_{self.block(tid)}").write_text("the worker's screen\n")
+        (self.fake / f"screen_{reviewer}").write_text("Reading the diff\nAPI Error: 403\n")
+        self.assertEqual(self.bp("peek", tid, "--review").stdout, "Reading the diff\nAPI Error: 403\n")
+        self.assertEqual(self.bp("peek", tid, "--review", "--lines", "1").stdout, "API Error: 403\n")
+        self.assertEqual(self.bp("peek", tid).stdout, "the worker's screen\n")
+        (self.fake / "alive" / reviewer).unlink()
+        p = self.bp("peek", tid, "--review", ok=False)
+        self.assertEqual(p.stderr, f"bullpen: {tid}'s reviewer isn't running\n")
+
     def test_the_diff_pane_never_goes_to_the_background(self):
         self.bp("config", "--workers", "background")
         tid = self.start_task()

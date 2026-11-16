@@ -3,8 +3,8 @@
 The task board (`bullpen board`, a Rust program in `board/`) sits in a narrow
 pane beside the coordinator and updates as soon as a task changes.
 It groups tasks by what you do next: needs you, coordinator on it (dimmed: see
-[Triage](triage.md)), ready to accept, finished (nothing to merge, see
-[Finish](finish.md)), in review, working, queued, and last the backlog's ideas
+[Triage](triage.md)), ready to accept, finished (nothing to merge, or a branch to
+keep unmerged, see [Finish](finish.md)), in review, working, queued, and last the backlog's ideas
 (Later, see [The Later group](#the-later-group)); `f` adds
 the closed ones (accepted, closed, dropped). `l` switches to a compact layout,
 one line per task under its group's name (dim), with the selected task's detail
@@ -23,7 +23,7 @@ Each task starts with its mark, the same one `?` shows under "Marks":
 | `■` red | stopped: its agent exited |
 | `◎` dim | the coordinator is on it |
 | `✔` green | ready to accept |
-| `◆` green | finished, nothing to merge |
+| `◆` green | finished: nothing to merge, or a branch to keep |
 | `◜` blue, turning slowly (`◐` still) | in review |
 | `⠋` turning slowly (`○` still) | working |
 | `◌` dim | queued, not started |
