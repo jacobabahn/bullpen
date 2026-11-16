@@ -198,3 +198,20 @@ fn test_a_task_from_the_backlog_says_where_it_came_from() {
     let done = task(json!({"id": "BP-4", "status": "done", "from": "L9", "origin": "backlog"}));
     assert_eq!((from_mark(&done), from_detail(&done).as_str()), ("↻", ""));
 }
+
+#[test]
+fn a_ready_tasks_sentence_ends_with_its_risk() {
+    let risk = json!({"level": "high", "why": "changes how accept merges"});
+    let t = task(
+        json!({"id": "BP-1", "status": "ready", "pr": "https://github.com/a/b/pull/41",
+                        "review": {"verdict": "approved", "kind": "full"}, "risk": risk}),
+    );
+    assert_eq!(
+        status_detail(&config(json!({})), &t, "", None),
+        "PR #41, approved by full review. High risk: changes how accept merges."
+    );
+    // once it's working again, its old label isn't said
+    let mut working = t.clone();
+    working.insert("status".into(), json!("working"));
+    assert!(!status_detail(&config(json!({})), &working, "", None).contains("risk"));
+}

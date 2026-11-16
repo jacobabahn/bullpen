@@ -489,3 +489,23 @@ fn the_compact_layout_names_its_groups_dim() {
     term.draw(|f| draw(f, &mut a)).unwrap();
     assert!(term.backend().buffer()[(1, 4)].modifier.contains(Modifier::DIM));
 }
+
+#[test]
+fn a_ready_task_has_its_risk_before_its_age_in_its_colour() {
+    let risk = |id: &str, level: &str| ready(id).with(json!({"risk": {"level": level, "why": "changes how accept merges"}}));
+    let mut a = app(vec![risk("BP-1", "high"), risk("BP-2", "medium"), risk("BP-3", "low"), ready("BP-4")], 0, Layout::Grouped);
+    let s = screen(&mut a, 60, 24);
+    let row = |id: &str| s.iter().find(|r| r.contains(id)).unwrap().clone();
+    assert!(row("BP-1").contains("Task BP-1") && row("BP-1").ends_with("high"), "{s:#?}");
+    assert!(row("BP-2").ends_with("medium") && row("BP-3").ends_with("low"), "{s:#?}");
+    assert!(!row("BP-4").ends_with("low") && !row("BP-4").ends_with("high"), "{s:#?}");
+    assert!(s.iter().any(|r| r.contains("High risk: changes how accept merges.")), "{s:#?}");
+    assert_eq!(tone_of(&mut a, 60, 24, "high"), Some(Color::Red));
+    assert_eq!(tone_of(&mut a, 60, 24, "medium"), Some(AMBER));
+    // the title gives way to it on a narrow board
+    let long = ready("BP-5").with(json!({"title": "A long title that has to be cut to fit", "risk": {"level": "high", "why": "x"}}));
+    let mut a = app(vec![long], 0, Layout::Grouped);
+    let s = screen(&mut a, 40, 12);
+    let r = s.iter().find(|r| r.contains("BP-5")).unwrap();
+    assert!(r.contains('…') && r.ends_with("high"), "{s:#?}");
+}

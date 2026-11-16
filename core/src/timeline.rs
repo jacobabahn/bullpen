@@ -8,7 +8,8 @@
 //!   status           its status changed: from, to; stop (who stopped and how) and why
 //!                    for a stopped one; ask for a question to the person; back (why it
 //!                    was sent back to work: review, rebase, person, pr, limit); outcome
-//!                    for a done one (accepted, closed, kept)
+//!                    for a done one (accepted, closed, kept); risk (level, why) for a
+//!                    ready one with a risk label
 //!   turn_ended       its worker ended a turn
 //!   review_started   a reviewer started: round, kind (full, light, followup, rebase,
 //!                    rebased, tour)
@@ -136,6 +137,9 @@ fn status_entry(from: &str, to: &str, t: &Obj, back: Option<Value>) -> Obj {
     }
     if to == "done" {
         e.insert("outcome".into(), json!(outcome(t)));
+    }
+    if let Some((level, why)) = crate::risk::shown(t) {
+        e.insert("risk".into(), json!({"level": level, "why": why}));
     }
     e
 }

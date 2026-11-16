@@ -30,6 +30,15 @@ pub(crate) fn rev() -> Style {
     Style::new().add_modifier(Modifier::REVERSED)
 }
 pub(crate) const AMBER: Color = Color::Yellow;
+
+/// A risk level's colour: green, amber, red.
+pub(crate) fn risk_style(level: &str) -> Style {
+    match level {
+        "high" => bold().fg(Color::Red),
+        "medium" => Style::new().fg(AMBER),
+        _ => Style::new().fg(Color::Green),
+    }
+}
 /// Under the selected task's rows: a tint from the terminal's own palette, so status
 /// colours still show on it. Some themes make it the background colour, so the ID
 /// in reverse video is what says which task is selected in every theme.

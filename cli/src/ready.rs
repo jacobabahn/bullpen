@@ -124,6 +124,7 @@ fn ready(repo: &Repo, t: &mut Obj, a: &Args) -> Res<()> {
         };
         t.insert("summary".into(), none);
         t.insert("diffstat".into(), Value::Null);
+        t.insert("risk".into(), Value::Null);
         save(repo, t)?;
         ready_news(repo, t, &["nothing to merge".into()], "", false)?;
         println!("no commits: marked ready with nothing to merge");
@@ -140,6 +141,7 @@ fn ready(repo: &Repo, t: &mut Obj, a: &Args) -> Res<()> {
         println!("{published}. {said}");
         return Ok(());
     }
+    crate::risk::assess(repo, t, &base_ref, crate::risk::Said::Nothing)?;
     set_status(t, "ready", None, None);
     save(repo, t)?;
     ready_news(repo, t, &[commits(ahead), where_(t)], "", false)?;

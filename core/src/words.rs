@@ -370,8 +370,13 @@ pub fn status_detail(cfg: &Obj, t: &Obj, waits: &str, at: Option<Stamp>) -> Stri
                 _ if !pr.is_empty() => format!("{pr}."),
                 _ => "Done.".into(),
             };
-            match get(t, "rebased").filter(|v| truthy(Some(v))) {
+            let text = match get(t, "rebased").filter(|v| truthy(Some(v))) {
                 Some(b) => format!("{text} Rebased onto {}.", py_str(b)),
+                None => text,
+            };
+            match crate::risk::shown(t) {
+                Some((level, "")) => format!("{text} {} risk.", upper_first(level)),
+                Some((level, why)) => format!("{text} {} risk: {why}.", upper_first(level)),
                 None => text,
             }
         }

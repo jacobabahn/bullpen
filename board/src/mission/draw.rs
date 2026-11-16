@@ -12,7 +12,7 @@ use crate::app::{App, Kind, Mode};
 use crate::model::{self, fit, pad, width, Task};
 use crate::ui::bottom::{input_line, key_line, message, pending_keys};
 use crate::ui::overlay::{draw_answer, draw_ask};
-use crate::ui::{bold, dim, frame_at, mark_style, put, rev, span, AMBER, REVIEW, SPINNER, TINT, WORKING};
+use crate::ui::{bold, dim, frame_at, mark_style, put, rev, risk_style, span, AMBER, REVIEW, SPINNER, TINT, WORKING};
 use bullpen_core::fleet::TaskState;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
@@ -290,8 +290,11 @@ fn title_line(m: &Mission, i: Item, t: &TaskState, repo: &str, repow: usize, idw
     let all = w.saturating_sub(4);
     let lead = if repo.is_empty() { String::new() } else { format!("{} ", pad(&fit(repo, repow), repow)) };
     let title = bullpen_core::json::s(&t.task, "title");
-    let room = all.saturating_sub(width(&lead) + idw + 2 + width(&age) + 2);
-    let middle = pad(&format!("  {}", fit(title, room)), all.saturating_sub(width(&lead) + idw + width(&age)));
+    // a ready task's risk, a coloured word before its age
+    let risk = if asked.is_some() { None } else { bullpen_core::risk::shown(&t.task).map(|(level, _)| level) };
+    let right = width(&age) + risk.map_or(0, |r| width(r) + if age.is_empty() { 0 } else { 2 });
+    let room = all.saturating_sub(width(&lead) + idw + 2 + right + 2);
+    let middle = pad(&format!("  {}", fit(title, room)), all.saturating_sub(width(&lead) + idw + right));
     let stale = matches!(items::status(t), "needs" | "stopped")
         && bullpen_core::task::stamp(&t.task).is_some_and(|s| bullpen_core::timeutil::seconds_since(s, Some(now)) >= model::STALE);
     let age_style = if stale { bold().fg(Color::Red) } else { dim() };
@@ -305,7 +308,16 @@ fn title_line(m: &Mission, i: Item, t: &TaskState, repo: &str, repow: usize, idw
         (None, false) => (dim(), dim(), if items::status(t) == "triage" { dim() } else { Style::new() }, age_style),
     };
     let id_pad = " ".repeat(idw.saturating_sub(width(&id)));
-    Line::from(vec![span(lead, lead_style), span(id, id_style), span(id_pad + &middle, title_style), span(age, age_style)])
+    let mut spans = vec![span(lead, lead_style), span(id, id_style), span(id_pad + &middle, title_style)];
+    if let Some(level) = risk {
+        let tint = |st: Style| if selected { st.bg(TINT) } else { st };
+        spans.push(span(level.to_string(), tint(risk_style(level))));
+        if !age.is_empty() {
+            spans.push(span("  ".to_string(), tint(Style::new())));
+        }
+    }
+    spans.push(span(age, age_style));
+    Line::from(spans)
 }
 
 /// A repo's line: its name, its root, its coordinators, and how many tasks are open at

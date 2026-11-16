@@ -12,6 +12,7 @@ pub mod paths;
 pub mod printable;
 pub mod proc;
 pub mod repo;
+pub mod risk;
 pub mod settings;
 pub mod sha1;
 pub mod sha256;

@@ -2,6 +2,7 @@
 //! words are core's words.rs): its mark, ID, title, age and the board's sentence.
 
 use bullpen_core::json::{s, Obj};
+use bullpen_core::risk::level_sgr;
 use bullpen_core::task::is_closed;
 use bullpen_core::text::{fit, len, ljust, width, wrap};
 use bullpen_core::words::{
@@ -57,7 +58,12 @@ fn age_code(t: &Obj) -> &'static str {
 /// color, as on the board: the mark in its status's colour, the rest dim.
 pub fn task_line(repo: &Repo, t: &Obj, every: &Every, idw: usize, cut: Option<i64>, color: bool) -> Res<String> {
     let tid = ljust(s(t, "id"), idw);
-    let when = ago(t, None);
+    let (risk, when) = (risk_word(t), ago(t, None));
+    let when = match (risk, when.is_empty()) {
+        ("", _) => when,
+        (r, true) => r.to_string(),
+        (r, false) => format!("{r}  {when}"),
+    };
     let mut text = board_detail(&repo.cfg, t, every, None)?;
     let head_w = (2 + len(&tid) + 2) as i64;
     let age_room = if when.is_empty() { 0 } else { len(&when) as i64 + 2 };
@@ -70,6 +76,10 @@ pub fn task_line(repo: &Repo, t: &Obj, every: &Every, idw: usize, cut: Option<i6
         text = if room >= 4 { fit(&text, room) } else { String::new() };
     }
     let mut parts = vec![head(t, &tid, &title, color)];
+    if !risk.is_empty() {
+        parts.push(sgr(level_sgr(risk), risk, color));
+    }
+    let when = ago(t, None);
     if !when.is_empty() {
         parts.push(sgr(age_code(t), &when, color));
     }
@@ -93,7 +103,13 @@ pub fn task_rows(
 ) -> Res<Vec<String>> {
     let st = s(t, "status");
     let tid = ljust(s(t, "id"), idw);
+    let risk = risk_word(t);
     let when = ago(t, None);
+    let when = match (risk, when.is_empty()) {
+        ("", _) => when,
+        (r, true) => r.to_string(),
+        (r, false) => format!("{r}  {when}"),
+    };
     let w = cols - 1; // never into the last column
     let head_w = (2 + len(&tid) + 2) as i64;
     let title = fit(s(t, "title"), (w - head_w - len(&when) as i64 - 2).max(1));
@@ -102,11 +118,13 @@ pub fn task_rows(
     } else {
         " ".repeat((w - head_w - width(&title) as i64 - len(&when) as i64).max(2) as usize)
     };
-    let mut rows = vec![format!(
-        "{}{pad}{}",
-        head(t, &tid, &title, color),
-        sgr(age_code(t), &when, color)
-    )];
+    let age = ago(t, None);
+    let right = match risk {
+        "" => sgr(age_code(t), &when, color),
+        r if age.is_empty() => sgr(level_sgr(r), r, color),
+        r => format!("{}  {}", sgr(level_sgr(r), r, color), sgr(age_code(t), &age, color)),
+    };
+    let mut rows = vec![format!("{}{pad}{right}", head(t, &tid, &title, color))];
     let text = board_detail(&repo.cfg, t, every, None)?;
     let two =
         matches!(st, "needs" | "stopped" | "finished") || is_stuck(t) || is_limited(t) || !pr_phrase(t).is_empty();
@@ -117,6 +135,11 @@ pub fn task_rows(
         }
     }
     Ok(rows)
+}
+
+/// A ready task's risk level, the word before its age ("" for none).
+fn risk_word(t: &Obj) -> &str {
+    bullpen_core::risk::shown(t).map_or("", |(level, _)| level)
 }
 
 /// The terminal's width when stdout is one, else None: piped output is whole.

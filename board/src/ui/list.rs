@@ -3,7 +3,7 @@
 //! Later group's rows are later.rs's.
 
 use super::later::{draw_item, draw_item_detail, draw_later_line, later_rows};
-use super::{bold, dim, mark_style, put, rev, review_mark, span, spinner, working_mark, Sizes, AMBER, TINT};
+use super::{bold, dim, mark_style, put, rev, review_mark, risk_style, span, spinner, working_mark, Sizes, AMBER, TINT};
 use crate::model::{self, fit, pad, width, Item, Layout, Task, STALE};
 use crate::App;
 use ratatui::buffer::Buffer;
@@ -352,9 +352,12 @@ fn title_line(
         None if with_age => model::ago(t, now),
         None => String::new(),
     };
-    let room = width_all.saturating_sub(idw + width(gap) + if age.is_empty() { 0 } else { width(&age) + 2 });
+    // a ready task's risk, a coloured word before its age
+    let risk = if asked.is_some() { None } else { bullpen_core::risk::shown(t.obj()).map(|(level, _)| level) };
+    let right = width(&age) + risk.map_or(0, |r| width(r) + if age.is_empty() { 0 } else { 2 });
+    let room = width_all.saturating_sub(idw + width(gap) + if right == 0 { 0 } else { right + 2 });
     let title = fit(&model::shown_title(t, &app.cfg, app.me.as_deref()), room);
-    let middle = pad(&format!("{gap}{title}"), width_all.saturating_sub(idw + width(&age)));
+    let middle = pad(&format!("{gap}{title}"), width_all.saturating_sub(idw + right));
     // the ID in reverse video, off the tint: that shows in any theme. Dim text is hard
     // to read on the tint, so the rest of the row drops it
     let (id_style, title_style, age_style) = if let Some((action, _)) = asked {
@@ -368,8 +371,18 @@ fn title_line(
     };
     // the ID's padding goes with the title, so only the ID itself is reversed
     let id_pad = id[t.id.len()..].to_string();
-    Line::from(vec![span(t.id.clone(), id_style), span(id_pad + &middle, title_style), span(age, age_style)])
+    let mut spans = vec![span(t.id.clone(), id_style), span(id_pad + &middle, title_style)];
+    if let Some(level) = risk {
+        let style = if selected { risk_style(level).bg(TINT) } else { risk_style(level) };
+        spans.push(span(level.to_string(), style));
+        if !age.is_empty() {
+            spans.push(span("  ".to_string(), if selected { Style::new().bg(TINT) } else { Style::new() }));
+        }
+    }
+    spans.push(span(age, age_style));
+    Line::from(spans)
 }
+
 
 #[cfg(test)]
 #[path = "test_list.rs"]

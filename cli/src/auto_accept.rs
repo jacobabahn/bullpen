@@ -85,6 +85,8 @@ pub fn cmd_verdict(argv: &[String]) -> Res<i32> {
     }
     let n = r.get("round").and_then(Value::as_i64).unwrap_or(0);
     if approve {
+        let base_ref = crate::modes::task_base_ref(&repo, &t)?;
+        crate::risk::assess(&repo, &mut t, &base_ref, crate::risk::Said::Approval(&text))?;
         set_status(&mut t, "ready", None, None);
         save(&repo, &mut t)?;
         if auto_accepts(&repo, &t) {
@@ -142,6 +144,8 @@ pub fn cmd_verdict(argv: &[String]) -> Res<i32> {
         }
     } else {
         let why = format!("Review still asks for changes after {rounds} rounds");
+        let base_ref = crate::modes::task_base_ref(&repo, &t)?;
+        crate::risk::assess(&repo, &mut t, &base_ref, crate::risk::Said::Nothing)?;
         set_status(&mut t, "ready", Some(&why), None);
         save(&repo, &mut t)?;
         let then = format!(", but review still asks for changes after {rounds} rounds: findings in {findings}");

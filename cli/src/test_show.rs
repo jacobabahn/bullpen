@@ -117,3 +117,39 @@ fn notes_are_indented_under_their_label() {
         "    notes: - one thing\n             goes on\n\n           - another"
     );
 }
+
+#[test]
+fn a_ready_tasks_risk_is_a_coloured_word_before_its_age() {
+    let t = task(
+        json!({"id": "BP-3", "status": "ready", "title": "Fix login", "since": ago(12),
+                        "pr": "https://github.com/a/b/pull/4", "review": {"verdict": "approved", "kind": "full"},
+                        "risk": {"level": "high", "why": "changes how accept merges"}}),
+    );
+    let e = every(std::slice::from_ref(&t));
+    let line = |cut, color| task_line(&repo(), &t, &e, 0, cut, color).unwrap();
+    assert_eq!(
+        line(None, false),
+        "✔ BP-3  Fix login  high  12m  PR #4, approved by full review. High risk: changes how accept merges."
+    );
+    assert!(line(None, true).contains("\x1b[1;31mhigh\x1b[0m"));
+    // the title makes room for it, cut
+    assert!(line(Some(40), false).starts_with("✔ BP-3  Fix login  high  12m"));
+    let rows = task_rows(&repo(), &t, &e, 0, 40, false, None).unwrap();
+    assert!(
+        rows[0].starts_with("✔ BP-3  Fix login") && rows[0].ends_with("high  12m"),
+        "{rows:?}"
+    );
+}
+
+#[test]
+fn show_says_the_risk_and_its_parts() {
+    let t = task(
+        json!({"status": "ready", "risk": {"level": "high", "why": "couldn't check it",
+        "rules": {"level": "low", "why": "docs only"}, "review": {"level": "high", "why": "couldn't check it", "round": 1}}}),
+    );
+    assert_eq!(
+        risk_line(&t).unwrap(),
+        "     risk: high · couldn't check it (rules: low · docs only; review: high · couldn't check it)"
+    );
+    assert_eq!(risk_line(&task(json!({"status": "ready"}))), None);
+}

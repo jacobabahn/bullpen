@@ -66,7 +66,7 @@ Every line has `at` (a stamp) and `event`:
 | event | when | with |
 | --- | --- | --- |
 | `added` | the task was added | `status` |
-| `status` | its status changed | `from`, `to`; `stop` and `why` for a stop; `ask` for a question to the person; `back` for a trip back to work (`review`, `rebase`, `person`, `pr`, `limit`); `outcome` for a closed one (`accepted`, `closed`, `kept`) |
+| `status` | its status changed | `from`, `to`; `stop` and `why` for a stop; `ask` for a question to the person; `back` for a trip back to work (`review`, `rebase`, `person`, `pr`, `limit`); `outcome` for a closed one (`accepted`, `closed`, `kept`); `risk` (`level`, `why`) when it became ready with a risk label |
 | `turn_ended` | its worker ended a turn | |
 | `review_started` | a reviewer started | `round`, `kind` |
 | `review_finished` | it gave its verdict | `round`, `kind`, `verdict` |

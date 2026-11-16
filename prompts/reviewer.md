@@ -38,6 +38,12 @@ Write your verdict to a file outside the worktree, in two parts:
 - `## Findings`: what must change before this merges. One short paragraph each:
   what is wrong, where (file and line), and what would fix it. For an approval,
   two or three sentences on what you checked and how.
+- `## Risk` (with an approval): one line, `low`, `medium` or `high`, a colon and
+  why, like `medium: changes when the queue starts a task`. It labels the task for
+  the person, who accepts it; it doesn't decide anything. bullpen rates the diff
+  itself (its size, docs or code, sensitive paths) and the higher of the two wins, so
+  rate what its rules can't see: a subtle change in behaviour, something you
+  couldn't run or check, a claim in the summary you couldn't confirm.
 - `## Notes` (leave out if none): things you saw that aren't worth another round:
   a small defect outside the brief, a stale comment or rule, a follow-up worth a
   task. One line each. These go to the coordinator, not back to the worker.

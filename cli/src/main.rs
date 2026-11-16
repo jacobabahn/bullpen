@@ -42,6 +42,7 @@ mod ready;
 mod repos;
 mod review;
 mod rex;
+mod risk;
 mod rules;
 mod saves;
 mod say;

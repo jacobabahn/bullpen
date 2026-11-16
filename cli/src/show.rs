@@ -307,6 +307,9 @@ pub fn cmd_show(argv: &[String]) -> Res<i32> {
     if let Some(notes) = crate::notes::review_notes(&t) {
         out.push(notes_lines(&notes));
     }
+    if let Some(line) = risk_line(&t) {
+        out.push(line);
+    }
     for name in ["setup", "teardown"] {
         let log = repo.dir.join("briefs").join(format!("{}.{name}.log", s(&t, "id")));
         if log.exists() {
@@ -361,6 +364,24 @@ fn review_line(t: &Obj) -> Option<String> {
         "   review: round {round} ({}{model}), {state}{findings}",
         review_kind(r)
     ))
+}
+
+/// "     risk: high · changes how accept merges (rules: high · ...; review: low · ...)",
+/// for a task with a risk label: the label, then the parts it came from.
+fn risk_line(t: &Obj) -> Option<String> {
+    let (level, why) = bullpen_core::risk::stored(t)?;
+    let r = obj(t, "risk");
+    let part = |k: &str| {
+        let p = obj(r, k);
+        let label = bullpen_core::risk::label(s(p, "level"), s(p, "why"));
+        (!s(p, "level").is_empty()).then(|| label.replacen("risk: ", "", 1))
+    };
+    let parts: Vec<String> = [("rules", "rules"), ("review", "review"), ("floor", "light review")]
+        .into_iter()
+        .filter_map(|(k, name)| part(k).map(|p| format!("{name}: {p}")))
+        .collect();
+    let label = bullpen_core::risk::label(level, why).replacen("risk: ", "", 1);
+    Some(format!("     risk: {label} ({})", parts.join("; ")))
 }
 
 /// "    notes: - ..." with the reviewer's notes under it, indented to the column.

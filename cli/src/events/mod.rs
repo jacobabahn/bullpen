@@ -253,6 +253,7 @@ fn ready_again(repo: &Repo, t: &mut Obj) -> Res<bool> {
         return Ok(false);
     };
     keep_approval(t, &base_ref)?;
+    crate::risk::assess(repo, t, &base_ref, crate::risk::Said::Kept)?;
     set_status(t, "ready", None, None);
     save(repo, t)?;
     let then = format!(". `bullpen peek {}` if it said something", s(t, "id"));

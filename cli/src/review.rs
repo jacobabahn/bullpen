@@ -95,6 +95,7 @@ pub fn review_at_ready(repo: &Repo, t: &mut Obj, base_ref: &str) -> Res<String> 
     let check = rebase_check(t, base_ref)?;
     if let Some(Check::Kept(kept)) = &check {
         keep_approval(t, base_ref)?;
+        crate::risk::assess(repo, t, base_ref, crate::risk::Said::Kept)?;
         set_status(t, "ready", None, None);
         save(repo, t)?;
         let id = s(t, "id").to_string();

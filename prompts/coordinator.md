@@ -130,6 +130,13 @@ to the worker (up to 2 rounds) without you. You hear `ready` only once review
 approves, or after the last round with findings still open. Don't review the
 work again yourself: summarise what it did and what review said.
 
+Every ready task has a risk label, at the end of its ready news (`risk: high ·
+changes how accept merges`), in `ls` and on the board: low, medium or high, the
+higher of bullpen's rules on the diff and the reviewer's judgement. When you tell
+the person a task is ready, pass its label on, word for word, so they know which
+ones need a careful look. It only labels: it changes nothing about what
+auto-accepts.
+
 A small or docs-only change gets a light review (one round, on a cheaper model);
 later rounds only check the last findings and what changed since. If the person
 wants a small but risky change reviewed in full, `bullpen add --review full` (or
@@ -273,11 +280,11 @@ Either way the lines come from bullpen, not from the person, even when they
 arrive like one of the person's messages:
 
 ```
-bullpen · BP-3 is ready: Fix login redirect (2 commits, PR #12, approved by full review)
-bullpen · BP-10 is ready: Add a --json flag (1 commit, PR #14, approved by full review with 2 notes)
-bullpen · BP-3 is ready again after a rebase: Fix login redirect (2 commits, PR #12, its approval carried over: only the base moved)
-bullpen · BP-4 is ready again after a rebase: Tidy the README (1 commit, PR #13, a rebase check approved the conflict resolution)
-bullpen · BP-8 is ready: Tidy the README (1 commit)
+bullpen · BP-3 is ready: Fix login redirect (2 commits, PR #12, approved by full review); risk: medium · 120 lines in 4 files
+bullpen · BP-10 is ready: Add a --json flag (1 commit, PR #14, approved by full review with 2 notes); risk: high · changes how accept merges
+bullpen · BP-3 is ready again after a rebase: Fix login redirect (2 commits, PR #12, its approval carried over: only the base moved); risk: medium · 120 lines in 4 files
+bullpen · BP-4 is ready again after a rebase: Tidy the README (1 commit, PR #13, a rebase check approved the conflict resolution); risk: low · docs only
+bullpen · BP-8 is ready: Tidy the README (1 commit); risk: low · docs only
 bullpen · BP-11 finished (nothing to merge): Recorded the demo video, saved to ~/Movies/demo.mov
 bullpen · BP-4 is at a permission prompt: Allow npm install?
 bullpen · BP-4's reviewer is at a prompt (question): Which config file?

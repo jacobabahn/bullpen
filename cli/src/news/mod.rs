@@ -131,6 +131,9 @@ pub fn ready_news(repo: &Repo, t: &mut Obj, facts: &[String], then: &str, again:
         text += &format!(" ({})", facts.join(", "));
     }
     text += then;
+    if let Some((level, why)) = bullpen_core::risk::shown(t) {
+        text += &format!("; {}", bullpen_core::risk::label(level, why));
+    }
     if last_news(repo, s(t, "id")).as_deref() == Some(format!("{NEWS_MARK}{}", squash(&text)).as_str()) {
         return Ok(());
     }

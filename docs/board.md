@@ -52,7 +52,9 @@ text of the agent's `working: ...` status, cut to fit and updated as it changes.
 With no such text, or text from before the task's current status or over 30
 minutes old, it shows the usual line. A task in review or ready also shows the
 size of its change ("3 files, +120 −14"), worked out once when its worker runs
-`ready`.
+`ready`. A ready task has its risk before its age, a word in its colour (`low`
+green, `medium` amber, `high` red), and why at the end of its sentence ("High risk:
+changes how accept merges."; see [Review](review.md#the-risk-label)).
 
 The top line counts only what you act on, at its right: `2 need you · 3 ready`
 (need you: needs or stopped; ready: ready to accept, or finished), in amber and

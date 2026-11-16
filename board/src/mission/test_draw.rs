@@ -141,3 +141,16 @@ fn any_size_draws_without_a_panic() {
         screen(&mut m, w, h);
     }
 }
+
+#[test]
+fn a_ready_tasks_risk_shows_before_its_age_in_the_inbox() {
+    let st = State::new("risk");
+    let mut ready = t("BP-127", "ready", "bullpen stats", 22);
+    ready["risk"] = json!({"level": "high", "why": "changes how accept merges"});
+    st.repo("bullpen", json!([]), &[ready]);
+    let mut m = st.mission();
+    let s = screen(&mut m, 150, 30);
+    let row = line_with(&s, "bullpen BP-127");
+    assert!(row.contains("bullpen stats") && row.contains("high  22m"), "{row}");
+    assert!(has(&s, "High risk: changes how accept merges."), "{}", s.join("\n"));
+}

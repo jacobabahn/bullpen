@@ -219,6 +219,13 @@ pub fn describe(e: &Obj) -> String {
         "" => String::new(),
         w => format!(": {w}"),
     };
+    let risk = |e: &Obj| {
+        let r = obj(e, "risk");
+        match s(r, "level") {
+            "" => String::new(),
+            level => format!(" ({})", bullpen_core::risk::label(level, s(r, "why"))),
+        }
+    };
     let kind = |e: &Obj| review_kind(&[("kind".to_string(), json!(s(e, "kind")))].into_iter().collect());
     match s(e, "event") {
         "added" => "added".into(),
@@ -242,7 +249,7 @@ pub fn describe(e: &Obj) -> String {
                 },
                 "review" if from == "working" => "ready: in review".into(),
                 "review" => format!("in review again (was {from})"),
-                "ready" => format!("ready to accept{}", why(e)),
+                "ready" => format!("ready to accept{}{}", why(e), risk(e)),
                 "needs" => format!("needs the person{}", why(e)),
                 "triage" => format!("coordinator on it{}", why(e)),
                 "done" => outcome_of(e).into(),

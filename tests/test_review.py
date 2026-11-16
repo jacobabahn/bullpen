@@ -26,7 +26,7 @@ class ReviewTest(BullpenTest):
         self.assertEqual((t["status"], t["review"]["round"], t["review"]["verdict"]), ("ready", 1, "approved"))
         self.assertEqual(list((self.tmp / "state").rglob(f"{tid}.review-2.md")), [])  # no new round
         self.assertEqual(self.news()[-1], "bullpen · BP-1 is ready again: Fix the thing (1 commit, PR #7, "
-                                          "its approval carried over: the same commit)")
+                                          "its approval carried over: the same commit); risk: low · a small change (1 line in 1 file)")
         self.assertIn("kept 1 time as the code didn't change", self.bp("show", tid).stdout)
 
     def test_a_turn_that_changes_no_code_leaves_a_ready_task_ready(self):
@@ -491,7 +491,7 @@ class NotesTest(BullpenTest):
         self.commit_and_ready(tid)
         self.verdict(tid, "approve", NOTES)
         self.assertEqual(self.news()[-1], "bullpen · BP-1 is ready: Fix the thing (1 commit, PR #7, "
-                                          "approved by light review: 1 line in 1 file, with 2 notes)")
+                                          "approved by light review: 1 line in 1 file, with 2 notes); risk: low · a small change (1 line in 1 file)")
         out = self.bp("show", tid).stdout
         self.assertIn("    notes: - `docs/x.md` still names the old flag.\n"
                       "           - The retry loop deserves its own task.\n", out)
@@ -501,7 +501,7 @@ class NotesTest(BullpenTest):
         self.commit_and_ready(tid)
         self.verdict(tid, "approve", "## Findings\n\nChecked it.\n\n## Notes\n\nNone.\n")
         self.assertEqual(self.news()[-1], "bullpen · BP-1 is ready: Fix the thing (1 commit, PR #7, "
-                                          "approved by light review: 1 line in 1 file)")
+                                          "approved by light review: 1 line in 1 file); risk: low · a small change (1 line in 1 file)")
         self.assertNotIn("notes:", self.bp("show", tid).stdout)
 
     def test_changes_keep_the_notes_from_the_worker_and_the_next_round(self):

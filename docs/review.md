@@ -15,7 +15,8 @@ listed. `bullpen config --review off` skips review; `bullpen config --review-rou
 sets the rounds, and `reviewer` in the repo's `config.json` the reviewer's command.
 
 The reviewer's verdict file has two parts: `## Findings`, what must change (or, for
-an approval, what it checked), and an optional `## Notes`, things it saw that aren't
+an approval, what it checked, with a `## Risk` line: see [The risk
+label](#the-risk-label)), and an optional `## Notes`, things it saw that aren't
 worth another round (a small defect outside the brief, a stale rule, a follow-up
 worth a task). Notes go to the coordinator, not the worker: the ready and
 auto-accepted news say "approved by review with 2 notes", and `bullpen show BP-3`
@@ -72,6 +73,67 @@ and a round past the limit leave out the "of 2".
 
 The board, `show` and the ready news say which kind of review it was ("approved by
 light review (12 lines in 1 file)").
+
+## The risk label
+
+Every task that is ready with a change has a risk label: low, medium or high, and
+one line of why (`risk: high · changes how accept merges`), so you can see at a
+glance which ones need a careful look. It only labels: it changes nothing about what
+auto-accepts. It has two parts, and the higher wins (on a tie, the reviewer's why):
+
+- **bullpen's rules**, from the diff, which the reviewer can't lower. A path in the
+  repository's `risk_paths` is high, and so is a new dependency in a `Cargo.toml` (a
+  name added under a dependencies table; a changed version isn't one). Docs alone
+  (under `docs/`, or a `.md` outside `prompts/`), tests alone (under `tests/`, or a
+  `test_` file), or both, are low. A prompt (under `prompts/`) is at least medium.
+  Other code goes by its size, docs and tests left out: at most
+  `light_review_lines` lines in at most 2 files is low ("a small change (12 lines
+  in 1 file)"), over 400 lines is high ("a large change"), and anything between is
+  medium. The rules read the repository's settings, never the branch's files.
+- **the reviewer's judgement**, given with its verdict as a `## Risk` part of its
+  findings (`medium: changes when the queue starts a task`), for what rules can't
+  see: a subtle change in behaviour, something it couldn't run or check, a claim in
+  the summary it couldn't confirm. It comes from the round that approved; a round
+  that gives none, and a rebase check, keep the last round's. A light review that was
+  set for the task (`review-mode light`) on a change whose size calls for a full one
+  makes the label at least medium ("a light review where its size calls for a full
+  one"): it looked at less than the change needs.
+
+It follows the code. Each step that makes a task ready works the rules out again:
+an approval kept after a rebase that only moved the base says the same (the same
+lines), and keeps the reviewer's part; a change after the approval gets a new review
+round, whose approval labels it afresh. With review off, or after the last round
+with findings open, the rules alone label it.
+
+`risk_paths` is a repository's list of sensitive paths, set in its `config.json` by
+hand, as `{"pattern": "why"}` (or a list of patterns, each "changes <pattern>"). A
+pattern ending in `/` is a folder, `*` is any run of characters, and anything else
+is a file (or a folder of that name). For bullpen itself:
+
+```json
+"risk_paths": {
+  "cli/src/accept/": "changes how accept merges",
+  "cli/src/auto_accept.rs": "changes what auto-accepts",
+  "cli/src/modes.rs": "changes how bullpen merges and pushes",
+  "cli/src/push_remote.rs": "changes how bullpen pushes",
+  "cli/src/close.rs": "changes how a task's worktree and branch are removed",
+  "cli/src/keep.rs": "changes how a kept branch is pushed",
+  "cli/src/hooks.rs": "changes how worktrees are removed",
+  "cli/src/build.rs": "changes the build and self-update",
+  "cli/src/main.rs": "changes the build's catch-up",
+  "install.sh": "changes the install",
+  "bin/": "changes what everything runs",
+  "Cargo.lock": "changes the locked dependencies"
+}
+```
+
+Where it shows: the end of the ready news (`BP-3 is ready: ... (1 commit, PR #12,
+approved by full review); risk: high · changes how accept merges`), `show`'s `risk:`
+line (with both parts), the end of a ready task's sentence on the board, in `ls` and
+in mission control ("High risk: changes how accept merges."), a coloured word before
+its age on the same rows (`low` green, `medium` amber, `high` red), the `ready`
+entry of `stats`' timeline, and `risk` in the task's record (`ls --json`, `show
+--json`, and the timeline's entry in `stats --json`).
 
 A reviewer whose turn ends while a background shell of its own still runs (the tests,
 say) is busy, not stopped, like a worker: it stays in review. Past `stuck_after`

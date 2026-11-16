@@ -133,7 +133,7 @@ use Kind::*;
 use Val::{Bool, Int, List, Null, Str};
 
 /// Every setting, in the order `config` lists them.
-pub static SETTINGS: [Setting; 39] = [
+pub static SETTINGS: [Setting; 40] = [
     Setting { help: "the letters new task IDs start with (2 to 5 capitals)", repo_only: true, says: Some("2 to 5 capital letters"), pattern: Some("[A-Z]{2,5}"), ..base("prefix", Str("BP"), Some("Tasks"), Text) },
     Setting { repo_only: true, ..base("next", Int(1), None, File) },
     Setting { help: "the branch tasks start from and open PRs against", repo_only: true, none: Some("the repo's default branch"), ..base("base", Null, Some("Tasks"), Text) },
@@ -158,6 +158,7 @@ pub static SETTINGS: [Setting; 39] = [
     Setting { help: "a reviewer agent checks each task before it's ready", ..base("review", Bool(true), Some("Review"), OnOff) },
     Setting { help: "reviews a task gets before it is ready anyway, findings listed", least: Some(1), says: Some("a number of rounds, 1 or more"), metavar: Some("N"), ..base("review_rounds", Int(2), Some("Review"), Number) },
     Setting { help: "a change of at most this many lines in at most 2 files gets a light review", least: Some(0), says: Some("a number of lines, or 0 for docs-only changes alone"), metavar: Some("LINES"), ..base("light_review_lines", Int(40), Some("Review"), Number) },
+    Setting { help: "paths whose change makes a ready task's risk high, as {pattern: why} in a repo's config.json (docs/review.md)", none: Some("none"), ..base("risk_paths", Null, Some("Review"), File) },
     Setting { help: "how the board lists tasks", choices: Some(&["grouped", "compact"]), ..base("board_layout", Str("grouped"), Some("Board"), Choice) },
     Setting { help: "empty rows at the board's bottom, under Rex's minimized-pane capsules (0: none)", least: Some(0), says: Some("rows, or 0 for none"), metavar: Some("ROWS"), none: Some("1 while workers or reviewers float, else 0"), ..base("board_bottom_gap", Null, Some("Board"), Number) },
     Setting { help: "the board's top line counts the tasks that need you or are ready in other repositories", ..base("board_repos", Bool(true), Some("Board"), OnOff) },

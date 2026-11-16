@@ -81,6 +81,8 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   (`changes`, from `save_task`), the trip-back mark a step that sends a task back sets
   (`send_back`; `hand_back` takes its reason), and `record` for an event no save shows
 - `proc.rs`: running a program, `git`, `file_hash` (`sha256.rs`)
+- `risk.rs`: a task's risk label as it's said (`shown`, `stored`, `label`): the
+  command line works it out (cli's `risk.rs`), this only reads it
 - `sha1.rs`: SHA-1, for a review's own lines (hashlib's)
 - `lock.rs`: flock
 - `backlog.rs`: the backlog (`backlog.json`): its items, loading and saving under its
@@ -161,6 +163,9 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   `close_reviewer`, what `ready` does with review on (`review_at_ready`), and the
   coordinator's `review`
 - `ready.rs`: `ready`, `finish`, and the summary a worker or reviewer gives (`summary_text`)
+- `risk.rs`: a ready task's risk label (docs/review.md): bullpen's rules on the diff
+  (`rules_of`, `risk_paths`, `adds_dependency`), the reviewer's `## Risk`
+  (`reviewer_of`), and `assess`, which each step that makes a task ready calls
 - `close.rs`: the one close step (`close`) that accept, close, drop and finish's
   auto-accept share, `close_task`, and the `close` and `drop` commands
 - `keep.rs`: `close --keep-branch`: push the branch, then the close step keeping it

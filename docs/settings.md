@@ -22,7 +22,8 @@ bullpen config --global --unset merge    # and the global one back to the defaul
 branch, the news mode, the push remote and the coordinators belong to one repository,
 so `--global` refuses `--prefix`, `--base`, `--news`, `--push-remote` and `--board-others`. The commands
 (`worker`, `reviewer`, `coordinator_cmd`, `tour`) have no flags: set them in either
-`config.json` by hand. `bullpen config --help` gives each flag's default; the defaults
+`config.json` by hand, and so is `risk_paths`, the paths that make a ready task's
+risk high ([Review](review.md#the-risk-label)). `bullpen config --help` gives each flag's default; the defaults
 are in one table, `SETTINGS` in `core/src/settings.rs`, with each setting's kind and
 whether only a repository can hold it.
 
