@@ -16,6 +16,7 @@ const NEW_CONFIG: &str = r#"{
   "merge": "squash",
   "push_remote": null,
   "news": "type",
+  "issues_repo": null,
   "coordinators": [
     {
       "id": "c1",
