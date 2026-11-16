@@ -251,7 +251,8 @@ class BoardBuildTest(unittest.TestCase):
         self.bp("ready", tid, "--summary", "Changed a key.", cwd=wt)
         out = self.bp("accept", tid).stdout
         self.assertEqual(out.splitlines()[-1], "Keys changed: run `rex config reload`")  # the board's line
-        self.assertEqual(self.news_log().count("Keys changed: run `rex config reload`"), 1)
+        self.assertEqual(self.news_log().count("Keys changed: tell the person to run `rex config reload` "
+                                               "(the cmd+; keys run the old ones until then)"), 1)
         # an accept that leaves keys.lua be says nothing of it
         self.bp("add", "Other", "--brief", "x")
         self.bp("start", "BP-2")

@@ -188,7 +188,8 @@ class NewsTableTest(BullpenTest):
         ("own", "BP-4 couldn't start (BP-3 was accepted): no Rex session. `bullpen start BP-4` tries again"),
         ("own", "The board wasn't rebuilt: cargo failed. Boards keep running the old one. Log: /x/build.log. Tell "
                 "the person: once it is fixed, `bullpen build` builds it."),
-        ("own", "Keys changed: run `rex config reload` (tell the person: the cmd+; keys run the old ones until then)"),
+        ("own", "Keys changed: tell the person to run `rex config reload` (the cmd+; keys run the old ones until "
+                "then)"),
         ("own", "BP-3 was accepted, but rebasing the other tasks failed: boom. The accept still counts: tell the "
                 "person"),
         ("own", "Starting BP-3's review failed: it was killed (signal 15). Log: /x/jobs.log. Tell the person if it "

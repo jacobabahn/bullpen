@@ -163,8 +163,10 @@ fn accepted(
                         ..Opts::default()
                     };
                     // the board's line, and for a coordinator, whose it is to do
-                    let line = format!("{KEYS_CHANGED} (tell the person: the cmd+; keys run the old ones until then)");
-                    news(repo, t, "keys", &line, everyone)?;
+                    let line =
+                        "Keys changed: tell the person to run `rex config reload` (the cmd+; keys run the old ones \
+                                until then)";
+                    news(repo, t, "keys", line, everyone)?;
                     println!("{KEYS_CHANGED}");
                 }
                 Ok(())

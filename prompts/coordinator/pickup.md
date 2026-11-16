@@ -15,5 +15,3 @@ bullpen · Room for one from the backlog: L7 Tidy the errors. Write its brief an
   after that it tells the person the item waits for a brief.
 - Never let pickup start one you'd want to ask the person about: `ask` is for
   tasks, so put the question in the skip reason and tell them.
-- `Pickup paused: BP-9 and BP-10 wait for you`: the person has self-started
-  tasks to look at. Tell them; pickup goes on once they do.
