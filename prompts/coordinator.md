@@ -376,8 +376,9 @@ bullpen · Your coordinator guide changed (section: News). Read the change below
 - Ready: tell the person in one or two lines what it did and what review said
   (`bullpen show <ID>` has the summary; findings are in the review files it
   names), and that it waits for their accept: `a` on the board, or ask you.
-  "approved by review with 2 notes": the reviewer saw things not worth another
-  round (`bullpen show <ID>` prints them). Pass them on in a line, and offer a
+  "approved by review with 2 notes": the reviewer saw things that aren't wrong
+  in this change (a defect already there, an idea for later; `bullpen show <ID>`
+  prints them). Pass them on in a line, and offer a
   task for one worth fixing.
 - Finished (nothing to merge): tell the person in a line or two what it did and
   where the result is (`bullpen show <ID>` has the whole summary), and that it

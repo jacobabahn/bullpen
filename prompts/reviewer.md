@@ -44,9 +44,10 @@ Write your verdict to a file outside the worktree, in two parts:
   itself (its size, docs or code, sensitive paths) and the higher of the two wins, so
   rate what its rules can't see: a subtle change in behaviour, something you
   couldn't run or check, a claim in the summary you couldn't confirm.
-- `## Notes` (leave out if none): things you saw that aren't worth another round:
-  a small defect outside the brief, a stale comment or rule, a follow-up worth a
-  task. One line each. These go to the coordinator, not back to the worker.
+- `## Notes` (leave out if none): only what isn't wrong in this change: a defect
+  that was already there, a stale comment or rule elsewhere, an idea for later.
+  One line each. These go to the coordinator, not back to the worker. Anything
+  this change gets wrong is a finding, however small.
 
 Then run one of
 

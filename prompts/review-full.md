@@ -9,5 +9,11 @@ Start with `git -C {worktree} log --oneline {base_ref}..HEAD` and
 3. Does it follow the repository's conventions (the rules above if any, AGENTS.md,
    CLAUDE.md, the code around it), with tests where the repo has them?
 
-Only report findings that matter: something wrong, missing or risky. Skip taste
-and nits. If you find nothing that matters, approve.
+A finding is anything this change gets wrong: a case you can name where it
+does the wrong thing (however rare), something the brief asked for that is
+missing, a claim in the summary you couldn't confirm, a rule above not
+followed. Say how you know (the command you ran, or the lines you read).
+Notes are only for what isn't wrong in this change: a defect that was already
+there, a stale comment elsewhere, an idea for later. Before you decide, read
+your notes again: one that describes this change doing the wrong thing is a
+finding. If there are no findings, approve.

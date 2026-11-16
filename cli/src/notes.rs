@@ -1,5 +1,5 @@
 //! A reviewer's notes: the `## Notes` part of a findings file, the things it saw that
-//! aren't worth another round. They go to the coordinator (the ready and auto-accepted
+//! aren't wrong in the change itself. They go to the coordinator (the ready and auto-accepted
 //! news say how many, `show` prints them), never back to the worker as findings.
 
 use bullpen_core::json::{obj, py_str, truthy, Obj};

@@ -17,8 +17,15 @@ sets the rounds, and `reviewer` in the repo's `config.json` the reviewer's comma
 The reviewer's verdict file has two parts: `## Findings`, what must change (or, for
 an approval, what it checked, with a `## Risk` line: see [The risk
 label](#the-risk-label)), and an optional `## Notes`, things it saw that aren't
-worth another round (a small defect outside the brief, a stale rule, a follow-up
-worth a task). Notes go to the coordinator, not the worker: the ready and
+wrong in this change (a defect that was already there, a stale rule, an idea for
+later). A finding is anything the change itself gets wrong: a case the reviewer
+can name where it does the wrong thing, however rare; something the brief asked
+for that is missing; a claim in the summary it couldn't confirm; a rule not
+followed. The reviewer says how it knows, and reads its notes again before it
+decides: one that describes the change doing the wrong thing is a finding. (Over
+92 replayed reviews this wording found 6.5 of 10 known bugs where "only findings
+that matter, skip nits" found 2.7, with no false alarms on clean work; expect
+more rounds, for small real defects.) Notes go to the coordinator, not the worker: the ready and
 auto-accepted news say "approved by review with 2 notes", and `bullpen show BP-3`
 prints them. When a round asks for changes, the worker is told its notes aren't for
 it, and the next round's reviewer gets the findings without them.

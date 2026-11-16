@@ -512,6 +512,23 @@ class NotesTest(BullpenTest):
         self.assertIn("- `## Notes` (leave out if none)", prompt)
         self.assertIn("These go to the coordinator, not back to the worker.", prompt)
 
+    def test_every_review_says_what_is_a_finding_and_what_is_a_note(self):
+        tid = self.start_task()
+        self.commit_and_ready(tid)
+        prompt = " ".join(self.review_prompt(tid, 1).split())
+        self.assertIn("A finding is anything this change gets wrong: a case you can name where it does the wrong "
+                      "thing (however rare)", prompt)
+        self.assertIn("only what isn't wrong in this change", prompt)  # the Notes bullet agrees
+        self.assertNotIn("worth another round", prompt)
+        for kind in ("full", "light", "followup", "tour"):
+            text = " ".join((Path(BULLPEN).parent.parent / "prompts" / f"review-{kind}.md").read_text().split())
+            self.assertIn("A finding is anything this change gets wrong", text, kind)
+            self.assertIn("Notes are only for what isn't wrong in this change", text, kind)
+            self.assertIn("one that describes this change doing the wrong thing is a finding", text, kind)
+            self.assertIn("there are no findings, approve.", text, kind)
+            self.assertNotIn("nits", text, kind)
+            self.assertNotIn("findings that matter", text, kind)
+
     def test_an_approval_with_notes_says_how_many_and_show_prints_them(self):
         tid = self.start_task()
         self.commit_and_ready(tid)
