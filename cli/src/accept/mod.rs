@@ -2,7 +2,8 @@
 //! the merge, each step on its own (a failed one is said, and the rest still run).
 //! Rebasing the other tasks onto the moved base is rebase.rs.
 //!
-//! An accept in bullpen's own checkout may replace the code under it: the merge (local
+//! An accept in a checkout of bullpen that runs from its own build (this copy's, or one
+//! another copy merged into: docs/rebuilds.md) may replace the code under it: the merge (local
 //! mode) or the rebuild after it puts new source and, later, a new build in place. This
 //! process is one compiled image, so it runs its own code to the end; the next call runs
 //! the new build (docs/rebuilds.md).
@@ -10,7 +11,7 @@
 pub mod rebase;
 
 use crate::args::{pos, Arg, Args, Nargs};
-use crate::build::rebuild_if_stale;
+use crate::build::rebuild_merged_into;
 use crate::close::{close, close_task};
 use crate::guide::tell_guide_changes;
 use crate::keys::{keys_hash, KEYS_CHANGED};
@@ -19,7 +20,6 @@ use crate::news::{news, tell_coordinator, Opts};
 use crate::saves::run_later;
 use crate::watcher::refresh_watcher;
 use bullpen_core::json::{obj, py_str, s, truthy, Obj};
-use bullpen_core::paths::home;
 use bullpen_core::proc::git;
 use bullpen_core::repo::repo_root;
 use bullpen_core::task::{is_status, keeps_branch, pr_short};
@@ -191,13 +191,11 @@ pub fn run_steps(id: &str, steps: Vec<Step>, tell: &mut dyn FnMut(&str) -> Res<(
     }
 }
 
-/// bullpen's own checkout: its programs too, when their source changed.
+/// A checkout of bullpen that runs from its own build (this copy's, or another's): its
+/// programs too, when their source changed.
 fn rebuild(repo: &Repo) -> Res<()> {
-    let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-    if canon(&repo.root) == canon(&home()) {
-        if let Some(said) = rebuild_if_stale(repo) {
-            println!("{said}");
-        }
+    if let Some(said) = rebuild_merged_into(repo) {
+        println!("{said}");
     }
     Ok(())
 }

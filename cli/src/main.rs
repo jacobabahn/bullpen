@@ -17,6 +17,7 @@ mod close;
 mod commands;
 mod config;
 mod coordinators;
+mod copies;
 mod diff;
 mod doctor;
 mod events;

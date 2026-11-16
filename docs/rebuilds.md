@@ -11,9 +11,11 @@ longer matches, as after accepting a task that changes it or a `git pull`, bullp
 builds that program again in the background:
 
 - `bullpen up` checks, in any repository.
-- `accept` checks only in bullpen's own repository, right after the merge (before the
-  other tasks are rebased and the queued ones start). Accepting a task elsewhere never
-  builds anything.
+- `accept` checks only when the repository it merged into is a copy of bullpen that
+  runs from its own build, right after the merge (before the other tasks are rebased
+  and the queued ones start). Accepting a task elsewhere never builds anything. Which
+  copy of bullpen ran the accept doesn't matter: see [An accept from another
+  copy](#an-accept-from-another-copy).
 - The build copies cargo's output and renames the copy into place, so nothing ever
   runs a half-written file. A command that's running keeps its old program; the next
   call runs the new one.
@@ -43,7 +45,9 @@ builds that program again in the background:
   `bullpen build`) gives up after 10 minutes: `` bullpen: the build that's running (pid 1234)
   still isn't done after 600s: if it's stuck, stop it (`kill 1234`) and run this again ``,
   exiting 1.
-- A new command line replaces the running watcher, so its calls run the new build.
+- A new command line replaces the running watcher of its own copy, so its calls run
+  the new build. Another copy's watcher is left alone: see [One watcher, from the
+  coordinator's copy](#one-watcher-from-the-coordinators-copy).
 - Every build runs cargo through one lookup, `bin/bullpen-cargo` (see below), so a
   build finds the same working cargo whether it starts in your shell, an agent's pane,
   the watcher, a background job or a test's fixture.
@@ -91,6 +95,69 @@ board by itself. Boards started from an older install's path
 An installed build from before the Python was removed (BP-116) that hands a command to
 `bin/bullpen-py` finds no such file: run `./install.sh` once. Builds from after BP-114
 hand nothing over.
+
+## An accept from another copy
+
+There can be several copies of bullpen on one machine: the installed checkout, and a
+worktree or clone of it on another branch, each with its own `bin/bullpen` and
+`target/`, all sharing one state folder. A board opened from one copy runs that copy's
+commands, in whichever repository its tasks are in.
+
+When an accept merges into a checkout of bullpen that runs from its own build, that
+checkout's programs are checked and rebuilt, whichever copy ran the accept. A checkout
+counts when it has all three of: the entry `bin/bullpen`, the workspace's source
+(`Cargo.toml` and `cli/Cargo.toml`), and a command line built there before
+(`target/bullpen`, which `install.sh` or `bullpen build` made). A clone of bullpen's
+source that was never built there isn't one: nothing runs from it, so nothing is built.
+
+The copy that ran the accept checks the merged checkout's source against that
+checkout's stamps, takes that checkout's build lock, and starts that checkout's own
+`bin/bullpen _build_board` in the background. So the build is the same as when the
+checkout's own copy runs the accept: its own source, lock, stamps and `build.log`,
+never uncommitted source (the same one news line), the same news lines when it fails,
+and its own watcher replaced when its command line is new. The accept says where:
+`` rebuilding bullpen's command line in the background (its source changed):
+~/dev/bullpen, this repository's own copy of bullpen ``. The copy that ran the accept
+isn't rebuilt for it: its own source didn't change.
+
+This is in the copy that runs the accept: a copy from before this (BP-165) still
+builds nothing in another checkout, until it has this change itself.
+
+## One watcher, from the coordinator's copy
+
+There is one watcher for the whole state folder: it forwards every repository's panes
+to one `bin/bullpen` (`watcher.json` records its pane, its stamp and the copy it runs,
+`home`). Which copy that is: the one the repository's coordinator was started from.
+`up` records it in each coordinator it starts or registers (`bullpen` in the
+coordinator's entry in `config.json`); the coordinator's agent was told that copy's
+`bin/bullpen` and given its guide, so that is the copy the repository's agents
+already work with.
+
+- `up` and `accept` see to the watcher of the repository's coordinator's copy,
+  whichever copy runs them: its `watch.lua`, its `bin/bullpen`, its build's stamp. A
+  command run by another copy never puts its own watcher in its place, and when none
+  runs it starts the coordinator's copy's.
+- A build replaces a running watcher only when the watcher runs the copy that was
+  built.
+- When the coordinator's copy is gone (its folder has no `bin/bullpen` and
+  `lua/watch.lua`), no watcher is started from a guess: `doctor` says so (`copy`), with
+  the fix, `bullpen up --here` in the coordinator's pane, which makes the copy that
+  runs it the coordinator's.
+- A coordinator started before copies were recorded is taken to use the copy that next
+  runs `up` in its repository; a watcher from before, whose stamp is that copy's, is
+  recorded as that copy's without a restart. Until then `accept` and a build treat an
+  unrecorded watcher as their own copy's, as they always did.
+- With repositories whose coordinators use different copies, the one watcher follows
+  the last `up` or `accept`; `doctor` in the other repository says it runs from another
+  copy.
+- The guide: an accept tells running coordinators when their guide changed. A
+  coordinator another copy started has that copy's guide, so only its own copy tells it.
+
+A command run in a repository by a copy other than its coordinator's does its work
+with its own code, which may be older (steps a newer accept has aren't in it). It
+warns of nothing as it runs. A command that saves a task notes that it ran
+(`other-copy.json` in the repository's state folder: the copy, the command, when), and
+`doctor` reports it while the two copies' source differs: see [Doctor](doctor.md).
 
 ## Fixtures never build
 

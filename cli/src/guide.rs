@@ -225,7 +225,8 @@ fn tell_repo(r: &mut Repo, text: &str, h: &str, other: bool) -> Res<()> {
     let mut told = Vec::new(); // by place in the list, all found before any is told
     for (n, c) in list.iter().enumerate() {
         let Some(c) = c.as_object() else { continue };
-        if c.get("guide").and_then(Value::as_str) != Some(h) && alive(Some(c))? {
+        // a coordinator another copy of bullpen started has that copy's guide: it tells its own
+        if c.get("guide").and_then(Value::as_str) != Some(h) && crate::copies::ours(c) && alive(Some(c))? {
             told.push(n);
         }
     }

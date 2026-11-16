@@ -73,7 +73,9 @@ pub fn cmd_up(argv: &[String]) -> Res<i32> {
         said.push(("started".into(), "coordinator".into(), block));
         vec![cid]
     };
+    crate::copies::record_unrecorded(&mut repo);
     repo.save()?;
+    crate::copies::clear_note(&repo);
     let mut unpaused = Vec::new();
     for cid in &mine {
         unpaused.extend(end_pause_at_up(&repo, cid)?);
@@ -86,7 +88,11 @@ pub fn cmd_up(argv: &[String]) -> Res<i32> {
         }
     }
     gather(&repo, &session)?;
-    ensure_watcher(&session, Some(&mut said))?;
+    // from the copy this repo's coordinator uses (recorded above); one that is gone is doctor's to say
+    let copy = crate::copies::coordinator_copy(&repo).unwrap_or_else(bullpen_core::paths::home);
+    if crate::copies::there(&copy) {
+        ensure_watcher(&session, &copy, Some(&mut said))?;
+    }
     if a.flag("--verbose") {
         for (what, name, ids) in &said {
             println!("{} {what}: {ids}", name.split_whitespace().next().unwrap_or(""));
@@ -139,6 +145,7 @@ fn here(repo: &mut Repo, session: &str, live: &[(String, String)], monitor: bool
         Some(cid) => {
             if let Some(c) = coordinator_mut(repo, &cid) {
                 c.insert("session".into(), Value::String(session.into()));
+                crate::copies::record(c); // its agent ran this copy's bullpen
             }
             print!("coordinator {cid}: this pane ({block}), already. ");
             cid

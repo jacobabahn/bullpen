@@ -13,6 +13,7 @@ use std::cell::RefCell;
 /// Save the task, then run what the save sets off, in one fixed order.
 pub fn save(repo: &Repo, t: &mut Obj) -> Res<()> {
     let old = repo.save_task(t)?;
+    crate::copies::note_command(repo);
     move_queue(repo, t, &old);
     crate::notifications::notify(repo, t, &old);
     follow_saved(t)?;

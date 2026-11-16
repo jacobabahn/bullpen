@@ -111,6 +111,12 @@ fn doctor_checks(place: &Place, run: Run) -> Vec<Line> {
             Box::new(|| check_coordinators(repo, why_not)),
         ),
         (
+            "copy",
+            false,
+            false,
+            Box::new(|| crate::copies::check_copy(repo, why_not)),
+        ),
+        (
             "push",
             false,
             true,

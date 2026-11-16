@@ -18,7 +18,8 @@ non-zero when anything fails. It checks:
   listed and one missing, the line is there but Rex loaded an older `keys.lua`: the
   fix is `rex config reload`. With none listed, it's `bullpen keys --install`
 - the watcher is running, from the current `watch.lua` and bullpen build (the build's
-  stamp, `target/bullpen.json`; the hashes in `watcher.json`)
+  stamp, `target/bullpen.json`; the hashes in `watcher.json`) of the copy of bullpen it
+  runs: this one, or the one `watcher.json` names, which the line then says
 - the state folder is writable, and this repo's `config.json` parses
 - the global `config.json` (see [Settings](settings.md)), if there is one, parses
   and sets nothing only a repository can have
@@ -36,6 +37,31 @@ non-zero when anything fails. It checks:
   is from an older build: `bullpen up` restarts it". `up` opens a new board in its
   place and closes the old one
 
+- the copy of bullpen this repo's coordinator uses (`copy`; see
+  [Rebuilds](rebuilds.md#one-watcher-from-the-coordinators-copy)): the one `up`
+  recorded when it started the coordinator. It fails when
+  - that copy is gone: "this repo's coordinator (c1) was started from ~/old/bullpen,
+    which is gone ... Run `~/dev/bullpen/bin/bullpen up --here` in its pane to have it
+    use this copy"
+  - doctor is run by another copy whose source differs: "this is ~/wt/bullpen's
+    bullpen, but this repo's coordinator (c1) uses ~/dev/bullpen's, and this one's
+    source is older than that one's (10 commits behind): run ~/dev/bullpen/bin/bullpen
+    here"
+  - the watcher runs from another copy than the coordinator's: `bullpen up` restarts it
+  - a command that saved a task here was run by another copy whose source differs:
+    "`accept` was run here by another copy of bullpen (~/wt/bullpen,
+    2026-11-16T10:02:11-08:00), whose source is older than this one's (it lacks 10 of
+    the other's commits, and has 1 of its own), the one this repo's coordinator (c1)
+    uses. Run this repo's commands with ~/dev/bullpen/bin/bullpen ...". Only the last
+    such command is kept; `bullpen up` from the coordinator's copy clears it.
+
+  Source is the command line's (`core/`, `cli/`, the workspace's files) and
+  `lua/watch.lua`; two copies with the same source are fine. Which is older is by
+  commits: behind or ahead when one has all of the other's, and for branches that
+  parted, the one whose last commit is earlier (by date alone when neither checkout
+  has the other's commits; not told without git). A coordinator started before copies
+  were recorded is `--` until `bullpen up` records it.
+
 `bullpen up` runs the quick checks (not `gh` or the push remote, which need the
 network, nor the watcher and coordinators, which `up` sees to itself) and, if any fail, prints one
 line: "2 problems: run `bullpen doctor`". Doctor itself ends with the failed checks'
@@ -48,7 +74,7 @@ names ("2 problems: keys, watcher."), and writes paths in your home folder with 
 gone). The checks about the setup, which are the same for every repo (`rex`,
 `bullpen`, `board`, `cargo`, `keys`, `watcher`, `state`, `global`), run once, under
 "Setup, for every repo". Then each repo gets its own (`gh`, `agents`, `config`,
-`setup`, `teardown`, `coordinators`, `push`) under its name and folder. A repo whose
+`setup`, `teardown`, `coordinators`, `copy`, `push`) under its name and folder. A repo whose
 board runs an older build shows up on its `coordinators` line, and one whose
 `config.json` doesn't parse is named by its state folder. The last line names each
 problem, a repo's as `repo/check`: "2 problems: keys, shop/coordinators." Two repos

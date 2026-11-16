@@ -6,7 +6,9 @@
 //! bullpen's own checkout (HOME) is one cargo workspace (Cargo.toml): core/, cli/ (the
 //! command line, bin/bullpen runs it) and board/. Each program's source has a hash, and
 //! its build records the hash it was built from (its stamp). `up`, and an accept in
-//! HOME's own repo, start a build in the background when a source no longer matches. A
+//! HOME's own repo, start a build in the background when a source no longer matches. An
+//! accept that merged into another copy of bullpen that runs from its own build starts
+//! that copy's build the same way, run by that copy (rebuild_merged_into). A
 //! running board sees its program replaced and execs the new one; a command runs the
 //! new build from its next call. A build that fails, or one skipped because the source
 //! has uncommitted changes, is one news line per source hash, and the old program keeps
@@ -68,7 +70,12 @@ pub static BOARD: Program = Program {
 
 /// The cargo workspace's build folder.
 pub fn target() -> PathBuf {
-    home().join("target")
+    target_in(&home())
+}
+
+/// The build folder of the copy of bullpen at root (this one's, or the checkout an accept merged into).
+fn target_in(root: &Path) -> PathBuf {
+    root.join("target")
 }
 
 pub fn build_lock() -> PathBuf {
@@ -82,7 +89,11 @@ pub fn build_log() -> PathBuf {
 impl Program {
     /// What runs: cargo's output, copied and renamed into place.
     pub fn installed(&self) -> PathBuf {
-        target().join(self.name)
+        self.installed_in(&home())
+    }
+
+    fn installed_in(&self, root: &Path) -> PathBuf {
+        target_in(root).join(self.name)
     }
 
     fn cargo_out(&self) -> PathBuf {
@@ -92,11 +103,20 @@ impl Program {
     /// {"source": the hash it was built from, "failed": a hash whose build failed,
     /// "skipped": one not built because the source had uncommitted changes}
     fn stamp_path(&self) -> PathBuf {
-        target().join(format!("{}.json", self.name))
+        self.stamp_path_in(&home())
+    }
+
+    fn stamp_path_in(&self, root: &Path) -> PathBuf {
+        target_in(root).join(format!("{}.json", self.name))
     }
 
     pub fn stamp(&self) -> Res<Obj> {
-        Ok(read_obj(&self.stamp_path())?.unwrap_or_default())
+        self.stamp_in(&home())
+    }
+
+    /// Its stamp in the copy of bullpen at root.
+    pub fn stamp_in(&self, root: &Path) -> Res<Obj> {
+        Ok(read_obj(&self.stamp_path_in(root))?.unwrap_or_default())
     }
 
     /// What its source is, relative to HOME: each crate's Cargo.toml and src/, and the workspace's files.
@@ -108,10 +128,10 @@ impl Program {
         out
     }
 
-    fn files(&self) -> Vec<PathBuf> {
+    fn files(&self, root: &Path) -> Vec<PathBuf> {
         let mut out = Vec::new();
         for rel in self.paths() {
-            let p = home().join(rel);
+            let p = root.join(rel);
             if p.is_dir() {
                 let mut found = Vec::new();
                 walk(&p, &mut found);
@@ -127,10 +147,14 @@ impl Program {
     /// A hash of its source, by path (the same bytes as the Python's was, so a stamp
     /// from before T13 still says what it built).
     pub fn source_hash(&self) -> Res<String> {
-        let h = home();
+        self.source_hash_in(&home())
+    }
+
+    /// The hash of its source in the copy of bullpen at root.
+    pub fn source_hash_in(&self, root: &Path) -> Res<String> {
         let mut parts: Vec<(String, String)> = Vec::new();
-        for f in self.files() {
-            let rel = f.strip_prefix(&h).unwrap_or(&f).display().to_string();
+        for f in self.files(root) {
+            let rel = f.strip_prefix(root).unwrap_or(&f).display().to_string();
             parts.push((rel, file_hash(&f)?));
         }
         parts.sort();
@@ -145,10 +169,14 @@ impl Program {
 
     /// Does HOME have uncommitted changes to its source (new files too)?
     pub fn dirty(&self) -> Res<bool> {
+        self.dirty_in(&home())
+    }
+
+    fn dirty_in(&self, root: &Path) -> Res<bool> {
         let mut args = vec!["status", "--porcelain", "--"];
         let paths = self.paths();
         args.extend(paths.iter().map(String::as_str));
-        let p = git(home(), &args, false)?;
+        let p = git(root, &args, false)?;
         Ok(p.ok() && !strip(&p.stdout).is_empty())
     }
 
@@ -163,17 +191,25 @@ impl Program {
 
     /// Set these keys of its stamp (a key set to "" goes).
     fn set_stamp(&self, key: &str, v: &str) -> Res<()> {
-        let mut st = self.stamp()?;
+        self.set_stamp_in(&home(), key, v)
+    }
+
+    fn set_stamp_in(&self, root: &Path, key: &str, v: &str) -> Res<()> {
+        let mut st = self.stamp_in(root)?;
         st.insert(key.into(), Value::String(v.into()));
         st.retain(|_, v| bullpen_core::json::truthy(Some(v)));
-        write_obj(&self.stamp_path(), &st)?;
+        write_obj(&self.stamp_path_in(root), &st)?;
         Ok(())
     }
 
     /// Its source is neither what it was built from nor a source whose build failed.
     pub fn stale(&self) -> Res<bool> {
-        let st = self.stamp()?;
-        let src = Value::String(self.source_hash()?);
+        self.stale_in(&home())
+    }
+
+    fn stale_in(&self, root: &Path) -> Res<bool> {
+        let st = self.stamp_in(root)?;
+        let src = Value::String(self.source_hash_in(root)?);
         Ok(st.get("source") != Some(&src) && st.get("failed") != Some(&src))
     }
 }
@@ -197,7 +233,11 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
 /// The programs HOME has the source of. In the background (`up`, accept), not the board
 /// when BULLPEN_BOARD names a board of the person's own choosing.
 pub fn programs(background: bool) -> Vec<&'static Program> {
-    let h = home();
+    programs_in(&home(), background)
+}
+
+/// The programs the copy of bullpen at h has the source of.
+fn programs_in(h: &Path, background: bool) -> Vec<&'static Program> {
     if !h.join("Cargo.toml").exists() {
         return vec![];
     }
@@ -284,7 +324,11 @@ fn names(progs: &[&Program]) -> String {
 /// `up`: when a program's source isn't what it was built from, build it in the
 /// background. Says what it started; never fails.
 pub fn rebuild_if_stale(repo: &Repo) -> Option<String> {
-    match start_rebuild(repo) {
+    checked(start_rebuild(repo, &home()))
+}
+
+fn checked(started: Res<Option<String>>) -> Option<String> {
+    match started {
         Ok(said) => said,
         Err(e) => {
             eprintln!("bullpen: couldn't check bullpen's build: {e}");
@@ -293,24 +337,55 @@ pub fn rebuild_if_stale(repo: &Repo) -> Option<String> {
     }
 }
 
-fn start_rebuild(repo: &Repo) -> Res<Option<String>> {
+/// Is root a copy of bullpen that runs from its own build: the entry (bin/bullpen), the
+/// workspace's source, and a command line built there before (target/bullpen)? A clone
+/// of bullpen's source that was never built or installed isn't one.
+pub fn runs_itself(root: &Path) -> bool {
+    root.join("bin/bullpen").is_file()
+        && programs_in(root, false).contains(&&CLI)
+        && executable(&CLI.installed_in(root))
+}
+
+/// Accept, after a merge into repo: when the checkout merged into is a copy of bullpen
+/// that runs from its own build (this one, or another: runs_itself), its programs are
+/// rebuilt in the background when their source changed, by its own bullpen. This copy
+/// isn't rebuilt for a merge into another. Says what it started; never fails.
+pub fn rebuild_merged_into(repo: &Repo) -> Option<String> {
+    let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let root = canon(&repo.root);
+    if root == canon(&home()) {
+        return rebuild_if_stale(repo);
+    }
+    if !runs_itself(&root) {
+        return None;
+    }
+    let said = checked(start_rebuild(repo, &root))?;
+    Some(format!(
+        "{said}: {}, this repository's own copy of bullpen",
+        root.display()
+    ))
+}
+
+/// Start the background build of the copy of bullpen at root (this one, or the checkout
+/// an accept merged into): root's own bullpen builds it, holding root's build lock.
+fn start_rebuild(repo: &Repo, root: &Path) -> Res<Option<String>> {
     if no_build() {
         return Ok(None);
     }
     let mut stale = Vec::new();
-    for p in programs(true) {
-        if !p.stale()? {
+    for p in programs_in(root, true) {
+        if !p.stale_in(root)? {
             continue; // current, or its build failed already: doctor says so
         }
-        if p.dirty()? {
-            let src = p.source_hash()?;
-            if p.stamp()?.get("skipped").and_then(Value::as_str) != Some(src.as_str()) {
-                p.set_stamp("skipped", &src)?;
+        if p.dirty_in(root)? {
+            let src = p.source_hash_in(root)?;
+            if p.stamp_in(root)?.get("skipped").and_then(Value::as_str) != Some(src.as_str()) {
+                p.set_stamp_in(root, "skipped", &src)?;
                 let text = format!(
                     "{} wasn't rebuilt: {} has uncommitted changes to {}, and a build would take them in. {}. \
                      Commit or drop them, then run `bullpen up` (or `bullpen build` to build them as they are).",
                     p.subject(),
-                    home().display(),
+                    root.display(),
                     p.crates.join(", "),
                     p.keeps
                 );
@@ -323,14 +398,14 @@ fn start_rebuild(repo: &Repo) -> Res<Option<String>> {
     if stale.is_empty() {
         return Ok(None);
     }
-    let Some(lock) = lock_build(false)? else {
+    let Some(lock) = bullpen_core::lock::take(&target_in(root).join("build.lock"), false)? else {
         return Ok(None); // a build is running: it checks the sources again when it's done
     };
     let fd = lock.as_raw_fd();
     let log = repo.dir.join("jobs.log");
     let job = Job {
         argv: vec![
-            self_bin().display().to_string(),
+            root.join("bin/bullpen").display().to_string(),
             "_build_board".into(),
             "--lock-fd".into(),
             fd.to_string(),

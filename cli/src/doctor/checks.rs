@@ -5,7 +5,7 @@ use crate::board::old_board;
 use crate::build::{build_log, building, bullpen_cargo, programs, Program, BOARD, CLI};
 use crate::coordinators::{alive, coordinators};
 use crate::modes::repo_base_ref;
-use crate::watcher::{watcher_record, watcher_stamp};
+use crate::watcher::{watcher_copy, watcher_record, watcher_stamp_of};
 use bullpen_core::config::{global_config_path, read_global_file};
 use bullpen_core::json::{get, obj, py_str, strs, truthy, Obj};
 use bullpen_core::paths::{home, rex, self_bin, state};
@@ -410,13 +410,35 @@ pub fn check_watcher() -> Check {
             format!("not running (its pane {block} is gone): run `bullpen up`"),
         ));
     }
-    if w.get("stamp") != Some(&watcher_stamp()?) {
+    // against the copy of bullpen it runs: this one, unless its record names another
+    let copy = watcher_copy(&w).unwrap_or_else(home);
+    let other = !crate::copies::same(&copy, &home());
+    if !crate::copies::there(&copy) {
         return Ok((
             "fail",
-            format!("running ({block}), but from an older watch.lua or bullpen: run `bullpen up` to restart it"),
+            format!(
+                "running ({block}), but from a copy of bullpen that is gone ({}): run `bullpen up`",
+                copy.display()
+            ),
         ));
     }
-    Ok(("ok", format!("running and current, {block}")))
+    if w.get("stamp") != Some(&watcher_stamp_of(&copy)?) {
+        let whose = if other {
+            format!(" (it runs another copy of bullpen: {})", copy.display())
+        } else {
+            String::new()
+        };
+        return Ok((
+            "fail",
+            format!("running ({block}), but from an older watch.lua or bullpen: run `bullpen up` to restart it{whose}"),
+        ));
+    }
+    let whose = if other {
+        format!(", from another copy of bullpen ({})", copy.display())
+    } else {
+        String::new()
+    };
+    Ok(("ok", format!("running and current, {block}{whose}")))
 }
 
 /// Make STATE, and a file in it (gone at once).

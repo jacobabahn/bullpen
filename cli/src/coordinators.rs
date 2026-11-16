@@ -3,7 +3,8 @@
 //! panes are gone (`up`), or whose pane the watcher said closed (`_coordinator_gone`).
 //!
 //! cfg["coordinators"] lists them, oldest (the primary) first: {"id": "c1", "block",
-//! "session", "board": {"block", "session"}, "board_others"}. A task belongs to the one
+//! "session", "board": {"block", "session"}, "board_others", "bullpen": the copy of
+//! bullpen it was started from (copies.rs)}. A task belongs to the one
 //! that added it (t["coordinator"]). Who sees to it is that one alone while its pane is
 //! running, else every running coordinator.
 
@@ -51,7 +52,8 @@ pub fn add_coordinator(repo: &mut Repo, block: &str, session: &str) -> Res<Strin
     let n = repo.cfg.get("next_coordinator").and_then(Value::as_i64).unwrap_or(1);
     let cid = format!("c{n}");
     repo.cfg.insert("next_coordinator".into(), json!(n + 1));
-    let c = json!({"id": cid, "block": block, "session": session, "board": null});
+    let mut c = json!({"id": cid, "block": block, "session": session, "board": null});
+    crate::copies::record(c.as_object_mut().expect("an object")); // the copy `up` runs from
     match repo.cfg.get_mut("coordinators").and_then(Value::as_array_mut) {
         Some(list) => list.push(c),
         None => {

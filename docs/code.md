@@ -141,10 +141,14 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `up.rs`: `up`
 - `guide.rs`: `guide`, and telling running coordinators their guide changed (with
   difflib's diff, ported)
-- `watcher.rs`: starting the watcher, and replacing it when `watch.lua` or the build
-  changes (its stamp: their hashes); after a merge (`refresh_watcher`) or a build
+- `watcher.rs`: starting the watcher from the copy of bullpen the repo's coordinator
+  uses, and replacing it when that copy's `watch.lua` or build changes (its stamp:
+  their hashes); after a merge (`refresh_watcher`) or a build
+- `copies.rs`: the copy of bullpen a coordinator was started from (`up` records it), a
+  command another copy ran noted for doctor, and doctor's `copy` check
 - `build.rs`: `build` and `_build_board` (the build lock passed by fd), the
-  `rebuild_if_stale` of `up` and accept, and the catch-up (`catch_up`)
+  `rebuild_if_stale` of `up`, accept's `rebuild_merged_into` (the checkout merged into,
+  when it runs from its own build), and the catch-up (`catch_up`)
 - `push_remote.rs`: the push remote's background push (`_push`, one at a time, under
   its lock), `up`'s catch-up push, and doctor's check of the push remote
 - `doctor/`: `mod.rs`: `doctor` (and `--json`) and `up`'s hint; `all_repos.rs`: `doctor --all-repos`; `checks.rs`: the checks
