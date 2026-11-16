@@ -168,6 +168,12 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `backlog/`: `later` (`mod.rs`: adding, who's calling, keep, drop, skip, moves, and
   `show`'s from line; `list.rs`: the list's lines; `start.rs`: an item made a task;
   `pickup.rs`: idle pickup, its caps, and the watcher's `_pickup`)
+- `issues/`: GitHub issues read into the backlog (docs/issues.md): `mod.rs`: `issues`
+  (`--now`: the open issues compared with `issues.json`, `sync`) and the yes or no
+  `later` remembers (`decided`); `repo.rs`: which repository (`issues_repo`, `slug`) and
+  the one call to gh, always with `-R` (`gh_json`); `store.rs`: `issues.json` under its
+  lock; `text.rs`: an issue's text made safe to print (the item's title, the fence, the
+  cut); `view.rs`: `issue N`
 - `config.rs`: `config`, its flags made from the settings table
 - `pick.rs`: the jump picker (`pick`, `--filter`, `--pane`)
 - `line_edit.rs`: typing on a terminal: raw mode, bracketed paste, the keys a read

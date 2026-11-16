@@ -42,6 +42,8 @@ const PYTHON: &str = r#"[
 ["pickup_per_day", "--pickup-per-day", "4", "self-started tasks a day, a spending guard (default 4)"],
 ["pickup_model", "--pickup-model", "the worker model", "claude's --model for self-started tasks (default the worker model)"],
 ["pickup_auto_accept", "--pickup-auto-accept", "off", "self-started tasks accept by themselves once review approves them (default off)"],
+["issues", "--issues", "off", "read this repository's GitHub issues into the backlog, each asking for a yes (docs/issues.md) (default off)"],
+["issues_repo", "--issues-repo", "origin's, or in local mode the push remote's", "the GitHub repository issues are read from, as OWNER/REPO (\"\" clears it) (default origin's, or in local mode the push remote's)"],
 ["coordinators", "--coordinators", "[]", " (default [])"],
 ["next_coordinator", "--next-coordinator", "1", " (default 1)"]
 ]"#;
@@ -100,6 +102,8 @@ const DEFAULT_CONFIG: &str = r#"{
   "pickup_per_day": 4,
   "pickup_model": null,
   "pickup_auto_accept": false,
+  "issues": false,
+  "issues_repo": null,
   "coordinators": [],
   "next_coordinator": 1
 }"#;

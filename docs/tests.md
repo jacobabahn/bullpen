@@ -45,8 +45,9 @@ run `bin/bullpen` as you do. The fakes are Rust, in `tests/fakes/` (the crate
 fake Rex keeps its blocks, layers and windows in `reg.json` and logs each call to
 `rex.log`, and a file such as `send_fails_<block>`, `server_down` or `screen` changes
 what it does; the fake gh logs to `gh.log` and reads `pr.json`, `gh_signed_out`,
-`merge_refused` (a refused merge, saying the file's text) and `meanwhile` (a command
-`pr view` runs before it answers: a slow gh). The top of `tests/fakes/src/rex.rs` and
+`merge_refused` (a refused merge, saying the file's text), `meanwhile` (a command
+`pr view` runs before it answers: a slow gh) and `issues.json` (the repository's issues,
+for `issue list` and `issue view`). The top of `tests/fakes/src/rex.rs` and
 `gh.rs` lists them all. They write JSON as Python's `json.dumps` does, since the tests
 read their files as text too. A test of a function on its own is a Rust test, beside
 its module (below). Each test removes its temp folder when it ends.

@@ -53,6 +53,11 @@ the item records it: `bullpen start BP-140` once it can.
   The coordinator says yes to one that's clearly small and worth it; the rest wait for you.
   A worker can only add: keep, drop, move and start are the coordinator's and yours.
 
+- **A GitHub issue**, with `bullpen config --issues on`: `bullpen issues --now` reads the
+  open issues, and each new one becomes an item that asks, added by `issue`, at the
+  bottom: `Board flickers on resize (#12, ann)`. Your `--keep` or `--drop` is remembered,
+  so an issue is never asked about twice. See [GitHub issues](issues.md).
+
 ## A task from the backlog
 
 A started item's task carries where it came from: `from` (the item, `L7`), `origin`

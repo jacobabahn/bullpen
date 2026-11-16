@@ -20,6 +20,8 @@
 - The backlog: `backlog.json` beside the tasks (with `backlog.lock`), its items' briefs
   in `briefs/` as `L<n>.md`. Pickup's `pickup.json` (with `pickup.lock`) beside them, and
   `~/.local/state/bullpen/pickup` while the watcher should look. See [The backlog](backlog.md).
+- The GitHub issues read so far, and what was decided on each: `issues.json` beside the
+  backlog (with `issues.lock`). See [GitHub issues](issues.md).
 - Overlaps told so far (two open tasks that change the same file): `overlaps.json`
   beside the tasks. See [Accept](accept.md#overlap-warning).
 - Notifications: `notify.log` beside the tasks. See [Notifications](notifications.md).

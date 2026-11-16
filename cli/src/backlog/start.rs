@@ -44,7 +44,7 @@ pub fn start(repo: &Repo, id: &str, brief: Option<&str>, who: &Caller) -> Res<i3
 /// on it and `add`'s flags given; its ID. The item records it.
 pub fn make_task(repo: &Repo, id: &str, brief: Option<&str>, started_by: &str, flags: &[String]) -> Res<String> {
     // under the backlog's lock, so two starts of one item make one task
-    backlog::change(repo, |b| {
+    let tid = backlog::change(repo, |b| {
         let item = b.item(id)?;
         if !is_open(item) {
             return fail(super::not_open(item));
@@ -74,5 +74,7 @@ pub fn make_task(repo: &Repo, id: &str, brief: Option<&str>, started_by: &str, f
         it.insert("task".into(), json!(tid));
         it.shift_remove("skipped");
         Ok(tid)
-    })
+    })?;
+    crate::issues::decided(repo, id)?; // an issue's item started is a yes
+    Ok(tid)
 }

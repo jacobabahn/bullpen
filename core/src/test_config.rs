@@ -203,6 +203,7 @@ fn a_repo_writes_only_its_own_settings() {
   "push_remote": null,
   "review": false,
   "news": "type",
+  "issues_repo": null,
   "coordinators": [],
   "next_coordinator": 1,
   "root": "/a/b",

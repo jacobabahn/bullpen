@@ -50,6 +50,8 @@ bullpen close BP-1 --keep-branch --as port  # end it unmerged, its branch kept a
 bullpen drop BP-1     # close its PR, pane and worktree without merging
 bullpen build         # build bullpen's command line and the board now (see Rebuilds)
 bullpen later "Tidy the errors"  # an idea for later, on the backlog (see backlog.md)
+bullpen issues --now  # read the open GitHub issues into the backlog, each asking for a yes (see issues.md)
+bullpen issue 12      # one issue for reading, its text in a fence
 bullpen stats BP-1    # where its time went: its timeline and totals (no ID: across closed tasks; see stats.md)
 ```
 

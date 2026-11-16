@@ -25,12 +25,13 @@ pub const WAITING: [&str; 2] = ["needs", "triage"];
 pub const STOPPED: [&str; 3] = ["needs", "triage", "stopped"];
 
 /// Settings that belong to one repository: the global config.json can't hold them.
-pub const REPO_ONLY: [&str; 7] = [
+pub const REPO_ONLY: [&str; 8] = [
     "prefix",
     "next",
     "base",
     "push_remote",
     "news",
+    "issues_repo",
     "coordinators",
     "next_coordinator",
 ];
@@ -133,7 +134,7 @@ use Kind::*;
 use Val::{Bool, Int, List, Null, Str};
 
 /// Every setting, in the order `config` lists them.
-pub static SETTINGS: [Setting; 40] = [
+pub static SETTINGS: [Setting; 42] = [
     Setting { help: "the letters new task IDs start with (2 to 5 capitals)", repo_only: true, says: Some("2 to 5 capital letters"), pattern: Some("[A-Z]{2,5}"), ..base("prefix", Str("BP"), Some("Tasks"), Text) },
     Setting { repo_only: true, ..base("next", Int(1), None, File) },
     Setting { help: "the branch tasks start from and open PRs against", repo_only: true, none: Some("the repo's default branch"), ..base("base", Null, Some("Tasks"), Text) },
@@ -172,6 +173,8 @@ pub static SETTINGS: [Setting; 40] = [
     Setting { help: "self-started tasks a day, a spending guard", least: Some(1), says: Some("a number of tasks, 1 or more"), metavar: Some("N"), ..base("pickup_per_day", Int(4), Some("Pickup"), Number) },
     Setting { help: "claude's --model for self-started tasks", none: Some("the worker model"), ..base("pickup_model", Null, Some("Pickup"), Model) },
     Setting { help: "self-started tasks accept by themselves once review approves them", ..base("pickup_auto_accept", Bool(false), Some("Pickup"), OnOff) },
+    Setting { help: "read this repository's GitHub issues into the backlog, each asking for a yes (docs/issues.md)", ..base("issues", Bool(false), Some("Issues"), OnOff) },
+    Setting { help: "the GitHub repository issues are read from, as OWNER/REPO (\"\" clears it)", repo_only: true, metavar: Some("OWNER/REPO"), none: Some("origin's, or in local mode the push remote's"), clears: true, ..base("issues_repo", Null, Some("Issues"), Text) },
     Setting { repo_only: true, ..base("coordinators", List(&[]), None, File) },
     Setting { repo_only: true, ..base("next_coordinator", Int(1), None, File) },
 ];

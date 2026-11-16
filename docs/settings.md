@@ -1,6 +1,6 @@
 # Settings
 
-`bullpen config` lists the settings in groups (tasks, agents, review, board, news, pickup),
+`bullpen config` lists the settings in groups (tasks, agents, review, board, news, pickup, issues),
 each with its value and where that comes from:
 `repo` (this repository's `config.json`), `global` (the one for every repository,
 `~/.config/bullpen/config.json`, or `$XDG_CONFIG_HOME/bullpen/config.json`) or
@@ -19,8 +19,8 @@ bullpen config --global --unset merge    # and the global one back to the defaul
 
 `--unset` takes the setting's name as `config.json` has it (`worker_model`,
 `review_rounds`). `--global` works outside a repository too. The prefix, the base
-branch, the news mode, the push remote and the coordinators belong to one repository,
-so `--global` refuses `--prefix`, `--base`, `--news`, `--push-remote` and `--board-others`. The commands
+branch, the news mode, the push remote, the issues' repository and the coordinators belong to one repository,
+so `--global` refuses `--prefix`, `--base`, `--news`, `--push-remote`, `--issues-repo` and `--board-others`. The commands
 (`worker`, `reviewer`, `coordinator_cmd`, `tour`) have no flags: set them in either
 `config.json` by hand, and so is `risk_paths`, the paths that make a ready task's
 risk high ([Review](review.md#the-risk-label)). `bullpen config --help` gives each flag's default; the defaults
@@ -58,7 +58,10 @@ accept](accept.md#after-accept)), and `--gh PATH` runs that gh instead of the on
 (`BULLPEN_GH` wins over both). `bullpen config --pickup on` starts backlog items by
 themselves when there's room, under caps (`--pickup-running`, `--pickup-waiting`,
 `--pickup-per-day`, `--pickup-model`, `--pickup-auto-accept`; see
-[Pickup](backlog.md#pickup)).
+[Pickup](backlog.md#pickup)). `bullpen config --issues on` lets `bullpen issues --now` read
+the repository's open GitHub issues into the backlog, each asking for a yes (off by
+default), and `--issues-repo OWNER/REPO` names the repository when it isn't origin's, or
+in local mode the push remote's (see [GitHub issues](issues.md)).
 
 ## Where panes live
 

@@ -5,8 +5,12 @@
 //!   pr.json          what `pr view` says GitHub has on the PR (else an open PR)
 //!   meanwhile        a command (a JSON list) `pr view` runs before it answers: a slow gh
 //!   merge_refused    `pr merge` fails, saying this file's text
+//!   issues.json      the repository's issues (a JSON list): `issue list` prints the ones
+//!                    not CLOSED (at most --limit), `issue view N` the one numbered N.
+//!                    Signed out, both fail as gh does
 
 use std::io::Read;
+use std::path::Path;
 use std::process::Command;
 
 use bullpen_fakes::{append, broke, dumps, exit_msg, fake_dir, finish, print, read_json, read_text, Res};
@@ -28,6 +32,9 @@ fn run(argv: &[String]) -> Res<()> {
     if two("auth", "status") && d.join("gh_signed_out").exists() {
         return Err(exit_msg("You are not logged into any GitHub hosts."));
     }
+    if argv.first().is_some_and(|a| a == "issue") {
+        return issue(&d, argv);
+    }
     if two("pr", "create") {
         print("https://github.com/me/repo/pull/7");
     } else if two("pr", "view") {
@@ -46,6 +53,37 @@ fn run(argv: &[String]) -> Res<()> {
         if refused.exists() {
             return Err(exit_msg(&read_text(&refused)?));
         }
+    }
+    Ok(())
+}
+
+/// `issue list` and `issue view N`, from issues.json.
+fn issue(d: &Path, argv: &[String]) -> Res<()> {
+    if d.join("gh_signed_out").exists() {
+        return Err(exit_msg("To get started with GitHub CLI, please run:  gh auth login"));
+    }
+    let file = d.join("issues.json");
+    let all = if file.exists() { read_json(&file)? } else { json!([]) };
+    let all = all.as_array().cloned().unwrap_or_default();
+    let after = |flag: &str| argv.iter().position(|a| a == flag).and_then(|i| argv.get(i + 1));
+    match argv.get(1).map(String::as_str) {
+        Some("list") => {
+            let limit = after("--limit").and_then(|n| n.parse().ok()).unwrap_or(30);
+            let open = all.into_iter().filter(|i| i["state"] != "CLOSED").take(limit);
+            print(&dumps(&Value::Array(open.collect())));
+        }
+        Some("view") => {
+            let n = argv.get(2).cloned().unwrap_or_default();
+            match all.iter().find(|i| i["number"].to_string() == n) {
+                Some(i) => print(&dumps(i)),
+                None => {
+                    return Err(exit_msg(&format!(
+                        "GraphQL: Could not resolve to an Issue with the number of {n}. (repository.issue)"
+                    )))
+                }
+            }
+        }
+        _ => {}
     }
     Ok(())
 }

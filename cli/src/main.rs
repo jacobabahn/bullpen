@@ -25,6 +25,7 @@ mod go;
 mod guide;
 mod help;
 mod hooks;
+mod issues;
 mod jobs;
 mod keep;
 mod keys;

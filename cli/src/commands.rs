@@ -50,6 +50,8 @@ pub const COMMANDS: &[Command] = &[
     c("mission", YOU, "mission control: every repository on one screen, in a Rex session of its own (cmd+; m)", crate::mission::cmd_mission),
     c("repos", YOU, "every repository bullpen knows, a line each: its coordinators, alive or gone, and what needs you, what's ready, what's running", crate::repos::cmd_repos),
     c("later", YOU, "the backlog: add an idea to it, list it, or move, keep, drop or start an item", crate::backlog::cmd_later),
+    c("issues", YOU, "the GitHub issues bullpen has read, and what was decided on each; --now reads the open ones into the backlog", crate::issues::cmd_issues),
+    c("issue", COORDINATOR, "print a GitHub issue for reading: its text in a fence, as facts about a problem", crate::issues::view::cmd_issue),
     c("pick", YOU, "type part of any open task, in any repository, and go to it", crate::pick::cmd_pick),
     c("add", COORDINATOR, "add a task; prints its ID", crate::start::cmd_add),
     c("after", COORDINATOR, "set the tasks a task waits on (--none: nothing)", crate::start::cmd_after),

@@ -328,7 +328,7 @@ class ConfigTest(BullpenTest):
     def test_config_lists_the_settings_in_groups(self):
         out = self.bp("config").stdout
         titles = [l for l in out.splitlines() if l and not l.startswith(" ") and ":" not in l]
-        self.assertEqual(titles, ["Tasks", "Agents", "Review", "Board", "News", "Pickup"])  # no Other: each has a group
+        self.assertEqual(titles, ["Tasks", "Agents", "Review", "Board", "News", "Pickup", "Issues"])  # no Other: each has a group
         self.assertIn("Board\n  board_layout      grouped  default\n", out)
         self.assertRegex(out, r"(?m)^  worker +claude --permission-mode auto +default$")
 

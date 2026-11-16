@@ -89,6 +89,7 @@ Using it:
 How it behaves: what bullpen does by itself as tasks move along, and the settings for it.
 
 - [The backlog](docs/backlog.md): `bullpen later`, the list ideas go on before they're tasks
+- [GitHub issues](docs/issues.md): `bullpen issues`, open issues read into the backlog, each asking for a yes
 - [Dependencies](docs/dependencies.md): tasks that wait on others, and the queue
 - [Accept](docs/accept.md): after accept, and auto-accept
 - [Review](docs/review.md): the reviewer, its rounds, and after ready (the PR's checks and comments)

@@ -232,6 +232,9 @@ fn change(repo: &Repo, id: &str, a: &Args, who: &Caller) -> Res<i32> {
         Ok(said)
     })?;
     println!("{}", said.join("\n"));
+    if matches!(act, Some("--keep" | "--drop")) {
+        crate::issues::decided(repo, id)?; // an issue's item: the yes or no is remembered
+    }
     if !viewing {
         pickup::soon(repo); // a brief, a yes, a skip or a move can make the next item another
     }
