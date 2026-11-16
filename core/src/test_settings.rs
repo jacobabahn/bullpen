@@ -35,6 +35,12 @@ const PYTHON: &str = r#"[
 ["notify", "--notify", "needs", "native notifications: when a task needs you (needs), also when one is ready, finished or auto-accepted (all), or none (off) (default needs)"],
 ["stuck_after", "--stuck-after", "20", "news when a working agent shows no progress this long (0: never) (default 20)"],
 ["triage_minutes", "--triage-minutes", "10", "how long a task can wait on its coordinator before it needs the person (default 10)"],
+["pickup", "--pickup", "off", "start backlog items by themselves when there's room (docs/backlog.md) (default off)"],
+["pickup_running", "--pickup-running", "1", "self-started tasks working or in review at once (default 1)"],
+["pickup_waiting", "--pickup-waiting", "2", "pickup pauses while this many self-started tasks wait for you (default 2)"],
+["pickup_per_day", "--pickup-per-day", "4", "self-started tasks a day, a spending guard (default 4)"],
+["pickup_model", "--pickup-model", "the worker model", "claude's --model for self-started tasks (default the worker model)"],
+["pickup_auto_accept", "--pickup-auto-accept", "off", "self-started tasks accept by themselves once review approves them (default off)"],
 ["coordinators", "--coordinators", "[]", " (default [])"],
 ["next_coordinator", "--next-coordinator", "1", " (default 1)"]
 ]"#;
@@ -86,6 +92,12 @@ const DEFAULT_CONFIG: &str = r#"{
   "notify": "needs",
   "stuck_after": 20,
   "triage_minutes": 10,
+  "pickup": false,
+  "pickup_running": 1,
+  "pickup_waiting": 2,
+  "pickup_per_day": 4,
+  "pickup_model": null,
+  "pickup_auto_accept": false,
   "coordinators": [],
   "next_coordinator": 1
 }"#;

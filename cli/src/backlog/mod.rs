@@ -5,6 +5,7 @@
 //! list.rs, making an item a task in start.rs.
 
 pub mod list;
+pub mod pickup;
 pub mod start;
 
 use crate::args::{flag, pos, value, Arg, Args, Nargs};
@@ -95,6 +96,9 @@ pub fn cmd_later(argv: &[String]) -> Res<i32> {
     let repo = Repo::new(repo_root()?)?;
     let what = a.arg("what").unwrap_or("");
     if what.is_empty() {
+        if let Some(f) = item_flag(&a) {
+            return fail(format!("{f} needs an item: `bullpen later L7 {f}`"));
+        }
         return list::print(&repo, a.flag("--all"), a.flag("--json"));
     }
     let who = caller(&repo, a.opt("--from"))?;
@@ -103,6 +107,16 @@ pub fn cmd_later(argv: &[String]) -> Res<i32> {
         return change(&repo, &id, &a, &who);
     }
     add(&repo, what, &a, &who)
+}
+
+/// The first flag given that is about one item, if any: with no item named it can't be
+/// done, and listing instead would hide the mistake.
+fn item_flag(a: &Args) -> Option<&'static str> {
+    let flags = ["--top", "--up", "--down", "--bottom", "--keep", "--drop", "--start"];
+    if let Some(f) = flags.into_iter().find(|f| a.flag(f)) {
+        return Some(f);
+    }
+    ["--skip", "--brief-file"].into_iter().find(|f| a.opt(f).is_some())
 }
 
 /// Add an item: kept for the person and a coordinator, asking for a yes for a worker,
@@ -138,6 +152,7 @@ fn add(repo: &Repo, title: &str, a: &Args, who: &Caller) -> Res<i32> {
         );
         crate::news::say(repo, t, "later", &text)?;
     }
+    pickup::soon(repo);
     Ok(0)
 }
 
@@ -164,7 +179,8 @@ fn write_brief(repo: &Repo, id: &str, text: &str) -> Res<String> {
 
 /// What to do with an item, from the flags: one of them, and maybe a brief.
 fn change(repo: &Repo, id: &str, a: &Args, who: &Caller) -> Res<i32> {
-    if let Caller::Worker(t) = who {
+    let viewing = item_flag(a).is_none() && a.arg("why").is_none();
+    if let (Caller::Worker(t), false) = (who, viewing) {
         return fail(format!(
             "{}'s worker only adds to the backlog: the coordinator or the person decides on its items",
             s(t, "id")
@@ -216,6 +232,7 @@ fn change(repo: &Repo, id: &str, a: &Args, who: &Caller) -> Res<i32> {
         Ok(said)
     })?;
     println!("{}", said.join("\n"));
+    pickup::soon(repo); // a brief, a yes, a skip or a move can make the next item another
     Ok(0)
 }
 

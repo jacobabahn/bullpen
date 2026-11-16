@@ -21,14 +21,18 @@ pub fn save(repo: &Repo, t: &mut Obj) -> Res<()> {
 
 /// move_queue: the run queue hears of every status change. When a task frees a slot or
 /// closes, the queue starts the next queued tasks once the command's own work is done,
-/// reading the tasks fresh then.
+/// reading the tasks fresh then; then pickup may start a backlog item (backlog/pickup.rs).
 fn move_queue(repo: &Repo, t: &Obj, old: &Obj) {
     let Some(how) = crate::start::slot_freed(old, t) else {
         return;
     };
     let (root, by) = (repo.root_str(), t.clone());
     later(&format!("queue {root}"), move || {
-        let moved = Repo::new(&root).and_then(|repo| crate::start::queue::start_queued(&repo, &by, how));
+        // the queue first: tasks waiting on this one go before the backlog
+        let moved = Repo::new(&root).and_then(|repo| {
+            crate::start::queue::start_queued(&repo, &by, how)?;
+            crate::backlog::pickup::pickup(&Repo::new(&root)?).map(|_| ())
+        });
         if let Err(e) = moved {
             eprintln!("bullpen: {e}");
         }

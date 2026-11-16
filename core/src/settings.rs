@@ -133,7 +133,7 @@ use Kind::*;
 use Val::{Bool, Int, List, Null, Str};
 
 /// Every setting, in the order `config` lists them.
-pub static SETTINGS: [Setting; 33] = [
+pub static SETTINGS: [Setting; 39] = [
     Setting { help: "the letters new task IDs start with (2 to 5 capitals)", repo_only: true, says: Some("2 to 5 capital letters"), pattern: Some("[A-Z]{2,5}"), ..base("prefix", Str("BP"), Some("Tasks"), Text) },
     Setting { repo_only: true, ..base("next", Int(1), None, File) },
     Setting { help: "the branch tasks start from and open PRs against", repo_only: true, none: Some("the repo's default branch"), ..base("base", Null, Some("Tasks"), Text) },
@@ -165,6 +165,12 @@ pub static SETTINGS: [Setting; 33] = [
     Setting { help: "native notifications: when a task needs you (needs), also when one is ready, finished or auto-accepted (all), or none (off)", choices: Some(&NOTIFY), ..base("notify", Str("needs"), Some("News"), Choice) },
     Setting { help: "news when a working agent shows no progress this long (0: never)", least: Some(0), says: Some("minutes, or 0 to turn it off"), metavar: Some("MINUTES"), ..base("stuck_after", Int(20), Some("News"), Number) },
     Setting { help: "how long a task can wait on its coordinator before it needs the person", least: Some(0), says: Some("minutes"), metavar: Some("MINUTES"), ..base("triage_minutes", Int(10), Some("News"), Number) },
+    Setting { help: "start backlog items by themselves when there's room (docs/backlog.md)", ..base("pickup", Bool(false), Some("Pickup"), OnOff) },
+    Setting { help: "self-started tasks working or in review at once", least: Some(1), says: Some("a number of tasks, 1 or more"), metavar: Some("N"), ..base("pickup_running", Int(1), Some("Pickup"), Number) },
+    Setting { help: "pickup pauses while this many self-started tasks wait for you", least: Some(1), says: Some("a number of tasks, 1 or more"), metavar: Some("N"), ..base("pickup_waiting", Int(2), Some("Pickup"), Number) },
+    Setting { help: "self-started tasks a day, a spending guard", least: Some(1), says: Some("a number of tasks, 1 or more"), metavar: Some("N"), ..base("pickup_per_day", Int(4), Some("Pickup"), Number) },
+    Setting { help: "claude's --model for self-started tasks", none: Some("the worker model"), ..base("pickup_model", Null, Some("Pickup"), Model) },
+    Setting { help: "self-started tasks accept by themselves once review approves them", ..base("pickup_auto_accept", Bool(false), Some("Pickup"), OnOff) },
     Setting { repo_only: true, ..base("coordinators", List(&[]), None, File) },
     Setting { repo_only: true, ..base("next_coordinator", Int(1), None, File) },
 ];

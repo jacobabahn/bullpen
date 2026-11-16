@@ -29,6 +29,9 @@ pub fn print(repo: &Repo, all: bool, as_json: bool) -> Res<i32> {
     } else {
         println!("{}", out.join("\n"));
     }
+    if let Some(line) = super::pickup::status_line(repo)? {
+        println!("{line}");
+    }
     Ok(0)
 }
 

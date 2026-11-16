@@ -25,8 +25,26 @@ pub fn start(repo: &Repo, id: &str, brief: Option<&str>, who: &Caller) -> Res<i3
         Caller::Coordinator(c) => c.clone(),
         _ => "person".into(),
     };
+    let tid = make_task(repo, id, brief, &started_by, &[])?;
+    match crate::start::launch::start(std::slice::from_ref(&tid)) {
+        Ok(t) => {
+            println!(
+                "{id} is {tid} now, started in {} (branch {}, pane {})",
+                s(&t, "worktree"),
+                s(&t, "branch"),
+                s(&t, "block")
+            );
+            Ok(0)
+        }
+        Err(e) => fail(format!("{id} is {tid} now, but it didn't start: {}", e.0)),
+    }
+}
+
+/// Make item id a task (todo), with brief as its brief (else the item's own), started_by
+/// on it and `add`'s flags given; its ID. The item records it.
+pub fn make_task(repo: &Repo, id: &str, brief: Option<&str>, started_by: &str, flags: &[String]) -> Res<String> {
     // under the backlog's lock, so two starts of one item make one task
-    let tid = backlog::change(repo, |b| {
+    backlog::change(repo, |b| {
         let item = b.item(id)?;
         if !is_open(item) {
             return fail(super::not_open(item));
@@ -46,28 +64,15 @@ pub fn start(repo: &Repo, id: &str, brief: Option<&str>, who: &Caller) -> Res<i3
         extra.insert("from".into(), json!(id));
         extra.insert("origin".into(), json!(origin(&item)));
         extra.insert("started_by".into(), json!(started_by));
-        let argv = vec![
-            s(&item, "title").to_string(),
-            "--brief-file".into(),
-            path.display().to_string(),
-        ];
-        let tid = crate::start::add(&argv, extra)?;
+        let mut argv = vec!["--brief-file".into(), path.display().to_string()];
+        argv.extend(flags.iter().cloned());
+        // `--` last: a title may start with a dash
+        argv.extend(["--".into(), s(&item, "title").to_string()]);
+        let tid = crate::start::add_in(Repo::new(&repo.root)?, &argv, extra)?;
         let it = b.item_mut(id)?;
         it.insert("state".into(), json!("started"));
         it.insert("task".into(), json!(tid));
         it.shift_remove("skipped");
         Ok(tid)
-    })?;
-    match crate::start::launch::start(std::slice::from_ref(&tid)) {
-        Ok(t) => {
-            println!(
-                "{id} is {tid} now, started in {} (branch {}, pane {})",
-                s(&t, "worktree"),
-                s(&t, "branch"),
-                s(&t, "block")
-            );
-            Ok(0)
-        }
-        Err(e) => fail(format!("{id} is {tid} now, but it didn't start: {}", e.0)),
-    }
+    })
 }

@@ -83,6 +83,9 @@ tick(200)
 timers[30]()                              -- no limit noted: nothing to call
 local f = io.open(args.state .. "/limit.json", "w") f:write("{}") f:close()
 timers[30]()
+timers[300]()                             -- pickup has nothing: nothing to call
+f = io.open(args.state .. "/pickup", "w") f:close()
+timers[300]()
 timers[180]()                             -- status drift, every 3 minutes
 return table.concat(calls, "|")
 """
@@ -138,6 +141,7 @@ return table.concat(calls, "|")
             "_stuck blk1 20",              # quiet again from minute 42
             "_gone blk1",
             "_limit",                      # only while <state>/limit.json exists
+            "_pickup",                     # only while <state>/pickup exists
             "check --fix --quiet --all-repos",
         ])
 

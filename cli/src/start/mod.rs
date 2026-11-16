@@ -206,8 +206,12 @@ pub fn cmd_add(argv: &[String]) -> Res<i32> {
 /// Add the task `add` would with these arguments, with extra's fields on it too (the
 /// backlog's `from` and `origin`); its ID.
 pub fn add(argv: &[String], extra: Obj) -> Res<String> {
+    add_in(Repo::new(repo_root()?)?, argv, extra)
+}
+
+/// add, in the repo given (pickup's, from the watcher, runs outside its checkout).
+pub fn add_in(mut repo: Repo, argv: &[String], extra: Obj) -> Res<String> {
     let a = Args::parse("add", argv, ADD);
-    let mut repo = Repo::new(repo_root()?)?;
     let brief = match a.opt("--brief-file").filter(|f| !f.is_empty()) {
         Some(f) => read_text(f)?,
         None => a.opt("--brief").unwrap_or("").to_string(),

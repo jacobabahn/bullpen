@@ -189,6 +189,11 @@ pub fn cmd_config(argv: &[String]) -> Res<i32> {
     let sp = spec();
     let a = Args::parse("config", argv, &sp);
     check_ints(&a, &sp);
+    if a.opt("--pickup") == Some("on") {
+        // the watcher's timer looks within minutes (`_pickup` drops the flag if there's nothing)
+        std::fs::create_dir_all(bullpen_core::paths::state())?;
+        crate::news::touch(&crate::backlog::pickup::flag())?;
+    }
     if a.flag("--global") {
         return config_global(&a);
     }

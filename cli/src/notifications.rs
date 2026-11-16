@@ -119,6 +119,24 @@ pub fn notify(repo: &Repo, t: &Obj, old: &Obj) {
     }
 }
 
+/// A notification that isn't a task's change (pickup paused for the person), sent from
+/// t's panes as a needs-you one is: unless notify is off or the person is looking.
+/// Never fails, as notify.
+pub fn tell_person(repo: &Repo, t: &Obj, text: &str) {
+    if repo.cfg_str("notify") == "off" {
+        return;
+    }
+    let sent = (|| -> Res<()> {
+        if looking(repo, t)? {
+            return log_notify(repo, s(t, "id"), text, "not sent: the person is looking");
+        }
+        send_notification(repo, t, text)
+    })();
+    if let Err(e) = sent {
+        let _ = log_notify(repo, s(t, "id"), text, &format!("not sent: {e}"));
+    }
+}
+
 fn send_notification(repo: &Repo, t: &Obj, text: &str) -> Res<()> {
     let title = format!("{NEWS_MARK}{}", repo.name());
     for (session, block) in notify_panes(repo, t)? {

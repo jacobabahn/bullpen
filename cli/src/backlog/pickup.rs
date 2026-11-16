@@ -1,0 +1,359 @@
+//! Idle pickup (docs/backlog.md): with `pickup` on, bullpen starts the backlog's next
+//! kept item by itself when there's room, under caps. It runs after a save that frees
+//! a slot (after the run queue, saves.rs), after `later` changes the list, and from the
+//! watcher's timer (`_pickup`, while <state>/pickup exists). One start a run at most.
+//!
+//! An item with a brief starts as a task `started_by: itself`, kept for the person to
+//! accept (unless pickup_auto_accept), with pickup_model if set. One without a brief
+//! asks the coordinators for one, once a room; with none running, the next item that
+//! has a brief starts instead. pickup.json in the repo's state folder holds what a room
+//! has asked for and whether pickup is paused, so each is said once.
+
+use crate::coordinators::{sees_to, session_for};
+use crate::limit::limit_active;
+use crate::news::{news, touch, Opts};
+use bullpen_core::backlog::{self, Backlog};
+use bullpen_core::json::{self, s, truthy, Obj};
+use bullpen_core::paths::state;
+use bullpen_core::repo::known_repos;
+use bullpen_core::task::{clip, is_closed};
+use bullpen_core::timeutil::parse;
+use bullpen_core::{Fail, Repo, Res};
+use chrono::{Local, NaiveDate};
+use serde_json::{json, Value};
+use std::path::PathBuf;
+
+/// What `started_by` says on a task pickup started.
+pub const ITSELF: &str = "itself";
+
+/// A self-started task waiting for the person: pickup pauses at pickup_waiting of them.
+const WAITS_FOR_YOU: [&str; 4] = ["ready", "finished", "needs", "stopped"];
+
+/// <state>/pickup: exists while some repo has pickup on and a kept item, so the
+/// watcher's timer only calls `_pickup` then.
+pub fn flag() -> PathBuf {
+    state().join("pickup")
+}
+
+fn state_path(repo: &Repo) -> PathBuf {
+    repo.dir.join("pickup.json")
+}
+
+fn on(repo: &Repo) -> bool {
+    truthy(repo.cfg.get("pickup"))
+}
+
+fn num(repo: &Repo, key: &str) -> i64 {
+    let d = bullpen_core::settings::setting(key).map(|s| s.default_value());
+    repo.cfg
+        .get(key)
+        .and_then(Value::as_i64)
+        .or_else(|| d.and_then(|d| d.as_i64()))
+        .unwrap_or(0)
+}
+
+/// The kept items pickup may start, in list order.
+fn kept(b: &Backlog) -> Vec<Obj> {
+    b.open().filter(|i| s(i, "state") == "kept").cloned().collect()
+}
+
+/// The tasks pickup started that aren't closed.
+fn self_started(tasks: &[Obj]) -> Vec<&Obj> {
+    tasks
+        .iter()
+        .filter(|t| s(t, "started_by") == ITSELF && !is_closed(s(t, "status")))
+        .collect()
+}
+
+/// How many tasks pickup made on day (local), closed ones too: the budget counts them all.
+pub fn started_on(tasks: &[Obj], day: NaiveDate) -> i64 {
+    let made = |t: &&Obj| parse(s(t, "created")).is_some_and(|c| c.with_timezone(&Local).date_naive() == day);
+    tasks
+        .iter()
+        .filter(|t| s(t, "started_by") == ITSELF)
+        .filter(made)
+        .count() as i64
+}
+
+/// What holds pickup back now, if anything.
+#[derive(Debug, PartialEq)]
+pub enum Held {
+    /// a task needs the person (needs or stopped): new work waits for their answer
+    Needed,
+    /// pickup_waiting self-started tasks wait for the person (their IDs)
+    Paused(Vec<String>),
+    /// no room: max_running tasks work, or pickup_running self-started ones work or are in review
+    NoRoom,
+    /// pickup_per_day tasks were started today
+    Spent,
+}
+
+/// The caps, from the tasks as they are: what holds pickup back, or None (it may start one).
+pub fn held(tasks: &[Obj], caps: [i64; 4], today: NaiveDate) -> Option<Held> {
+    let [max_running, running, waiting, per_day] = caps;
+    if tasks.iter().any(|t| matches!(s(t, "status"), "needs" | "stopped")) {
+        return Some(Held::Needed);
+    }
+    let mine = self_started(tasks);
+    let waits: Vec<String> = mine
+        .iter()
+        .filter(|t| WAITS_FOR_YOU.contains(&s(t, "status")))
+        .map(|t| s(t, "id").to_string())
+        .collect();
+    if waits.len() as i64 >= waiting {
+        return Some(Held::Paused(waits));
+    }
+    let working = tasks.iter().filter(|t| s(t, "status") == "working").count() as i64;
+    let busy = mine
+        .iter()
+        .filter(|t| matches!(s(t, "status"), "working" | "review"))
+        .count() as i64;
+    if working >= max_running || busy >= running {
+        return Some(Held::NoRoom);
+    }
+    if started_on(tasks, today) >= per_day {
+        return Some(Held::Spent);
+    }
+    None
+}
+
+fn caps(repo: &Repo) -> [i64; 4] {
+    ["max_running", "pickup_running", "pickup_waiting", "pickup_per_day"].map(|k| num(repo, k))
+}
+
+/// "BP-1", "BP-1 and BP-2", "BP-1, BP-2 and BP-3".
+fn and_list(ids: &[String]) -> String {
+    match ids {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// Run f on pickup.json, under its lock, and write it back. Two pickups at once would
+/// both see room: while one runs (a worktree's setup can take minutes) the other does
+/// nothing, as the room it would see is the one being taken.
+fn with_state(repo: &Repo, f: impl FnOnce(&mut Obj) -> Res<()>) -> Res<()> {
+    std::fs::create_dir_all(&repo.dir)?;
+    let Some(_held) = bullpen_core::lock::try_lock(&repo.dir.join("pickup.lock"))? else {
+        return Ok(());
+    };
+    let mut st = json::read_obj(&state_path(repo))?.unwrap_or_default();
+    let out = f(&mut st);
+    json::write_obj(&state_path(repo), &st)?; // what was said is kept even if a start failed
+    out
+}
+
+/// The news a pickup line goes out as: about the repo, not one task (the task's ID in
+/// the log is the item's or the task's).
+fn say(repo: &Repo, about: &Obj, event: &str, text: &str) -> Res<()> {
+    news(
+        repo,
+        about,
+        event,
+        text,
+        Opts {
+            everyone: true,
+            ..Opts::default()
+        },
+    )
+}
+
+/// Pickup, once, in this repo: start the next item if there's room. Whether pickup still
+/// has something to look at here (on, with a kept item): the timer's flag stays then.
+pub fn pickup(repo: &Repo) -> Res<bool> {
+    if !on(repo) {
+        return Ok(false);
+    }
+    let items = kept(&backlog::load(repo)?);
+    if items.is_empty() {
+        return Ok(false);
+    }
+    std::fs::create_dir_all(state())?;
+    touch(&flag())?;
+    with_state(repo, |st| run(repo, st, &items))?;
+    Ok(true)
+}
+
+fn run(repo: &Repo, st: &mut Obj, items: &[Obj]) -> Res<()> {
+    let tasks = repo.tasks()?;
+    let today = Local::now().date_naive();
+    let held = held(&tasks, caps(repo), today);
+    let paused = truthy(st.get("paused"));
+    match &held {
+        Some(Held::Paused(ids)) if !paused => {
+            st.insert("paused".into(), json!(true));
+            let text = format!("Pickup paused: {} wait for you", and_list(ids));
+            let first = repo.task(&ids[0])?;
+            say(repo, &first, "pickup", &text)?;
+            crate::notifications::tell_person(repo, &first, &text);
+        }
+        Some(Held::Paused(_)) => {}
+        _ => {
+            st.shift_remove("paused");
+        }
+    }
+    if held == Some(Held::Spent) && s(st, "spent") != today.to_string() {
+        st.insert("spent".into(), json!(today.to_string()));
+        let text = format!(
+            "Pickup started its {} for today (pickup_per_day): the backlog waits for tomorrow",
+            num(repo, "pickup_per_day")
+        );
+        say(repo, &item_as_task(&items[0]), "pickup", &text)?;
+    }
+    if held == Some(Held::NoRoom) {
+        st.shift_remove("asked"); // the room was taken: the next one asks again
+    }
+    if held.is_some() || limit_active(None)?.is_some() {
+        return Ok(());
+    }
+    let session = session_for(repo, None)?;
+    if session.is_empty() {
+        return Ok(()); // no Rex session to start a worker in: `bullpen up` makes one
+    }
+    let mut asked = json::strs(st, "asked");
+    for item in items.iter().filter(|i| !truthy(i.get("skipped"))) {
+        let id = s(item, "id").to_string();
+        if truthy(item.get("brief")) {
+            st.shift_remove("asked");
+            clear_skips(repo)?;
+            return start(repo, item, &session);
+        }
+        let about = item_as_task(item);
+        if !asked.contains(&id) {
+            asked.push(id.clone());
+            st.insert("asked".into(), json!(asked));
+            let text = format!(
+                "Room for one from the backlog: {id} {}. Write its brief and give it with \
+                 `bullpen later {id} --brief-file <f>` (pickup then starts it), or \
+                 `bullpen later {id} --skip \"why\"`",
+                s(item, "title")
+            );
+            say(repo, &about, "pickup", &text)?;
+        }
+        if !sees_to(repo, &about)?.is_empty() {
+            return Ok(()); // a coordinator will write it: the list's order holds
+        }
+    }
+    Ok(())
+}
+
+/// For news about an item: its ID, and its coordinator if one added it.
+fn item_as_task(item: &Obj) -> Obj {
+    let mut t = Obj::new();
+    t.insert("id".into(), json!(s(item, "id")));
+    let by = s(item, "by");
+    if by.starts_with('c') && by[1..].bytes().all(|b| b.is_ascii_digit()) {
+        t.insert("coordinator".into(), json!(by));
+    }
+    t
+}
+
+/// A skip lasts until pickup starts the next item.
+fn clear_skips(repo: &Repo) -> Res<()> {
+    backlog::change(repo, |b| {
+        for i in b.items.iter_mut() {
+            i.shift_remove("skipped");
+        }
+        Ok(())
+    })
+}
+
+/// The add flags a self-started task gets: kept for the person (unless
+/// pickup_auto_accept), and pickup_model.
+fn flags(repo: &Repo) -> Vec<String> {
+    let mut out = vec![if truthy(repo.cfg.get("pickup_auto_accept")) {
+        "--auto-accept".to_string()
+    } else {
+        "--no-auto-accept".to_string()
+    }];
+    if let Some(m) = repo
+        .cfg
+        .get("pickup_model")
+        .and_then(Value::as_str)
+        .filter(|m| !m.is_empty())
+    {
+        out.extend(["--model".into(), m.to_string()]);
+    }
+    out
+}
+
+/// Make the item a task and start its worker, with one news line either way.
+fn start(repo: &Repo, item: &Obj, session: &str) -> Res<()> {
+    let id = s(item, "id");
+    let tid = super::start::make_task(repo, id, None, ITSELF, &flags(repo))?;
+    let mut t = repo.task(&tid)?;
+    let started = crate::start::launch::start_task(repo, &mut t, session, None);
+    match started {
+        Ok(false) => Ok(()), // its setup failed: that has its own news
+        Ok(true) => say(
+            repo,
+            &t,
+            "started",
+            &format!("{tid} started by itself from the backlog ({id}: {})", s(item, "title")),
+        ),
+        Err(Fail(e)) => say(
+            repo,
+            &t,
+            "pickup",
+            &format!("{id} is {tid} now, but it didn't start: {}", clip(&e, 200)),
+        ),
+    }
+}
+
+/// The line `later` ends with while pickup is on: what it waits for, if anything.
+pub fn status_line(repo: &Repo) -> Res<Option<String>> {
+    if !on(repo) {
+        return Ok(None);
+    }
+    let tasks = repo.tasks()?;
+    let today = Local::now().date_naive();
+    let made = started_on(&tasks, today);
+    let per_day = num(repo, "pickup_per_day");
+    let why = match held(&tasks, caps(repo), today) {
+        Some(Held::Paused(ids)) => format!("paused: {} wait for you", and_list(&ids)),
+        Some(Held::Needed) => "waits: a task needs you".into(),
+        Some(Held::NoRoom) => "waits for room".into(),
+        Some(Held::Spent) => format!("done for today ({made} of {per_day} started)"),
+        None if limit_active(None)?.is_some() => "waits: the usage limit is reached".into(),
+        None => format!("on ({made} of {per_day} started today)"),
+    };
+    Ok(Some(format!("Pickup {why}")))
+}
+
+/// Run pickup once the command's own work is done (saves::later).
+pub fn soon(repo: &Repo) {
+    if !on(repo) {
+        return;
+    }
+    let root = repo.root_str();
+    crate::saves::later(&format!("pickup {root}"), move || {
+        if let Err(e) = Repo::new(&root).and_then(|r| pickup(&r)) {
+            eprintln!("bullpen: {e}");
+        }
+    });
+}
+
+/// `_pickup`: the watcher's timer. Pickup in every repo; the flag goes once none has
+/// anything for it.
+pub fn cmd_pickup(argv: &[String]) -> Res<i32> {
+    crate::args::Args::parse("_pickup", argv, &[]);
+    let mut any = false;
+    for repo in known_repos()? {
+        match pickup(&repo) {
+            Ok(wants) => any |= wants,
+            Err(e) => eprintln!("bullpen: {}: {e}", repo.name()),
+        }
+    }
+    if !any {
+        match std::fs::remove_file(flag()) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+            _ => {}
+        }
+    }
+    Ok(0)
+}
+
+#[cfg(test)]
+#[path = "test_pickup.rs"]
+mod tests;

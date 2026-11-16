@@ -80,6 +80,7 @@ pub const COMMANDS: &[Command] = &[
     c("_coordinator_gone", INTERNAL, "", crate::coordinators::cmd_coordinator_gone),
     c("_flush", INTERNAL, "", crate::notifications::cmd_flush),
     c("_prs", INTERNAL, "", crate::prs::cmd_prs),
+    c("_pickup", INTERNAL, "", crate::backlog::pickup::cmd_pickup),
     c("_event", INTERNAL, "", crate::events::cmd_event),
     c("_stuck", INTERNAL, "", crate::events::stuck::cmd_stuck),
     c("_limit", INTERNAL, "", crate::events::stuck::cmd_limit),

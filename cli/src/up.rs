@@ -109,6 +109,7 @@ pub fn cmd_up(argv: &[String]) -> Res<i32> {
     if a.flag("--verbose") || monitor {
         println!("{}", news_mode_line(&repo));
     }
+    crate::backlog::pickup::soon(&repo); // a Rex session now: there may be room
     Ok(0)
 }
 

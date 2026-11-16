@@ -1,6 +1,6 @@
 -- bullpen watcher: forwards status changes of bullpen panes to the bullpen CLI.
 --
---   rex do --all watch.lua bin=/path/to/bullpen state=/path/to/state [quiet=30] [prs=120] [check=180]
+--   rex do --all watch.lua bin=/path/to/bullpen state=/path/to/state [quiet=30] [prs=120] [check=180] [pickup=300]
 --
 -- Only panes bullpen started (listed in <state>/blocks/) are forwarded, and
 -- only when their state changes, so a worker's stream of "working: ..."
@@ -180,6 +180,15 @@ local pr_every = tonumber(rex.args.prs or "") or 120 -- seconds
 rex.every(pr_every, function()
   local f = io.open(state_dir .. "/prs", "r")
   if f then f:close() call("_prs") end
+end)
+
+-- Idle pickup (docs/backlog.md): <state>/pickup exists while some repo has pickup on
+-- and a kept backlog item. A save that frees a slot runs pickup itself; this catches
+-- what no save does (pickup just turned on, the usage limit reset, a cap lifted).
+local pickup_every = tonumber(rex.args.pickup or "") or 300 -- seconds
+rex.every(pickup_every, function()
+  local f = io.open(state_dir .. "/pickup", "r")
+  if f then f:close() call("_pickup") end
 end)
 
 -- Agents stopped at the usage limit are continued once it has reset:

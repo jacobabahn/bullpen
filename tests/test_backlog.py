@@ -129,3 +129,25 @@ class BacklogTest(BullpenTest):
         # a coordinator's own item is kept from the start
         self.bp_in("blk1", "later", "Its own idea")
         self.assertEqual((self.item("L3")["by"], self.item("L3")["state"]), ("c1", "kept"))
+
+    def test_a_title_starting_with_a_dash_starts(self):
+        self.bp("up")
+        self.later("--brief-file", self.brief(), "--", "--x marks it")
+        p = self.later("L1", "--start")
+        self.assertTrue(p.stdout.startswith("L1 is BP-1 now, started in "), p.stdout)
+        self.assertEqual(self.show("BP-1")["title"], "--x marks it")
+
+    def test_a_worker_may_view_an_item(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.later("Tidy")
+        self.assertIn("L1  Tidy\n    state: kept, added by you", self.bp_in(blk, "later", "L1").stdout)
+        self.assertIn("only adds", self.bp_in(blk, "later", "L1", "--brief-file", self.brief(), ok=False).stderr)
+        self.assertIn("only adds", self.bp_in(blk, "later", "L1", "--drop", ok=False).stderr)
+
+    def test_an_items_flag_with_no_item_says_so(self):
+        self.later("Tidy")
+        for flags in (["--top"], ["--keep"], ["--drop"], ["--start"], ["--skip", "why"], ["--brief-file", "f"]):
+            p = self.later(*flags, ok=False)
+            self.assertIn(f"{flags[0]} needs an item: `bullpen later L7 {flags[0]}`", p.stderr)
+            self.assertEqual(p.stdout, "")
