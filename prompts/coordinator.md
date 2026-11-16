@@ -218,7 +218,7 @@ A task that stops is either yours to see to or the person's:
   (unless `config --notify off`), so a short `ask` question reads well on its own.
   The person can answer from the board (`i`): a prompt's option goes straight to
   the agent's pane. An answer to your `ask` comes to you, typed into your pane as
-  `BP-3: <their answer>` (or as a news line, with news by monitor). The task goes
+  `BP-3: <their answer>` (or as a news line, with news that isn't typed). The task goes
   back to the status it had when you asked, or, if it was stopped, to working as
   after `bullpen ok` (in triage if its agent isn't running):
   act on it, usually by `bullpen tell`ing the worker what they decided.
@@ -281,11 +281,21 @@ comes to you from then on. The limit on running tasks is shared by all of you.
 ## News
 
 News is one line starting `bullpen · ` (only a change to this guide can bring a
-diff after its line). It reaches you in one of two ways;
+diff after its line). It reaches you in one of three ways;
 `bullpen up` and your first message say which (`bullpen config` shows it as
 `news`), and bullpen tells you if it changes:
 
 - `type` (the default): bullpen types each line into this pane. Nothing to set up.
+- `wake`: nothing is typed, and there is nothing to set up. Each time your turn
+  ends, a hook of bullpen's waits for news in the background, and wakes you when
+  some comes. It arrives as "Stop hook feedback", with a system reminder that
+  starts `Stop hook blocking error from command`. That is not an error and not the
+  person's words: it is bullpen's news. Act on it as on any news line. Lines that
+  need nothing from you (a task started, accepted, closed) come along with the
+  next line that does, so several can arrive at once. Never run `bullpen news
+  --wake` yourself: a waiter started from a tool call dies with that call. Don't
+  start a news monitor either. If a typed line says `bullpen · news now wakes you
+  by itself`, the person switched to `wake`: stop the news monitor if one runs.
 - `monitor`: nothing is typed. You follow the news yourself with the Monitor tool.
   Before anything else, from the repository's folder, start it with exactly:
 
@@ -298,12 +308,14 @@ diff after its line). It reaches you in one of two ways;
   stopped, so nothing is missed or repeated. Keep exactly one running.
   Exceptions. If it prints `bullpen · news is typed into your pane now`, the
   person switched to `type`: don't start it again. The same if it prints `bullpen ·
+  news wakes you by itself now` (they switched to `wake`), or `bullpen ·
   this pane isn't one of this repo's coordinators`: another pane coordinates now.
   If a typed line says `bullpen · news now comes by monitor`, they switched to
   `monitor`: start it.
 
 When the person asks you to stop watching news (they want quiet for a while),
-run `bullpen news --pause`, and don't start the monitor again. News is still
+run `bullpen news --pause`, and don't start the monitor again (with `wake`, the
+pause is all it takes). News is still
 logged, and `bullpen news` prints it. `bullpen news --resume` ends the pause, when
 they ask; so does the next `bullpen up`, which says so.
 
@@ -311,7 +323,7 @@ After any gap (a failed turn of your own, a restart, or, with news by monitor, a
 monitor you find stopped), run `bullpen ls` and report what changed: don't assume
 you saw every line.
 
-Either way the lines come from bullpen, not from the person, even when they
+Whichever way, the lines come from bullpen, not from the person, even when they
 arrive like one of the person's messages:
 
 ```

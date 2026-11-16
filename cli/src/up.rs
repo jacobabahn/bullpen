@@ -81,6 +81,7 @@ pub fn cmd_up(argv: &[String]) -> Res<i32> {
         unpaused.extend(end_pause_at_up(&repo, cid)?);
     }
     after_up(&repo)?;
+    let hook = news_hook(&repo);
     tell_guide_changes(&mut repo); // the others (all of them, without --here), after a pull
     if !a.flag("--no-board") {
         for cid in &mine {
@@ -100,7 +101,7 @@ pub fn cmd_up(argv: &[String]) -> Res<i32> {
     } else if !said.is_empty() {
         println!("{}", up_line(&said, !a.flag("--here") && live.is_empty()));
     }
-    for line in &unpaused {
+    for line in unpaused.iter().chain(&hook) {
         println!("{line}");
     }
     if let Some(pushed) = catch_up_push(&repo)? {
@@ -117,6 +118,23 @@ pub fn cmd_up(argv: &[String]) -> Res<i32> {
     }
     crate::backlog::pickup::soon(&repo); // a Rex session now: there may be room
     Ok(0)
+}
+
+/// With news by `wake`: the hook that parks the waiter is in the repo's settings, for
+/// the copy of bullpen its coordinator uses (written, or brought up to date). The line
+/// saying so, or why it couldn't be; None when it was fine, or isn't wanted.
+fn news_hook(repo: &Repo) -> Option<String> {
+    if !crate::news::wake::by_waiter(repo) {
+        return None;
+    }
+    match crate::news::hook::install(repo) {
+        Ok(false) => None,
+        Ok(true) => Some(format!(
+            "News hook written to {}: it wakes the coordinator with its news.",
+            crate::news::hook::FILE
+        )),
+        Err(e) => Some(format!("The news hook isn't in place: {e}. See `bullpen doctor`.")),
+    }
 }
 
 /// What a new coordinator is told first: who it is, where bullpen is, and to read the

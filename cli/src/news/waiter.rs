@@ -5,7 +5,8 @@
 //! cursor and exits 2, which starts a turn in the idle session with those lines.
 //!
 //! - Who: the coordinator whose pane runs it (`REX_BLOCK`, by the pane index). In any
-//!   other pane, with typed news, or while paused, it exits 0 at once.
+//!   other pane, unless news is `wake` (hook.rs installs it then), or while paused, it
+//!   exits 0 at once.
 //! - Newest wins: Claude Code starts one hook per turn end and stops none, so each
 //!   waiter writes itself into `news-<cid>.wait` and goes quietly once the file names
 //!   another.
@@ -21,7 +22,7 @@
 //! - It starts no child process: one would outlive the session.
 
 use super::read::{news_cursor, news_size, set_news_cursor};
-use super::wake::{lock_path, typed, unread, update_wait, wait_file, Unread};
+use super::wake::{by_waiter, lock_path, unread, update_wait, wait_file, Unread};
 use super::{LINE_BREAK, NEWS_MARK};
 use crate::coordinators::{coordinator_at, coordinators};
 use bullpen_core::config::load_config;
@@ -114,7 +115,7 @@ fn running(pid: libc::pid_t) -> bool {
 impl Waiter {
     /// The waiter for the coordinator in pane block, started by hook event (`Stop`,
     /// `StopFailure`) of a session; it takes the wait over. None: nothing to wait for
-    /// here (not a coordinator's pane, typed news, a pause).
+    /// here (not a coordinator's pane, news that isn't `wake`, a pause).
     pub fn start(block: &str, event: &str, session: &str, timeout: f64, at: Stamp) -> Res<Option<Waiter>> {
         let entry = bullpen_core::repo::block_entry(block);
         if s(&entry, "role") != "coordinator" || s(&entry, "repo").is_empty() {
@@ -137,7 +138,7 @@ impl Waiter {
         let Some(cid) = coordinator_at(&repo, block, false).map(|c| s(c, "id").to_string()) else {
             return Ok(None);
         };
-        if typed(&repo) {
+        if !by_waiter(&repo) {
             return Ok(None);
         }
         let lasts = (timeout - EXPIRE_BEFORE).max(0.0);
@@ -194,7 +195,7 @@ impl Waiter {
     fn still_waits(&mut self) -> Res<bool> {
         self.repo.cfg = load_config(&self.repo.dir)?;
         let me = coordinator_at(&self.repo, &self.block, false);
-        Ok(!typed(&self.repo) && me.is_some_and(|c| s(c, "id") == self.cid))
+        Ok(by_waiter(&self.repo) && me.is_some_and(|c| s(c, "id") == self.cid))
     }
 
     fn listed(&self) -> Vec<String> {

@@ -1,7 +1,7 @@
 //! The backstop for news no coordinator reads, and `news --pause` / `--resume`.
 //!
-//! When news isn't typed (`config --news monitor`), a coordinator hears it only while a
-//! reader runs: its Monitor on `news --follow`. A Monitor expires after 30 minutes, and
+//! When news isn't typed (`config --news monitor` or `wake`), a coordinator hears it only
+//! while a reader runs: its Monitor on `news --follow`, or the waiter of its Stop hook. A Monitor expires after 30 minutes, and
 //! news that comes while none runs would sit unseen until the person speaks. So a line
 //! worth a wake (`wakes`) touches `<state>/wake-due`, and while that exists the watcher
 //! runs `_wake_check` every 3 s. For each live coordinator that isn't paused and has
@@ -56,7 +56,29 @@ pub fn wakes(event: &str) -> bool {
 /// Is news typed into the coordinators' panes? (As news() decides it.) Then the backstop
 /// has nothing to do.
 pub fn typed(repo: &Repo) -> bool {
-    repo.cfg_str("news") != "monitor"
+    typed_mode(repo.cfg_str("news"))
+}
+
+/// Is this value of the `news` setting one that types news? (`monitor` and `wake` don't.)
+pub fn typed_mode(news: &str) -> bool {
+    !matches!(news, "monitor" | "wake")
+}
+
+/// Does a waiter in the coordinator's Stop hook bring the news (`config --news wake`)?
+pub fn by_waiter(repo: &Repo) -> bool {
+    repo.cfg_str("news") == "wake"
+}
+
+/// Does a live waiter own coordinator cid's wait?
+pub fn has_waiter(repo: &Repo, cid: &str) -> bool {
+    super::waiter::live(&wait_file(repo, cid))
+}
+
+/// End the waiter that owns coordinator cid's wait: it goes at its next look.
+pub fn end_waiter(repo: &Repo, cid: &str) -> Res<()> {
+    update_wait(repo, cid, |w| {
+        w.remove("waiter");
+    })
 }
 
 pub fn wake_due_path() -> PathBuf {

@@ -12,6 +12,11 @@ sets how it reaches the coordinator, and `bullpen up --verbose` says which is in
   you send your own. Claude Code's dimmed prompt suggestion doesn't count as
   typing (bullpen reads the input's styling with `rex capture --format=vt`), so
   news doesn't wait behind one.
+- `wake`: nothing is typed, and the coordinator starts nothing. Bullpen writes a
+  hook into the repo's `.claude/settings.local.json`; each time the coordinator's
+  turn ends, the hook parks a waiter, which costs no turn while nothing happens and
+  wakes the idle session when news comes (see [The waiter](#the-waiter-config---news-wake)
+  below). It needs Claude Code as the coordinator. It is opt-in for now.
 - `monitor`: nothing is typed. The coordinator runs Claude Code's Monitor tool on
   `bullpen news --follow`, and each line shows up in its chat as a notification
   without touching the input, so news never waits on your typing. It needs a
@@ -57,7 +62,8 @@ old news is never printed again.
 ## The backstop
 
 A monitor can lapse: it expires every 30 minutes, and the coordinator may not
-start it again. So news that isn't typed has a backstop. When a line worth
+start it again. A session with `wake` has no waiter until its first turn ends (a
+resumed one, say), or when the hook can't run. So news that isn't typed has a backstop. When a line worth
 acting on is logged, the watcher looks every 3 seconds (`bullpen _wake_check`,
 while `<state>/wake-due` exists). Once such a line has gone a minute unread by
 a coordinator whose pane is running, and no reader takes its news (a
@@ -73,12 +79,11 @@ Bookkeeping doesn't wake a coordinator by itself: lines for `started`,
 `tour-sent` and `keys` ride along with the next line that does (or wait for
 `bullpen news`). Every other line wakes, a new kind of line too.
 
-## A waiter in the coordinator's Stop hook
+## The waiter (`config --news wake`)
 
-`bullpen news --wake` is made to be a Claude Code hook. Bullpen doesn't install
-it yet: to try it, add it yourself to the settings of the folder the coordinator
-runs in, as a Stop and a StopFailure hook, with news not typed
-(`bullpen config --news monitor`):
+`bullpen config --news wake` writes a Stop and a StopFailure hook into the repo's
+`.claude/settings.local.json`, the settings Claude Code reads for a session in that
+folder and doesn't share:
 
 ```json
 {"hooks": {
@@ -88,6 +93,25 @@ runs in, as a Stop and a StopFailure hook, with news not typed
                               "asyncRewake": true, "timeout": 86400}]}]
 }}
 ```
+
+- The file is yours and Claude Code's. Bullpen knows its own entries by their
+  command's `news --wake` ending and touches nothing else: your other settings and
+  hooks stay, in their order. It writes the file by rename.
+- `bullpen config --news type` (or `monitor`) takes the entries out again, with the
+  lists that leaves empty, and the file if nothing else is in it. A parked waiter
+  ends within a second.
+- The file is added to the checkout's `.git/info/exclude`, so git leaves it out: it
+  holds your own path to bullpen.
+- `wake` is refused when the coordinator isn't Claude Code (`coordinator_cmd`'s
+  program isn't `claude`): only it has the hook. Use `type` there. It is also
+  refused, with nothing changed, when the settings file doesn't parse.
+- `bullpen up` checks that the entries are there and run the copy of bullpen the
+  repo's coordinator uses, and writes them again if not ("News hook written to
+  .claude/settings.local.json"). `bullpen doctor` checks the rest (see
+  [Doctor](doctor.md)).
+- Claude Code reads the file again when it changes, so the switch reaches a
+  coordinator that is running. Every other Claude session in the folder runs the
+  hook too; there it exits at once.
 
 Each time the coordinator's turn ends, Claude Code starts the command in the
 background, and it waits there: it looks at `news.log`'s size once a second,
@@ -100,8 +124,8 @@ are bullpen's news, not an error and not your words. If the session is busy, the
 lines come as a turn of their own once it is done.
 
 - It knows its coordinator by the pane it runs in (`REX_BLOCK`). In any other
-  pane, with typed news, or while news is paused, it exits at once: that is all
-  another Claude session in the folder pays for the hook.
+  pane, unless news is `wake`, or while news is paused, it exits at once: that is
+  all another Claude session in the folder pays for the hook.
 - Claude Code starts one per turn end and stops none, so the newest owns the
   wait (`news-c1.wait` names it) and an older one goes quietly within a second.
 - A coordinator is woken once a minute at most. A batch that settles sooner
@@ -127,9 +151,9 @@ lines come as a turn of their own once it is done.
 - A session that is killed outright (`kill -9`, a crash) signals nobody. The
   waiter notices within a second that nobody reads its stderr any more and
   exits the same way; and it moves the cursor only once its lines got out.
-- It shares the cursor and the lock with `bullpen news` and `news --follow`, so
-  no line comes twice. While a `news --follow` runs, that prints the news and
-  the waiter leaves it to it. The backstop types nothing while a waiter lives.
+- It shares the cursor and the lock with `bullpen news`, so no line comes twice.
+  The backstop types nothing while a waiter lives. With `wake`, `news --follow`
+  prints `bullpen · news wakes you by itself now` and exits.
 - `bullpen news --pause` ends a parked waiter, and none starts until the resume.
 - Never run `news --wake` from the coordinator's own tools: a waiter started by
   a tool call dies with that call.
@@ -147,13 +171,17 @@ types it. With `type`, `--pause` refuses: there's nothing to pause.
 
 ## Switching
 
-You can switch while a coordinator runs. Switching to `monitor` types one last
-line into its pane telling it to start the monitor (not when you run `config`
-from the coordinator's own pane: it sees the answer). Switching to `type` makes
+You can switch while a coordinator runs. Switching to `wake` types one last line
+into its pane saying that news wakes it by itself from now on; the turn that line
+starts ends with the hook in place, so it parks the first waiter. Switching to
+`monitor` types one last line telling it to start the monitor. (Neither is typed
+when you run `config` from the coordinator's own pane: it sees the answer.)
+Switching from `type` starts from the end of the log, since what was typed isn't
+news again; between `monitor` and `wake`, unread news stays unread. Switching to `type` makes
 a running `news --follow` print `bullpen · news is typed into your pane now` and
 exit, so the coordinator stops restarting it and no line arrives twice; in `type`
 mode `--follow` always does that, and plain `bullpen news` still works. News
-logged in `monitor` mode but not yet read when you switch back is not typed:
+logged in `monitor` or `wake` mode but not yet read when you switch back is not typed:
 `bullpen news` prints it.
 
 ## A changed guide

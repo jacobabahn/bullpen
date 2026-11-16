@@ -19,7 +19,7 @@ impl Home {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let home = Home { dir };
-        home.config("monitor");
+        home.config("wake");
         set_news_cursor(&home.repo(), 0, "c1").unwrap();
         home
     }
@@ -295,15 +295,17 @@ fn a_pause_ends_it_and_none_starts_while_paused() {
 }
 
 #[test]
-fn none_starts_for_typed_news_or_another_pane() {
+fn none_starts_unless_news_is_wake_or_in_another_pane() {
     let h = Home::new();
     let file = h.dir.join("limit.json");
     assert!(Waiter::take(h.repo(), "blk9", "Stop", "", TIMEOUT, t(0), file)
         .unwrap()
         .is_none());
-    h.config("type");
-    assert!(h.waiter("Stop", 0).is_none());
-    assert!(!h.wait().contains_key("waiter"));
+    for news in ["type", "monitor"] {
+        h.config(news);
+        assert!(h.waiter("Stop", 0).is_none());
+        assert!(!h.wait().contains_key("waiter"));
+    }
 }
 
 #[test]

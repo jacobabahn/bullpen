@@ -123,7 +123,9 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   `wake.rs`: the backstop for news no coordinator reads (`_wake_check`, which news is worth a
   wake: `wakes`) and `news --pause` / `--resume`; `waiter.rs`: `news --wake`, the waiter a
   coordinator's Stop hook parks (`Waiter::step` is one look, given its time, so its tests
-  bring their own clock)
+  bring their own clock); `hook.rs`: that hook in the repo's `.claude/settings.local.json`
+  (`put` and `take` change the settings as read, `install`, `remove` and `sync` the file);
+  `switch.rs`: what `config --news <value>` sets off (the hook, the cursors, the last typed line)
 - `notifications.rs`: the person's notifications (the save hook) and `_flush`
 - `overlap.rs`: two open tasks changing the same file: checked at a worker's end of turn
   and on `ready` (`check`), one news line per pair, and `show`'s list (`overlaps_of`)
@@ -153,7 +155,7 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   when it runs from its own build), and the catch-up (`catch_up`)
 - `push_remote.rs`: the push remote's background push (`_push`, one at a time, under
   its lock), `up`'s catch-up push, and doctor's check of the push remote
-- `doctor/`: `mod.rs`: `doctor` (and `--json`) and `up`'s hint; `all_repos.rs`: `doctor --all-repos`; `checks.rs`: the checks
+- `doctor/`: `mod.rs`: `doctor` (and `--json`) and `up`'s hint; `all_repos.rs`: `doctor --all-repos`; `checks.rs`: the checks; `news.rs`: the `news` check (the hook of `config --news wake`); `doctor --fix` (`fix` in `mod.rs`) makes the hook match the setting
 - `start/mod.rs`: `add`, `after`, `model`, `review-mode`, what a task waits on, and
   which saves move the run queue (`slot_freed`); `launch.rs`: `start`, `resume`, `tell`,
   the worker's brief and pane (`start_task`, `write_full`, `launch`) and `hand_back`; `queue.rs`: the

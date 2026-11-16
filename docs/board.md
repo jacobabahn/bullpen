@@ -203,7 +203,7 @@ A task that needs you for a question gets `i answer` on its key line:
 - **The coordinator asked** (`bullpen ask`): `i` shows the task and the whole
   question, wrapped to the pane, with a line under it, "Answer:" (`⏎` sends, `esc`
   goes back). What you type goes to the task's coordinator, not its worker: typed into its pane as
-  `BP-3: <your answer>`, or, with `config --news monitor`, as a news line it reads.
+  `BP-3: <your answer>`, or, with news that isn't typed (`config --news wake` or `monitor`), as a news line it reads.
   A task asked about while it was working, in review or ready goes back to that.
   One that was stopped leaves needs as `bullpen ok` would (working, or in review),
   or, with its agent's pane gone, goes to its coordinator ("coordinator on it"). The

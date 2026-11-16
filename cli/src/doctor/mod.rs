@@ -7,6 +7,7 @@
 
 mod all_repos;
 mod checks;
+mod news;
 
 use crate::args::{flag, Arg, Args};
 use crate::push_remote::{check_push, check_push_seen};
@@ -116,6 +117,7 @@ fn doctor_checks(place: &Place, run: Run) -> Vec<Line> {
             false,
             Box::new(|| crate::copies::check_copy(repo, why_not)),
         ),
+        ("news", false, true, Box::new(|| news::check_news(repo, why_not))),
         (
             "push",
             false,
@@ -160,15 +162,26 @@ const DOCTOR: &[Arg] = &[
         "--json",
         "the checks as JSON: {name, state, text} each, and the problems' names",
     ),
+    flag(
+        "--fix",
+        "first fix what bullpen can by itself, in this repository: the news hook in .claude/settings.local.json \
+         (written with `config --news wake`, removed with any other news)",
+    ),
 ];
 
 /// `doctor`: one line per check, with the fix for what's wrong.
 pub fn cmd_doctor(argv: &[String]) -> Res<i32> {
     let a = Args::parse("doctor", argv, DOCTOR);
     if a.flag("--all-repos") {
+        if a.flag("--fix") {
+            return bullpen_core::fail("--fix is for one repository: run `bullpen doctor --fix` in it");
+        }
         return all_repos::doctor_all(a.flag("--json"));
     }
     let place = Place::at(repo_root().ok());
+    if a.flag("--fix") {
+        fix(&place, a.flag("--json"))?;
+    }
     let res = doctor_checks(&place, Run::Doctor);
     let failed: Vec<String> = failed(&res).map(String::from).collect();
     if a.flag("--json") {
@@ -180,6 +193,24 @@ pub fn cmd_doctor(argv: &[String]) -> Res<i32> {
         println!("{}", summary(&failed));
     }
     Ok(if failed.is_empty() { 0 } else { 1 })
+}
+
+/// `doctor --fix`: what bullpen can fix by itself, before the checks. Said on stderr
+/// with --json, whose output is the checks alone.
+fn fix(place: &Place, json: bool) -> Res<()> {
+    let Some(repo) = place.repo.as_ref() else {
+        return bullpen_core::fail(match place.why_not {
+            Some(why) => format!("--fix can't tell this repository's settings: {why}"),
+            None => "--fix is for a repository: run it in one".into(),
+        });
+    };
+    match crate::news::hook::sync(repo) {
+        Ok(None) => {}
+        Ok(Some(did)) if json => eprintln!("fixed  news: {did}"),
+        Ok(Some(did)) => println!("fixed  news: {did}"),
+        Err(e) => eprintln!("bullpen: --fix left the news hook as it was: {}", e.0),
+    }
+    Ok(())
 }
 
 /// The names of the checks that failed.

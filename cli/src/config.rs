@@ -2,14 +2,13 @@
 //! global ones. Its flags come from core's settings table, one per setting that has one.
 
 use crate::args::{flag, usage_error, value, Arg, Args};
-use crate::coordinators::{alive, calling_coordinator, coordinator, coordinator_at, coordinator_mut, coordinators};
-use crate::news::read::{news_size, py_int, set_news_cursor};
-use crate::news::{type_news, NEWS_MARK};
-use crate::rex::with_state;
+use crate::coordinators::{coordinator, coordinator_at, coordinator_mut, coordinators};
+use crate::news::news_mode_line;
+use crate::news::read::py_int;
 use crate::task_line::term_width;
 use bullpen_core::config::{config_source, global_config_path, inherited_config, read_global, read_global_file};
 use bullpen_core::json::{self, dumps, dumps_line, py_str, s, Obj};
-use bullpen_core::paths::{home_path, homes, self_bin, state};
+use bullpen_core::paths::{home_path, homes, state};
 use bullpen_core::repo::{reindex, repo_root};
 use bullpen_core::settings::{defaults, is_internal, is_repo_only, Kind as SKind, Setting, SETTINGS};
 use bullpen_core::task::model_phrase;
@@ -201,30 +200,9 @@ pub fn cmd_config(argv: &[String]) -> Res<i32> {
     let ch = config_changes(&a)?;
     let unset = a.all("--unset");
     check_unset(&unset, Some(&repo))?;
+    let news_was = repo.cfg_str("news").to_string();
     for k in unset {
         repo.unset(k)?;
-    }
-    if ch.get("news").and_then(Value::as_str) == Some("monitor") && s(&repo.cfg, "news") != "monitor" {
-        let ids: Vec<String> = coordinators(&repo).iter().map(|c| s(c, "id").to_string()).collect();
-        for cid in std::iter::once("").chain(ids.iter().map(String::as_str)) {
-            set_news_cursor(&repo, news_size(&repo), cid)?; // what was typed already isn't news again
-        }
-        let me = calling_coordinator(&repo).map(|c| c as *const Obj);
-        let mut told = Vec::new();
-        for c in coordinators(&repo) {
-            if Some(c as *const Obj) != me && alive(Some(c))? {
-                told.push(s(c, "id").to_string());
-            }
-        }
-        if !told.is_empty() {
-            // The last typed line: running coordinators have to hear of the switch.
-            let line = format!(
-                "{NEWS_MARK}news now comes by monitor and is no longer typed: start the Monitor tool on `{}` now, \
-                 as your guide says",
-                follow_cmd()
-            );
-            type_news(&repo, &line, &told)?;
-        }
     }
     if let Some(on) = a.opt("--board-others") {
         let named = a.opt("--coordinator").filter(|c| !c.is_empty());
@@ -248,6 +226,7 @@ pub fn cmd_config(argv: &[String]) -> Res<i32> {
         repo.set(k, v.clone());
     }
     if ch.contains_key("news") {
+        crate::news::switch::switched(&repo, &news_was)?; // before the save: `wake` can be refused
         eprintln!("{}", news_mode_line(&repo));
     }
     repo.save()?;
@@ -307,30 +286,6 @@ fn config_files() -> Vec<std::path::PathBuf> {
     dirs.map(|e| e.path().join("config.json"))
         .filter(|p| p.is_file())
         .collect()
-}
-
-/// news.follow_cmd: the command a coordinator's Monitor tool runs.
-fn follow_cmd() -> String {
-    let argv = [
-        self_bin().to_string_lossy().into_owned(),
-        "news".into(),
-        "--follow".into(),
-    ];
-    shell_join(&with_state(&argv))
-}
-
-/// One line saying how news reaches the coordinator.
-fn news_mode_line(repo: &Repo) -> String {
-    if s(&repo.cfg, "news") == "monitor" {
-        return format!(
-            "news: by monitor. Nothing is typed: the coordinator must run the Monitor tool on `{}` (its guide \
-             says how).",
-            follow_cmd()
-        );
-    }
-    "news: typed into the coordinator's pane (`bullpen config --news monitor`: by Claude Code's Monitor tool \
-     instead)."
-        .into()
 }
 
 /// A setting's value as `config` lists it: a command as a shell would take it, text as

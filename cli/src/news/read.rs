@@ -156,13 +156,24 @@ pub fn cmd_news(argv: &[String]) -> Res<i32> {
         if INTERRUPTED.load(Ordering::SeqCst) {
             return Ok(0);
         }
-        if follow && !news_by_monitor(&repo)? {
-            // Typed news is logged too: following it would give every line twice.
-            say(&format!(
-                "{NEWS_MARK}news is typed into your pane now (`bullpen config --news type`): \
-                 don't start the monitor again"
-            ));
-            return Ok(0);
+        if follow {
+            let mode = news_mode(&repo)?;
+            if mode == "wake" {
+                // the waiter of its Stop hook brings the news: a monitor would only expire
+                say(&format!(
+                    "{NEWS_MARK}news wakes you by itself now (`bullpen config --news wake`): \
+                     don't start the monitor again"
+                ));
+                return Ok(0);
+            }
+            if mode != "monitor" {
+                // Typed news is logged too: following it would give every line twice.
+                say(&format!(
+                    "{NEWS_MARK}news is typed into your pane now (`bullpen config --news type`): \
+                     don't start the monitor again"
+                ));
+                return Ok(0);
+            }
         }
         if follow && not_a_reader(&mut repo, &cid)? {
             // dropped while following
@@ -228,9 +239,9 @@ fn not_a_reader(repo: &mut Repo, cid: &str) -> Res<bool> {
     Ok(coordinator_at(repo, &block, false).is_none_or(|me| s(me, "id") != cid))
 }
 
-/// Is the setting `monitor` right now? Read again: it can change while we follow.
-fn news_by_monitor(repo: &Repo) -> Res<bool> {
-    Ok(s(&load_config(&repo.dir)?, "news") == "monitor")
+/// The `news` setting right now. Read again: it can change while we follow.
+fn news_mode(repo: &Repo) -> Res<String> {
+    Ok(s(&load_config(&repo.dir)?, "news").to_string())
 }
 
 pub fn cursor_path(repo: &Repo, cid: &str) -> PathBuf {

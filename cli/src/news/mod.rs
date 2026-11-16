@@ -2,8 +2,10 @@
 //! the watcher types into their panes. `bullpen news` (one-off and `--follow`) is in
 //! read.rs, `news --recent` in recent.rs.
 
+pub mod hook;
 pub mod read;
 pub mod recent;
+pub mod switch;
 pub mod waiter;
 pub mod wake;
 
@@ -72,7 +74,7 @@ pub fn news(repo: &Repo, task: &Obj, event: &str, text: &str, o: Opts) -> Res<()
     // one write: a reader never sees half
     append(&repo.dir.join("news.log"), &record)?;
     wake::after_logged(repo, event)?;
-    if repo.cfg_str("news") != "monitor" {
+    if wake::typed(repo) {
         // With no coordinator alive the line waits once, in the shared outbox: one copy
         // per coordinator would reach the first to come back once for each.
         let said = o.typed.filter(|t| !t.is_empty()).map_or(line, squash);
@@ -220,7 +222,15 @@ pub fn news_mode_line(repo: &Repo) -> String {
             follow_cmd()
         );
     }
-    "news: typed into the coordinator's pane (`bullpen config --news monitor`: by Claude Code's Monitor tool instead)."
+    if wake::by_waiter(repo) {
+        return format!(
+            "news: by wake. Nothing is typed and the coordinator starts nothing: a hook in {} parks a waiter \
+             each time its turn ends, which wakes it with the news.",
+            hook::FILE
+        );
+    }
+    "news: typed into the coordinator's pane (`bullpen config --news wake`: a hook in Claude Code wakes the \
+     coordinator instead, with nothing typed)."
         .into()
 }
 

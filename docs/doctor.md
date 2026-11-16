@@ -66,8 +66,33 @@ non-zero when anything fails. It checks:
   has the other's commits; not told without git). A coordinator started before copies
   were recorded is `--` until `bullpen up` records it.
 
+- the news hook (`news`; see [News](news.md#the-waiter-config---news-wake)). With
+  `config --news wake`:
+  - the repo's `.claude/settings.local.json` parses, and has bullpen's Stop and
+    StopFailure entries, once each, running the copy of bullpen the repo's
+    coordinator uses: `bullpen up` writes them
+  - git ignores that file (a committed one isn't ignored)
+  - `coordinator_cmd`'s program is `claude`. Else it says `wake` needs Claude Code,
+    and to use `type`
+  - Claude Code (`claude --version`) is 2.1.325 or later, the version the hook was
+    checked on. A program that doesn't say its version isn't a failure
+  - every running coordinator that is idle (by the watcher's note of its pane), and
+    not paused, has a waiter: "c1 is idle with no news waiter: it hears news by
+    typing until its next turn". Saying anything to it starts one; if its turns
+    keep ending without one, the hook doesn't run in that session (`/hooks` there
+    lists the hooks it has)
+
+  With any other news it is `--`, unless the file still has bullpen's entries:
+  `bullpen doctor --fix` removes them.
+
+`bullpen doctor --fix` first fixes what bullpen can by itself, in this repository,
+and then runs the checks. For now that is the news hook: written when news is
+`wake`, removed when it isn't. It says what it did ("fixed  news: removed bullpen's
+news hook from .claude/settings.local.json"), on stderr with `--json`, and it
+doesn't go with `--all-repos`.
+
 `bullpen up` runs the quick checks (not `gh` or the push remote, which need the
-network, nor the watcher and coordinators, which `up` sees to itself) and, if any fail, prints one
+network, nor the watcher, the coordinators and the news hook, which `up` sees to itself) and, if any fail, prints one
 line: "2 problems: run `bullpen doctor`". Doctor itself ends with the failed checks'
 names ("2 problems: keys, watcher."), and writes paths in your home folder with `~`.
 
@@ -78,7 +103,7 @@ names ("2 problems: keys, watcher."), and writes paths in your home folder with 
 gone). The checks about the setup, which are the same for every repo (`rex`,
 `bullpen`, `board`, `cargo`, `keys`, `watcher`, `state`, `global`), run once, under
 "Setup, for every repo". Then each repo gets its own (`gh`, `agents`, `config`,
-`setup`, `teardown`, `coordinators`, `copy`, `push`) under its name and folder. A repo whose
+`setup`, `teardown`, `coordinators`, `copy`, `news`, `push`) under its name and folder. A repo whose
 board runs an older build shows up on its `coordinators` line, and one whose
 `config.json` doesn't parse is named by its state folder. The last line names each
 problem, a repo's as `repo/check`: "2 problems: keys, shop/coordinators." Two repos

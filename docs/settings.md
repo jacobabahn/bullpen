@@ -32,8 +32,9 @@ global file held every setting: the first time bullpen reads it, it drops the
 values that are just the default, so the global ones apply there.
 
 `bullpen config --auto-accept on` accepts approved tasks by themselves (off by
-default; see [Auto-accept](accept.md#auto-accept)). `bullpen config --news monitor` changes how news reaches the coordinator (`type`
-by default). `bullpen config --merge squash` changes how `accept` merges (`rebase` by default;
+default; see [Auto-accept](accept.md#auto-accept)). `bullpen config --news wake` changes how news reaches the coordinator (`type`
+by default; `wake` writes a hook into the repo's `.claude/settings.local.json` and needs Claude Code
+as the coordinator, `monitor` has the coordinator follow it with its Monitor tool; see [News](news.md)). `bullpen config --merge squash` changes how `accept` merges (`rebase` by default;
 `squash` or `merge`). `bullpen config --stuck-after 45` sets how many minutes a
 working agent can show no progress before you hear of it (20 by default, `0` for
 never). `bullpen config --triage-minutes 15` sets how long a task can wait on its

@@ -264,8 +264,8 @@ class NewsTest(BullpenTest):
         self.assertEqual(self.bp("up").stdout, "Coordinator already running. Board started.\n")
         self.assertEqual(self.bp("up", "--verbose").stdout.splitlines(),
                          ["coordinator already running: c1 (blk1)",
-                          "news: typed into the coordinator's pane (`bullpen config --news monitor`: "
-                          "by Claude Code's Monitor tool instead)."])
+                          "news: typed into the coordinator's pane (`bullpen config --news wake`: a hook in "
+                          "Claude Code wakes the coordinator instead, with nothing typed)."])
 
     def test_errors_say_a_status_in_the_boards_words(self):
         self.bp("up")

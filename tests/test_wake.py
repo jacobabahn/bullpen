@@ -194,6 +194,10 @@ class WakeTest(WakeCase):
 
 class WaiterTest(WakeCase):
     """`news --wake` as a process: what a Stop hook sees of it."""
+    def setUp(self):
+        super().setUp()
+        self.bp("config", "--news", "wake")  # one more typed line: the switch
+        self.told = len(self.news())
 
     def wake(self, block="blk1", event="Stop", *args):
         """Start `bullpen news --wake` as the hook of a pane's session would."""
@@ -248,11 +252,12 @@ class WaiterTest(WakeCase):
         self.bp_in("blk1", "news", "--pause")
         self.assertEqual(self.wake().wait(timeout=10), 0)  # paused
         self.bp_in("blk1", "news", "--resume")
-        self.bp("config", "--news", "type")
-        p = self.wake()
-        self.assertEqual(p.wait(timeout=10), 0)  # typed news
-        self.assertEqual(p.stderr.read(), "")
-        self.assertNotIn("waiter", self.wait_json())
+        for news in ("type", "monitor"):  # only `wake` has a waiter
+            self.bp("config", "--news", news)
+            p = self.wake()
+            self.assertEqual(p.wait(timeout=10), 0, news)
+            self.assertEqual(p.stderr.read(), "")
+            self.assertNotIn("waiter", self.wait_json())
 
     def test_a_signal_ends_it_quietly_and_the_cursor_stays(self):
         for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
@@ -282,6 +287,19 @@ class WaiterTest(WakeCase):
         self.bp_in("blk1", "news", "--pause")
         self.assertEqual(p.wait(timeout=10), 0)
         self.assertEqual(list(self.wait_json()), ["paused"])
+
+    def test_switching_away_from_wake_ends_a_parked_waiter(self):
+        p = self.wake()
+        self.parked(p)
+        self.bp("config", "--news", "type")
+        self.assertEqual(p.wait(timeout=10), 0)
+        self.assertEqual(p.stderr.read(), "")
+        self.assertNotIn("waiter", self.wait_json())
+
+    def test_follow_leaves_it_to_the_waiter(self):
+        p = self.bp_in("blk1", "news", "--follow")
+        self.assertEqual(p.stdout, "bullpen · news wakes you by itself now (`bullpen config --news wake`): "
+                                   "don't start the monitor again\n")
 
     def test_the_backstop_leaves_news_to_a_live_waiter(self):
         self.ask(self.tid, "Which one?")
