@@ -411,7 +411,8 @@ class BullpenTest(unittest.TestCase):
         (self.fake / "server_version").write_text("0.1.0-preview.13")
         (self.fake / "actions.json").write_text(json.dumps({"actions": [
             {"name": n, "source": "/x/lua/keys.lua:62"}
-            for n in ("bullpen_next", "bullpen_board", "bullpen_coordinator", "bullpen_jump")]}))
+            for n in ("bullpen_next", "bullpen_board", "bullpen_coordinator", "bullpen_jump",
+                      "bullpen_mission")]}))
         board = self.fake / "board"
         board.write_text("#!/bin/sh\n")
         board.chmod(0o755)

@@ -58,6 +58,7 @@ bullpen start BP-3 --pane tab      # its pane in float, tab (the workers tab), t
 bullpen model BP-4 sonnet   # the model a task starts and resumes with, even by itself (`add --model` too; `--clear`)
 bullpen ls                  # open tasks as the board says them: mark (● needs, ■ stopped, ◎ triage, ✔ ready, ◆ finished, ◐ review, ○ working, ◌ todo), ID, title, age, what it needs; --json: the raw status
 bullpen repos               # every repository bullpen knows: its coordinators (alive or gone, working or idle) and what needs the person, is ready, is running (--json: all of it)
+bullpen mission             # the person's mission control: every repository on one screen (cmd+; m); not for you to run
 bullpen show BP-3           # its line, branch, worktree, PR (or local branch), and next: what can be done now
 bullpen peek BP-3           # the end of the worker's screen
 bullpen check               # tasks whose status is out of step with their agent (nothing: all agree)

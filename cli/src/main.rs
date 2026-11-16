@@ -28,6 +28,7 @@ mod keep;
 mod keys;
 mod limit;
 mod line_edit;
+mod mission;
 mod modes;
 mod news;
 mod notes;

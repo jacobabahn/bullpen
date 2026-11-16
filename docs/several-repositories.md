@@ -33,6 +33,8 @@ checkout is gone is left out of what follows.
 - `bullpen news --recent --all-repos` prints the last news lines of every
   repository, in time order, each with its repository and time (see
   [News](news.md)).
+- `cmd+;` then `m` (`bullpen mission`) is [mission control](mission.md): every
+  repository's inbox and tasks on one screen, with the board's keys on each task.
 - `cmd+;` then `j` (`bullpen pick`) picks any open task of any repository by
   typing part of it (see [Keys](keys.md)); `bullpen go BP-1 --repo PATH` goes to a
   task of another repository.

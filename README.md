@@ -84,6 +84,7 @@ Using it:
 - [Doctor](docs/doctor.md): what `bullpen doctor` checks
 - [Several coordinators](docs/several-coordinators.md)
 - [Several repositories](docs/several-repositories.md)
+- [Mission control](docs/mission.md): every repository on one screen, `cmd+;` `m`
 
 How it behaves: what bullpen does by itself as tasks move along, and the settings for it.
 

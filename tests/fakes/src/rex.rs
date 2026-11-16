@@ -1,6 +1,7 @@
 //! The tests' fake Rex. It logs each call to rex.log in $FAKE_DIR, keeps its blocks,
 //! layers and windows in reg.json there (blocks: {id: {label, layer, window}}; layers:
-//! {id: state}; windows: [id]; labels: {window: label}; session), with a file in alive/
+//! {id: state}; windows: [id]; labels: {window: label}; session; sessions: the ones
+//! `new` made, [{session_id, label}], which `ls --json` lists), with a file in alive/
 //! for each block that's open, and answers from the files the tests put there:
 //!
 //!   send_fails_<block>      `send` and `send-key` to it fail
@@ -173,6 +174,23 @@ impl Rex {
             print(&dumps(
                 &json!({"window_id": idx(&self.blocks()?[&b], "window")?, "block_ids": [b]}),
             ));
+        } else if first == "new" {
+            // a session of its own: its label is kept (sessions), its first pane a block
+            let label = arg(a, 1)?.to_string();
+            let sid = format!("session:{label}");
+            let w = self.new_window()?;
+            let b = self.new_block(Value::Null, Value::Null, json!(w))?;
+            let sessions = obj(&mut self.r)?.entry("sessions").or_insert(json!([]));
+            sessions
+                .as_array_mut()
+                .ok_or_else(|| broke("sessions isn't a list"))?
+                .push(json!({"session_id": sid, "label": label}));
+            print(&dumps(
+                &json!({"session_id": sid, "initial_windows": [{"window_id": w, "block_ids": [b]}]}),
+            ));
+        } else if first == "ls" {
+            let sessions = self.r.get("sessions").cloned().unwrap_or(json!([]));
+            print(&dumps(&json!({"sessions": sessions})));
         } else if first == "split" {
             let anchor = if a.iter().any(|x| x == "-b") {
                 self.blocks()?.get(opt(a, "-b")?).cloned()

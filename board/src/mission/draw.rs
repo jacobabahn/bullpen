@@ -434,7 +434,7 @@ fn bottom(buf: &mut Buffer, area: Rect, m: &Mission, msg: Vec<Span<'static>>) ->
     let (w, h) = (area.width as usize, area.height as usize);
     let last = h.saturating_sub(1);
     for (j, l) in msg.iter().enumerate() {
-        put(buf, area, last - msg.len() + j, 1, l.clone());
+        put(buf, area, (last + j).saturating_sub(msg.len()), 1, l.clone());
     }
     if m.quitting {
         let texts = ["y quits mission control   any other key stays", "y quits   n stays"].map(String::from);

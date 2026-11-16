@@ -21,7 +21,13 @@ pub type Check = Res<(&'static str, String)>;
 
 /// preview.13: minimized floating panes. A release sorts after its previews (u64::MAX).
 pub const REX_MIN: (u64, u64, u64, u64) = (0, 1, 0, 13);
-const KEY_ACTIONS: [&str; 4] = ["bullpen_next", "bullpen_board", "bullpen_coordinator", "bullpen_jump"];
+const KEY_ACTIONS: [&str; 5] = [
+    "bullpen_next",
+    "bullpen_board",
+    "bullpen_coordinator",
+    "bullpen_jump",
+    "bullpen_mission",
+];
 
 /// (major, minor, patch, preview) from "0.1.0-preview.13"; a release sorts after its
 /// previews. None if it isn't a version (`v?(\d+)\.(\d+)\.(\d+)(?:-preview\.(\d+))?$`).

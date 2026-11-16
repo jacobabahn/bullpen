@@ -72,8 +72,8 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `fleet.rs`: every known repo in one snapshot (`Fleet`): its root and settings, its
   coordinators (with the watcher's note on each, and Rex's alive, asked apart:
   `ask_alive`), its open tasks with the board's words and counts. `repos`,
-  `ls --all-repos` and the board's top line read it; a `Reader` kept between
-  snapshots (the board's) reads a file again only when its time or size changed.
+  `ls --all-repos`, the board's top line and mission control read it; a `Reader` kept
+  between snapshots (the board's) reads a file again only when its time or size changed.
   `fleet::repos` is its list of repos alone (`news --recent --all-repos`), and
   `fleet::unread` the ones whose settings it can't read (`doctor --all-repos`)
 - `timeutil.rs`: ISO stamps as Python's `isoformat`, ages, the clock
@@ -95,6 +95,8 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `help.rs`: the top-level help and the unknown-command line (as the Python wrote them)
 - `show.rs`: `ls` and `show`
 - `repos.rs`: `repos`, a line per repository from core's `fleet.rs`, or its JSON
+- `mission.rs`: `mission`: make or focus mission control's session and pane
+  (`mission.json`), and `--here`, which runs the board's program as mission control
 - `task_line.rs`: one task line, as the board says it (or its rows, on a narrow
   terminal), cut to the terminal's width and coloured there
 - `saves.rs`: saving a task and what it sets off (`save`): the run queue and then
@@ -218,6 +220,14 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `app/` (keys, background jobs, reloading; `later.rs`: the Later group's keys, `L` and
   an item's `y` `n` `s` `J` `K` `⏎`), `ui/` (drawing; `later.rs`: the Later group's
   rows), `edit.rs` (a line editor)
+- `mission/` (`bullpen-board --mission`): mission control. `items.rs` is what it lists,
+  from core's `fleet.rs` snapshot (the inbox, each repo's line and tasks, the totals);
+  `mod.rs` its state and keys: each repo gets a board's `App` with its tasks from the
+  snapshot, and a key on a task goes to that App, so the board's keys, questions and
+  background commands serve it unchanged; `draw.rs` its layouts (140 and 80 columns),
+  with the board's drawing for the questions, answers and typed lines; `run.rs` the
+  loop: a watch on the state folder, `bullpen repos --json` for Rex's alive every 5 s,
+  and reloading when rebuilt
 
 ## Closing a task
 

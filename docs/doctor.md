@@ -14,7 +14,7 @@ non-zero when anything fails. It checks:
   Else it says why: the last build failed (with the log), the source has uncommitted
   changes, or it just hasn't been rebuilt yet; `bullpen build` fixes each
 - the keys are in your Rex config: Rex lists the `bullpen_next`, `bullpen_board`,
-  `bullpen_coordinator` and `bullpen_jump` actions (`rex actions`). With some of them
+  `bullpen_coordinator`, `bullpen_jump` and `bullpen_mission` actions (`rex actions`). With some of them
   listed and one missing, the line is there but Rex loaded an older `keys.lua`: the
   fix is `rex config reload`. With none listed, it's `bullpen keys --install`
 - the watcher is running, from the current `watch.lua` and bullpen build (the build's

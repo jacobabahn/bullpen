@@ -129,3 +129,15 @@ fn with_no_repos_it_says_how_to_start_one() {
     assert!(has(&s, "No repositories yet.") && has(&s, "Nothing open in any repository."));
     assert!(s[0].contains("0 repos"));
 }
+
+#[test]
+fn any_size_draws_without_a_panic() {
+    let st = State::new("sizes");
+    sample(&st);
+    let mut m = st.mission();
+    press(&mut m, 'q'); // a message row too
+    m.msg = crate::app::Note::failed("A long failure that wraps over a few rows, on a screen far too small for it.");
+    for (w, h) in [(1, 1), (10, 1), (20, 3), (79, 4), (80, 5), (140, 6), (300, 100)] {
+        screen(&mut m, w, h);
+    }
+}

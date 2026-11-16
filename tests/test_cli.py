@@ -152,8 +152,8 @@ class CliTest(BullpenTest):
             {"name": n, "source": "/x/lua/keys.lua:62"}
             for n in ("bullpen_next", "bullpen_board", "bullpen_coordinator")]}))
         _, lines = self.doctor()
-        self.assertEqual(lines["keys"],
-                         ("FAIL", "bullpen_jump missing: Rex loaded an older keys.lua. Run `rex config reload`"))
+        self.assertEqual(lines["keys"], ("FAIL", "bullpen_jump, bullpen_mission missing: Rex loaded an older keys.lua. "
+                                                 "Run `rex config reload`"))
 
     def keys_install(self, ok=True):
         self.env.pop("REX_CONFIG", None)
@@ -266,7 +266,7 @@ class EntryTest(BullpenTest):
                           "config", "ready", "review", "verdict", "close", "drop", "finish", "_push", "answer",
                           "reply", "prompt", "check", "_event", "_stuck", "_limit", "_gone", "_coordinator_gone",
                           "_tour", "tour-comment", "accept", "_auto_accept", "keys", "_prs", "tour", "stats",
-                          "repos", "later", "_pickup"})
+                          "repos", "later", "_pickup", "mission"})
 
     def test_help_and_an_unknown_command(self):
         p = self.call("--help")

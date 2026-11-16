@@ -47,6 +47,7 @@ pub const COMMANDS: &[Command] = &[
     c("_tour", INTERNAL, "", crate::tours::write::cmd_tour_bg),
     c("tour-comment", YOU, "draft comments on a tour's steps: add, list (no STEP) or remove", crate::tours::comments::cmd_tour_comment),
     c("stats", YOU, "where tasks' time went: one task's timeline and totals, or the totals across closed tasks", crate::stats::cmd_stats),
+    c("mission", YOU, "mission control: every repository on one screen, in a Rex session of its own (cmd+; m)", crate::mission::cmd_mission),
     c("repos", YOU, "every repository bullpen knows, a line each: its coordinators, alive or gone, and what needs you, what's ready, what's running", crate::repos::cmd_repos),
     c("later", YOU, "the backlog: add an idea to it, list it, or move, keep, drop or start an item", crate::backlog::cmd_later),
     c("pick", YOU, "type part of any open task, in any repository, and go to it", crate::pick::cmd_pick),

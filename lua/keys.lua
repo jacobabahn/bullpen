@@ -2,19 +2,20 @@
 --
 --   dofile("/path/to/bullpen/lua/keys.lua").setup{ bin = "/path/to/bullpen/bin/bullpen" }
 --
--- `bullpen keys` prints that line with your paths filled in. It defines four
+-- `bullpen keys` prints that line with your paths filled in. It defines five
 -- actions, which also show in the command palette, and binds a key to each:
 --
 --   bullpen_next         cmd+;>n  the next task that needs you (again: the one after)
 --   bullpen_board        cmd+;>b  the task board
 --   bullpen_coordinator  cmd+;>c  the coordinator
 --   bullpen_jump         cmd+;>j  type part of any open task, in any repository, and go to it
+--   bullpen_mission      cmd+;>m  mission control: every repository on one screen
 --
 -- and ctrl+escape, in a worker's or reviewer's floating pane, puts it away (back
 -- into its capsule, or into the background) and returns to the board. Anywhere
 -- else the key goes through.
 --
--- Options: prefix = "ctrl+b" moves all four behind another key;
+-- Options: prefix = "ctrl+b" moves all five behind another key;
 -- keys = { next = "cmd+shift+j", hide = "cmd+." } sets single ones (false leaves one unbound;
 -- hide also takes a list of keys);
 -- state = "..." when you set BULLPEN_STATE.
@@ -51,6 +52,7 @@ function M.setup(opts)
     { name = "bullpen_board", title = "Bullpen: Task Board", cmd = "go", flag = "--board", key = "b" },
     { name = "bullpen_coordinator", title = "Bullpen: Coordinator", cmd = "go", flag = nil, key = "c" },
     { name = "bullpen_jump", title = "Bullpen: Jump to a Task", cmd = "pick", flag = "--pane", key = "j" },
+    { name = "bullpen_mission", title = "Bullpen: Mission Control", cmd = "mission", flag = nil, key = "m" },
   }
   for _, a in ipairs(actions) do
     rex.action{

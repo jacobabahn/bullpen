@@ -5,7 +5,7 @@ or `REX_CONFIG`) and runs `rex config reload`. It only appends, so what's above
 the line stays first, and it adds nothing when the line is there (it still
 reloads). If the config already loads another bullpen's `keys.lua`, it says so
 and changes nothing: edit that line. `bullpen keys` only prints the line. It defines
-four actions, also in the command palette under Bullpen, and binds:
+five actions, also in the command palette under Bullpen, and binds:
 
 - `cmd+;` then `n`: the next task that needs you. Again: the one after it. Once
   nothing needs you, the board, with the task ready to accept (else finished) that
@@ -27,6 +27,8 @@ four actions, also in the command palette under Bullpen, and binds:
   coordinators' tasks (`o`). If even that fails, the picker says why after the count
   and stays open. It works from any pane
   (`bullpen pick --pane`; `bullpen pick` runs it in the terminal you're in).
+- `cmd+;` then `m`: [mission control](mission.md), every repository on one screen,
+  in a Rex session of its own (`bullpen mission`): made the first time, focused after.
 
 And in a worker's or reviewer's floating pane, `ctrl+escape` puts it away and
 returns you to the board (`bullpen hide`): a capsule is minimized again (in the workers
