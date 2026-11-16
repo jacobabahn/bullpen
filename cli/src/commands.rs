@@ -42,6 +42,7 @@ pub const COMMANDS: &[Command] = &[
     c("prompt", COORDINATOR, "the prompt a task's agent is at, and its screen, as JSON (for the board)", crate::answer::cmd_prompt),
     c("accept", YOU, "(the person's call) merge a ready task's PR, or its local branch without a remote (config --merge), and clean up; on a finished task (nothing to merge), close it", crate::accept::cmd_accept),
     c("close", YOU, "(the person's call) close a finished task: remove its worktree, branch and pane (the same as accept on it); --keep-branch ends any task unmerged, its branch kept (and pushed)", crate::close::cmd_close),
+    c("revert", YOU, "(the person's call) take an accepted task back: queues a task that reverts its commits (--why goes into its brief), reviewed and accepted like any other", crate::revert::cmd_revert),
     c("drop", YOU, "stop a task, close its PR, remove its worktree", crate::close::cmd_drop),
     c("tour", YOU, "a guided tour of a ready task's change: step through it (its path, off a terminal), or start writing one", crate::stepper::cmd_tour),
     c("_tour", INTERNAL, "", crate::tours::write::cmd_tour_bg),

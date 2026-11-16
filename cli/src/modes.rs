@@ -262,15 +262,23 @@ pub fn merge(repo: &Repo, t: &mut Obj) -> Res<()> {
         }
         return Ok(());
     }
-    if !truthy(t.get("pr")) || s(obj(t, "gh"), "state") == "merged" {
+    if !truthy(t.get("pr")) {
         return Ok(());
     }
-    let how = format!("--{}", repo.cfg_str("merge"));
-    let pr = py_str(t.get("pr").unwrap_or(&Value::Null));
-    let p = run_in(&[repo.gh(), "pr".into(), "merge".into(), pr, how], &repo.root, false)?;
-    if !p.ok() {
-        let said = if p.stderr.is_empty() { &p.stdout } else { &p.stderr };
-        return fail(format!("merge refused: {}", strip(said)));
+    if s(obj(t, "gh"), "state") != "merged" {
+        let how = repo.cfg_str("merge").to_string();
+        let pr = py_str(t.get("pr").unwrap_or(&Value::Null));
+        let argv = [repo.gh(), "pr".into(), "merge".into(), pr, format!("--{how}")];
+        let p = run_in(&argv, &repo.root, false)?;
+        if !p.ok() {
+            let said = if p.stderr.is_empty() { &p.stdout } else { &p.stderr };
+            return fail(format!("merge refused: {}", strip(said)));
+        }
+        t.insert("merged_how".into(), json!(how)); // one merged outside bullpen has none: who knows how
+    }
+    // for `revert`: the commit the merge left on the base, when gh says it
+    if let Some(oid) = crate::revert::commits::pr_merge_commit(repo, t) {
+        t.insert("merged".into(), json!(oid));
     }
     Ok(())
 }
@@ -391,6 +399,9 @@ fn merge_locally(repo: &Repo, t: &mut Obj) -> Res<()> {
     };
     move_base(repo, &base, &old, &new)?;
     t.insert("merged".into(), json!(new));
+    // for `revert`: the task's commits are these, by how it was merged
+    t.insert("merged_from".into(), json!(old));
+    t.insert("merged_how".into(), json!(how));
     Ok(())
 }
 

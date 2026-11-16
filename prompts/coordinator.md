@@ -110,6 +110,7 @@ bullpen accept BP-3         # merge its PR or local branch, clean up; on a finis
 bullpen close BP-3          # a finished task: its worktree, branch and pane go
 bullpen close BP-3 --keep-branch [--as NAME]  # end it unmerged, its branch kept (and pushed, if there's a remote)
 bullpen drop BP-3           # close it and remove its worktree
+bullpen revert BP-3 --why "..."  # take an accepted task back: adds and starts a task that reverts its commits; prints its ID
 bullpen adopt BP-3          # make another coordinator's task yours
 bullpen tour BP-3           # a guided tour of a ready task, for the person to step through on the board
 ```

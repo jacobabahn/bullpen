@@ -147,3 +147,50 @@ to its coordinator with news to `resume` or `tell` it. A refusal that isn't a
 conflict (uncommitted changes, a check GitHub requires, ...) leaves the task ready
 with the reason, as before; so does a refused `bullpen accept` of your own: it says
 why, and sends nothing back (`bullpen tell` the worker to rebase if you want it to).
+
+## Taking an accept back
+
+`bullpen revert BP-3 [--why "..."]` takes an accepted task back. It reverts nothing
+itself: it adds a task, `Revert BP-3: <its title>`, and starts it (if as many tasks
+work as `max_running` allows, it stays todo and the output says so: `bullpen start`
+it later). So the revert gets a branch, a review and an accept like any other change,
+and with an `origin` a pull request. It prints the new task's ID. It is your call:
+the coordinator runs it only when you ask.
+
+bullpen writes the new task's brief (from `prompts/revert.md`). It names the commits
+to revert, newest first, and tells the worker to revert them as one commit (`git
+revert --no-commit <commits>`, then one `git commit`), to keep the later work where
+the revert conflicts with it, to run the full suite, and to say in its summary
+anything that couldn't be cleanly taken back: a later task that built on it, or a
+change to settings or a state file that the older code can't read. `--why` goes into
+the brief. One commit for the lot, not one per commit, because the revert is read,
+accepted and (if it comes to that) taken back as one change, and a conflict with
+later work is settled once.
+
+The commits come from the task's record, never from commit messages. An accept
+records `merged` (the base's head after the merge; with a PR, the commit gh says the
+merge left), `merged_how` (`config --merge` at the time) and in local mode
+`merged_from` (the base's head before it); `ready` records `commits` (how many the
+branch had):
+
+| Merged by | The commits |
+| --- | --- |
+| `rebase` | local mode: those from `merged_from` to `merged`. A PR: the last `commits` ones up to `merged`. |
+| `squash` | `merged`, the one commit. |
+| `merge` | `merged`, the merge commit, reverted with `-m 1` (against the base as it was). |
+| not recorded | A task accepted before `merged_how` was kept, or a PR merged on GitHub outside bullpen. A `merged` commit with two parents is a merge commit; a branch of one commit left one commit. Anything else is refused: a rebase and a squash of several commits leave different commits, and the record can't tell them apart. |
+
+A task with a PR and no `merged` on record (accepted before it was kept) asks gh for
+the merge commit when you revert it.
+
+`revert` refuses, saying why: a task that wasn't accepted (open, dropped, closed
+with its branch kept, finished with nothing to merge); one whose commits are no
+longer in its base's history (the base is fetched first, with an `origin`); one whose
+record can't give the commits; one that has an open revert task; and one whose revert
+was accepted (`bullpen revert` that revert task brings the change back, and after
+that the first task can be reverted again).
+
+The new task has `reverts: BP-3` on its record. `bullpen show` says it on both:
+`reverts: BP-3` on the revert task, and on BP-3 `a revert is open: BP-9` until the
+revert is accepted, then `reverted by BP-9`. A revert task that is dropped counts
+for nothing.

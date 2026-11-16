@@ -43,6 +43,7 @@ mod prs;
 mod push_remote;
 mod ready;
 mod repos;
+mod revert;
 mod review;
 mod rex;
 mod risk;

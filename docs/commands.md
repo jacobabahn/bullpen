@@ -48,6 +48,8 @@ bullpen accept BP-1   # merge its PR (or local branch; rebase), close its pane, 
 bullpen close BP-1    # the same as accept, for a finished task only
 bullpen close BP-1 --keep-branch --as port  # end it unmerged, its branch kept as port (see finish.md)
 bullpen drop BP-1     # close its PR, pane and worktree without merging
+bullpen revert BP-1 --why "It broke login"   # take an accepted task back: a new task reverts its commits,
+                      #   reviewed and accepted like any other (see accept.md)
 bullpen build         # build bullpen's command line and the board now (see Rebuilds)
 bullpen later "Tidy the errors"  # an idea for later, on the backlog (see backlog.md)
 bullpen issues --now  # read the open GitHub issues into the backlog, each asking for a yes (see issues.md)

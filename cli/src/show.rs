@@ -247,6 +247,7 @@ pub fn cmd_show(argv: &[String]) -> Res<i32> {
         out.push(format!("    after: {}", after.join(", ")));
     }
     out.extend(crate::backlog::from_line(&t));
+    out.extend(crate::revert::show_lines(&t, &all));
     let own = owner(&repo, &t);
     if coordinators(&repo).len() > 1 || (truthy(t.get("coordinator")) && own.is_none()) {
         out.push(match own {
