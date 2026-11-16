@@ -1,6 +1,6 @@
 # Settings
 
-`bullpen config` lists the settings in groups (tasks, agents, review, board, news),
+`bullpen config` lists the settings in groups (tasks, agents, review, board, news, pickup),
 each with its value and where that comes from:
 `repo` (this repository's `config.json`), `global` (the one for every repository,
 `~/.config/bullpen/config.json`, or `$XDG_CONFIG_HOME/bullpen/config.json`) or
@@ -53,7 +53,10 @@ only (see [Local mode](local-mode.md)). The worker and coordinator
 commands are in that folder's `config.json` (`worker`, `coordinator_cmd`). `bullpen config
 --rebase-others off` stops `accept` rebasing the other open tasks (see [After
 accept](accept.md#after-accept)), and `--gh PATH` runs that gh instead of the one on PATH
-(`BULLPEN_GH` wins over both).
+(`BULLPEN_GH` wins over both). `bullpen config --pickup on` starts backlog items by
+themselves when there's room, under caps (`--pickup-running`, `--pickup-waiting`,
+`--pickup-per-day`, `--pickup-model`, `--pickup-auto-accept`; see
+[Pickup](backlog.md#pickup)).
 
 ## Where panes live
 

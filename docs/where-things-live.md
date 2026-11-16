@@ -15,7 +15,8 @@
 - The coordinator guides running coordinators were given, for the diff when it changes:
   `~/.local/state/bullpen/guides/<hash>.md`. See [News](news.md).
 - The backlog: `backlog.json` beside the tasks (with `backlog.lock`), its items' briefs
-  in `briefs/` as `L<n>.md`. See [The backlog](backlog.md).
+  in `briefs/` as `L<n>.md`. Pickup's `pickup.json` (with `pickup.lock`) beside them, and
+  `~/.local/state/bullpen/pickup` while the watcher should look. See [The backlog](backlog.md).
 - Overlaps told so far (two open tasks that change the same file): `overlaps.json`
   beside the tasks. See [Accept](accept.md#overlap-warning).
 - Notifications: `notify.log` beside the tasks. See [Notifications](notifications.md).

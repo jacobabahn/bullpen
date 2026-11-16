@@ -97,8 +97,8 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `repos.rs`: `repos`, a line per repository from core's `fleet.rs`, or its JSON
 - `task_line.rs`: one task line, as the board says it (or its rows, on a narrow
   terminal), cut to the terminal's width and coloured there
-- `saves.rs`: saving a task and what it sets off (`save`): the run queue (at
-  later-time), the person's notification, the PR to follow; `later` and `run_later`
+- `saves.rs`: saving a task and what it sets off (`save`): the run queue and then
+  pickup (at later-time), the person's notification, the PR to follow; `later` and `run_later`
 - `rex.rs`: Rex: running its commands, finding (`find_pane`, by ID or label), typing
   into, focusing and closing panes, a pane's terminal and program, the end of its screen
   (`screen_end`)
@@ -148,7 +148,8 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   run queue (`start_queued`); `peek.rs`: `peek`
 - `triage.rs`: `ask`, `ok` and `note`
 - `backlog/`: `later` (`mod.rs`: adding, who's calling, keep, drop, skip, moves, and
-  `show`'s from line; `list.rs`: the list's lines; `start.rs`: an item made a task)
+  `show`'s from line; `list.rs`: the list's lines; `start.rs`: an item made a task;
+  `pickup.rs`: idle pickup, its caps, and the watcher's `_pickup`)
 - `config.rs`: `config`, its flags made from the settings table
 - `pick.rs`: the jump picker (`pick`, `--filter`, `--pane`)
 - `line_edit.rs`: typing on a terminal: raw mode, bracketed paste, the keys a read

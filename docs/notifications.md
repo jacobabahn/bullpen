@@ -12,6 +12,10 @@ first is sent as usual and the rest wait for a 3-second lull, then go out as one
 "3 tasks need you: BP-3, BP-4, BP-5" (a single one goes out as it was). The
 watcher sends it, on the round that types waiting news.
 
+When pickup pauses because self-started tasks wait for you (see
+[Pickup](backlog.md#pickup)), you get one: "Pickup paused: BP-140 and BP-141 wait for
+you", once a pause, from the first one's pane, unless notify is `off`.
+
 Bullpen writes the notification (OSC 777) to the terminal of the task's pane, or of
 its board, or its coordinator, when the task's has none, and Rex for Mac shows it:
 clicking it opens that pane's tab. Turn on Settings > Notifications > System

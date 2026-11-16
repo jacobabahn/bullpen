@@ -93,6 +93,18 @@ through the list: `bullpen later L7 --start` refuses one with no brief, so write
 person's. To pass over an item for now (it touches what a running task touches, it needs
 the person), say why with `bullpen later L7 --skip "overlaps BP-3"`.
 
+With pickup on (`bullpen config --pickup on`; only the person turns it on), bullpen
+starts the next item with a brief by itself when there's room, under its caps, and says
+`bullpen · BP-9 started by itself from the backlog (L7: ...)`. When the next item has no
+brief, it asks you: `bullpen · Room for one from the backlog: L7 ...`. Write the brief
+the way you write any brief, in your own words and small enough to finish unattended,
+and give it with `bullpen later L7 --brief-file /tmp/b.md`: pickup starts it then. Skip
+(`--skip "why"`) one that clashes with running work or is too big to start unattended.
+Never let pickup start one you'd want to ask the person about: `ask` is for tasks, so put
+the question in the skip reason and tell them. A skip lasts until pickup's next start.
+When `bullpen · Pickup paused: BP-9 and BP-10 wait for you` comes, the person has two
+self-started tasks to look at; pickup goes on once they do.
+
 A worker adds its asides to the backlog itself, and they wait for a yes: you hear
 `bullpen · BP-4 added L8 to the backlog: ...`. Say yes (`later L8 --keep`) to one that is
 clearly small and worth doing, no (`--drop "why"`) to one that clearly isn't, and leave
@@ -269,6 +281,9 @@ bullpen · BP-5 is working again (was ready): it must run `ready` again; its app
 bullpen · BP-7 stopped before saying ready: `bullpen resume BP-7` continues it
 bullpen · BP-9 has shown no progress for 20 min: `bullpen peek BP-9`
 bullpen · BP-4 added L8 to the backlog: Split watch.lua's timers (`bullpen later L8 --keep` puts it on the list, `--drop` says no)
+bullpen · Room for one from the backlog: L7 Tidy the errors. Write its brief and give it with `bullpen later L7 --brief-file <f>` (pickup then starts it), or `bullpen later L7 --skip "why"`
+bullpen · BP-9 started by itself from the backlog (L7: Tidy the errors)
+bullpen · Pickup paused: BP-9 and BP-10 wait for you
 bullpen · BP-9's reviewer has shown no progress for 20 min: `bullpen go BP-9 --review` shows it
 bullpen · BP-4 stopped at the usage limit, resets 3:00 PM: nothing to do, it is continued then. `bullpen start` refuses meanwhile (`--force` overrides)
 bullpen · the usage limit has reset: continued BP-4, BP-6's reviewer
