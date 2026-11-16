@@ -75,11 +75,39 @@ class DoctorAllReposTest(BullpenTest):
         self.assertEqual(p.stdout.splitlines()[-1],
                          "3 problems: keys, broken/config, shop/coordinators.")
         d = json.loads(self.bp("doctor", "--all-repos", "--json", ok=False).stdout)
-        self.assertEqual(d["problems"], ["keys", "broken/config", "shop/coordinators"])
+        self.assertEqual([p["name"] for p in d["problems"]], ["keys", "broken/config", "shop/coordinators"])
+        # each says which folder its fix is run in (none for the setup's, or an unreadable config)
+        self.assertEqual(d["problems"][2], {"name": "shop/coordinators", "check": "coordinators",
+                                            "repo": str(shop), "text": sections["shop"]["coordinators"][1]})
+        self.assertEqual([p["repo"] for p in d["problems"][:2]], [None, None])
         self.assertEqual([c["name"] for c in d["shared"]], SHARED)
         self.assertEqual([(r["name"], r["repo"]) for r in d["repos"]],
                          [("broken", None), ("proj", str(self.repo)), ("shop", str(shop))])
         self.assertEqual([c["name"] for c in d["repos"][2]["checks"]], EACH)
+
+    def test_two_repos_of_the_same_name_are_told_apart(self):
+        self.healthy()
+        a, b = self.other_repo("a/shop"), self.other_repo("b/shop")
+        for r in (a, b):
+            self.bp("up", cwd=r)
+        for r in (a, b):  # each its own problem: a board on an older build
+            board = json.loads(self.bp("config", "--json", cwd=r).stdout)["coordinators"][0]["board"]["block"]
+            (self.fake / f"prog_{board}").write_text(str(self.tmp / "old" / "release" / "bullpen-board"))
+        p, _ = self.doctor_all()
+        self.assertEqual(p.stdout.splitlines()[-1], "2 problems: a/shop/coordinators, b/shop/coordinators.")
+        d = json.loads(self.bp("doctor", "--all-repos", "--json", ok=False).stdout)
+        self.assertEqual([(p["name"], p["repo"]) for p in d["problems"]],
+                         [("a/shop/coordinators", str(a)), ("b/shop/coordinators", str(b))])
+        self.assertEqual([r["name"] for r in d["repos"]].count("shop"), 2)
+
+    def test_a_broken_global_config_still_lists_each_repo(self):
+        self.healthy()
+        (self.tmp / "xdg" / "bullpen" / "config.json").parent.mkdir(parents=True, exist_ok=True)
+        (self.tmp / "xdg" / "bullpen" / "config.json").write_text("{oops")
+        p, sections = self.doctor_all()
+        self.assertEqual(sections["Setup"]["global"][0], "FAIL")
+        self.assertIn(f"\nproj  ({self.repo})\n", p.stdout)
+        self.assertEqual(sections["proj"]["setup"], ("--", "can't tell: the global config.json doesn't parse"))
 
 
 if __name__ == "__main__":

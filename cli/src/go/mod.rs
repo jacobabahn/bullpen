@@ -329,7 +329,7 @@ pub fn cmd_go(argv: &[String]) -> Res<i32> {
     if g.all_repos && !g.next {
         return fail("--all-repos goes with --next");
     }
-    let mut home = go_home(&g)?;
+    let mut home = repo_or_here(&g.repo, &g.from_block)?;
     if g.board && g.id.is_empty() {
         home = board_for_go(home, &g)?;
     }
@@ -412,14 +412,15 @@ fn board_for_go(mut repo: Repo, g: &Go) -> Res<Repo> {
     Ok(repo)
 }
 
-/// The repository `go` is about: --repo, else the one the pane or folder belongs to.
-fn go_home(g: &Go) -> Res<Repo> {
-    if g.repo.is_empty() {
-        return find_repo(Some(&g.from_block));
+/// The repository a `--repo` names (`go`'s, `say`'s): path, else the one pane block or
+/// this folder belongs to.
+pub fn repo_or_here(path: &str, block: &str) -> Res<Repo> {
+    if path.is_empty() {
+        return find_repo(Some(block));
     }
-    let repo = Repo::new(realpath(Path::new(&g.repo)))?;
+    let repo = Repo::new(realpath(Path::new(path)))?;
     if !repo.dir.join("config.json").exists() {
-        return fail(format!("bullpen has no tasks for {}", g.repo));
+        return fail(format!("bullpen has no tasks for {path}"));
     }
     Ok(repo)
 }

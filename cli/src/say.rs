@@ -3,15 +3,13 @@
 //! news waits), whatever the repo's news setting: it's the person talking, not news.
 
 use crate::args::{pos, value, Arg, Args, Nargs};
-use crate::board::realpath;
 use crate::coordinators::{alive, calling_coordinator, coordinator, coordinators};
 use crate::go::relink::relink;
+use crate::go::repo_or_here;
 use crate::news::{has_draft, type_news, LINE_BREAK};
 use crate::rex::type_into;
 use bullpen_core::json::{s, Obj};
-use bullpen_core::repo::find_repo;
 use bullpen_core::{fail, Repo, Res};
-use std::path::Path;
 
 const SAY: &[Arg] = &[
     pos("text", Nargs::Some, "what to say"),
@@ -34,7 +32,8 @@ pub fn cmd_say(argv: &[String]) -> Res<i32> {
     if text.trim().is_empty() {
         return fail("say what? give the words to type");
     }
-    let mut repo = say_repo(a.opt("--repo").unwrap_or(""))?;
+    let block = std::env::var("REX_BLOCK").unwrap_or_default();
+    let mut repo = repo_or_here(a.opt("--repo").unwrap_or(""), &block)?;
     let cid = which(&repo, a.opt("--coordinator").unwrap_or(""))?;
     if calling_coordinator(&repo).is_some_and(|c| s(c, "id") == cid) {
         return fail(format!("this is {cid}'s own pane: type it here"));
@@ -55,18 +54,6 @@ pub fn cmd_say(argv: &[String]) -> Res<i32> {
         }
     };
     say_to(&repo, &c, &text)
-}
-
-/// The repository: --repo, else the one the pane or folder belongs to (as `go`).
-fn say_repo(path: &str) -> Res<Repo> {
-    if path.is_empty() {
-        return find_repo(Some(&std::env::var("REX_BLOCK").unwrap_or_default()));
-    }
-    let repo = Repo::new(realpath(Path::new(path)))?;
-    if !repo.dir.join("config.json").exists() {
-        return fail(format!("bullpen has no tasks for {path}"));
-    }
-    Ok(repo)
 }
 
 /// The coordinator to say it to: the one named, else the repo's only one.

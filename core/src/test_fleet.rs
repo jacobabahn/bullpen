@@ -205,3 +205,33 @@ fn the_snapshot_as_json() {
         ]
     );
 }
+
+#[test]
+fn the_repos_it_cant_read_are_named_apart() {
+    let env = Env::new();
+    repo(&env, "shop", false, json!([]), &["needs"]);
+    repo(&env, "gone", true, json!([]), &[]);
+    let broken = env.state().join("repos").join("broken");
+    std::fs::create_dir_all(&broken).unwrap();
+    std::fs::write(broken.join("config.json"), "{").unwrap();
+    let names: Vec<String> = repos(&env.state()).unwrap().iter().map(Repo::name).collect();
+    assert_eq!(names, ["shop"]);
+    assert_eq!(
+        unread(&env.state()),
+        [Unread {
+            dir: broken,
+            root: None
+        }]
+    );
+}
+
+#[test]
+fn a_broken_global_config_fails_the_snapshot_and_each_repo_is_unread() {
+    let env = Env::new();
+    let dir = repo(&env, "shop", false, json!([]), &[]);
+    env.global("{oops");
+    assert!(repos(&env.state()).is_err());
+    assert!(read().is_err());
+    let root = env.dir.join("checkouts").join("shop");
+    assert_eq!(unread(&env.state()), [Unread { dir, root: Some(root) }]);
+}

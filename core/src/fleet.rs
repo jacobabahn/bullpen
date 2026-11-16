@@ -1,7 +1,8 @@
 //! Every repo bullpen knows, in one snapshot: its root, settings and coordinators, its
 //! open tasks with the board's words for each, and its counts (what needs you, what's
 //! ready, what's running). `bullpen repos`, `ls --all-repos` and the board's top line
-//! read it, and so will mission control.
+//! read it, and so will mission control. `repos` is its list of repos alone (`news
+//! --recent --all-repos`), and `unread` those it leaves out (`doctor --all-repos`).
 //!
 //! Only files are read, and only these: <state>/repos/*/config.json, each repo's tasks,
 //! and doing/ for the panes they name. A `Reader` kept between snapshots (a long-running
@@ -13,7 +14,7 @@ use crate::json::{self, s, Obj};
 use crate::paths::{safe, state};
 use crate::task::{is_closed, task_num};
 use crate::words::{agent_block, board_order, board_sentence, doing_said, every, mark, Every};
-use crate::{Repo, Res};
+use crate::{Fail, Repo, Res};
 use serde_json::{json, Value};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -114,25 +115,12 @@ impl Reader {
     /// The snapshot of every repo under the state folder.
     pub fn read(&mut self, state: &Path) -> Res<Fleet> {
         self.used.clear();
-        let mut repos = Vec::new();
-        for dir in repo_dirs(state) {
-            // a config.json caught half-written, or broken: that repo's own commands say so
-            let Ok(own) = read_own(&dir) else { continue };
-            let root = s(&own, "root");
-            if root.is_empty() || !Path::new(root).is_dir() {
-                continue; // its checkout is gone
-            }
-            let cfg = load_config(&dir)?;
-            let repo = Repo {
-                root: PathBuf::from(root),
-                dir,
-                own: own.keys().cloned().collect(),
-                cfg,
-            };
-            repos.push(self.repo_state(state, repo));
+        let mut out = Vec::new();
+        for repo in repos(state)? {
+            out.push(self.repo_state(state, repo));
         }
         self.files.retain(|p, _| self.used.contains(p));
-        Ok(Fleet { repos })
+        Ok(Fleet { repos: out })
     }
 
     fn repo_state(&mut self, state: &Path, repo: Repo) -> RepoState {
@@ -251,6 +239,72 @@ fn repo_dirs(state: &Path) -> Vec<PathBuf> {
         .collect();
     dirs.sort();
     dirs
+}
+
+/// A known repo the snapshot leaves out because its settings can't be read: its
+/// config.json doesn't parse (so which checkout it's for can't be told: no root), or
+/// the global config.json doesn't.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unread {
+    pub dir: PathBuf,
+    pub root: Option<PathBuf>,
+}
+
+/// What a state folder holds.
+enum Known {
+    Repo(Repo),
+    Unread(Unread, Fail),
+    /// its checkout is gone
+    Gone,
+}
+
+fn known(dir: PathBuf) -> Known {
+    let own = match read_own(&dir) {
+        Ok(own) => own,
+        Err(e) => return Known::Unread(Unread { dir, root: None }, e),
+    };
+    let root = s(&own, "root");
+    if root.is_empty() || !Path::new(root).is_dir() {
+        return Known::Gone;
+    }
+    let root = PathBuf::from(root);
+    match load_config(&dir) {
+        Ok(cfg) => Known::Repo(Repo {
+            root,
+            own: own.keys().cloned().collect(),
+            dir,
+            cfg,
+        }),
+        Err(e) => Known::Unread(Unread { dir, root: Some(root) }, e),
+    }
+}
+
+/// The repos the snapshot is of: every known one whose checkout is still there, by
+/// state folder, with its settings (read, never migrated or saved). One whose
+/// config.json doesn't parse (maybe caught half-written) is left out: its own commands
+/// say so. Err when the global config.json doesn't parse.
+pub fn repos(state: &Path) -> Res<Vec<Repo>> {
+    let mut out = Vec::new();
+    for dir in repo_dirs(state) {
+        match known(dir) {
+            Known::Repo(r) => out.push(r),
+            Known::Unread(Unread { root: Some(_), .. }, e) => return Err(e),
+            Known::Unread(..) | Known::Gone => {}
+        }
+    }
+    Ok(out)
+}
+
+/// The known repos `repos` leaves out (or fails on) because their settings
+/// can't be read, by state folder, for `doctor --all-repos` to report.
+pub fn unread(state: &Path) -> Vec<Unread> {
+    let known = repo_dirs(state).into_iter().map(known);
+    known
+        .filter_map(|k| match k {
+            Known::Unread(u, _) => Some(u),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The repo's coordinators, oldest first (an entry that isn't an object is left out).

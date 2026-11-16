@@ -51,7 +51,8 @@ gone). The checks about the setup, which are the same for every repo (`rex`,
 `setup`, `teardown`, `coordinators`, `push`) under its name and folder. A repo whose
 board runs an older build shows up on its `coordinators` line, and one whose
 `config.json` doesn't parse is named by its state folder. The last line names each
-problem, a repo's as `repo/check`: "2 problems: keys, shop/coordinators."
+problem, a repo's as `repo/check`: "2 problems: keys, shop/coordinators." Two repos
+of the same name are told apart by the folders above them: `a/shop/push`, `b/shop/push`.
 
 Here the push remote is checked from local refs only, with no network: the remote's
 base branch as this checkout last saw it (its last fetch, or bullpen's last push to
@@ -66,4 +67,6 @@ mission screen's health line. Each check is `{name, state, text}`, with `state` 
 `{repo, checks, problems}` (`repo` is null outside a repository); with `--all-repos`,
 `{shared, repos: [{repo, name, checks}], problems}` (`repo` is null for a repo whose
 `config.json` doesn't parse). `problems` lists the failed checks' names, as the last
-line does. Either way doctor exits non-zero when anything fails.
+line does; with `--all-repos` each is `{name, check, repo, text}`, `repo` being the
+folder to run the fix in (null for a check about the setup, or a repo whose
+`config.json` doesn't parse) and `text` what the check says. Either way doctor exits non-zero when anything fails.

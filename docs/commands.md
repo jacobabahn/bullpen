@@ -29,9 +29,9 @@ bullpen check         # tasks whose status is out of step with their agent; --fi
 bullpen go BP-1       # focus its pane (`go` alone: the coordinator; --next: next needing you;
                       #   --board: the board, started first if none runs)
 bullpen go --next --all-repos   # the next task needing you in any repository
-bullpen news --recent --all-repos   # the last 20 news lines of every repository (N: the last N); moves no cursor
 bullpen go BP-1 --repo ~/shop   # a task of another repository
 bullpen go BP-1 --board         # its board, with BP-1 selected
+bullpen news --recent --all-repos   # the last 20 news lines of every repository (N: the last N); moves no cursor
 bullpen pick          # type part of any open task, in any repository, and go to it (the cmd+; j picker)
 bullpen pick --filter "lgn"   # just print the open tasks matching, best first
 bullpen tell BP-1 "Also cover the logout path"

@@ -73,7 +73,9 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   coordinators (with the watcher's note on each, and Rex's alive, asked apart:
   `ask_alive`), its open tasks with the board's words and counts. `repos`,
   `ls --all-repos` and the board's top line read it; a `Reader` kept between
-  snapshots (the board's) reads a file again only when its time or size changed
+  snapshots (the board's) reads a file again only when its time or size changed.
+  `fleet::repos` is its list of repos alone (`news --recent --all-repos`), and
+  `fleet::unread` the ones whose settings it can't read (`doctor --all-repos`)
 - `timeutil.rs`: ISO stamps as Python's `isoformat`, ages, the clock
 - `timeline.rs`: a task's timeline (`timeline/<ID>.jsonl`): what a save changed
   (`changes`, from `save_task`), the trip-back mark a step that sends a task back sets
@@ -103,7 +105,7 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `panes/`: where a worker's, reviewer's or diff's pane lives (see "Where a pane lives"):
   `mod.rs` (`place`, `show`, `hide`, `find`, `gather`, `placement_at`, `for_new`), and one
   file per placement that does more than focus: `float.rs`, `tab.rs`, `background.rs`
-- `go/`: `mod.rs`: `go`, `hide` and `adopt`; `relink.rs`: finding a repo's panes again
+- `go/`: `mod.rs`: `go`, `hide` and `adopt` (and `repo_or_here`, the repo a `--repo` names, `say`'s too); `relink.rs`: finding a repo's panes again
   after a Rex restart
 - `board.rs`: `board`, and a coordinator's board pane beside it (`ensure_board`)
 - `diff.rs`: `diff` (the pager, `--stat`, `--pane`)

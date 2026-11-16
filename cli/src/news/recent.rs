@@ -5,8 +5,10 @@
 
 use super::read::news_records;
 use super::NEWS_MARK;
+use bullpen_core::fleet;
 use bullpen_core::json::dumps;
-use bullpen_core::repo::{known_repos, repo_root};
+use bullpen_core::paths::state;
+use bullpen_core::repo::repo_root;
 use bullpen_core::text::{len, ljust};
 use bullpen_core::timeutil::{now, parse, Stamp};
 use bullpen_core::{Repo, Res};
@@ -34,7 +36,7 @@ pub struct Item {
 /// `news --recent`: print the last n lines, of this repo or (all) of every repo.
 pub fn print_recent(n: usize, all: bool, as_json: bool) -> Res<i32> {
     let repos = if all {
-        known_repos()?
+        fleet::repos(&state())?
     } else {
         vec![Repo::new(repo_root()?)?]
     };
