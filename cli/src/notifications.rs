@@ -430,6 +430,9 @@ pub(crate) fn folders_with(want: impl Fn(&str) -> bool) -> Vec<PathBuf> {
 /// `_flush` (the watcher): deliver news, and send notifications, that had to wait.
 pub fn cmd_flush(argv: &[String]) -> Res<i32> {
     Args::parse("_flush", argv, &[]);
+    // the mark goes before the round and is made again after it: news that has to wait
+    // meanwhile makes it too, and that one stays
+    crate::news::wake::remove_mark(&state().join("outbox"))?;
     let mut waiting = false;
     let outbox = |n: &str| n.starts_with("outbox") && n.ends_with(".txt") && n.len() >= "outbox.txt".len();
     for d in folders_with(outbox) {
@@ -442,11 +445,9 @@ pub fn cmd_flush(argv: &[String]) -> Res<i32> {
             waiting = true;
         }
     }
-    if !waiting {
-        match std::fs::remove_file(state().join("outbox")) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
-            _ => {}
-        }
+    crate::news::wake::mark_wait();
+    if waiting {
+        touch(&state().join("outbox"))?;
     }
     Ok(0)
 }

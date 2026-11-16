@@ -1,18 +1,18 @@
 use super::*;
 
 #[test]
-fn a_records_stamp_and_event() {
+fn a_records_stamp_task_and_event() {
     let t = "2026-11-16T10:00:00-08:00";
     assert_eq!(
-        stamp_and_event(&format!("{t} [c1,c2] BP-3 ready: bullpen · BP-3 is ready: x")),
-        Some((t, "ready"))
+        record_head(&format!("{t} [c1,c2] BP-3 ready: bullpen · BP-3 is ready: x")),
+        Some((t, "BP-3", "ready"))
     );
     assert_eq!(
-        stamp_and_event(&format!("{t} BP-3 needs-you: bullpen · a: b")),
-        Some((t, "needs-you"))
+        record_head(&format!("{t} BP-3 needs-you: bullpen · a: b")),
+        Some((t, "BP-3", "needs-you"))
     );
-    assert_eq!(stamp_and_event("\tdiff line"), None);
-    assert_eq!(stamp_and_event("junk"), None);
+    assert_eq!(record_head("\tdiff line"), None);
+    assert_eq!(record_head("junk"), None);
 }
 
 #[test]

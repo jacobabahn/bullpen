@@ -42,6 +42,16 @@ const SPEC: &[crate::args::Arg] = &[
         "stop news reaching this coordinator unasked (it is still logged) until --resume or the next `bullpen up`",
     ),
     flag("--resume", "end a pause"),
+    flag(
+        "--wake",
+        "for a Claude Code Stop hook with asyncRewake: wait for this coordinator's news, then print it to stderr \
+         and exit 2, which wakes the session",
+    ),
+    value(
+        "--timeout",
+        "SECONDS",
+        "with --wake: the hook's timeout (86400 without); the wait ends a minute before it",
+    ),
 ];
 
 /// Set by SIGINT: stop between records.
@@ -74,7 +84,7 @@ pub fn cmd_news(argv: &[String]) -> Res<i32> {
         return super::recent::print_recent(n, a.flag("--all-repos"), a.flag("--json"));
     }
     if a.flag("--pause") || a.flag("--resume") {
-        if follow || a.flag("--pause") && a.flag("--resume") {
+        if follow || a.flag("--wake") || a.flag("--pause") && a.flag("--resume") {
             crate::args::usage_error("news", SPEC, "--pause and --resume go alone");
         }
         return pause_or_resume(a.flag("--pause"));
@@ -82,13 +92,23 @@ pub fn cmd_news(argv: &[String]) -> Res<i32> {
     if a.arg("N").is_some() || a.flag("--all-repos") || a.flag("--json") {
         crate::args::usage_error("news", SPEC, "N, --all-repos and --json go with --recent");
     }
-    let every = match a.opt("--every") {
-        None => 0.5,
-        Some(e) => match bullpen_core::text::strip(e).parse::<f64>() {
+    let seconds = |name: &str| {
+        a.opt(name).map(|e| match bullpen_core::text::strip(e).parse::<f64>() {
             Ok(n) => n,
-            Err(_) => crate::args::usage_error("news", SPEC, &format!("argument --every: invalid float value: '{e}'")),
-        },
+            Err(_) => crate::args::usage_error("news", SPEC, &format!("argument {name}: invalid float value: '{e}'")),
+        })
     };
+    if a.flag("--wake") {
+        if follow {
+            crate::args::usage_error("news", SPEC, "--wake and --follow don't go together");
+        }
+        let timeout = seconds("--timeout").unwrap_or(super::waiter::TIMEOUT);
+        return super::waiter::cmd_wake(seconds("--every").unwrap_or(1.0), timeout);
+    }
+    if a.opt("--timeout").is_some() {
+        crate::args::usage_error("news", SPEC, "--timeout goes with --wake");
+    }
+    let every = seconds("--every").unwrap_or(0.5);
     // SAFETY: plain handlers set once, before anything is printed. Not SA_RESTART: a
     // follower waiting for the lock stops at Ctrl-C, as the Python did.
     unsafe {
@@ -167,7 +187,8 @@ fn pause_or_resume(on: bool) -> Res<i32> {
     if cid.is_empty() {
         return fail("this repo has no coordinator: there's no news to pause");
     }
-    if not_a_reader(&mut repo, &cid)? {
+    // outside Rex there's no telling whose pane this is: a pause is one coordinator's own
+    if std::env::var("REX_BLOCK").unwrap_or_default().is_empty() || not_a_reader(&mut repo, &cid)? {
         return fail("this pane isn't one of this repo's coordinators: pause news from the coordinator's own pane");
     }
     if on && super::wake::typed(&repo) {

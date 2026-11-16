@@ -4,6 +4,7 @@
 
 pub mod read;
 pub mod recent;
+pub mod waiter;
 pub mod wake;
 
 use crate::coordinators::{alive, calling_coordinator, coordinators, sees_to};

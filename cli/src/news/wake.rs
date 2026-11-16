@@ -5,7 +5,8 @@
 //! news that comes while none runs would sit unseen until the person speaks. So a line
 //! worth a wake (`wakes`) touches `<state>/wake-due`, and while that exists the watcher
 //! runs `_wake_check` every 3 s. For each live coordinator that isn't paused and has
-//! such news past its cursor, a minute old, with no live reader, it types every line
+//! such news past its cursor, a minute old, with no live reader (a `news --follow`, or
+//! the waiter its Stop hook parks: waiter.rs), it types every line
 //! since the cursor into the coordinator's pane, as typed news is, and moves the cursor:
 //! each line is typed once. It waits behind a draft in the input, as typed news does;
 //! after 10 minutes of that it tells the person once for the batch.
@@ -87,29 +88,31 @@ pub fn after_logged(repo: &Repo, event: &str) -> Res<()> {
     Ok(())
 }
 
-/// (stamp, event) of a news.log record's first line: `<stamp>[ [to]] <id> <event>: <line>`.
-pub fn stamp_and_event(line: &str) -> Option<(&str, &str)> {
+/// (stamp, task ID, event) of a news.log record's first line: `<stamp>[ [to]] <id> <event>: <line>`.
+pub fn record_head(line: &str) -> Option<(&str, &str, &str)> {
     let (stamp, rest) = line.split_once(' ')?;
     let rest = match rest.strip_prefix('[') {
         Some(r) => r.split_once("] ")?.1,
         None => rest,
     };
-    let (_id, rest) = rest.split_once(' ')?;
+    let (id, rest) = rest.split_once(' ')?;
     let (event, _) = rest.split_once(": ")?;
-    (!stamp.is_empty() && !event.is_empty() && !event.contains([' ', ':'])).then_some((stamp, event))
+    (!stamp.is_empty() && !event.is_empty() && !event.contains([' ', ':'])).then_some((stamp, id, event))
 }
 
 /// A record past a coordinator's cursor: where it ends, and what typing it says (None:
 /// not for this coordinator, skipped).
-struct Unread {
-    end: u64,
-    said: Option<String>,
+pub(super) struct Unread {
+    pub end: u64,
+    pub said: Option<String>,
     /// when it was logged, if it is worth a wake
-    wakes_since: Option<String>,
+    pub wakes_since: Option<String>,
+    /// "<task> <event>", if it is this coordinator's
+    pub what: String,
 }
 
 /// The whole records after offset, for coordinator cid or not.
-fn unread(repo: &Repo, offset: u64, cid: &str, listed: &[String]) -> Res<Vec<Unread>> {
+pub(super) fn unread(repo: &Repo, offset: u64, cid: &str, listed: &[String]) -> Res<Vec<Unread>> {
     let Ok(mut f) = std::fs::File::open(repo.dir.join("news.log")) else {
         return Ok(Vec::new());
     };
@@ -127,6 +130,7 @@ fn unread(repo: &Repo, offset: u64, cid: &str, listed: &[String]) -> Res<Vec<Unr
                 end,
                 said: None,
                 wakes_since: None,
+                what: String::new(),
             });
             continue;
         }
@@ -141,37 +145,48 @@ fn unread(repo: &Repo, offset: u64, cid: &str, listed: &[String]) -> Res<Vec<Unr
                     .collect(),
             );
         }
-        let wakes_since = stamp_and_event(&first)
-            .filter(|(_, event)| wakes(event))
-            .map(|(stamp, _)| stamp.to_string());
+        let head = record_head(&first);
+        let wakes_since = head
+            .filter(|(_, _, event)| wakes(event))
+            .map(|(stamp, _, _)| stamp.to_string());
         out.push(Unread {
             end,
             said: Some(lines.join(LINE_BREAK)),
             wakes_since,
+            what: head.map_or(String::new(), |(_, id, event)| format!("{id} {event}")),
         });
     }
     Ok(out)
 }
 
-/// The pause and the backstop's notes for coordinator cid live in `news-<cid>.wait`.
+/// `news-<cid>.wait` holds what waking coordinator cid goes by: the pause (`paused`),
+/// the backstop's notes (`held`, `resumed`), the waiter that owns the wait (`waiter`)
+/// and the last wake (`woke`, `woke_for`: waiter.rs).
 fn wait_path(repo: &Repo, cid: &str) -> PathBuf {
     repo.dir.join(format!("news-{}.wait", safe(cid)))
 }
 
-fn wait_file(repo: &Repo, cid: &str) -> Obj {
+pub(super) fn wait_file(repo: &Repo, cid: &str) -> Obj {
     json::read_obj(&wait_path(repo, cid)).ok().flatten().unwrap_or_default()
 }
 
-fn save_wait_file(repo: &Repo, cid: &str, w: &Obj) -> Res<()> {
+/// Change `news-<cid>.wait`: read, change, written by rename, one writer at a time (the
+/// waiter, the backstop and `--pause` all write it, so none loses another's keys).
+pub(super) fn update_wait<T>(repo: &Repo, cid: &str, change: impl FnOnce(&mut Obj) -> T) -> Res<T> {
+    let _held = bullpen_core::lock::lock(&repo.dir.join(format!("news-{}.wait.lock", safe(cid))))?;
     let path = wait_path(repo, cid);
+    let mut w = wait_file(repo, cid);
+    let before = w.clone();
+    let out = change(&mut w);
     if w.is_empty() {
-        return match std::fs::remove_file(&path) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
-            _ => Ok(()),
-        };
+        match std::fs::remove_file(&path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+            _ => {}
+        }
+    } else if w != before {
+        json::write_obj(&path, &w)?; // by rename
     }
-    json::write_obj(&path, w)?; // by rename
-    Ok(())
+    Ok(out)
 }
 
 pub fn paused(repo: &Repo, cid: &str) -> bool {
@@ -180,35 +195,39 @@ pub fn paused(repo: &Repo, cid: &str) -> bool {
 
 /// Pause coordinator cid's news. False if it was paused already.
 pub fn pause(repo: &Repo, cid: &str) -> Res<bool> {
-    let mut w = wait_file(repo, cid);
-    if w.contains_key("paused") {
-        return Ok(false);
-    }
-    w.insert("paused".into(), json!(iso_now()));
-    save_wait_file(repo, cid, &w)?;
-    Ok(true)
+    update_wait(repo, cid, |w| {
+        if w.contains_key("paused") {
+            return false;
+        }
+        w.insert("paused".into(), json!(iso_now()));
+        true
+    })
 }
 
 /// End coordinator cid's pause. False if it wasn't paused. News logged during the pause
 /// gets a minute from now for a reader to take it, before the backstop types it.
 pub fn resume(repo: &Repo, cid: &str) -> Res<bool> {
-    let mut w = wait_file(repo, cid);
-    if w.remove("paused").is_none() {
-        return Ok(false);
+    let was = update_wait(repo, cid, |w| {
+        if w.remove("paused").is_none() {
+            return false;
+        }
+        w.insert("resumed".into(), json!(iso_now()));
+        true
+    })?;
+    if was {
+        touch(&wake_due_path())?;
     }
-    w.insert("resumed".into(), json!(iso_now()));
-    save_wait_file(repo, cid, &w)?;
-    touch(&wake_due_path())?;
-    Ok(true)
+    Ok(was)
 }
 
-/// Is a reader taking coordinator cid's news right now? A `news --follow` holds its lock.
-/// (The Stop hook's waiter, later, will count too.)
-fn live_reader(repo: &Repo, cid: &str) -> Res<bool> {
-    Ok(bullpen_core::lock::try_lock(&lock_path(repo, cid))?.is_none())
+/// Is a reader taking coordinator cid's news right now? A `news --follow` holds its lock;
+/// a waiter (`news --wake`, parked by the coordinator's Stop hook) is named in its wait
+/// file, and wakes the coordinator itself within its batch window.
+fn live_reader(repo: &Repo, cid: &str, w: &Obj) -> Res<bool> {
+    Ok(super::waiter::live(w) || bullpen_core::lock::try_lock(&lock_path(repo, cid))?.is_none())
 }
 
-fn lock_path(repo: &Repo, cid: &str) -> PathBuf {
+pub(super) fn lock_path(repo: &Repo, cid: &str) -> PathBuf {
     repo.dir.join(format!("news-{}.lock", safe(cid)))
 }
 
@@ -245,11 +264,11 @@ fn check(repo: &Repo, c: &Obj, listed: &[String]) -> Res<Left> {
     } else {
         seconds_since(&resumed, None)
     });
-    if unread_for < UNREAD_FOR || live_reader(repo, cid)? {
+    if unread_for < UNREAD_FOR || live_reader(repo, cid, &w)? {
         return Ok(Left::Waits);
     }
     if has_draft(s(c, "session"), s(c, "block"))? {
-        held_by_draft(repo, c, cursor, w)?;
+        held_by_draft(repo, c, cursor)?;
         return Ok(Left::Waits);
     }
     let Some(_lock) = bullpen_core::lock::try_lock(&lock_path(repo, cid))? else {
@@ -263,35 +282,39 @@ fn check(repo: &Repo, c: &Obj, listed: &[String]) -> Res<Left> {
         }
         set_news_cursor(repo, r.end, cid)?; // after typing: each line is typed once
     }
-    let mut w = wait_file(repo, cid);
-    for key in ["held", "resumed"] {
-        w.remove(key);
-    }
-    save_wait_file(repo, cid, &w)?;
+    update_wait(repo, cid, |w| {
+        for key in ["held", "resumed"] {
+            w.remove(key);
+        }
+    })?;
     Ok(Left::Done)
 }
 
 /// A draft holds the batch that starts at the cursor: after DRAFT_FOR, the person hears
 /// once for it.
-fn held_by_draft(repo: &Repo, c: &Obj, cursor: u64, mut w: Obj) -> Res<()> {
+fn held_by_draft(repo: &Repo, c: &Obj, cursor: u64) -> Res<()> {
     let cid = s(c, "id");
-    let held = w.get("held").and_then(Value::as_object).cloned().unwrap_or_default();
-    let same = held.get("batch").and_then(Value::as_u64) == Some(cursor);
-    if !same {
-        w.insert(
-            "held".into(),
-            json!({"batch": cursor, "since": iso_now(), "told": false}),
-        );
-        return save_wait_file(repo, cid, &w);
-    }
-    let since = held.get("since").map(json::py_str).unwrap_or_default();
-    if json::truthy(held.get("told")) || seconds_since(&since, None) < DRAFT_FOR {
+    // noted as told first: told once, even if sending fails
+    let tell = update_wait(repo, cid, |w| {
+        let mut held = w.get("held").and_then(Value::as_object).cloned().unwrap_or_default();
+        if held.get("batch").and_then(Value::as_u64) != Some(cursor) {
+            w.insert(
+                "held".into(),
+                json!({"batch": cursor, "since": iso_now(), "told": false}),
+            );
+            return false;
+        }
+        let since = held.get("since").map(json::py_str).unwrap_or_default();
+        if json::truthy(held.get("told")) || seconds_since(&since, None) < DRAFT_FOR {
+            return false;
+        }
+        held.insert("told".into(), json!(true));
+        w.insert("held".into(), Value::Object(held));
+        true
+    })?;
+    if !tell {
         return Ok(());
     }
-    let mut held = held;
-    held.insert("told".into(), json!(true));
-    w.insert("held".into(), Value::Object(held));
-    save_wait_file(repo, cid, &w)?; // first: told once, even if sending fails
     let text = format!(
         "Your coordinator ({cid}) has news it hasn't seen: your draft in its input has held it for {} minutes.",
         (DRAFT_FOR / 60.0) as i64
@@ -317,9 +340,11 @@ pub fn check_repo(repo: &Repo) -> Res<Left> {
 }
 
 /// `_wake_check` (the watcher, while `<state>/wake-due` exists): the backstop, for every
-/// repo; wake-due goes when nothing waits.
+/// repo; wake-due stays only while something waits. It goes before the checks and is
+/// made again after them: a line logged meanwhile makes it too, and that one stays.
 pub fn cmd_wake_check(argv: &[String]) -> Res<i32> {
     crate::args::Args::parse("_wake_check", argv, &[]);
+    remove_mark(&wake_due_path())?;
     let mut waits = false;
     for d in crate::notifications::folders_with(|n| n == "news.log") {
         let repo = crate::notifications::repo_at(&d)?;
@@ -327,13 +352,30 @@ pub fn cmd_wake_check(argv: &[String]) -> Res<i32> {
             waits = true;
         }
     }
-    if !waits {
-        match std::fs::remove_file(wake_due_path()) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
-            _ => {}
-        }
+    mark_wait();
+    if waits {
+        touch(&wake_due_path())?;
     }
     Ok(0)
+}
+
+/// Remove one of the watcher's marks (`<state>/wake-due`, `<state>/outbox`), there or not.
+pub fn remove_mark(path: &std::path::Path) -> Res<()> {
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+        _ => Ok(()),
+    }
+}
+
+/// For the tests: a pause after the watcher's round (`_wake_check`, `_flush`) has looked,
+/// so a test can log a line right then (BULLPEN_MARK_WAIT, seconds).
+pub fn mark_wait() {
+    if let Some(wait) = std::env::var("BULLPEN_MARK_WAIT")
+        .ok()
+        .and_then(|w| w.parse::<f64>().ok())
+    {
+        std::thread::sleep(std::time::Duration::from_secs_f64(wait.max(0.0)));
+    }
 }
 
 /// `news --pause` / `--resume` for coordinator cid: what to say.

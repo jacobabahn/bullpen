@@ -46,7 +46,12 @@ pub fn limit_file() -> PathBuf {
 /// The usage limit in force ({"at", "resets", "text"}), or None. It holds until its
 /// reset time; one with no known reset time, for LIMIT_FORGET seconds.
 pub fn limit_active(at: Option<Stamp>) -> Res<Option<Obj>> {
-    let lim = match json::read(&limit_file()) {
+    limit_in(&limit_file(), at)
+}
+
+/// limit_active, for the limit noted in a file.
+pub fn limit_in(file: &std::path::Path, at: Option<Stamp>) -> Res<Option<Obj>> {
+    let lim = match json::read(file) {
         Ok(Some(Value::Object(o))) => o,
         Ok(_) => return Ok(None),
         Err(e) => return bullpen_core::fail(e),

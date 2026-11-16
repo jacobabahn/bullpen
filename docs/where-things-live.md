@@ -11,7 +11,8 @@
   See [Stats](stats.md).
 - News: `news.log` beside the tasks (each line names the coordinators it is for,
   as `[c1]`), with `news-<id>.cursor` (how far each coordinator's `bullpen news`
-  has read) and `outbox-<id>.txt` (typed news waiting for an empty input). See
+  has read), `outbox-<id>.txt` (typed news waiting for an empty input) and
+  `news-<id>.wait` (a pause, the waiter that owns the wait, the last wake). See
   [News](news.md).
 - The coordinator guides running coordinators were given, for the diff when it changes:
   `~/.local/state/bullpen/guides/<hash>.md`. See [News](news.md).

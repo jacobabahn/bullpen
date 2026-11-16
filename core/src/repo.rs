@@ -270,6 +270,15 @@ fn block_path(block: &str) -> PathBuf {
     state().join("blocks").join(format!("{}.json", safe(block)))
 }
 
+/// What bullpen noted of the pane block ({"repo", "role", ...}); empty for a pane that
+/// isn't one of its own.
+pub fn block_entry(block: &str) -> Obj {
+    if block.is_empty() {
+        return Obj::new();
+    }
+    json::read_obj(&block_path(block)).ok().flatten().unwrap_or_default()
+}
+
 /// Note the pane block as the repo's, in role ("worker", "reviewer", ...).
 pub fn index_block(block: &str, repo: &Repo, role: &str) -> Res<()> {
     // the watcher writes what the pane's agent is doing into doing/, for the board

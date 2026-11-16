@@ -121,7 +121,9 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   them into coordinators' panes (`deliver`, `has_draft`); `read.rs`: `news` and
   `news --follow`; `recent.rs`: `news --recent`, which reads the log's end and moves no cursor;
   `wake.rs`: the backstop for news no coordinator reads (`_wake_check`, which news is worth a
-  wake: `wakes`) and `news --pause` / `--resume`
+  wake: `wakes`) and `news --pause` / `--resume`; `waiter.rs`: `news --wake`, the waiter a
+  coordinator's Stop hook parks (`Waiter::step` is one look, given its time, so its tests
+  bring their own clock)
 - `notifications.rs`: the person's notifications (the save hook) and `_flush`
 - `overlap.rs`: two open tasks changing the same file: checked at a worker's end of turn
   and on `ready` (`check`), one news line per pair, and `show`'s list (`overlaps_of`)
