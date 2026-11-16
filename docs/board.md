@@ -101,14 +101,13 @@ in the order `?` lists them:
 | `g` | its guided tour (see [Guided review tours](tours.md), with the keys inside a tour) |
 | `s` | start it |
 | `r` | resume a stopped worker |
-| `L` | the Later group: show its items, or fold them back to its line (see [The Later group](#the-later-group)) |
-| `y` `n` `s` `J` `K` `⏎` | on an item of the Later group: keep it, drop it, start it, move it down or up, show it in full |
 | `l` | switch layout: compact, one line a task, or back |
 | `f` | show the closed tasks too |
 | `o` | show other coordinators' tasks too (see [Several coordinators](several-coordinators.md)) |
 | `esc` | put a red message away (see below) |
 | `?` | every key, one short line each, and the marks |
 | `q` | quit the board, once you say `y` (`ctrl+c` quits at once) |
+| `L` | the Later group: show its items, or fold them back to its line; its items' keys are under [The Later group](#the-later-group) |
 
 The `y`/`n` question for `a` and `d` goes above the key line, and the task keeps
 its title with `y / n` in place of its age. It says which of the two it is, and in red,

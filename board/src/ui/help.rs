@@ -31,14 +31,6 @@ pub const BOARD_KEYS: &[(&str, &[(&str, &str)])] = &[
         ("s", "start it"),
         ("r", "resume a stopped worker"),
     ]),
-    ("Later: the backlog", &[
-        ("L", "show its items, or fold them"),
-        ("y", "keep an idea that asks"),
-        ("n", "drop the item"),
-        ("s", "start it (or ask for a brief)"),
-        ("J K", "move it down, up the list"),
-        ("⏎", "the item in full"),
-    ]),
     ("The board", &[
         ("l", "switch layout"),
         ("f", "show closed tasks too"),
@@ -46,6 +38,14 @@ pub const BOARD_KEYS: &[(&str, &[(&str, &str)])] = &[
         ("esc", "put a red message away"),
         ("?", "this list"),
         ("q", "quit the board (y to be sure)"),
+    ]),
+    ("Later: the backlog", &[
+        ("L", "show its items, or fold them"),
+        ("y", "keep an idea that asks"),
+        ("n", "drop the item"),
+        ("s", "start it (or ask for a brief)"),
+        ("J K", "move it down, up the list"),
+        ("⏎", "the item in full"),
     ]),
     ("In a tour", &[
         ("n p", "next, previous step"),
