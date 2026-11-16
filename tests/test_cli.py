@@ -262,7 +262,7 @@ class EntryTest(BullpenTest):
         self.assertEqual({c["name"] for c in table},
                          {"_nop", "_commands", "go", "hide", "adopt", "board", "ls", "show", "diff", "add", "after",
                           "model", "review-mode", "peek", "ask", "ok", "note", "news", "guide", "up", "build",
-                          "_build_board", "doctor", "_flush", "start", "resume", "tell", "rules", "pick",
+                          "_build_board", "doctor", "_flush", "start", "resume", "tell", "say", "rules", "pick",
                           "config", "ready", "review", "verdict", "close", "drop", "finish", "_push", "answer",
                           "reply", "prompt", "check", "_event", "_stuck", "_limit", "_gone", "_coordinator_gone",
                           "_tour", "tour-comment", "accept", "_auto_accept", "keys", "_prs", "tour", "stats"})
