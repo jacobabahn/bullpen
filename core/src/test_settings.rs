@@ -32,7 +32,7 @@ const PYTHON: &str = r#"[
 ["board_layout", "--board-layout", "grouped", "how the board lists tasks (default grouped)"],
 ["board_bottom_gap", "--board-bottom-gap", "1 while workers or reviewers float, else 0", "empty rows at the board's bottom, under Rex's minimized-pane capsules (0: none) (default 1 while workers or reviewers float, else 0)"],
 ["board_repos", "--board-repos", "on", "the board's top line counts the tasks that need you or are ready in other repositories (default on)"],
-["news", "--news", "type", "how news reaches the coordinator: typed into its pane (type), or read by its Monitor tool from `bullpen news --follow` (monitor) (default type)"],
+["news", "--news", "type", "how news reaches the coordinator: typed into its pane (type), by a Claude Code hook that wakes it, written to the repo's .claude/settings.local.json (wake), or read by its Monitor tool from `bullpen news --follow` (monitor) (default type)"],
 ["notify", "--notify", "needs", "native notifications: when a task needs you (needs), also when one is ready, finished or auto-accepted (all), or none (off) (default needs)"],
 ["stuck_after", "--stuck-after", "20", "news when a working agent shows no progress this long (0: never) (default 20)"],
 ["triage_minutes", "--triage-minutes", "10", "how long a task can wait on its coordinator before it needs the person (default 10)"],
