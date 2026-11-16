@@ -124,6 +124,9 @@ lines come as a turn of their own once it is done.
 - When the session exits or the pane closes (TERM, HUP, INT) it exits without
   moving the cursor, so the next waiter, `bullpen news` or the backstop has the
   lines.
+- A session that is killed outright (`kill -9`, a crash) signals nobody. The
+  waiter notices within a second that nobody reads its stderr any more and
+  exits the same way; and it moves the cursor only once its lines got out.
 - It shares the cursor and the lock with `bullpen news` and `news --follow`, so
   no line comes twice. While a `news --follow` runs, that prints the news and
   the waiter leaves it to it. The backstop types nothing while a waiter lives.

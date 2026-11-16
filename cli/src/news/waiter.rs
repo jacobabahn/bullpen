@@ -14,6 +14,8 @@
 //!   a known usage-limit reset; a repeat of triage's line about a task doesn't wake for
 //!   15 minutes.
 //! - A wake whose turn ended in an API error is said again by the StopFailure waiter.
+//! - A session killed outright signals nobody: the waiter goes once nobody reads its
+//!   stderr, and moves the cursor only after the lines got out.
 //! - It ends a minute before the hook's timeout (a hook killed there loses its exit
 //!   2), delivering what waits, and on TERM, HUP and INT without moving the cursor.
 //! - It starts no child process: one would outlive the session.
@@ -56,7 +58,7 @@ pub enum Step {
     Wait,
     /// end quietly, exit 0
     Quit,
-    /// print this to stderr and exit 2: the cursor is past it
+    /// exit 2: this was printed to stderr, and the cursor is past it
     Wake(String),
 }
 
@@ -80,6 +82,8 @@ pub struct Waiter {
     batch: Option<Stamp>,
     /// where a usage limit is noted (<state>/limit.json)
     limit_file: PathBuf,
+    /// hands the lines to the session (stderr); false if nobody is there to read them
+    say: fn(&str) -> bool,
 }
 
 /// The wait file's `waiter` or `woke`, as an object.
@@ -151,6 +155,7 @@ impl Waiter {
             changed: at,
             batch: None,
             limit_file,
+            say: say_on_stderr,
         };
         let until = at + chrono::Duration::milliseconds((lasts * 1000.0) as i64);
         let took = update_wait(&me.repo, &me.cid, |w| {
@@ -306,10 +311,14 @@ impl Waiter {
             return Ok(Step::Wait);
         }
         let end = new.last().map_or(cursor, |r| r.end);
-        // From here to the exit nothing stops it: moving the cursor and printing go together.
+        // From here to the exit nothing stops it: printing and moving the cursor go together.
         hold_signals();
         if STOPPED.load(Ordering::SeqCst) {
             return Ok(Step::Quit); // the session is going: the next reader has the lines
+        }
+        let said = lines.join("\n").replace(LINE_BREAK, "\n");
+        if !(self.say)(&said) {
+            return Ok(Step::Quit); // nobody reads them (the session died): the cursor stays
         }
         set_news_cursor(&self.repo, end, &self.cid)?;
         update_wait(&self.repo, &self.cid, |w| {
@@ -328,7 +337,7 @@ impl Waiter {
                 w.remove("woke_for");
             }
         })?;
-        Ok(Step::Wake(lines.join("\n").replace(LINE_BREAK, "\n")))
+        Ok(Step::Wake(said))
     }
 }
 
@@ -380,6 +389,27 @@ fn hold_signals() {
     }
 }
 
+/// Print the lines to stderr, where Claude Code reads a hook's news. False if they
+/// didn't get out (the pipe's reader is gone).
+fn say_on_stderr(lines: &str) -> bool {
+    let mut err = std::io::stderr().lock();
+    writeln!(err, "{lines}").and_then(|_| err.flush()).is_ok()
+}
+
+/// Is whoever reads stderr gone? A session killed outright (kill -9, a crash) sends its
+/// hooks no signal: its end of the pipe closing is all that shows. A waiter left behind
+/// would hold the backstop off, and print its news to nobody.
+fn reader_gone() -> bool {
+    let mut fd = libc::pollfd {
+        fd: 2,
+        events: 0,
+        revents: 0,
+    };
+    // SAFETY: one valid pollfd, no wait
+    let n = unsafe { libc::poll(&mut fd, 1, 0) };
+    n > 0 && fd.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0
+}
+
 /// Sleep, or until a signal comes.
 fn nap(seconds: f64) {
     let seconds = seconds.max(0.0);
@@ -424,7 +454,7 @@ pub fn cmd_wake(every: f64, timeout: f64) -> Res<i32> {
         return Ok(0);
     };
     loop {
-        if STOPPED.load(Ordering::SeqCst) {
+        if STOPPED.load(Ordering::SeqCst) || reader_gone() {
             waiter.leave()?;
             return Ok(0);
         }
@@ -434,11 +464,7 @@ pub fn cmd_wake(every: f64, timeout: f64) -> Res<i32> {
                 waiter.leave()?;
                 return Ok(0);
             }
-            Step::Wake(lines) => {
-                let mut err = std::io::stderr().lock();
-                let _ = writeln!(err, "{lines}").and_then(|_| err.flush());
-                return Ok(2);
-            }
+            Step::Wake(_) => return Ok(2),
         }
     }
 }

@@ -312,6 +312,19 @@ class WaiterTest(WakeCase):
         self.bp("_wake_check")
         self.assertEqual(len(self.unread_typed()), 1)
 
+    def test_a_waiter_left_by_a_dead_session_goes_and_takes_no_news(self):
+        p = self.wake()
+        self.parked(p)
+        p.stdout.close()  # the session was killed outright: no signal, only its pipes closing
+        p.stderr.close()
+        self.assertEqual(p.wait(timeout=10), 0)
+        self.assertNotIn("waiter", self.wait_json())
+        self.ask(self.tid, "Which one?")
+        self.age_news(61)
+        self.bp("_wake_check")
+        self.assertEqual(len(self.unread_typed()), 1)  # the backstop types it
+        self.assertEqual(self.bp_in("blk1", "news").stdout, "")  # once
+
     def test_wake_goes_alone(self):
         p = self.bp_in("blk1", "news", "--wake", "--follow", ok=False)
         self.assertIn("--wake and --follow don't go together", p.stderr)

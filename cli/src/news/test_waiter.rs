@@ -42,16 +42,12 @@ impl Home {
 
     /// A waiter for c1, started at second `at` by a hook event.
     fn waiter(&self, event: &str, at: i64) -> Option<Waiter> {
-        Waiter::take(
-            self.repo(),
-            "blk1",
-            event,
-            "sess",
-            TIMEOUT,
-            t(at),
-            self.dir.join("limit.json"),
-        )
-        .unwrap()
+        let file = self.dir.join("limit.json");
+        let mut w = Waiter::take(self.repo(), "blk1", event, "sess", TIMEOUT, t(at), file).unwrap();
+        if let Some(w) = w.as_mut() {
+            w.say = |_| true; // the test reads what it said from the step
+        }
+        w
     }
 
     /// Log a line of news for c1 at second `at`.
@@ -348,4 +344,17 @@ fn a_waiter_is_live_while_its_process_runs_and_it_hasnt_expired() {
     )));
     assert!(!live(&waiter(i32::MAX.into(), soon))); // no such process
     assert!(!live(&Obj::new()));
+}
+
+#[test]
+fn news_nobody_reads_stays_unread() {
+    let h = Home::new();
+    let mut w = h.waiter("Stop", 0).unwrap();
+    w.say = |_| false; // the session died: its end of stderr is closed
+    h.log(1, "BP-2", "ready");
+    assert_eq!(w.step(t(1)).unwrap(), Step::Wait);
+    assert_eq!(w.step(t(4)).unwrap(), Step::Quit);
+    w.leave().unwrap();
+    assert_eq!(h.cursor(), 0);
+    assert!(h.wait().is_empty()); // no wake noted, and the wait given up
 }
