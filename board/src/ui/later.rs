@@ -1,7 +1,7 @@
 //! The Later group, last under Queued: the backlog's open items, folded to one line
 //! ("Later · 6 · next: ..."), amber when something there waits on you, or with `L` a
 //! row per item (`?` amber for one that asks, `◇` dim for a kept one), the selected one
-//! with a line saying what its keys do.
+//! with a line saying what its keys do, red while its drop is asked about.
 
 use super::list::Row;
 use super::{bold, dim, put, rev, span, spinner, AMBER, TINT};
@@ -9,7 +9,7 @@ use crate::model::{self, fit, pad, Item, Layout};
 use crate::App;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 
 /// How many lines the selected item's detail gets.
@@ -69,12 +69,15 @@ pub(super) fn draw_item(buf: &mut Buffer, area: Rect, y: usize, app: &App, i: &I
     let width_all = w.saturating_sub(5);
     let title = fit(&i.title, width_all.saturating_sub(idw + 2));
     let rest = pad(&format!("{}  {title}", " ".repeat(idw.saturating_sub(model::width(&i.id)))), width_all.saturating_sub(model::width(&i.id)));
-    let (id_style, rest_style) = if selected {
+    let asked = super::bottom::asked_item(app).is_some_and(|a| a.id == i.id);
+    let (id_style, rest_style) = if asked {
+        (rev().add_modifier(Modifier::BOLD).fg(Color::Red), bold().fg(Color::Red))
+    } else if selected {
         (rev().add_modifier(Modifier::BOLD), Style::new().bg(TINT))
     } else {
         (dim(), Style::new())
     };
-    let rest = if selected { rest } else { rest.trim_end().to_string() };
+    let rest = if selected || asked { rest } else { rest.trim_end().to_string() };
     put(buf, area, y, 3, Line::from(vec![span(i.id.clone(), id_style), span(rest, rest_style)]));
 }
 

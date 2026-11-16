@@ -231,6 +231,10 @@ impl App {
                 Action::Close => Job::Close,
                 Action::Drop => Job::Drop,
                 Action::DropForce => Job::DropForce,
+                Action::DropItem => {
+                    self.drop_item(&tid);
+                    return true;
+                }
             };
             self.spawn(&tid, job);
             return true;

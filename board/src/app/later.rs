@@ -1,11 +1,11 @@
 //! The Later group's keys: `L` expands the backlog into rows (or folds it back to its
-//! line), and on a selected item `y` keeps it, `n` drops it, `s` starts it (or, with
+//! line), and on a selected item `y` keeps it, `n` drops it (once you say y), `s` starts it (or, with
 //! no brief, asks the coordinator to write one), `J`/`K` move it and ⏎ shows it in
 //! full. Each runs `bullpen later`; the board redraws when backlog.json changes.
 
 use super::jobs::{run, said};
 use super::{App, Job, Mode, Note};
-use crate::model::{self, Item};
+use crate::model::{self, Action, Item};
 use ratatui::crossterm::event::KeyCode;
 
 impl App {
@@ -50,12 +50,8 @@ impl App {
             (_, Some('y')) => {
                 self.later_says(&["later", id, "--keep"]);
             }
-            (_, Some('n')) => {
-                let next = self.neighbour(id);
-                if self.later_says(&["later", id, "--drop"]) {
-                    self.sel = next;
-                }
-            }
+            // asked first, as a task's drop is: the drop itself is drop_item's
+            (_, Some('n')) => self.pending = Some((Action::DropItem, id.into())),
             (_, Some('J')) => {
                 self.later_says(&["later", id, "--down"]);
             }
@@ -75,6 +71,15 @@ impl App {
             _ => return false,
         }
         true
+    }
+
+    /// y to an item's drop: `bullpen later L7 --drop`, and the selection goes on to the
+    /// next item.
+    pub(super) fn drop_item(&mut self, id: &str) {
+        let next = self.neighbour(id);
+        if self.later_says(&["later", id, "--drop"]) {
+            self.sel = next;
+        }
     }
 
     /// Run a quick `bullpen later ...` and say what it said. Whether it worked.

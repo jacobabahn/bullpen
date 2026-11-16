@@ -27,6 +27,11 @@ fn an_item_says_what_its_keys_do() {
 }
 
 #[test]
+fn an_item_s_drop_is_asked_by_its_id_and_title() {
+    assert_eq!(item_confirm(&item("L7", "kept")), "Drop L7 \"Idea L7\"?");
+}
+
+#[test]
 fn the_board_reads_the_open_items_in_order() {
     let d = std::env::temp_dir().join(format!("bullpen-board-later-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);

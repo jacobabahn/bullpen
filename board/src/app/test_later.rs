@@ -1,7 +1,7 @@
 use super::*;
 use crate::app::testing::*;
 use crate::app::Kind;
-use crate::model::{Item, Task};
+use crate::model::{Action, Item, Task};
 
 fn item(id: &str, state: &str, brief: bool) -> Item {
     Item { id: id.into(), title: format!("Idea {id}"), state: state.into(), by: "BP-9".into(), brief, ..Default::default() }
@@ -68,13 +68,35 @@ fn y_keeps_n_drops_and_j_k_move_the_item_with_bullpen_later() {
     assert_eq!(a.msg, Note::done("L2 is on the list: Idea L2."));
     press(&mut a, 'J');
     press(&mut a, 'K');
-    // n drops it, and the selection goes on to the next item
+    // n asks first, as a task's drop does; any key but y keeps the item
     press(&mut a, 'n');
+    assert_eq!(a.pending, Some((Action::DropItem, "L2".into())));
+    press(&mut a, 'n');
+    assert!(a.pending.is_none());
+    assert_eq!(a.msg, "Cancelled.");
+    assert_eq!(calls(&d), ["later L2 --keep", "later L2 --down", "later L2 --up"]);
+    // y drops it, and the selection goes on to the next item
+    press(&mut a, 'n');
+    press(&mut a, 'y');
     assert_eq!(a.sel.as_deref(), Some("L3"));
     assert_eq!(calls(&d), ["later L2 --keep", "later L2 --down", "later L2 --up", "later L2 --drop"]);
     // the last item dropped: the one before it
     press(&mut a, 'n');
+    press(&mut a, 'y');
     assert_eq!(a.sel.as_deref(), Some("L2"));
+}
+
+#[test]
+fn the_group_folds_again_once_the_backlog_is_empty() {
+    // the test board has no state folder: a reload finds the backlog empty
+    let mut a = App::for_test(vec![]);
+    a.later = vec![item("L1", "kept", true)];
+    press(&mut a, 'L');
+    press(&mut a, 'n');
+    assert!(a.later_open && a.pending.is_some());
+    a.reload();
+    assert!(!a.later_open, "the next item added shows as the folded line");
+    assert!(a.pending.is_none(), "no drop is asked about an item that has gone");
 }
 
 #[test]
@@ -87,6 +109,7 @@ fn a_failed_change_says_why() {
     a.later = vec![item("L1", "kept", true)];
     press(&mut a, 'L');
     press(&mut a, 'n');
+    press(&mut a, 'y');
     assert_eq!(a.msg, Note::failed("L1 is a task already (BP-4): see to it there"));
     assert_eq!(a.sel.as_deref(), Some("L1"), "it stays on the item");
 }

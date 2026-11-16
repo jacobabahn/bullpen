@@ -151,12 +151,13 @@ item, in list order, and selects the first: `?` in amber for one that asks, `◇
 a kept one, then its ID and title; the selected one has a line saying what to know
 (who it asks from, why the coordinator skipped it, whether it has a brief) and the key
 line its keys. `j` `k` move between tasks and items as one list; `L` again folds it,
-back on the last task. On an item:
+back on the last task. Once the last item goes, the group folds by itself: the next
+item added shows as the one line again. On an item:
 
 | Key | Does |
 | --- | --- |
 | `y` | keep it: an idea that asks goes on the list (`bullpen later L8 --keep`) |
-| `n` | drop it (`--drop`); the next item is selected |
+| `n` | drop it (`--drop`), once you say `y` to `Drop L7 "Tidy the errors"?`, red above the key line as a task's drop is; the next item is selected |
 | `s` | start it: one with a brief becomes a task and starts, in the background, and the new task is selected (`--start`). One with no brief can't start yet: the board asks the coordinator to write one and start it (typed into its pane, as `bullpen say` does) and takes you there, as `c` does |
 | `J` `K` | move it down or up the list (`--down`, `--up`) |
 | `⏎` | the item in full (`bullpen later L7`) |

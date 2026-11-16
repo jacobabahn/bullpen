@@ -31,6 +31,8 @@ pub enum Action {
     Close,
     Drop,
     DropForce,
+    /// an item of the Later group: its question is `item_confirm`'s
+    DropItem,
 }
 
 /// What could go wrong with an accept or a drop, worst first, each in full and in
@@ -65,7 +67,7 @@ pub fn confirm_risks(action: Action, t: &Task, cfg: &Config) -> Vec<(&'static st
                 risks.push(("Its worker is still running", "Worker running"));
             }
         }
-        Action::Close | Action::DropForce => {}
+        Action::Close | Action::DropForce | Action::DropItem => {}
     }
     risks
 }
@@ -74,7 +76,7 @@ pub fn confirm_risks(action: Action, t: &Task, cfg: &Config) -> Vec<(&'static st
 pub fn confirm_risky(action: Action, t: &Task, cfg: &Config) -> bool {
     match action {
         Action::Accept | Action::Close => !confirm_risks(action, t, cfg).is_empty(),
-        Action::Drop | Action::DropForce => true,
+        Action::Drop | Action::DropForce | Action::DropItem => true,
     }
 }
 
@@ -98,8 +100,8 @@ pub fn confirm_texts(action: Action, t: &Task, cfg: &Config) -> Vec<String> {
         Action::Accept if pr.is_empty() => "Accept and clean up".into(),
         Action::Accept => format!("Accept and {verb}"),
         Action::Close => "Close it and remove its worktree".into(),
-        Action::Drop if pr.is_empty() => "Drop it".into(),
-        Action::Drop => format!("Drop it and close {pr}"),
+        Action::Drop | Action::DropItem if pr.is_empty() => "Drop it".into(),
+        Action::Drop | Action::DropItem => format!("Drop it and close {pr}"),
         Action::DropForce => "Discard uncommitted changes".into(),
     };
     let Some(&(worst, short)) = risks.first() else { return vec![format!("{ask}?")] };

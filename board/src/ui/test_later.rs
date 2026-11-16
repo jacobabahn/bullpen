@@ -50,6 +50,14 @@ fn expanded_each_item_has_a_row_and_the_selected_one_its_keys() {
     assert_eq!(s[at("Idea L2") + 2], "   brief: s asks the coordinator for one.");
     assert_eq!(tone_of(&mut a, 60, 20, "? L2"), Some(AMBER));
     assert_eq!(row(&s, 0), " y keep  n drop  s start  J K move                   ? keys");
+    // n asks before it drops: the question above the keys, red, as a task's drop is
+    a.pending = Some((crate::model::Action::DropItem, "L2".into()));
+    let s = screen(&mut a, 60, 20);
+    assert_eq!(row(&s, 1).trim_end(), " Drop L2 \"Idea L2\"?");
+    assert_eq!(row(&s, 0).trim_end(), " y drop   any other key cancels");
+    assert_eq!(tone_of(&mut a, 60, 20, "Drop L2"), Some(ratatui::style::Color::Red));
+    assert_eq!(tone_of(&mut a, 60, 20, "Idea L2"), Some(ratatui::style::Color::Red));
+    a.pending = None;
     // the compact layout has the rows too
     a.cfg.layout = Layout::Compact;
     let s = screen(&mut a, 60, 20);

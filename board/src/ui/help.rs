@@ -42,7 +42,7 @@ pub const BOARD_KEYS: &[(&str, &[(&str, &str)])] = &[
     ("Later: the backlog", &[
         ("L", "show its items, or fold them"),
         ("y", "keep an idea that asks"),
-        ("n", "drop the item"),
+        ("n", "drop the item (y to be sure)"),
         ("s", "start it (or ask for a brief)"),
         ("J K", "move it down, up the list"),
         ("⏎", "the item in full"),

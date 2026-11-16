@@ -19,6 +19,9 @@ const MESSAGE_LINES: usize = 3;
 pub(crate) fn message(app: &App, w: usize, most: usize) -> Vec<Span<'static>> {
     let room = w.saturating_sub(2);
     let most = MESSAGE_LINES.min(most).max(1);
+    if let Some(i) = asked_item(app) {
+        return model::wrap(&model::item_confirm(i), room, most).into_iter().map(|l| span(l, bold().fg(Color::Red))).collect();
+    }
     if let Some((action, t)) = app.pending.as_ref().and_then(|(a, id)| Some((*a, app.tasks.iter().find(|t| &t.id == id)?))) {
         let tone = if model::confirm_risky(action, t, &app.cfg) { Color::Red } else { Color::Green };
         // the fullest words that fit the rows there are, else the shortest, cut
@@ -41,6 +44,12 @@ pub(crate) fn message(app: &App, w: usize, most: usize) -> Vec<Span<'static>> {
         return vec![span(fit(&format!("{} {id}…{more}", job.doing()), room), dim())];
     }
     vec![]
+}
+
+/// The Later item whose drop the board is asking about.
+pub(super) fn asked_item(app: &App) -> Option<&model::Item> {
+    let (Action::DropItem, id) = app.pending.as_ref()? else { return None };
+    app.later.iter().find(|i| &i.id == id)
 }
 
 /// The message rows, then the last row: a line being typed, the y/n question's keys,
@@ -80,7 +89,7 @@ pub(super) fn draw_bottom(buf: &mut Buffer, area: Rect, app: &App, s: &Sizes, ms
 pub(crate) fn pending_keys(app: &App, w: usize) -> Option<Span<'static>> {
     let (action, tid) = app.pending.as_ref()?;
     let t = app.tasks.iter().find(|t| &t.id == tid);
-    let risky = t.is_some_and(|t| model::confirm_risky(*action, t, &app.cfg));
+    let risky = *action == Action::DropItem || t.is_some_and(|t| model::confirm_risky(*action, t, &app.cfg));
     // the PR a drop closes, said here too: a narrow row has no room for it
     let pr = model::pr_short(t.and_then(|t| t.pr.as_deref()));
     let verb = match action {
@@ -90,6 +99,7 @@ pub(crate) fn pending_keys(app: &App, w: usize) -> Option<Span<'static>> {
         Action::Drop if !pr.is_empty() => format!("drop and close {pr}"),
         Action::Drop => "drop".into(),
         Action::DropForce => "discard and drop".into(),
+        Action::DropItem => "drop".into(),
     };
     let texts = [format!("y {verb}   any other key cancels"), format!("y {verb}   n cancels")];
     let tone = if risky { bold().fg(Color::Red) } else { bold() };

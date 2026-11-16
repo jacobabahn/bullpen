@@ -178,7 +178,7 @@ its lock (`backlog.lock`) so two commands adding at once both land; an item's br
 ## On the board
 
 The board's last group, Later, is the list: one line (`Later · 6 · next: ...`, amber with
-items that ask), and with `L` a row per item, where `y` keeps, `n` drops, `s` starts
+items that ask), and with `L` a row per item, where `y` keeps, `n` drops (once you say `y`), `s` starts
 (asking the coordinator for a brief when there's none) and `J` `K` move. See
 [The Later group](board.md#the-later-group).
 

@@ -199,6 +199,16 @@ impl App {
         self.cfg = Config::load(&self.dir);
         self.tasks = model::load_tasks(&self.dir);
         self.later = model::load_later(&self.dir);
+        // the backlog emptied: the next item added shows as the folded line again
+        if self.later.is_empty() {
+            self.later_open = false;
+        }
+        // a drop asked about an item that has gone meanwhile
+        if let Some((Action::DropItem, id)) = &self.pending {
+            if !self.later.iter().any(|i| &i.id == id) {
+                self.pending = None;
+            }
+        }
         if self.cfg.other_repos {
             self.others.refresh(&self.dir);
         } else {

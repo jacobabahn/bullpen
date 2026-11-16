@@ -98,6 +98,11 @@ pub fn item_keys(i: &Item) -> Vec<(&'static str, &'static str)> {
     keys
 }
 
+/// The y/n question `n` asks before an item is dropped: `Drop L7 "Tidy the errors"?`.
+pub fn item_confirm(i: &Item) -> String {
+    format!("Drop {} \"{}\"?", i.id, i.title)
+}
+
 /// What the board says to the coordinator for an item with no brief: write one, then
 /// start it. Typed into its pane as the person would (`bullpen say`).
 pub fn brief_request(i: &Item) -> String {
