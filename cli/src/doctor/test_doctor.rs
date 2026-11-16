@@ -1,4 +1,4 @@
-use super::checks::{json_error, rex_version_key, shebang_program, shlex_split, REX_MIN};
+use super::checks::{json_error, repo_scope, rex_version_key, shebang_program, shlex_split, REX_MIN};
 use super::{problems_phrase, summary};
 
 #[test]
@@ -137,4 +137,25 @@ fn the_last_line_names_the_problems() {
     assert_eq!(summary(&[]), "All good.");
     let failed = ["keys".to_string(), "shop/coordinators".to_string()];
     assert_eq!(summary(&failed), "2 problems: keys, shop/coordinators.");
+}
+
+#[test]
+fn gh_says_whether_the_token_in_use_has_the_repo_scope() {
+    let said = |scopes: &str| {
+        format!("github.com\n  ✓ Logged in to github.com account me (keyring)\n  - Active account: true\n  - Token scopes: {scopes}\n")
+    };
+    assert_eq!(repo_scope(&said("'gist', 'read:org', 'repo', 'workflow'")), Some(true));
+    assert_eq!(repo_scope(&said("gist, read:org, repo")), Some(true)); // an older gh: no quotes
+    assert_eq!(repo_scope(&said("'gist', 'public_repo'")), Some(false));
+    // can't tell: no scopes named (a fine-grained token, a token from the environment)
+    assert_eq!(repo_scope(&said("none")), None);
+    assert_eq!(
+        repo_scope("github.com\n  ✓ Logged in to github.com account me (GH_TOKEN)\n"),
+        None
+    );
+    // a second account that isn't the one in use doesn't count, either way
+    let other =
+        "  ✓ Logged in to github.com account other (keyring)\n  - Active account: false\n  - Token scopes: 'repo'\n";
+    assert_eq!(repo_scope(&format!("{}{other}", said("'gist'"))), Some(false));
+    assert_eq!(repo_scope(&format!("{}{other}", said("'repo'"))), Some(true));
 }

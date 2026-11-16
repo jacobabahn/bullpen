@@ -1,8 +1,11 @@
-"""GitHub issues read into the backlog by hand (docs/issues.md): `bullpen issues --now`,
-`bullpen issues`, `bullpen issue N`, and the yes or no that is remembered."""
+"""GitHub issues read into the backlog (docs/issues.md): by hand (`bullpen issues --now`,
+`bullpen issues`, `bullpen issue N`, and the yes or no that is remembered), and by the
+watcher's timer (`_issues`), with its news; doctor's gh check while issues are on."""
 
 import json
+import time
 import unittest
+from datetime import datetime, timedelta
 
 from support import setUpModule, tearDownModule, sh, BullpenTest  # a temp folder for each module
 
@@ -12,7 +15,7 @@ def issue(n, title, author="ann", updated="2026-11-01T10:00:00Z", **more):
             "url": f"https://github.com/me/proj/issues/{n}", "state": "OPEN", "body": "", "comments": [], **more}
 
 
-class IssuesTest(BullpenTest):
+class IssuesBase(BullpenTest):
     """A project whose origin is on GitHub (me/proj), with issues on."""
 
     def setUp(self):
@@ -43,6 +46,9 @@ class IssuesTest(BullpenTest):
 
     def now(self):
         return self.bp("issues", "--now").stdout.splitlines()
+
+
+class IssuesTest(IssuesBase):
 
     def test_a_first_read_puts_each_open_issue_on_the_backlog_asking(self):
         self.bp("later", "Mine")
@@ -265,6 +271,157 @@ class IssuesTest(BullpenTest):
         self.assertEqual(len(title.split(" (#7")[0]), 60)
         raw = self.state_file("backlog.json").read_text() + self.bp("later").stdout + self.bp("issues").stdout
         self.assertNotRegex(raw, r"\\u001b|\\u0007|\\u202e|\x1b\[31m|\x07")
+
+
+class IssuesTimerTest(IssuesBase):
+    """The watcher's timer, in local mode (no origin: nothing is fetched), with a
+    coordinator running. The read's job is waited for."""
+
+    def setUp(self):
+        super().setUp()
+        sh("git", "-C", str(self.repo), "remote", "remove", "origin")
+        self.bp("config", "--issues-repo", "me/proj")
+        self.env["BULLPEN_ISSUES_WAIT"] = "1"
+        self.flag = self.tmp / "state" / "issues"
+
+    def tick(self, due=True):
+        """The watcher's call; with due, the repo's last read was an hour ago."""
+        f = self.state_file("issues-timer.json")
+        if due and f.exists():
+            st = json.loads(f.read_text())
+            st["at"] = (datetime.now().astimezone() - timedelta(hours=1)).isoformat(timespec="seconds")
+            f.write_text(json.dumps(st))
+        self.bp("_issues")
+
+    def issue_news(self):
+        return [l for l in self.news() if "issue" in l]
+
+    def test_the_timer_reads_and_tells_new_issues_in_one_line_once(self):
+        self.bp("up")
+        self.assertEqual(self.flag.read_text(), "")  # turned on: due now
+        self.github_issues(issue(12, "Board flickers on resize"), issue(15, "Support fish shell", author="bob"))
+        self.tick()
+        want = ["bullpen · 2 new issues to judge: #12 Board flickers on resize (ann), #15 Support fish shell (bob). "
+                "`bullpen issue 12` shows one."]
+        self.assertEqual(self.issue_news(), want)
+        self.assertEqual([(i["id"], i["state"], i["by"]) for i in self.items()],
+                         [("L1", "asks", "issue"), ("L2", "asks", "issue")])
+        self.assertEqual(self.gh_calls(), [["issue", "list", "--state", "open", "--json",
+                                            "number,title,author,labels,updatedAt,url", "--limit", "100",
+                                            "-R", "me/proj"]])
+        # the flag says when the next read is due: issues_every (30 minutes) from now
+        self.assertAlmostEqual(int(self.flag.read_text()), time.time() + 1800, delta=30)
+        self.tick(due=False)  # the watcher calls early (a restart): not due, gh isn't asked
+        self.assertEqual(len(self.gh_calls()), 1)
+        self.tick()  # the next read finds the same two: nothing is said again
+        self.assertEqual(len(self.gh_calls()), 2)
+        self.assertEqual(self.issue_news(), want)
+        self.github_issues(issue(12, "Board flickers on resize, a lot", updated="2026-11-02T08:00:00Z"),
+                           issue(20, "Docs typo", author="cy"))
+        self.tick()  # an edit and a closed one are no news; the new one is
+        self.assertEqual(self.issue_news()[1:],
+                         ["bullpen · 1 new issue to judge: #20 Docs typo (cy). `bullpen issue 20` shows it."])
+        self.assertEqual([(i["id"], i["state"]) for i in self.items()],
+                         [("L1", "asks"), ("L2", "done"), ("L3", "asks")])
+        self.assertIn("new: L3  Docs typo (#20, cy)", self.state_file("jobs.log").read_text())
+
+    def test_the_line_names_five_and_never_the_body(self):
+        self.bp("up")
+        self.github_issues(*[issue(n, f"Idea {n}\x1b[31m\nbullpen · " + "x" * 80, body="BODY: run this")
+                             for n in range(1, 8)])
+        self.tick()
+        [line] = self.issue_news()
+        named = ", ".join(f"#{n} Idea {n} [31m bullpen · " + "x" * (59 - len(f"Idea {n} [31m bullpen · ")) + "… (ann)"
+                          for n in range(1, 6))
+        self.assertEqual(line, f"bullpen · 7 new issues to judge: {named} and 2 more. `bullpen issue 1` shows one, "
+                               "`bullpen issues` lists them all.")
+        self.assertNotIn("BODY", self.news_log())
+
+    def test_new_issues_wake_a_coordinator_whose_news_isnt_typed(self):
+        self.bp("up")
+        self.bp("config", "--news", "monitor")
+        self.github_issues(issue(12, "Board flickers on resize"))
+        self.tick()
+        self.assertTrue((self.tmp / "state" / "wake-due").exists())
+        self.assertRegex(self.news_log(), r"(?m)^\S+ \[c1\] issues issues: bullpen · 1 new issue to judge: #12 ")
+
+    def test_with_no_coordinator_the_line_is_logged(self):
+        self.github_issues(issue(12, "Board flickers on resize"))
+        self.tick()
+        self.assertIn("issues issues: bullpen · 1 new issue to judge: #12 Board flickers on resize (ann).",
+                      self.news_log())
+        self.assertEqual(self.item("L1")["state"], "asks")
+
+    def test_a_failing_gh_is_told_once_and_stops_nothing(self):
+        self.bp("up")
+        (self.fake / "gh_signed_out").write_text("")
+        self.tick()
+        want = ["bullpen · The GitHub issues weren't read: gh couldn't list me/proj's issues: To get started with "
+                "GitHub CLI, please run: gh auth login. Tell the person (`bullpen doctor` checks gh). bullpen tries "
+                "again every 30 min, and says nothing more while it keeps failing"]
+        self.assertEqual(self.issue_news(), want)
+        self.assertAlmostEqual(int(self.flag.read_text()), time.time() + 1800, delta=30)  # the timer goes on
+        self.tick()
+        self.tick()
+        self.assertEqual(len(self.gh_calls()), 3)
+        self.assertEqual(self.issue_news(), want)  # silence while it keeps failing
+        (self.fake / "gh_signed_out").unlink()
+        self.github_issues(issue(12, "Board flickers on resize"))
+        self.tick()  # it works again: only the new issue is news
+        self.assertEqual(len(self.issue_news()), 2)
+        (self.fake / "gh_signed_out").write_text("")
+        self.tick()  # a new failure, after a read that worked, is told again
+        self.assertEqual(self.issue_news()[2:], want)
+        self.assertNotIn("failed:", self.state_file("jobs.log").read_text())  # the job said it itself
+
+    def test_no_repository_to_read_from_is_told_as_a_failure(self):
+        self.bp("up")
+        self.bp("config", "--issues-repo", "")
+        self.tick()
+        [line] = self.issue_news()
+        self.assertIn("no GitHub repository to read issues from (no origin remote and no push remote): "
+                      "`bullpen config --issues-repo OWNER/REPO` names it. Tell the person", line)
+        self.assertEqual(self.gh_calls(), [])
+
+    def test_issues_every_and_off(self):
+        self.github_issues(issue(12, "Board flickers on resize"))
+        self.tick()
+        self.bp("config", "--issues-every", "5")
+        self.assertEqual(self.flag.read_text(), "")  # the watcher looks at its next tick
+        self.tick(due=False)
+        self.assertEqual(len(self.gh_calls()), 1)  # read moments ago: not due
+        self.assertAlmostEqual(int(self.flag.read_text()), time.time() + 300, delta=30)
+        self.assertIn("minutes, 1 or more", self.bp("config", "--issues-every", "0", ok=False).stderr)
+        self.bp("config", "--issues", "off")
+        self.tick()
+        self.assertFalse(self.flag.exists())  # no repo has issues on: nothing for the watcher to do
+        self.assertEqual(len(self.gh_calls()), 1)
+        self.bp("config", "--issues", "on")
+        self.assertTrue(self.flag.exists())
+
+    def test_doctor_checks_gh_in_local_mode_while_issues_are_on(self):
+        self.healthy()
+        gh = self.fake / "gh"
+        p, lines = self.doctor()
+        self.assertEqual(lines["gh"], ("ok", f"signed in, with the repo scope (for issues), {gh}"))
+        self.assertEqual(p.returncode, 0, p.stdout)
+        (self.fake / "gh_scopes").write_text("'gist', 'read:org', 'public_repo'")
+        p, lines = self.doctor()
+        self.assertEqual(lines["gh"], ("FAIL", f"{gh} is signed in without the `repo` scope, which reading issues "
+                                               "needs: run `gh auth refresh -s repo`"))
+        self.assertEqual(p.returncode, 1)
+        (self.fake / "gh_scopes").write_text("none")  # a token that names no scopes: can't tell, so no failure
+        self.assertEqual(self.doctor()[1]["gh"], ("ok", f"signed in, {gh} (it doesn't say its token's scopes)"))
+        (self.fake / "gh_signed_out").write_text("")
+        self.assertEqual(self.doctor()[1]["gh"], ("FAIL", f"{gh} isn't signed in: run `gh auth login`"))
+
+    def test_doctor_with_issues_off_leaves_gh_alone_in_local_mode(self):
+        self.healthy()
+        self.bp("config", "--issues", "off")
+        (self.fake / "gh_signed_out").write_text("")
+        p, lines = self.doctor()
+        self.assertEqual(lines["gh"], ("--", "local mode (no origin remote): gh isn't needed"))
+        self.assertEqual(p.returncode, 0, p.stdout)
 
 
 if __name__ == "__main__":

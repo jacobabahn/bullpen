@@ -37,6 +37,7 @@ fn bookkeeping_rides_along_and_anything_else_wakes() {
         "guide",
         "working",
         "risk",
+        "issues",
         "a-new-one",
     ] {
         assert!(wakes(event), "{event}");

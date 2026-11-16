@@ -50,7 +50,10 @@ os.time = function() return clock end
 rex = {
   args = { bin = "bullpen", state = args.state },
   on = function(name, fn) handlers[name] = fn end,
-  every = function(seconds, fn) timers[seconds] = fn end,
+  every = function(seconds, fn)  -- two timers of one interval both run
+    local first = timers[seconds]
+    timers[seconds] = first and function() first() fn() end or fn
+  end,
   after = function(seconds, fn) fn() end,
   exec = function(argv)
     calls[#calls + 1] = table.concat(argv, " ", 4)
@@ -86,6 +89,15 @@ timers[30]()
 timers[300]()                             -- pickup has nothing: nothing to call
 f = io.open(args.state .. "/pickup", "w") f:close()
 timers[300]()
+clock = 1000
+timers[60]()                              -- issues are off: no file, nothing to call
+f = io.open(args.state .. "/issues", "w") f:close()
+timers[60]()                              -- on, and no time in it: due now
+f = io.open(args.state .. "/issues", "w") f:write("2800") f:close()
+timers[60]()                              -- the next read is due at 2800: not yet
+clock = 2800
+timers[60]()
+os.remove(args.state .. "/issues")
 timers[180]()                             -- status drift, every 3 minutes
 timers[3]()                               -- no outbox and no news unread: nothing to call
 f = io.open(args.state .. "/wake-due", "w") f:close()
@@ -147,6 +159,8 @@ return table.concat(calls, "|")
             "_gone blk1",
             "_limit",                      # only while <state>/limit.json exists
             "_pickup",                     # only while <state>/pickup exists
+            "_issues",                     # only while <state>/issues exists, when the time in it has come
+            "_issues",
             "check --fix --quiet --all-repos",
             "_wake_check",                 # only while <state>/wake-due exists
             "_flush",                      # and <state>/outbox, in the same tick

@@ -4,7 +4,7 @@
 //! The guide is `prompts/coordinator.md` with the sections that apply to the repo put
 //! in at its `{{sections}}` line, each from a file of its own in `prompts/coordinator/`
 //! (SECTIONS): how news arrives when it isn't typed, pull requests, auto-accept, pickup,
-//! other coordinators. So a repo's guide changes with its settings.
+//! GitHub issues, other coordinators. So a repo's guide changes with its settings.
 //!
 //! A coordinator gets its guide once, in its system prompt or by reading `bullpen guide`
 //! (`up --here`), and can't load it again. Each records the hash of the guide it was
@@ -107,6 +107,7 @@ const SECTIONS: &[(&str, &str, fn(&Repo) -> Res<bool>)] = &[
         Ok(on(r, "auto_accept") || (on(r, "pickup") && on(r, "pickup_auto_accept")))
     }),
     ("pickup", "Pickup", |r| Ok(on(r, "pickup"))),
+    ("issues", "GitHub issues", |r| Ok(on(r, "issues"))),
     ("others", "Other coordinators", |r| Ok(coordinators(r).len() > 1)),
 ];
 

@@ -194,22 +194,69 @@ pub fn check_rex() -> Check {
     Ok(("ok", format!("server {version}, {exe}")))
 }
 
+/// gh: installed and signed in, for a repo with a remote (pull requests). With `issues`
+/// on it is checked in local mode too, and for the `repo` scope, which reading a
+/// private repository's issues needs.
 pub fn check_gh(repo: Option<&Repo>) -> Check {
-    let repo = match repo {
-        Some(r) if r.has_origin()? => r,
+    let issues = repo.is_some_and(|r| truthy(r.cfg.get("issues")));
+    let (repo, remote) = match repo {
+        Some(r) if r.has_origin()? => (r, true),
+        Some(r) if issues => (r, false),
         _ => return Ok(("skip", "local mode (no origin remote): gh isn't needed".into())),
     };
     let gh = repo.gh();
     let Some(exe) = which(&gh) else {
+        let why = if remote {
+            "this repo has a remote"
+        } else {
+            "`issues` is on"
+        };
         return Ok((
             "fail",
-            format!("{gh} isn't on PATH, and this repo has a remote: install gh (https://cli.github.com)"),
+            format!("{gh} isn't on PATH, and {why}: install gh (https://cli.github.com)"),
         ));
     };
-    if !run(&[exe.as_str(), "auth", "status"], false)?.ok() {
+    let status = run(&[exe.as_str(), "auth", "status"], false)?;
+    if !status.ok() {
         return Ok(("fail", format!("{exe} isn't signed in: run `gh auth login`")));
     }
-    Ok(("ok", format!("signed in, {exe}")))
+    if !issues {
+        return Ok(("ok", format!("signed in, {exe}")));
+    }
+    match repo_scope(&format!("{}\n{}", status.stdout, status.stderr)) {
+        Some(false) => Ok((
+            "fail",
+            format!(
+                "{exe} is signed in without the `repo` scope, which reading issues needs: run `gh auth refresh -s repo`"
+            ),
+        )),
+        Some(true) => Ok(("ok", format!("signed in, with the repo scope (for issues), {exe}"))),
+        None => Ok(("ok", format!("signed in, {exe} (it doesn't say its token's scopes)"))),
+    }
+}
+
+/// Does `gh auth status` say the token in use has the `repo` scope? From its "Token
+/// scopes: 'gist', 'repo'" lines, those of an account that isn't the active one left
+/// out. None when it names no scopes (a fine-grained token has none): can't tell.
+pub fn repo_scope(said: &str) -> Option<bool> {
+    let mut active = true;
+    let mut found = None;
+    for l in splitlines(said) {
+        if l.contains("Logged in to") {
+            active = true;
+        } else if l.contains("Active account: false") {
+            active = false;
+        }
+        let Some((_, scopes)) = l.split_once("Token scopes:").filter(|_| active) else {
+            continue;
+        };
+        let mut scopes = scopes.split(',').map(|w| w.trim().trim_matches(['\'', '"']));
+        let scopes: Vec<&str> = scopes.by_ref().filter(|w| !w.is_empty() && *w != "none").collect();
+        if !scopes.is_empty() {
+            found = Some(found == Some(true) || scopes.contains(&"repo"));
+        }
+    }
+    found
 }
 
 /// The programs the coordinator, workers and reviewers run (claude, unless changed).

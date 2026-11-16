@@ -134,7 +134,7 @@ use Kind::*;
 use Val::{Bool, Int, List, Null, Str};
 
 /// Every setting, in the order `config` lists them.
-pub static SETTINGS: [Setting; 42] = [
+pub static SETTINGS: [Setting; 43] = [
     Setting { help: "the letters new task IDs start with (2 to 5 capitals)", repo_only: true, says: Some("2 to 5 capital letters"), pattern: Some("[A-Z]{2,5}"), ..base("prefix", Str("BP"), Some("Tasks"), Text) },
     Setting { repo_only: true, ..base("next", Int(1), None, File) },
     Setting { help: "the branch tasks start from and open PRs against", repo_only: true, none: Some("the repo's default branch"), ..base("base", Null, Some("Tasks"), Text) },
@@ -175,6 +175,7 @@ pub static SETTINGS: [Setting; 42] = [
     Setting { help: "self-started tasks accept by themselves once review approves them", ..base("pickup_auto_accept", Bool(false), Some("Pickup"), OnOff) },
     Setting { help: "read this repository's GitHub issues into the backlog, each asking for a yes (docs/issues.md)", ..base("issues", Bool(false), Some("Issues"), OnOff) },
     Setting { help: "the GitHub repository issues are read from, as OWNER/REPO (\"\" clears it)", repo_only: true, metavar: Some("OWNER/REPO"), none: Some("origin's, or in local mode the push remote's"), clears: true, ..base("issues_repo", Null, Some("Issues"), Text) },
+    Setting { help: "minutes between the watcher's reads of the GitHub issues", least: Some(1), says: Some("minutes, 1 or more"), metavar: Some("MINUTES"), ..base("issues_every", Int(30), Some("Issues"), Number) },
     Setting { repo_only: true, ..base("coordinators", List(&[]), None, File) },
     Setting { repo_only: true, ..base("next_coordinator", Int(1), None, File) },
 ];

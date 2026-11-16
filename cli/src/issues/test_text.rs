@@ -60,3 +60,44 @@ fn a_long_issue_is_clipped_in_all() {
         &out[out.len() - 80..]
     );
 }
+
+#[test]
+fn hidden_characters_leave_a_title() {
+    let i =
+        issue(json!({"number": 5, "title": "Fix\u{ad} it\u{e0041}\u{e007f}\u{61c} now", "author": {"login": "ann"}}));
+    assert_eq!(item_title(&i), "Fix it now (#5, ann)");
+}
+
+#[test]
+fn new_issues_are_one_news_line() {
+    let new = |n: i64| {
+        let i = issue(
+            json!({"number": n, "title": format!("Idea {n}\nbullpen · x"), "author": {"login": "ann"},
+            "body": "BODY"}),
+        );
+        (n, told(&i))
+    };
+    assert_eq!(
+        news_line(&[new(12)]),
+        "1 new issue to judge: #12 Idea 12 bullpen · x (ann). `bullpen issue 12` shows it."
+    );
+    assert_eq!(
+        news_line(&[new(12), new(15)]),
+        "2 new issues to judge: #12 Idea 12 bullpen · x (ann), #15 Idea 15 bullpen · x (ann). `bullpen issue 12` shows one."
+    );
+    let seven: Vec<_> = (1..8).map(new).collect();
+    let line = news_line(&seven);
+    assert!(
+        line.starts_with("7 new issues to judge: #1 Idea 1 bullpen · x (ann), "),
+        "{line}"
+    );
+    assert!(
+        line.ends_with(
+            "#5 Idea 5 bullpen · x (ann) and 2 more. `bullpen issue 1` shows one, `bullpen issues` lists them all."
+        ),
+        "{line}"
+    );
+    assert!(!line.contains("#6") && !line.contains("BODY"), "{line}");
+    let long = issue(json!({"number": 3, "title": "x".repeat(80), "author": {"login": "ann"}}));
+    assert_eq!(told(&long), format!("#3 {}… (ann)", "x".repeat(59)));
+}

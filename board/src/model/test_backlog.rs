@@ -12,6 +12,10 @@ fn the_later_line_says_what_is_next_or_what_waits_on_you() {
     assert_eq!(later_line(&kept), ("Later · 2 · next: Idea L1".into(), false));
     let some_ask = [item("L1", "kept"), item("L4", "asks"), item("L6", "asks")];
     assert_eq!(later_line(&some_ask), ("Later · 3 · 2 to decide (L4, L6)".into(), true));
+    // a GitHub issue's item asks as any other does
+    let issue = Item::from_obj(json!({"id": "L7", "title": "Board flickers (#12, ann)", "state": "asks", "by": "issue",
+        "issue": {"number": 12}}).as_object().unwrap());
+    assert_eq!(later_line(&[item("L1", "kept"), issue]), ("Later · 2 · 1 to decide (L7)".into(), true));
 }
 
 #[test]

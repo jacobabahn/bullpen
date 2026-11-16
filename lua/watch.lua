@@ -1,6 +1,6 @@
 -- bullpen watcher: forwards status changes of bullpen panes to the bullpen CLI.
 --
---   rex do --all watch.lua bin=/path/to/bullpen state=/path/to/state [quiet=30] [prs=120] [check=180] [pickup=300]
+--   rex do --all watch.lua bin=/path/to/bullpen state=/path/to/state [quiet=30] [prs=120] [check=180] [pickup=300] [issues=60]
 --
 -- Only panes bullpen started (listed in <state>/blocks/) are forwarded, and
 -- only when their state changes, so a worker's stream of "working: ..."
@@ -197,6 +197,19 @@ local pickup_every = tonumber(rex.args.pickup or "") or 300 -- seconds
 rex.every(pickup_every, function()
   local f = io.open(state_dir .. "/pickup", "r")
   if f then f:close() call("_pickup") end
+end)
+
+-- GitHub issues (docs/issues.md): <state>/issues exists while some repo has `issues`
+-- on, and holds when the next read is due (seconds since 1970; empty: now). `_issues`
+-- starts the reads that are due and writes when the next one is, so this is one small
+-- file read a tick, and nothing at all with issues off.
+local issues_every = tonumber(rex.args.issues or "") or 60 -- seconds between looks
+rex.every(issues_every, function()
+  local f = io.open(state_dir .. "/issues", "r")
+  if not f then return end
+  local due = tonumber(f:read("*a")) or 0
+  f:close()
+  if os.time() >= due then call("_issues") end
 end)
 
 -- Agents stopped at the usage limit are continued once it has reset:

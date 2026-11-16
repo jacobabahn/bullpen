@@ -6,12 +6,16 @@
 //! to GitHub and nothing starts by itself: every issue asks the person, whose keep or
 //! drop of its item is remembered (`decided`), so it is never asked again.
 //!
+//! The watcher reads them too, on a timer, and tells the coordinators of new ones in
+//! one news line (timer.rs).
+//!
 //! An issue's text is whoever filed it's: only its title, clipped and without control
-//! characters (text.rs), its number and its author reach the backlog.
+//! characters (text.rs), its number and its author reach the backlog and the news.
 
 pub mod repo;
 pub mod store;
 pub mod text;
+pub mod timer;
 pub mod view;
 
 use crate::args::{flag, Arg, Args};
@@ -52,21 +56,10 @@ pub fn cmd_issues(argv: &[String]) -> Res<i32> {
     if !on(&repo) {
         return Ok(0);
     }
-    let slug = repo::issues_repo(&repo)?;
-    let limit = LIMIT.to_string();
-    let args = ["issue", "list", "--state", "open", "--json", FIELDS, "--limit", &limit];
-    let got = repo::gh_json(&repo, &slug, &args, &format!("list {slug}'s issues"))?;
-    let Some(open) = got.as_array() else {
-        return fail(format!(
-            "gh couldn't list {slug}'s issues: what it printed isn't a list"
-        ));
-    };
-    let open: Vec<&Obj> = open.iter().filter_map(Value::as_object).collect();
-    let changes = sync(&repo, &open)?;
+    let Read { slug, open: n, changes } = read(&repo)?;
     for c in &changes {
-        println!("{c}");
+        println!("{}", c.line);
     }
-    let n = open.len();
     let count = format!("{n} open issue{} in {slug}", if n == 1 { "" } else { "s" });
     if changes.is_empty() {
         println!("nothing new: {count}");
@@ -78,9 +71,48 @@ pub fn cmd_issues(argv: &[String]) -> Res<i32> {
     Ok(0)
 }
 
-/// Compare the open issues with the records, and change the backlog to match: a line
-/// for each thing that changed.
-fn sync(repo: &Repo, open: &[&Obj]) -> Res<Vec<String>> {
+/// One thing a read changed: the line `issues --now` prints for it, and, for an issue
+/// not seen before, its number and what the news calls it (`#12 Title (author)`).
+pub struct Change {
+    pub line: String,
+    pub new: Option<(i64, String)>,
+}
+
+/// What a read found: the repository, how many issues are open there, what changed.
+pub struct Read {
+    pub slug: String,
+    pub open: usize,
+    pub changes: Vec<Change>,
+}
+
+fn changed(line: String) -> Option<Change> {
+    Some(Change { line, new: None })
+}
+
+/// One read (`issues --now`, and the watcher's timer): ask gh for the repository's open
+/// issues and bring the records and the backlog up to date with them.
+pub fn read(repo: &Repo) -> Res<Read> {
+    let slug = repo::issues_repo(repo)?;
+    let limit = LIMIT.to_string();
+    let args = ["issue", "list", "--state", "open", "--json", FIELDS, "--limit", &limit];
+    let got = repo::gh_json(repo, &slug, &args, &format!("list {slug}'s issues"))?;
+    let Some(open) = got.as_array() else {
+        return fail(format!(
+            "gh couldn't list {slug}'s issues: what it printed isn't a list"
+        ));
+    };
+    let open: Vec<&Obj> = open.iter().filter_map(Value::as_object).collect();
+    let changes = sync(repo, &open)?;
+    Ok(Read {
+        slug,
+        open: open.len(),
+        changes,
+    })
+}
+
+/// Compare the open issues with the records, and change the backlog to match: each
+/// thing that changed.
+fn sync(repo: &Repo, open: &[&Obj]) -> Res<Vec<Change>> {
     store::change(repo, |seen| {
         backlog::change(repo, |b| {
             let mut said = Vec::new();
@@ -103,16 +135,20 @@ fn number(issue: &Obj) -> Option<i64> {
 
 /// One open issue: new (an item that asks, at the bottom), decided (left alone), or
 /// undecided and edited or reopened (read again; its item stays where it is).
-fn read_one(seen: &mut Obj, b: &mut Backlog, issue: &Obj) -> Option<String> {
-    let key = number(issue)?.to_string();
+fn read_one(seen: &mut Obj, b: &mut Backlog, issue: &Obj) -> Option<Change> {
+    let n = number(issue)?;
+    let key = n.to_string();
     let (title, updated) = (text::item_title(issue), s(issue, "updatedAt"));
     let Some(rec) = seen.get_mut(&key).and_then(Value::as_object_mut) else {
         let id = b.add(&title, "issue", "asks", false);
-        let about = json!({"number": number(issue), "url": text::line(s(issue, "url"), 200),
+        let about = json!({"number": n, "url": text::line(s(issue, "url"), 200),
             "author": text::author(issue), "updated": updated});
         b.item_mut(&id).ok()?.insert("issue".into(), about);
         seen.insert(key, store::record(&id, updated));
-        return Some(format!("new: {id}  {title}"));
+        return Some(Change {
+            line: format!("new: {id}  {title}"),
+            new: Some((n, text::told(issue))),
+        });
     };
     let id = s(rec, "item").to_string();
     let item = b.item_mut(&id).ok()?;
@@ -132,15 +168,15 @@ fn read_one(seen: &mut Obj, b: &mut Backlog, issue: &Obj) -> Option<String> {
         }
     }
     match (reopened, edited) {
-        (true, _) => Some(format!("open again: {id}  {title}")),
-        (_, true) => Some(format!("edited: {id}  {title}")),
+        (true, _) => changed(format!("open again: {id}  {title}")),
+        (_, true) => changed(format!("edited: {id}  {title}")),
         _ => None,
     }
 }
 
 /// The recorded issues that aren't open any more: each is marked closed, and its item,
 /// if still on the list, is done.
-fn close_gone(seen: &mut Obj, b: &mut Backlog, open: &[&Obj]) -> Vec<String> {
+fn close_gone(seen: &mut Obj, b: &mut Backlog, open: &[&Obj]) -> Vec<Change> {
     let still: Vec<String> = open.iter().filter_map(|i| number(i)).map(|n| n.to_string()).collect();
     let mut said = Vec::new();
     for (key, rec) in seen.iter_mut().filter(|(k, _)| !still.contains(k)) {
@@ -152,11 +188,12 @@ fn close_gone(seen: &mut Obj, b: &mut Backlog, open: &[&Obj]) -> Vec<String> {
         store::settle(rec, item);
         if is_open(item) {
             item.insert("state".into(), json!("done"));
-            said.push(format!(
+            let line = format!(
                 "closed: {}  {} (#{key} is closed on GitHub)",
                 s(item, "id"),
                 s(item, "title")
-            ));
+            );
+            said.extend(changed(line));
         }
     }
     said

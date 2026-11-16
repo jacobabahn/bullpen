@@ -266,7 +266,7 @@ class EntryTest(BullpenTest):
                           "config", "ready", "review", "verdict", "close", "drop", "finish", "_push", "answer",
                           "reply", "prompt", "check", "_event", "_stuck", "_limit", "_gone", "_coordinator_gone",
                           "_tour", "tour-comment", "accept", "_auto_accept", "keys", "_prs", "tour", "stats",
-                          "repos", "later", "_pickup", "mission", "_wake_check", "brief", "issues",
+                          "repos", "later", "_pickup", "_issues", "mission", "_wake_check", "brief", "issues",
                           "issue"})
 
     def test_help_and_an_unknown_command(self):

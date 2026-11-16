@@ -11,11 +11,16 @@ pub const TITLE: usize = 60;
 /// `bullpen issue N` shows this many characters of the issue's text, in all.
 pub const SHOWN: usize = 4000;
 
+/// A news line names this many new issues; the rest are counted.
+pub const NAMED: usize = 5;
+
 /// A character that could change how the text around it is read: a control character,
-/// or one that hides or reorders text (zero width, the bidi overrides).
+/// or one that hides or reorders text (zero width, the soft hyphen, the bidi marks and
+/// overrides, the invisible tag characters).
 fn steers(c: char) -> bool {
     c.is_control()
-        || matches!(c, '\u{200b}'..='\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2060}'..='\u{2069}' | '\u{feff}')
+        || matches!(c, '\u{ad}' | '\u{61c}' | '\u{200b}'..='\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2060}'..='\u{2069}'
+            | '\u{feff}' | '\u{e0000}'..='\u{e007f}')
 }
 
 /// One line of the issue's text: those characters as spaces, runs of space as one, cut
@@ -51,6 +56,30 @@ pub fn author(issue: &Obj) -> String {
 pub fn item_title(issue: &Obj) -> String {
     let n = issue.get("number").and_then(Value::as_i64).unwrap_or(0);
     format!("{} (#{n}, {})", line(s(issue, "title"), TITLE), author(issue))
+}
+
+/// What the news calls an issue: its number, its title clipped, its author.
+pub fn told(issue: &Obj) -> String {
+    let n = issue.get("number").and_then(Value::as_i64).unwrap_or(0);
+    format!("#{n} {} ({})", line(s(issue, "title"), TITLE), author(issue))
+}
+
+/// The one news line for the new issues a read found (their numbers and what `told`
+/// calls them): the first NAMED by name, the rest counted. Never an issue's body.
+pub fn news_line(new: &[(i64, String)]) -> String {
+    let n = new.len();
+    let first = new.first().map_or(0, |(number, _)| *number);
+    let names: Vec<&str> = new.iter().take(NAMED).map(|(_, told)| told.as_str()).collect();
+    let names = names.join(", ");
+    match n {
+        1 => format!("1 new issue to judge: {names}. `bullpen issue {first}` shows it."),
+        _ if n > NAMED => format!(
+            "{n} new issues to judge: {names} and {} more. `bullpen issue {first}` shows one, `bullpen issues` \
+             lists them all.",
+            n - NAMED
+        ),
+        _ => format!("{n} new issues to judge: {names}. `bullpen issue {first}` shows one."),
+    }
 }
 
 /// The issue's text for reading: its title, labels, body and comments.

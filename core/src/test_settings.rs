@@ -44,6 +44,7 @@ const PYTHON: &str = r#"[
 ["pickup_auto_accept", "--pickup-auto-accept", "off", "self-started tasks accept by themselves once review approves them (default off)"],
 ["issues", "--issues", "off", "read this repository's GitHub issues into the backlog, each asking for a yes (docs/issues.md) (default off)"],
 ["issues_repo", "--issues-repo", "origin's, or in local mode the push remote's", "the GitHub repository issues are read from, as OWNER/REPO (\"\" clears it) (default origin's, or in local mode the push remote's)"],
+["issues_every", "--issues-every", "30", "minutes between the watcher's reads of the GitHub issues (default 30)"],
 ["coordinators", "--coordinators", "[]", " (default [])"],
 ["next_coordinator", "--next-coordinator", "1", " (default 1)"]
 ]"#;
@@ -104,6 +105,7 @@ const DEFAULT_CONFIG: &str = r#"{
   "pickup_auto_accept": false,
   "issues": false,
   "issues_repo": null,
+  "issues_every": 30,
   "coordinators": [],
   "next_coordinator": 1
 }"#;

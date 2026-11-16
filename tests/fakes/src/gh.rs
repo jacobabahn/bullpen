@@ -2,6 +2,7 @@
 //! nothing) to gh.log in $FAKE_DIR and answers from the files the tests put there:
 //!
 //!   gh_signed_out    `auth status` says it isn't signed in
+//!   gh_scopes        the token scopes `auth status` names (else gist, read:org and repo)
 //!   pr.json          what `pr view` says GitHub has on the PR (else an open PR)
 //!   meanwhile        a command (a JSON list) `pr view` runs before it answers: a slow gh
 //!   merge_refused    `pr merge` fails, saying this file's text
@@ -29,8 +30,21 @@ fn run(argv: &[String]) -> Res<()> {
         .map_err(|e| broke(&format!("stdin: {e}")))?;
     append(&d.join("gh.log"), &dumps(&json!({"argv": argv, "body": body})))?;
     let two = |x: &str, y: &str| argv.len() >= 2 && argv[0] == x && argv[1] == y;
-    if two("auth", "status") && d.join("gh_signed_out").exists() {
-        return Err(exit_msg("You are not logged into any GitHub hosts."));
+    if two("auth", "status") {
+        if d.join("gh_signed_out").exists() {
+            return Err(exit_msg("You are not logged into any GitHub hosts."));
+        }
+        let scopes = d.join("gh_scopes");
+        let scopes = if scopes.exists() {
+            read_text(&scopes)?
+        } else {
+            "'gist', 'read:org', 'repo'".into()
+        };
+        print(&format!(
+            "github.com\n  ✓ Logged in to github.com account me (keyring)\n  - Active account: true\n  - Token scopes: {}",
+            scopes.trim()
+        ));
+        return Ok(());
     }
     if argv.first().is_some_and(|a| a == "issue") {
         return issue(&d, argv);

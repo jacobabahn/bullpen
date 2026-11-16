@@ -193,6 +193,10 @@ pub fn cmd_config(argv: &[String]) -> Res<i32> {
         std::fs::create_dir_all(bullpen_core::paths::state())?;
         crate::news::touch(&crate::backlog::pickup::flag())?;
     }
+    if a.opt("--issues") == Some("on") || a.opt("--issues-every").is_some() {
+        // the watcher's timer looks at its next tick (`_issues` reads only where a read is due)
+        crate::issues::timer::soon()?;
+    }
     if a.flag("--global") {
         return config_global(&a);
     }
