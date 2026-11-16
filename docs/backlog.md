@@ -79,7 +79,8 @@ When it runs:
 - after a save that frees a slot (a task accepted, closed, dropped, gone to review, ready
   or finished), right after the run queue, so tasks waiting with `--after` go first;
 - after `later` changes the list (an item added, given a brief, kept, skipped, moved),
-  and after `bullpen up`;
+  and after `bullpen up`; looking at the list or an item (`later`, `later L7`, `--json`)
+  never runs it;
 - from the watcher, every 5 minutes, while `~/.local/state/bullpen/pickup` exists
   (some repository has pickup on and a kept item): it catches what no save does, like
   the usage limit's reset or pickup just turned on. With nothing to do it costs one
@@ -91,7 +92,9 @@ It starts at most one item a run, and only when all of these hold:
   you haven't answered comes before new work.
 - **No pile**: fewer than `pickup_waiting` (2) self-started tasks wait for you (ready,
   finished, needs, stopped). At the cap it pauses, with one news line and one
-  notification, once a pause: `Pickup paused: BP-140 and BP-141 wait for you`.
+  notification, once a pause: `Pickup paused: BP-140 and BP-141 wait for you`. The
+  pause lasts until the pile is gone, even while something else (a task that needs you)
+  holds pickup back too, so it isn't said again when that's answered.
 - **Room**: fewer than `max_running` tasks work, and fewer than `pickup_running` (1)
   self-started ones work or are in review.
 - **Budget**: fewer than `pickup_per_day` (4) self-started tasks today (local day, closed
@@ -116,13 +119,23 @@ skipped ones:
   for it: the order is yours. With none, the line waits in the news for the next one, and
   pickup tries the next item that has a brief.
 
+  If 30 minutes go by and the coordinator has neither given the brief nor skipped the
+  item, you hear once, with one news line and one notification:
+
+  ```
+  bullpen · Pickup waits for a brief for L7 (asked at 3:00 PM): give it with `bullpen later L7 --brief-file <f>`, or `bullpen later L7 --skip "why"` to pass over it
+  ```
+
+  Pickup still doesn't go past L7 by itself: the items below it are ones you put after
+  it, and a coordinator that is running may just be slow. Brief it, skip it or move it.
+
 A hand start (`later L7 --start`, by you or the coordinator) isn't pickup's: it is not
 capped and keeps the config's auto-accept, as `add` and `start` would.
 
 `bullpen later` ends with pickup's line while it is on: `Pickup on (1 of 4 started
 today)`, `Pickup waits for room`, `Pickup waits: a task needs you`, `Pickup paused: BP-140
-and BP-141 wait for you`, `Pickup done for today (4 of 4 started)`, or `Pickup waits: the
-usage limit is reached`.
+and BP-141 wait for you`, `Pickup done for today (4 of 4 started)`, `Pickup waits: the
+usage limit is reached`, or `Pickup waits for a brief for L7 (asked at 3:00 PM)`.
 
 The settings, in `bullpen config`'s Pickup group:
 
@@ -135,8 +148,8 @@ The settings, in `bullpen config`'s Pickup group:
 | `pickup_model` | the worker model | claude's `--model` for self-started tasks |
 | `pickup_auto_accept` | off | self-started tasks accept by themselves once review approves them |
 
-`pickup.json` beside the tasks keeps what a room has asked for and whether pickup is
-paused, so each is said once; `pickup.lock` keeps two pickups from both taking one room.
+`pickup.json` beside the tasks keeps what a room has asked for and when, the item it
+waits for, whether you were told and whether pickup is paused, so each is said once; `pickup.lock` keeps two pickups from both taking one room.
 The code is `cli/src/backlog/pickup.rs` (`_pickup` is the watcher's call).
 
 ## Where it lives

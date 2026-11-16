@@ -161,3 +161,60 @@ class PickupTest(BullpenTest):
         (self.tmp / "state" / "limit.json").unlink()
         self.bp("_pickup")
         self.assertEqual(self.show("BP-2")["started_by"], "itself")
+
+    def test_viewing_the_list_or_an_item_starts_nothing(self):
+        self.bp("up")
+        self.later("Tidy", "--brief-file", self.brief())
+        self.bp("config", "--pickup", "on")  # on, with room: the next change would start L1
+        self.later("L1")
+        self.later()
+        self.later("--json")
+        self.later("L1", "--json")
+        self.assertEqual(self.tasks(), [])  # a read never starts work
+        self.later("L1", "--top")  # a change does
+        self.assertEqual(self.show("BP-1")["from"], "L1")
+
+    def test_an_unanswered_ask_is_told_once_and_the_order_holds(self):
+        self.on()
+        self.later("Tidy the errors")
+        self.later("Has one", "--brief-file", self.brief())
+        self.assertIn("Pickup waits for a brief for L1 (asked at ", self.later().stdout)
+        self.assertEqual([l for l in self.news() if "waits for a brief" in l], [])  # not yet
+        # half an hour on, nobody wrote it: the person hears, once
+        f = next((self.tmp / "state").rglob("pickup.json"))
+        st = json.loads(f.read_text())
+        st["asked"]["L1"] = (dt.datetime.now().astimezone() - dt.timedelta(minutes=31)).isoformat(timespec="seconds")
+        f.write_text(json.dumps(st))
+        self.bp("_pickup")
+        self.bp("_pickup")
+        told = [l for l in self.news() if "waits for a brief" in l]
+        self.assertEqual(len(told), 1)
+        self.assertRegex(told[0], r"^bullpen · Pickup waits for a brief for L1 \(asked at .+\): give it with "
+                                  r"`bullpen later L1 --brief-file <f>`, or `bullpen later L1 --skip \"why\"` "
+                                  r"to pass over it$")
+        log = next((self.tmp / "state").rglob("notify.log")).read_text()
+        self.assertEqual(log.count("Pickup waits for a brief for L1"), 1)
+        self.assertEqual(self.tasks(), [])  # L2 doesn't go ahead of L1: the order is the person's
+        self.assertIn("Pickup waits for a brief for L1", self.later().stdout)
+        # a skip passes over it: L2 starts, and the line says so no more
+        self.later("L1", "--skip", "later")
+        self.assertEqual(self.show("BP-1")["from"], "L2")
+        self.assertNotIn("waits for a brief", self.later().stdout)
+
+    def test_the_pause_is_said_once_through_a_task_that_needs_you(self):
+        self.on("--pickup-running", "3", "--max-running", "5")
+        self.later("One", "--brief-file", self.brief())
+        self.later("Two", "--brief-file", self.brief())
+        self.set_status("BP-1", "ready")
+        self.set_status("BP-2", "ready")
+        self.later("Three", "--brief-file", self.brief())  # paused: Three waits
+        # a hand task needs you, then is answered: still the same pause
+        self.bp("add", "Hand", "--brief", "x")
+        self.set_status("BP-3", "needs")
+        self.bp("_pickup")
+        self.set_status("BP-3", "working")
+        self.bp("_pickup")
+        self.assertEqual(len(self.tasks()), 3)
+        self.assertEqual(len([l for l in self.news() if "Pickup paused" in l]), 1)
+        log = next((self.tmp / "state").rglob("notify.log")).read_text()
+        self.assertEqual(log.count("Pickup paused"), 1)

@@ -232,7 +232,9 @@ fn change(repo: &Repo, id: &str, a: &Args, who: &Caller) -> Res<i32> {
         Ok(said)
     })?;
     println!("{}", said.join("\n"));
-    pickup::soon(repo); // a brief, a yes, a skip or a move can make the next item another
+    if !viewing {
+        pickup::soon(repo); // a brief, a yes, a skip or a move can make the next item another
+    }
     Ok(0)
 }
 

@@ -14,7 +14,9 @@ watcher sends it, on the round that types waiting news.
 
 When pickup pauses because self-started tasks wait for you (see
 [Pickup](backlog.md#pickup)), you get one: "Pickup paused: BP-140 and BP-141 wait for
-you", once a pause, from the first one's pane, unless notify is `off`.
+you", once a pause, from the first one's pane, unless notify is `off`. So you do when
+pickup has waited 30 minutes for a coordinator's brief: "Pickup waits for a brief for L7
+(asked at 3:00 PM) ...", once an item.
 
 Bullpen writes the notification (OSC 777) to the terminal of the task's pane, or of
 its board, or its coordinator, when the task's has none, and Rex for Mac shows it:

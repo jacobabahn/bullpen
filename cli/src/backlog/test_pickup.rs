@@ -51,3 +51,16 @@ fn ids_read_as_a_list() {
     assert_eq!(and_list(&["BP-1".into(), "BP-2".into()]), "BP-1 and BP-2");
     assert_eq!(and_list(&["A".into(), "B".into(), "C".into()]), "A, B and C");
 }
+
+#[test]
+fn the_pile_stands_while_something_else_holds_pickup() {
+    let mut tasks = vec![
+        task("BP-1", "ready", ITSELF, DAY),
+        task("BP-2", "ready", ITSELF, DAY),
+        task("BP-3", "needs", "person", DAY),
+    ];
+    assert_eq!(held(&tasks, [3, 1, 2, 4], today()), Some(Held::Needed));
+    assert_eq!(pile(&tasks, 2), Some(vec!["BP-1".into(), "BP-2".into()]));
+    tasks[0].insert("status".into(), json!("done"));
+    assert_eq!(pile(&tasks, 2), None);
+}

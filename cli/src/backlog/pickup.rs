@@ -6,8 +6,10 @@
 //! An item with a brief starts as a task `started_by: itself`, kept for the person to
 //! accept (unless pickup_auto_accept), with pickup_model if set. One without a brief
 //! asks the coordinators for one, once a room; with none running, the next item that
-//! has a brief starts instead. pickup.json in the repo's state folder holds what a room
-//! has asked for and whether pickup is paused, so each is said once.
+//! has a brief starts instead. An ask nobody answers in BRIEF_WAIT is told to the person,
+//! once; the list's order still holds. pickup.json in the repo's state folder holds what
+//! a room has asked for (and when), what pickup waits for, whether the person was told
+//! and whether pickup is paused, so each is said once.
 
 use crate::coordinators::{sees_to, session_for};
 use crate::limit::limit_active;
@@ -17,7 +19,7 @@ use bullpen_core::json::{self, s, truthy, Obj};
 use bullpen_core::paths::state;
 use bullpen_core::repo::known_repos;
 use bullpen_core::task::{clip, is_closed};
-use bullpen_core::timeutil::parse;
+use bullpen_core::timeutil::{clock, iso_now, parse, seconds_since};
 use bullpen_core::{Fail, Repo, Res};
 use chrono::{Local, NaiveDate};
 use serde_json::{json, Value};
@@ -28,6 +30,10 @@ pub const ITSELF: &str = "itself";
 
 /// A self-started task waiting for the person: pickup pauses at pickup_waiting of them.
 const WAITS_FOR_YOU: [&str; 4] = ["ready", "finished", "needs", "stopped"];
+
+/// How long pickup waits for a coordinator's brief before it tells the person: long
+/// enough to read the item and write one, short of a forgotten afternoon.
+const BRIEF_WAIT: f64 = 30.0 * 60.0;
 
 /// <state>/pickup: exists while some repo has pickup on and a kept item, so the
 /// watcher's timer only calls `_pickup` then.
@@ -94,15 +100,10 @@ pub fn held(tasks: &[Obj], caps: [i64; 4], today: NaiveDate) -> Option<Held> {
     if tasks.iter().any(|t| matches!(s(t, "status"), "needs" | "stopped")) {
         return Some(Held::Needed);
     }
-    let mine = self_started(tasks);
-    let waits: Vec<String> = mine
-        .iter()
-        .filter(|t| WAITS_FOR_YOU.contains(&s(t, "status")))
-        .map(|t| s(t, "id").to_string())
-        .collect();
-    if waits.len() as i64 >= waiting {
-        return Some(Held::Paused(waits));
+    if let Some(ids) = pile(tasks, waiting) {
+        return Some(Held::Paused(ids));
     }
+    let mine = self_started(tasks);
     let working = tasks.iter().filter(|t| s(t, "status") == "working").count() as i64;
     let busy = mine
         .iter()
@@ -115,6 +116,17 @@ pub fn held(tasks: &[Obj], caps: [i64; 4], today: NaiveDate) -> Option<Held> {
         return Some(Held::Spent);
     }
     None
+}
+
+/// The self-started tasks that wait for the person, if there are pickup_waiting of them:
+/// whatever else holds pickup back, the pause lasts until this pile is gone.
+fn pile(tasks: &[Obj], waiting: i64) -> Option<Vec<String>> {
+    let waits: Vec<String> = self_started(tasks)
+        .iter()
+        .filter(|t| WAITS_FOR_YOU.contains(&s(t, "status")))
+        .map(|t| s(t, "id").to_string())
+        .collect();
+    (waits.len() as i64 >= waiting).then_some(waits)
 }
 
 fn caps(repo: &Repo) -> [i64; 4] {
@@ -178,20 +190,22 @@ pub fn pickup(repo: &Repo) -> Res<bool> {
 fn run(repo: &Repo, st: &mut Obj, items: &[Obj]) -> Res<()> {
     let tasks = repo.tasks()?;
     let today = Local::now().date_naive();
-    let held = held(&tasks, caps(repo), today);
-    let paused = truthy(st.get("paused"));
+    let caps = caps(repo);
+    let held = held(&tasks, caps, today);
+    st.shift_remove("waits"); // set again below while pickup waits for a brief
     match &held {
-        Some(Held::Paused(ids)) if !paused => {
+        Some(Held::Paused(ids)) if !truthy(st.get("paused")) => {
             st.insert("paused".into(), json!(true));
             let text = format!("Pickup paused: {} wait for you", and_list(ids));
             let first = repo.task(&ids[0])?;
             say(repo, &first, "pickup", &text)?;
             crate::notifications::tell_person(repo, &first, &text);
         }
-        Some(Held::Paused(_)) => {}
-        _ => {
+        // Needed is checked first: the pause ends with the pile, not when something else holds it
+        _ if pile(&tasks, caps[2]).is_none() => {
             st.shift_remove("paused");
         }
+        _ => {}
     }
     if held == Some(Held::Spent) && s(st, "spent") != today.to_string() {
         st.insert("spent".into(), json!(today.to_string()));
@@ -202,7 +216,7 @@ fn run(repo: &Repo, st: &mut Obj, items: &[Obj]) -> Res<()> {
         say(repo, &item_as_task(&items[0]), "pickup", &text)?;
     }
     if held == Some(Held::NoRoom) {
-        st.shift_remove("asked"); // the room was taken: the next one asks again
+        forget_asks(st); // the room was taken: the next one asks again
     }
     if held.is_some() || limit_active(None)?.is_some() {
         return Ok(());
@@ -211,18 +225,16 @@ fn run(repo: &Repo, st: &mut Obj, items: &[Obj]) -> Res<()> {
     if session.is_empty() {
         return Ok(()); // no Rex session to start a worker in: `bullpen up` makes one
     }
-    let mut asked = json::strs(st, "asked");
     for item in items.iter().filter(|i| !truthy(i.get("skipped"))) {
         let id = s(item, "id").to_string();
         if truthy(item.get("brief")) {
-            st.shift_remove("asked");
+            forget_asks(st);
             clear_skips(repo)?;
             return start(repo, item, &session);
         }
         let about = item_as_task(item);
-        if !asked.contains(&id) {
-            asked.push(id.clone());
-            st.insert("asked".into(), json!(asked));
+        if asked_at(st, &id).is_none() {
+            note_ask(st, &id);
             let text = format!(
                 "Room for one from the backlog: {id} {}. Write its brief and give it with \
                  `bullpen later {id} --brief-file <f>` (pickup then starts it), or \
@@ -232,9 +244,52 @@ fn run(repo: &Repo, st: &mut Obj, items: &[Obj]) -> Res<()> {
             say(repo, &about, "pickup", &text)?;
         }
         if !sees_to(repo, &about)?.is_empty() {
-            return Ok(()); // a coordinator will write it: the list's order holds
+            st.insert("waits".into(), json!(id));
+            return unanswered(repo, st, item); // a coordinator will write it: the list's order holds
         }
     }
+    Ok(())
+}
+
+/// When the room asked for item's brief, if it did.
+fn asked_at(st: &Obj, id: &str) -> Option<String> {
+    let at = st.get("asked")?.as_object()?.get(id)?.as_str()?;
+    Some(at.to_string())
+}
+
+/// Note that the room asked for id's brief, now.
+fn note_ask(st: &mut Obj, id: &str) {
+    let mut asked = st.get("asked").and_then(Value::as_object).cloned().unwrap_or_default();
+    asked.insert(id.into(), json!(iso_now()));
+    st.insert("asked".into(), Value::Object(asked));
+}
+
+/// A room's asks end with it (a start, or the room taken): the next room asks again.
+fn forget_asks(st: &mut Obj) {
+    st.shift_remove("asked");
+    st.shift_remove("told");
+}
+
+/// An ask unanswered for BRIEF_WAIT: tell the person, once, that the item waits for a
+/// brief. Pickup doesn't go past it: the list's order is the person's, so they (or the
+/// coordinator) brief it, skip it or move it.
+fn unanswered(repo: &Repo, st: &mut Obj, item: &Obj) -> Res<()> {
+    let id = s(item, "id");
+    let Some(at) = asked_at(st, id) else { return Ok(()) };
+    let mut told = json::strs(st, "told");
+    if seconds_since(&at, None) < BRIEF_WAIT || told.iter().any(|t| t == id) {
+        return Ok(());
+    }
+    told.push(id.to_string());
+    st.insert("told".into(), json!(told));
+    let when = parse(&at).map_or(at.clone(), |t| clock(t, None));
+    let text = format!(
+        "Pickup waits for a brief for {id} (asked at {when}): give it with \
+         `bullpen later {id} --brief-file <f>`, or `bullpen later {id} --skip \"why\"` to pass over it"
+    );
+    let about = item_as_task(item);
+    say(repo, &about, "pickup", &text)?;
+    crate::notifications::tell_person(repo, &about, &text);
     Ok(())
 }
 
@@ -310,15 +365,36 @@ pub fn status_line(repo: &Repo) -> Res<Option<String>> {
     let today = Local::now().date_naive();
     let made = started_on(&tasks, today);
     let per_day = num(repo, "pickup_per_day");
+    let waits = waits_for(repo)?;
     let why = match held(&tasks, caps(repo), today) {
         Some(Held::Paused(ids)) => format!("paused: {} wait for you", and_list(&ids)),
         Some(Held::Needed) => "waits: a task needs you".into(),
         Some(Held::NoRoom) => "waits for room".into(),
         Some(Held::Spent) => format!("done for today ({made} of {per_day} started)"),
         None if limit_active(None)?.is_some() => "waits: the usage limit is reached".into(),
+        None if let Some(w) = waits => w,
         None => format!("on ({made} of {per_day} started today)"),
     };
     Ok(Some(format!("Pickup {why}")))
+}
+
+/// What pickup waits for a brief for, if it does: "waits for a brief for L7 (asked at
+/// 3:00 PM)". Only while the item is still the kept one with no brief.
+fn waits_for(repo: &Repo) -> Res<Option<String>> {
+    let st = json::read_obj(&state_path(repo))?.unwrap_or_default();
+    let id = s(&st, "waits");
+    let b = backlog::load(repo)?;
+    let still = b
+        .open()
+        .any(|i| s(i, "id") == id && s(i, "state") == "kept" && !truthy(i.get("brief")) && !truthy(i.get("skipped")));
+    if !still {
+        return Ok(None);
+    }
+    let when = asked_at(&st, id).and_then(|a| parse(&a)).map(|t| clock(t, None));
+    Ok(Some(match when {
+        Some(w) => format!("waits for a brief for {id} (asked at {w})"),
+        None => format!("waits for a brief for {id}"),
+    }))
 }
 
 /// Run pickup once the command's own work is done (saves::later).

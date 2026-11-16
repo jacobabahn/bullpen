@@ -101,6 +101,8 @@ brief, it asks you: `bullpen · Room for one from the backlog: L7 ...`. Write th
 the way you write any brief, in your own words and small enough to finish unattended,
 and give it with `bullpen later L7 --brief-file /tmp/b.md`: pickup starts it then. Skip
 (`--skip "why"`) one that clashes with running work or is too big to start unattended.
+Answer within 30 minutes, one way or the other: pickup waits for you, and after that it
+tells the person the item waits for a brief.
 Never let pickup start one you'd want to ask the person about: `ask` is for tasks, so put
 the question in the skip reason and tell them. A skip lasts until pickup's next start.
 When `bullpen · Pickup paused: BP-9 and BP-10 wait for you` comes, the person has two
