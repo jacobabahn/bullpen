@@ -348,3 +348,57 @@ class CoordinatorsTest(BullpenTest):
         (self.fake / "alive" / other).unlink()
         self.gone_now(other)
         self.assertEqual([c["id"] for c in self.coordinators()], ["c1", "c2"])
+
+    def test_a_new_coordinator_is_told_to_read_the_rules_first(self):
+        self.bp("up")
+        first = next(a for a in self.rex_calls() if a[0] == "run")[-1]
+        self.assertRegex(first, r"Run `\S+ rules` and `\S+ ls`, then say in one short line that you are ready\.$")
+
+
+class GuideTextTest(BullpenTest):
+    """The lines the prompt audit (BP-133, finding 8) added to the coordinator's guide."""
+
+    def has(self, *lines):
+        guide = " ".join(self.bp("guide").stdout.split())  # however its lines are wrapped
+        for line in lines:
+            self.assertIn(line, guide)
+
+    def test_plan_says_to_read_the_rules_and_not_to_say_how_a_task_ends(self):
+        self.has("`bullpen rules` prints them: read them once before your first brief",
+                 "A rule repeated in a brief goes stale there when the rules change",
+                 "When you write the same thing into a second brief, it is a rule",
+                 "Don't `tell` it to one worker and leave it there.",
+                 "Don't tell a worker how to end: the instructions bullpen appends cover `ready` and `finish`",
+                 "name the file, in the state folder's `briefs/`, not `/tmp`",
+                 "its worker ends with `bullpen finish <ID> --keep-branch`, and you ask the person for "
+                 "`bullpen close <ID> --keep-branch`")
+
+    def test_the_commands_say_how_tell_model_and_peek_review_behave(self):
+        self.has("bullpen peek BP-3 --review # the end of its reviewer's screen",
+                 "bullpen types `Coordinator: ` # before your words itself, so don't start them with "
+                 "\"Coordinator here:\"",
+                 "a running task takes it at its next `resume`: don't drop and re-add a task to change it "
+                 "without asking")
+
+    def test_triage_reads_a_quiet_worker_and_an_auth_prompt_right(self):
+        self.has("Ended its turn without `ready`: `bullpen show <ID>` first. If it shows a review round with "
+                 "`changes`, `ready` ran and the findings didn't reach it",
+                 "News that says `at a prompt (auth)` with an API error in it is this, not a prompt: `tell` it "
+                 "to carry on (a reviewer: `bullpen review <ID>`)",
+                 "`bullpen peek <ID> --review` reads its screen")
+
+    def test_news_says_what_to_do_after_a_gap_and_at_ready(self):
+        self.has("After any gap (a failed turn of your own, a restart, or, with news by monitor, a monitor you "
+                 "find stopped), run `bullpen ls` and report what changed",
+                 "Ready: tell the person, in plain words for someone who hasn't read the brief: what the change "
+                 "does (one sentence), its risk label, what review said, and anything they must decide",
+                 "say which to accept first: one that others wait on, then the smaller of two that touch the "
+                 "same files",
+                 "Pass them on in a line, and offer a task for one worth fixing",  # the notes, kept
+                 "pass its label on, word for word",  # the risk label, kept
+                 "Ready with findings still open (the review rounds are used up): tell the person what the "
+                 "open finding is and ask which they want",
+                 "worker to rebase (keeping both where both sides changed the same place), run the full suite "
+                 "again and run `ready` again")
+        self.assertNotIn("fix the conflicts and run `ready` again", " ".join(self.bp("guide").stdout.split()))
+

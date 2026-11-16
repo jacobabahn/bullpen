@@ -10,4 +10,5 @@ same rules and checks the work against them. No rules, no heading.
 The repository's file is read as committed on the task's base branch (`origin/<base>`,
 or the local base branch without a remote): an uncommitted edit in your checkout, or
 a task's own edit when it is started again, isn't used. `bullpen rules`
-prints the rules in effect and where each came from.
+prints the rules in effect and where each came from. A coordinator that `bullpen up`
+starts is told to run it first, so it knows what its briefs needn't repeat.

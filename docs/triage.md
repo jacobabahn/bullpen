@@ -14,7 +14,8 @@ A task that stops is either the coordinator's to see to or yours:
   prompt, or the coordinator ran `bullpen ask BP-3 "question"`, which shows the
   question on the board. The news says it needs the person.
 
-The coordinator settles triage with `tell` or `resume` (which put the task back to
+The coordinator reads the worker's screen with `bullpen peek BP-3` and the reviewer's
+with `bullpen peek BP-3 --review`. It settles triage with `tell` or `resume` (which put the task back to
 work), `bullpen review BP-3` (a new reviewer on the task's current commit in place of
 one that stopped without a verdict; it counts as a review round and is refused once
 they're used up), `bullpen ok BP-3` (back to working, or in review, typing nothing to
