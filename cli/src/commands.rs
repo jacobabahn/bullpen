@@ -47,6 +47,7 @@ pub const COMMANDS: &[Command] = &[
     c("_tour", INTERNAL, "", crate::tours::write::cmd_tour_bg),
     c("tour-comment", YOU, "draft comments on a tour's steps: add, list (no STEP) or remove", crate::tours::comments::cmd_tour_comment),
     c("stats", YOU, "where tasks' time went: one task's timeline and totals, or the totals across closed tasks", crate::stats::cmd_stats),
+    c("repos", YOU, "every repository bullpen knows, a line each: its coordinators, alive or gone, and what needs you, what's ready, what's running", crate::repos::cmd_repos),
     c("pick", YOU, "type part of any open task, in any repository, and go to it", crate::pick::cmd_pick),
     c("add", COORDINATOR, "add a task; prints its ID", crate::start::cmd_add),
     c("after", COORDINATOR, "set the tasks a task waits on (--none: nothing)", crate::start::cmd_after),

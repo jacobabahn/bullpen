@@ -453,18 +453,23 @@ pub fn auto_detail(cfg: &Obj, t: &Obj) -> &'static str {
 /// what GitHub said, what auto-accept does with it and its own model.
 pub fn board_detail(cfg: &Obj, t: &Obj, every: &Every, at: Option<Stamp>) -> Res<String> {
     let doing = doing_now(t, at)?;
+    Ok(board_sentence(cfg, t, every, at, doing))
+}
+
+/// board_detail with what its agent is doing already read (doing_said's, "" for nothing).
+pub fn board_sentence(cfg: &Obj, t: &Obj, every: &Every, at: Option<Stamp>, doing: String) -> String {
     if !doing.is_empty() {
-        return Ok(doing);
+        return doing;
     }
     let text = with_gh(t, status_detail(cfg, t, &waits_phrase(t, every), at));
     let model = model_detail(cfg, t);
     let parts = [text.as_str(), auto_detail(cfg, t), model.as_str()];
-    Ok(parts
+    parts
         .iter()
         .filter(|p| !p.is_empty())
         .copied()
         .collect::<Vec<_>>()
-        .join(" "))
+        .join(" ")
 }
 
 #[cfg(test)]

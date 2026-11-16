@@ -4,6 +4,7 @@
 
 pub mod config;
 pub mod fail;
+pub mod fleet;
 pub mod json;
 pub mod lock;
 pub mod paths;

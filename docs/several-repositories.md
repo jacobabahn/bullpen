@@ -4,6 +4,25 @@ Each repository has its own coordinator, board and tasks, but bullpen knows them
 all: their state is under `~/.local/state/bullpen/repos/`. A repository whose
 checkout is gone is left out of what follows.
 
+- `bullpen repos` says, a line per repository, whether its bullpen is up and what
+  waits: its coordinators (each working, idle, blocked on a question in its pane,
+  or gone: its pane closed) and what needs you, what's ready and what's running
+  (working or in review), else how many tasks are open:
+
+  ```
+  bullpen     c3 working · 1 needs you · 2 ready · 4 running
+  jj-evolved  c1 gone · 1 ready
+  shop        no coordinator · nothing open
+  ```
+
+  `--json` prints the whole snapshot it's made from: `{"repos": [...]}`, each with
+  its `name`, `root`, state folder (`dir`), `coordinators` (`id`, `block`,
+  `session`, `alive`, `word`, and the watcher's last `state`, `text` and `at` for
+  its pane), `counts`, its open `tasks` in the board's order (each `{"mark",
+  "words", "doing", "task"}`: the board's sentence, what its agent is doing, and
+  the task record), task files that don't parse (`broken`) and its `settings`. It
+  works from any folder, reads only files (about 10 ms for 160 task files) and asks
+  Rex once per coordinator, all at once.
 - `bullpen ls --all-repos` lists the open tasks of every repository, under each
   one's name and path, leaving out those with nothing open. It works from any
   folder. `--all` adds the closed tasks; `--json` prints a list of
@@ -31,6 +50,6 @@ checkout is gone is left out of what follows.
   `shop ●1 ✔2` when the words don't fit, cut (to no less than 8 columns) beside
   this repository's counts, and left out when even that has no room.
   It is amber while one of them needs you. The board looks at the other
-  repositories every 10 seconds, and reads a repository's tasks again only when
-  its tasks folder changed. `bullpen config --board-repos off` turns it off
+  repositories every 10 seconds, through the same snapshot as `bullpen repos`, and
+  reads a task file again only when it changed. `bullpen config --board-repos off` turns it off
   (`--global` for every board).

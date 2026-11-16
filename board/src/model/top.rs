@@ -1,10 +1,8 @@
 //! The top line's counts: this repo's and the other repositories'.
 
-use bullpen_core::config::{read_own, task_files};
-use bullpen_core::json;
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant, SystemTime};
+use bullpen_core::fleet::Reader;
+use std::path::Path;
+use std::time::{Duration, Instant};
 use super::*;
 
 /// Another repository with tasks that need you or are ready, for the top line.
@@ -20,14 +18,13 @@ pub struct RepoCount {
 /// How often the board looks at the other repositories: their tasks aren't watched.
 pub const OTHERS_EVERY: Duration = Duration::from_secs(10);
 
-/// The other repositories' counts, kept between looks. A look reads each one's
-/// config.json and the time its tasks folder last changed (bullpen writes a task by
-/// renaming a new file into it), and reads its tasks again only when that changed.
+/// The other repositories' counts, kept between looks. A look takes the snapshot of
+/// every repo (bullpen_core::fleet), whose reader is kept: it reads a task file again
+/// only when the file changed.
 #[derive(Default)]
 pub struct OtherRepos {
     pub counts: Vec<RepoCount>,
-    /// by state folder: when its tasks folder changed, and its needs and ready
-    seen: HashMap<PathBuf, (SystemTime, usize, usize)>,
+    reader: Reader,
     looked: Option<Instant>,
 }
 
@@ -43,54 +40,18 @@ impl OtherRepos {
 
     /// The repositories beside me (<state>/repos/*) whose checkout is still there,
     /// each with what needs you and what's ready; those with neither are left out.
+    /// A snapshot that can't be read (a broken global config) keeps the last counts.
     pub fn look(&mut self, me: &Path) {
-        let Some(repos) = me.parent() else { return };
-        let mut dirs: Vec<PathBuf> = std::fs::read_dir(repos)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|e| e.path())
-            .filter(|d| d.file_name() != me.file_name())
+        let Some(state) = me.parent().and_then(Path::parent) else { return };
+        let Ok(fleet) = self.reader.read(state) else { return };
+        self.counts = fleet
+            .repos
+            .iter()
+            .filter(|r| r.repo.dir.file_name() != me.file_name())
+            .filter(|r| r.counts.needs + r.counts.ready > 0)
+            .map(|r| RepoCount { name: r.repo.name(), needs: r.counts.needs, ready: r.counts.ready })
             .collect();
-        dirs.sort();
-        let mut counts = Vec::new();
-        let mut seen = HashMap::new();
-        for dir in dirs {
-            let cfg = read_own(&dir).unwrap_or_default();
-            let Some(root) = cfg.get("root").and_then(|r| r.as_str()).map(PathBuf::from) else { continue };
-            if !root.is_dir() {
-                continue; // its checkout is gone
-            }
-            let changed = std::fs::metadata(dir.join("tasks")).and_then(|m| m.modified()).ok();
-            let Some(changed) = changed else { continue }; // no tasks yet
-            // a change in the same second as the last look may share its time: read again
-            let settled = changed.elapsed().is_ok_and(|a| a > Duration::from_secs(2));
-            let (needs, ready) = match self.seen.get(&dir) {
-                Some(&(t, n, r)) if t == changed && settled => (n, r),
-                _ => count_tasks(&dir),
-            };
-            seen.insert(dir, (changed, needs, ready));
-            if needs + ready > 0 {
-                let name = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                counts.push(RepoCount { name, needs, ready });
-            }
-        }
-        self.seen = seen;
-        self.counts = counts;
     }
-}
-
-/// How many tasks in a repo's state folder need you, and how many are ready or finished.
-fn count_tasks(dir: &Path) -> (usize, usize) {
-    let (mut needs, mut ready) = (0, 0);
-    for p in task_files(dir) {
-        match json::read_obj(&p).ok().flatten().as_ref().map(|t| json::s(t, "status")) {
-            Some("needs" | "stopped") => needs += 1,
-            Some("ready" | "finished") => ready += 1,
-            _ => {}
-        }
-    }
-    (needs, ready)
 }
 
 /// "1 needs you", "2 need you", "3 ready": a count of what you act on, in words.

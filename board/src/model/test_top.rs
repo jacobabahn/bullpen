@@ -1,5 +1,6 @@
 use super::*;
 use crate::model::testing::*;
+use std::path::PathBuf;
 
 /// A state folder of its own under the system's temp folder, removed when dropped.
 struct TempState(PathBuf);

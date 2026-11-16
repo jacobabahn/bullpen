@@ -13,7 +13,10 @@ fn dumps_writes_json_as_python_does() {
 #[test]
 fn dumps_keeps_only_ascii() {
     let v = json!("a\"b\\c\nd\re\tf\u{8}\u{c}\u{1}\u{7f}\u{e9}\u{276f}\u{1f600}");
-    assert_eq!(dumps(&v), r#""a\"b\\c\nd\re\tf\b\f\u0001\u007f\u00e9\u276f\ud83d\ude00""#);
+    assert_eq!(
+        dumps(&v),
+        r#""a\"b\\c\nd\re\tf\b\f\u0001\u007f\u00e9\u276f\ud83d\ude00""#
+    );
 }
 
 #[test]

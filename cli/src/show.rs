@@ -4,8 +4,9 @@ use crate::args::{flag, pos, Arg, Args, Nargs};
 use crate::coordinators::{coordinators, owner};
 use crate::rex;
 use crate::task_line::{colored, task_line, task_rows, term_width};
+use bullpen_core::fleet;
 use bullpen_core::json::{dumps, get, obj, py_str, s, truthy, Obj};
-use bullpen_core::repo::{known_repos, repo_root};
+use bullpen_core::repo::repo_root;
 use bullpen_core::task::{listed, own_model};
 use bullpen_core::text::{len, lstrip, rjust, splitlines, strip, width, wrap};
 use bullpen_core::words::{
@@ -34,7 +35,7 @@ const SHOW: &[Arg] = &[
 
 /// Print lines to stdout. A closed pipe ends the program quietly (SIGPIPE), as Python's
 /// print does; another failed write is a Fail.
-fn print_all(lines: &[String]) -> Res<()> {
+pub fn print_all(lines: &[String]) -> Res<()> {
     let mut out = std::io::stdout().lock();
     for l in lines {
         writeln!(out, "{l}").map_err(|e| bullpen_core::Fail(e.to_string()))?;
@@ -115,11 +116,13 @@ pub fn ls_lines(repo: &Repo, tasks: Vec<Obj>, cols: Option<i64>, color: bool, ev
 /// One with nothing open, or whose checkout is gone, is left out.
 fn ls_repos(all: bool, as_json: bool) -> Res<i32> {
     let mut groups = Vec::new();
-    for r in known_repos()? {
-        let every_task = r.tasks()?;
-        let ts = listed(every_task.clone(), all);
+    for r in fleet::read()?.repos {
+        if let Some(why) = r.broken.first() {
+            return Err(bullpen_core::Fail(why.clone()));
+        }
+        let ts = listed(r.all, all);
         if !ts.is_empty() {
-            groups.push((r, ts, every(&every_task)));
+            groups.push((r.repo, ts, r.every));
         }
     }
     if as_json {

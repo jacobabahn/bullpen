@@ -69,6 +69,11 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `words.rs`: what the board says about a task, for `ls`, `show` and the board: its
   mark, the board's order, its age, and the board's sentence (`board_detail`, and its
   parts: `status_detail`, `with_gh`, `auto_detail`, `model_detail`, `doing_said`)
+- `fleet.rs`: every known repo in one snapshot (`Fleet`): its root and settings, its
+  coordinators (with the watcher's note on each, and Rex's alive, asked apart:
+  `ask_alive`), its open tasks with the board's words and counts. `repos`,
+  `ls --all-repos` and the board's top line read it; a `Reader` kept between
+  snapshots (the board's) reads a file again only when its time or size changed
 - `timeutil.rs`: ISO stamps as Python's `isoformat`, ages, the clock
 - `timeline.rs`: a task's timeline (`timeline/<ID>.jsonl`): what a save changed
   (`changes`, from `save_task`), the trip-back mark a step that sends a task back sets
@@ -85,6 +90,7 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `args.rs`: a command's arguments by argparse's rules, and its usage and help
 - `help.rs`: the top-level help and the unknown-command line (as the Python wrote them)
 - `show.rs`: `ls` and `show`
+- `repos.rs`: `repos`, a line per repository from core's `fleet.rs`, or its JSON
 - `task_line.rs`: one task line, as the board says it (or its rows, on a narrow
   terminal), cut to the terminal's width and coloured there
 - `saves.rs`: saving a task and what it sets off (`save`): the run queue (at
@@ -198,7 +204,7 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   own: a finished task's (no "a closes it."; the key row says it), when a task its
   coordinator is on comes to you, and where a ready task's tour stands
 - `model/groups.rs`, `top.rs`, `confirm.rs`, `text.rs`: the groups and what a board
-  hides, the top line's counts (other repos read through core too), the confirm
+  hides, the top line's counts (other repos from core's `fleet.rs` snapshot), the confirm
   questions, and fitting text (core's width)
 - `app/` (keys, background jobs, reloading), `ui/` (drawing), `edit.rs` (a line editor)
 

@@ -5,6 +5,7 @@ import json
 import signal
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from support import setUpModule, tearDownModule, BULLPEN, BullpenTest  # a temp folder for each module
@@ -644,6 +645,42 @@ class NewsTest(BullpenTest):
         self.bp("drop", "BP-2", cwd=shop)
         self.assertEqual(self.bp("ls", "--all-repos").stdout, "no open tasks in any repository "
                          "(--all shows finished ones)\n")
+
+    def test_repos_says_each_repos_coordinators_and_counts(self):
+        self.start_task("Here")  # proj: c1 (blk1), and a task running
+        self.bp("add", "Later", "--brief", "x")
+        shop = self.other_repo("shop")
+        self.bp("up", cwd=shop)
+        self.bp("add", "Sell it", "--brief", "x", cwd=shop)
+        self.bp("ask", "BP-1", "Which shop?", cwd=shop)
+        quiet = self.other_repo("quiet")
+        self.bp("add", "Some day", "--brief", "x", cwd=quiet)  # no bullpen up: no coordinator
+        gone = self.other_repo("gone")
+        self.bp("add", "Lost", "--brief", "x", cwd=gone)
+        shutil.rmtree(gone)  # its checkout is gone: left out
+        theirs = json.loads(self.bp("config", "--json", cwd=shop).stdout)["coordinators"][0]["block"]
+        (self.fake / "alive" / theirs).unlink()  # shop's coordinator's pane closed
+        doing = self.tmp / "state" / "doing" / "blk1.json"  # the watcher's note: proj's c1 is working
+        doing.write_text(json.dumps({"state": "working", "text": "Reading the news", "at": time.time()}))
+        out = self.bp("repos", cwd=self.tmp).stdout  # works outside a repository
+        self.assertEqual(out.splitlines(), [
+            "proj   c1 working · 1 running",
+            "quiet  no coordinator · 1 open",
+            "shop   c1 gone · 1 needs you"])
+        js = json.loads(self.bp("repos", "--json").stdout)
+        self.assertEqual([r["name"] for r in js["repos"]], ["proj", "quiet", "shop"])
+        proj = js["repos"][0]
+        self.assertEqual((proj["root"], proj["counts"]), (str(self.repo), {"needs": 0, "ready": 0, "running": 1}))
+        c1 = proj["coordinators"][0]
+        self.assertEqual((c1["id"], c1["alive"], c1["word"], c1["text"]), ("c1", True, "working", "Reading the news"))
+        self.assertEqual([(t["task"]["id"], t["mark"]) for t in proj["tasks"]], [("BP-1", "○"), ("BP-2", "◌")])
+        self.assertEqual(proj["tasks"][1]["words"], "Not started. s starts it.")
+        self.assertEqual(proj["settings"]["prefix"], "BP")
+        self.assertEqual(js["repos"][2]["coordinators"][0]["alive"], False)
+        for d in (shop, quiet):
+            shutil.rmtree(d)
+        shutil.rmtree(self.tmp / "state" / "repos")
+        self.assertEqual(self.bp("repos").stdout, "no repositories yet: `bullpen up` in one starts its bullpen\n")
 
     def test_go_next_all_repos_goes_across_repos(self):
         here = self.start_task("Here")
