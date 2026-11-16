@@ -6,7 +6,6 @@ use crate::coordinators::{alive, coordinators};
 use crate::news::hook::{self, FILE};
 use crate::news::wake::{has_waiter, paused};
 use bullpen_core::json::s;
-use bullpen_core::paths::{safe, state};
 use bullpen_core::proc::run;
 use bullpen_core::Repo;
 
@@ -28,6 +27,9 @@ pub fn version_in(text: &str) -> Option<(u64, u64, u64)> {
 /// "Claude Code 2.1.300 is older than ...", if the coordinator's program says a version
 /// and it is. One that can't be asked isn't a problem of the hook's.
 fn too_old(repo: &Repo) -> Option<String> {
+    if !hook::claude(repo) {
+        return None; // another program's version says nothing
+    }
     let said = run(&[hook::program(repo)?.as_str(), "--version"], false).ok()?;
     let v = version_in(&said.stdout).filter(|v| *v < CLAUDE_AT_LEAST)?;
     let (a, b, c) = CLAUDE_AT_LEAST;
@@ -37,11 +39,19 @@ fn too_old(repo: &Repo) -> Option<String> {
     ))
 }
 
-/// Is coordinator pane block idle, by the watcher's note of it? (No note: not known.)
-fn idle(block: &str) -> bool {
-    let note = state().join("doing").join(format!("{}.json", safe(block)));
-    let note = bullpen_core::json::read_obj(&note).ok().flatten().unwrap_or_default();
-    matches!(s(&note, "state"), "idle" | "done")
+/// Seconds after a turn's end before a missing waiter counts: the hook is just starting.
+const PARKS_WITHIN: f64 = 10.0;
+
+/// Has the coordinator in this pane been idle a moment, by Rex's status of its program
+/// (as `check` asks it)? With no status it isn't known, so not said. The watcher keeps
+/// no `doing/` note for a coordinator's pane.
+fn idle(session: &str, block: &str) -> bool {
+    let Some(status) = crate::rex::program_status(session, block).ok().flatten() else {
+        return false;
+    };
+    let since = s(&status, "updated_at");
+    matches!(s(&status, "state"), "idle" | "done")
+        && (since.is_empty() || bullpen_core::timeutil::seconds_since(since, None) >= PARKS_WITHIN)
 }
 
 /// The running, idle coordinators with no waiter (and no pause): each hears its news by
@@ -50,7 +60,8 @@ fn unwatched(repo: &Repo) -> Vec<String> {
     let mut out = Vec::new();
     for c in coordinators(repo) {
         let cid = s(c, "id");
-        if alive(Some(c)).unwrap_or(false) && idle(s(c, "block")) && !paused(repo, cid) && !has_waiter(repo, cid) {
+        let is_idle = || idle(s(c, "session"), s(c, "block"));
+        if !paused(repo, cid) && !has_waiter(repo, cid) && alive(Some(c)).unwrap_or(false) && is_idle() {
             out.push(cid.to_string());
         }
     }

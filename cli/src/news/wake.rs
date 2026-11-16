@@ -1,9 +1,9 @@
 //! The backstop for news no coordinator reads, and `news --pause` / `--resume`.
 //!
 //! When news isn't typed (`config --news monitor` or `wake`), a coordinator hears it only
-//! while a reader runs: its Monitor on `news --follow`, or the waiter of its Stop hook. A Monitor expires after 30 minutes, and
-//! news that comes while none runs would sit unseen until the person speaks. So a line
-//! worth a wake (`wakes`) touches `<state>/wake-due`, and while that exists the watcher
+//! while a reader runs: its Monitor on `news --follow`, or the waiter of its Stop hook. A
+//! Monitor expires after 30 minutes, and news that comes while none runs would sit unseen
+//! until the person speaks. So a line worth a wake (`wakes`) touches `<state>/wake-due`, and while that exists the watcher
 //! runs `_wake_check` every 3 s. For each live coordinator that isn't paused and has
 //! such news past its cursor, a minute old, with no live reader (a `news --follow`, or
 //! the waiter its Stop hook parks: waiter.rs), it types every line

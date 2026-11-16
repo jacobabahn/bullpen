@@ -76,7 +76,8 @@ non-zero when anything fails. It checks:
     and to use `type`
   - Claude Code (`claude --version`) is 2.1.325 or later, the version the hook was
     checked on. A program that doesn't say its version isn't a failure
-  - every running coordinator that is idle (by the watcher's note of its pane), and
+  - every running coordinator that has been idle for 10 seconds (by Rex's status of
+    its pane's program), and
     not paused, has a waiter: "c1 is idle with no news waiter: it hears news by
     typing until its next turn". Saying anything to it starts one; if its turns
     keep ending without one, the hook doesn't run in that session (`/hooks` there

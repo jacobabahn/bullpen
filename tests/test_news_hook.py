@@ -196,16 +196,22 @@ class DoctorNewsTest(HookCase):
         mark, text = self.news_line()
         self.assertEqual(mark, "FAIL")
         self.assertIn("Claude Code 2.1.300 is older than 2.1.325", text)
+        codex = self.fake / "codex"
+        codex.write_text("#!/bin/sh\necho 'codex 0.163.0'\n")
+        codex.chmod(0o755)
         self.set_commands(coordinator_cmd=["codex"])
-        self.assertIn("`wake` needs Claude Code as the coordinator", self.news_line()[1])
+        text = self.news_line()[1]
+        self.assertIn("`wake` needs Claude Code as the coordinator", text)
+        self.assertNotIn("is older than", text)  # another program's version isn't Claude Code's
 
     def test_an_idle_coordinator_with_no_waiter_is_said(self):
         self.bp("config", "--news", "wake")
-        doing = self.tmp / "state" / "doing"
-        doing.mkdir(exist_ok=True)
-        (doing / "blk1.json").write_text(json.dumps({"state": "working", "text": "", "at": 1}))
+        self.assertEqual(self.news_line()[0], "ok")  # Rex has no status for its pane: not known
+        self.agent("blk1", "working")
         self.assertEqual(self.news_line()[0], "ok")  # in a turn: its end parks one
-        (doing / "blk1.json").write_text(json.dumps({"state": "idle", "text": "", "at": 1}))
+        self.agent("blk1", "idle", ago=2)
+        self.assertEqual(self.news_line()[0], "ok")  # its turn just ended: the hook is starting
+        self.agent("blk1", "idle")  # as Rex says it, 10 minutes ago
         mark, text = self.news_line()
         self.assertEqual(mark, "FAIL")
         self.assertIn("c1 is idle with no news waiter: it hears news by typing until its next turn", text)
