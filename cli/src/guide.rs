@@ -94,16 +94,20 @@ fn mkdirs(path: &Path) -> Res<()> {
 const SECTIONS_MARK: &str = "{{sections}}\n";
 
 /// The sections a guide has only when they apply, in the guide's order: the file in
-/// `prompts/coordinator/`, and whether the repo's guide has it.
-const SECTIONS: &[(&str, fn(&Repo) -> Res<bool>)] = &[
-    ("news-wake", |r| Ok(r.cfg_str("news") == "wake")),
-    ("news-monitor", |r| Ok(r.cfg_str("news") == "monitor")),
-    ("prs", |r| r.has_origin()),
-    ("auto-accept", |r| {
+/// `prompts/coordinator/`, its heading, and whether the repo's guide has it.
+const SECTIONS: &[(&str, &str, fn(&Repo) -> Res<bool>)] = &[
+    ("news-wake", "News by wake", |r| Ok(r.cfg_str("news") == "wake")),
+    (
+        "news-monitor",
+        "News by monitor",
+        |r| Ok(r.cfg_str("news") == "monitor"),
+    ),
+    ("prs", "Pull requests", |r| r.has_origin()),
+    ("auto-accept", "Auto-accept", |r| {
         Ok(on(r, "auto_accept") || (on(r, "pickup") && on(r, "pickup_auto_accept")))
     }),
-    ("pickup", |r| Ok(on(r, "pickup"))),
-    ("others", |r| Ok(coordinators(r).len() > 1)),
+    ("pickup", "Pickup", |r| Ok(on(r, "pickup"))),
+    ("others", "Other coordinators", |r| Ok(coordinators(r).len() > 1)),
 ];
 
 fn on(repo: &Repo, key: &str) -> bool {
@@ -114,7 +118,7 @@ fn on(repo: &Repo, key: &str) -> bool {
 /// every section) and this bullpen's own path in its commands.
 pub fn guide_text(repo: Option<&Repo>) -> Res<String> {
     let mut sections = String::new();
-    for (name, applies) in SECTIONS {
+    for (name, _, applies) in SECTIONS {
         if match repo {
             Some(r) => applies(r)?,
             None => true,
@@ -261,8 +265,9 @@ fn listed(names: &[&str]) -> String {
 type Section = (String, Vec<String>);
 
 /// (the headings that went, the sections that came) when the guides differ only in
-/// whole sections (a setting changed: a section applies now, or no longer does). None
-/// when they are the same, or anything else changed too.
+/// whole sections of SECTIONS (a setting changed: a section applies now, or no longer
+/// does). None when they are the same, or anything else changed too: a section a merge
+/// added to the guide or took out of it is a change like any other, told by diff.
 fn section_change(old: &str, new: &str) -> Option<(Vec<String>, Vec<Section>)> {
     let own = |text: &str| -> Vec<Section> {
         let each = by_section(text).into_iter();
@@ -276,7 +281,9 @@ fn section_change(old: &str, new: &str) -> Option<(Vec<String>, Vec<Section>)> {
     let kept = |list: &[Section], out: &[Section]| -> Vec<Section> {
         list.iter().filter(|s| !out.contains(s)).cloned().collect()
     };
-    if (gone.is_empty() && came.is_empty()) || kept(&a, &gone) != kept(&b, &came) {
+    let by_setting = |(h, _): &Section| SECTIONS.iter().any(|(_, heading, _)| heading == h);
+    let settings_only = gone.iter().chain(&came).all(by_setting);
+    if (gone.is_empty() && came.is_empty()) || !settings_only || kept(&a, &gone) != kept(&b, &came) {
         return None;
     }
     Some((gone.into_iter().map(|(h, _)| h).collect(), came))

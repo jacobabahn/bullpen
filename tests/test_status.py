@@ -419,8 +419,8 @@ class StatusTest(BullpenTest):
         t = self.show(tid)
         self.assertEqual((t["status"], t["why"]), ("working", "Usage limit, reset time unknown"))
         self.assertIsNone(t["limit"]["resets"])
-        self.assertIn("its reset time couldn't be read, so it won't be continued by itself: "
-                      "`bullpen tell BP-1 continue`", self.news()[-1])
+        self.assertIn("its reset time couldn't be read, so it won't be continued by itself: tell the person, "
+                      "and `bullpen tell BP-1 continue` when they say the limit has reset", self.news()[-1])
         before = len(self.typed())
         self.bp("_limit")
         self.assertEqual(len(self.typed()), before)

@@ -160,6 +160,17 @@ fn test_a_section_that_came_is_told_whole_and_one_that_only_went_is_not() {
     assert_eq!(more, ["## Auto-accept", "auto 1", "auto 2"]);
     assert_eq!(guide_news(Some(S), &no_auto), None); // only went: following it does no harm
     assert_eq!(guide_news(Some(S), &neither), None);
+    // a section no setting brings (a merge added it, or took it out): the diff, as for any change
+    let merged = S.replace("## Reporting\n", "## Tours\ntour 1\n\n## Reporting\n");
+    for (old, new) in [(S, merged.as_str()), (merged.as_str(), S)] {
+        let (line, more) = guide_news(Some(old), new).unwrap();
+        assert!(
+            line.starts_with("Your coordinator guide changed (section") && line.contains("Tours"),
+            "{line}"
+        );
+        assert!(!line.contains("settings"), "{line}");
+        assert_eq!(more[..2], ["--- guide (yours)", "+++ guide (now)"]);
+    }
     // anything else changed too: the diff, as for any change
     let (line, _) = guide_news(Some(&no_auto), &S.replace("rep 1", "rep one")).unwrap();
     assert_eq!(

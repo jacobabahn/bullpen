@@ -176,6 +176,8 @@ class NewsTableTest(BullpenTest):
         ("own", "BP-4 stopped at the usage limit, resets 3:00 PM: nothing to do, it is continued then. `bullpen "
                 "start` refuses meanwhile (`--force` overrides, only if the person asks)"),
         ("own", "the usage limit has reset: continued BP-4, BP-6's reviewer: nothing to do"),
+        ("own", "BP-4 stopped at the usage limit, and its reset time couldn't be read, so it won't be continued by "
+                "itself: tell the person, and `bullpen tell BP-4 continue` when they say the limit has reset"),
         ("own", "BP-3's PR has 1 new comment: ann Please cover logout too. Not sent to its worker, which is on a "
                 "prompt: `bullpen tell BP-3` it when it's free"),
         ("own", "BP-3's PR #12 was merged outside bullpen: tell the person; `bullpen accept BP-3` cleans up when "

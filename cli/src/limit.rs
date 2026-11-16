@@ -185,12 +185,13 @@ pub fn limit_hit(repo: &Repo, t: &mut Obj, who: &str, block: &str, state: &str, 
     } else if who == "reviewer" {
         format!(
             "{name} stopped at the usage limit, and its reset time couldn't be read, so it won't \
-             be continued by itself: `bullpen go {id} --review` shows it"
+             be continued by itself: tell the person (`bullpen go {id} --review` shows it)"
         )
     } else {
         format!(
             "{name} stopped at the usage limit, and its reset time couldn't be read, so it won't \
-             be continued by itself: `bullpen tell {id} continue` once the limit has reset"
+             be continued by itself: tell the person, and `bullpen tell {id} continue` when they say the limit has \
+             reset"
         )
     };
     if before.is_none() {

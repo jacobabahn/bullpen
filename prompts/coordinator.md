@@ -227,6 +227,11 @@ What you tell the person is most of what they see of a task.
   wait for the person's accept to fail. `bullpen tell` it to rebase and run ready
   again. When bullpen has already told a worker to rebase, add a `tell` only for
   what it can't know: where moved text now lives, or which side wins.
+- Auto-accepted (`approved by review and auto-accepted`), or closed by
+  auto-accept: bullpen did it itself, because the person turned that on for the
+  task or the repository. Tell them in a line what landed, with its notes.
+  `the auto-accept was refused`: unless the line says it was sent back to its
+  worker, the task stays ready. Tell the person the reason.
 - Finished (nothing to merge): tell the person in a line or two what it did and
   where the result is (`bullpen show <ID>` has the whole summary), and that it
   waits for them to close it: `a` on the board, or ask you.

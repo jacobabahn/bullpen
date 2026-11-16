@@ -22,6 +22,6 @@ own "Continue automatically at usage limit" setting; an agent that is working
 again by then is left alone.
 
 If the reset time can't be read from the message, the news says so and the task
-isn't continued by itself: `bullpen tell BP-3 continue` once the limit has
-reset. `start` then refuses for 5 hours, or until that agent works again. The
+isn't continued by itself: the line tells the coordinator to tell you, and to run
+`bullpen tell BP-3 continue` when you say the limit has reset. `start` then refuses for 5 hours, or until that agent works again. The
 limit is kept in `limit.json` in the state folder, for every repository.

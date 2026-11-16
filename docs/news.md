@@ -233,7 +233,9 @@ bullpen · Your coordinator guide changed with this repo's settings: it has the 
 ...
 ```
 
-A section that only stopped applying is no news: following it does no harm. A switch
+A section that only stopped applying is no news: following it does no harm. Only
+these six sections are told this way: a section a merge adds to the guide or takes out
+of it is a change like any other, told by diff. A switch
 of `news` to `wake` or `monitor` needs no such line either: the last typed line, which
 says news is no longer typed, carries the section for the new way.
 
