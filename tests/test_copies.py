@@ -235,6 +235,7 @@ class CopiesTest(unittest.TestCase):
         path = next((self.tmp / "state").rglob(f"tasks/{tid}.json"))
         t = json.loads(path.read_text())
         del t["risk"]
+        t["since"] = "2026-11-10T09:00:00-08:00"  # ready for days before its label
         path.write_text(json.dumps(t))
         note = self.config().parent / "other-copy.json"
         note.unlink()
@@ -246,7 +247,8 @@ class CopiesTest(unittest.TestCase):
                       "(1 line in 1 file). Tell the person", self.news_log().splitlines()[-1])
         mark, text = self.doctor()["copy"]
         self.assertEqual(mark, "FAIL")
-        self.assertIn(f"`ready` was run here by another copy of bullpen ({self.other}, ", text)
+        # the time is the ready's, not the label's
+        self.assertIn(f"`ready` was run here by another copy of bullpen ({self.other}, 2026-11-10T09:00:00-08:00)", text)
         self.assertTrue(text.endswith(
             "then `bullpen up` clears this. That copy has no risk label: a task it makes ready gets its label "
             "late, from this one's `check --fix` (the watcher runs it)"), text)

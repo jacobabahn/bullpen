@@ -92,20 +92,21 @@ fn note_path(repo: &Repo) -> PathBuf {
 /// repo was started from, note it for doctor (the last such command; once a command).
 pub fn note_command(repo: &Repo) {
     static NOTED: AtomicBool = AtomicBool::new(false);
-    if NOTED.swap(true, Ordering::Relaxed) {
+    // NOTED last: a save in a repo this copy is a coordinator's doesn't use up the note
+    if coordinator_copy(repo).is_none() || a_coordinators(repo, &home()) || NOTED.swap(true, Ordering::Relaxed) {
         return;
     }
-    note_copy(repo, &home(), &std::env::args().nth(1).unwrap_or_default());
+    note_copy(repo, &home(), &std::env::args().nth(1).unwrap_or_default(), &iso_now());
 }
 
-/// Note that copy ran command in repo, unless it is one a coordinator of the repo was
-/// started from. A copy from before the note leaves none itself: what it left undone
-/// tells (risk_late.rs).
-pub fn note_copy(repo: &Repo, copy: &Path, command: &str) {
+/// Note that copy ran command in repo at a time, unless it is one a coordinator of the
+/// repo was started from. A copy from before the note leaves none itself: what it left
+/// undone tells (risk_late.rs).
+pub fn note_copy(repo: &Repo, copy: &Path, command: &str, at: &str) {
     if coordinator_copy(repo).is_none() || a_coordinators(repo, copy) {
         return;
     }
-    let note = json!({"copy": copy.display().to_string(), "command": command, "at": iso_now()});
+    let note = json!({"copy": copy.display().to_string(), "command": command, "at": at});
     let _ = write_obj(&note_path(repo), note.as_object().expect("an object"));
 }
 

@@ -77,7 +77,9 @@ pub fn label_late(repo: &Repo, tid: &str) -> Res<bool> {
     // the copy that made it ready knows no label: doctor's `copy` says which, if it isn't ours
     let brief = std::fs::read_to_string(repo.dir.join("briefs").join(format!("{tid}.full.md")));
     if let Some(copy) = brief.ok().and_then(|b| told_copy(&b, tid)) {
-        crate::copies::note_copy(repo, &copy, "ready");
+        // when it became ready, not now: the task may have waited long for its label
+        let at = Some(s(&now, "since")).filter(|at| !at.is_empty());
+        crate::copies::note_copy(repo, &copy, "ready", at.unwrap_or(&bullpen_core::timeutil::iso_now()));
     }
     Ok(true)
 }
