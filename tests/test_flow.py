@@ -166,7 +166,7 @@ class FlowTest(BullpenTest):
         gh = [json.loads(l)["argv"] for l in (self.fake / "gh.log").read_text().splitlines()]
         self.assertEqual(gh[-2][:2], ["pr", "merge"])
         self.assertIn("--rebase", gh[-2])
-        self.assertEqual(gh[-1][-2:], ["--json", "mergeCommit"])  # then the commit it left, for `revert`
+        self.assertEqual(gh[-1][-2:], ["--json", "mergeCommit,commits"])  # then the commit it left, for `revert`
         self.assertFalse((self.fake / "alive" / blk).exists())
         branches = sh("git", "-C", str(self.repo), "branch")
         self.assertNotIn("bullpen/", branches)

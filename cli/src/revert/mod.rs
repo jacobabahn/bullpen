@@ -27,10 +27,10 @@ const REVERT: &[Arg] = &[
     ),
 ];
 
-/// Was the task accepted: done, by a merge (not closed with nothing to merge, or with
-/// its branch kept)?
+/// Was the task accepted with something merged: done, with a merge on record (not closed
+/// with nothing to merge, or with its branch kept)?
 fn accepted(t: &Obj) -> bool {
-    s(t, "status") == "done" && !truthy(t.get("closed")) && !truthy(t.get("kept"))
+    s(t, "status") == "done" && not_accepted(t).is_none()
 }
 
 /// Why task t can't be reverted: only an accepted one, with something merged, can.

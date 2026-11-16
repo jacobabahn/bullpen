@@ -197,7 +197,7 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `revert/`: `mod.rs`: `revert`: the refusals, the revert task (`add` with `reverts` on it, then `start`
   within max_running), its brief from `prompts/revert.md`, and `show`'s lines (`reverted`,
   `show_lines`); `commits.rs`: the commits an accept left on the base, from the task's record
-  (`commits_of`, `shape`), and the commit gh says a PR's merge left (`pr_merge_commit`, which
+  (`commits_of`, `shape`), and the commit gh says a PR's merge left and how many commits it had (`pr_merge_commit`, which
   accept's `merge` records)
 - `auto_accept.rs`: a reviewer's `verdict`; an approval with auto-accept runs
   `_auto_accept` as a job and waits for it, before the verdict closes the reviewer's

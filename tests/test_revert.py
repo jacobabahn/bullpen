@@ -223,6 +223,14 @@ class RevertLocalTest(RevertHelpers, BullpenTest):
         self.assertIn("\n reverted: reverted by BP-2 (which BP-3 reverted)\n", self.bp("show", tid).stdout)
         self.assertIn("BP-4 added: Revert BP-1: Fix the thing", self.bp("revert", tid).stdout)
 
+    def test_a_revert_task_accepted_with_nothing_merged_counts_for_nothing(self):
+        tid, _, _ = self.accepted()
+        self.bp("revert", tid)
+        self.bp("ready", "BP-2", "--summary", "Nothing to do.", cwd=self.show("BP-2")["worktree"])
+        self.bp("accept", "BP-2")
+        self.assertNotIn("revert", self.bp("show", tid).stdout)
+        self.assertIn("BP-3 added", self.bp("revert", tid).stdout)
+
     def test_a_dropped_revert_task_leaves_the_task_free_to_revert(self):
         tid, _, _ = self.accepted()
         self.bp("revert", tid)
@@ -275,16 +283,35 @@ class RevertRemoteTest(RevertHelpers, BullpenTest):
         tid, wt = self.work(n)
         head = self.git("rev-parse", "HEAD", cwd=wt)
         self.merge_on_github(tid)
-        self.github(state="OPEN", mergeCommit={"oid": head})
+        self.github(state="OPEN", mergeCommit={"oid": head}, commits=[{"oid": "x"}] * n)
         self.bp("accept", tid)
         return tid, head
 
     def test_accept_records_the_commit_gh_says_the_merge_left(self):
         tid, head = self.accepted()
         t = self.show(tid)
-        self.assertEqual((t["merged"], t["merged_how"]), (head, "rebase"))
+        self.assertEqual((t["merged"], t["merged_how"], t["merged_commits"]), (head, "rebase", 1))
         self.assertNotIn("merged_from", t)
-        self.assertIn(["pr", "view", t["pr"], "--json", "mergeCommit"], self.gh_calls())
+        self.assertIn(["pr", "view", t["pr"], "--json", "mergeCommit,commits"], self.gh_calls())
+
+    def test_a_commit_pushed_to_the_pr_after_ready_is_reverted_too(self):
+        tid, wt = self.work(1)
+        self.commit(wt, "more.txt", "more\n", "A fix after ready")
+        head = self.git("rev-parse", "HEAD", cwd=wt)
+        self.merge_on_github(tid)
+        self.github(state="OPEN", mergeCommit={"oid": head}, commits=[{"oid": "a"}, {"oid": "b"}])
+        self.bp("accept", tid)
+        t = self.show(tid)
+        self.assertEqual((t["commits"], t["merged_commits"]), (1, 2))
+        self.assertIn("(2 commits to revert)", self.bp("revert", tid).stdout)
+        shas = self.git("rev-list", "-n", "2", head).split()
+        self.assertIn(f"       git revert --no-commit {' '.join(shas)}\n", self.brief("BP-2"))
+
+    def test_a_rebased_pr_without_its_count_on_record_is_refused(self):
+        tid, _ = self.accepted(2)
+        self.change(tid, merged_commits=None)
+        p = self.bp("revert", tid, ok=False)
+        self.assertIn("BP-1's record doesn't say how many commits its PR had when it was merged", p.stderr)
 
     def test_the_revert_task_names_the_prs_commits_and_opens_a_pr_like_any_other(self):
         tid, head = self.accepted(2)
@@ -308,7 +335,7 @@ class RevertRemoteTest(RevertHelpers, BullpenTest):
         self.assertFalse((Path(wt) / "fix1.txt").exists() or (Path(wt) / "fix2.txt").exists())
         self.assertTrue((Path(wt) / "later.txt").exists())
         self.merge_on_github("BP-2")
-        self.github(state="OPEN", mergeCommit={"oid": self.git("rev-parse", "HEAD", cwd=wt)})
+        self.github(state="OPEN", mergeCommit={"oid": self.git("rev-parse", "HEAD", cwd=wt)}, commits=[{"oid": "x"}])
         self.bp("accept", "BP-2")
         self.assertIn("reverted by BP-2", self.bp("show", tid).stdout)
         self.assertIn("reverts: BP-1", self.bp("show", "BP-2").stdout)

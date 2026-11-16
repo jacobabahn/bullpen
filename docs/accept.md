@@ -169,19 +169,20 @@ later work is settled once.
 
 The commits come from the task's record, never from commit messages. An accept
 records `merged` (the base's head after the merge; with a PR, the commit gh says the
-merge left), `merged_how` (`config --merge` at the time) and in local mode
-`merged_from` (the base's head before it); `ready` records `commits` (how many the
-branch had):
+merge left), `merged_how` (`config --merge` at the time), and `merged_from` (local
+mode: the base's head before it) or `merged_commits` (a PR: how many commits gh says
+it had when it was merged, which counts a commit pushed after the last `ready`);
+`ready` records `commits` (how many the branch had then):
 
 | Merged by | The commits |
 | --- | --- |
-| `rebase` | local mode: those from `merged_from` to `merged`. A PR: the last `commits` ones up to `merged`. |
+| `rebase` | local mode: those from `merged_from` to `merged`. A PR: the last `merged_commits` ones up to `merged` (refused without that count). |
 | `squash` | `merged`, the one commit. |
 | `merge` | `merged`, the merge commit, reverted with `-m 1` (against the base as it was). |
-| not recorded | A task accepted before `merged_how` was kept, or a PR merged on GitHub outside bullpen. A `merged` commit with two parents is a merge commit; a branch of one commit left one commit. Anything else is refused: a rebase and a squash of several commits leave different commits, and the record can't tell them apart. |
+| not recorded | A task accepted before `merged_how` was kept, or a PR merged on GitHub outside bullpen. A `merged` commit with two parents is a merge commit; a branch of one commit (`merged_commits`, else `commits`) left one commit. Anything else is refused: a rebase and a squash of several commits leave different commits, and the record can't tell them apart. |
 
 A task with a PR and no `merged` on record (accepted before it was kept) asks gh for
-the merge commit when you revert it.
+the merge commit, and how many commits the PR had, when you revert it.
 
 `revert` refuses, saying why: a task that wasn't accepted (open, dropped, closed
 with its branch kept, finished with nothing to merge); one whose commits are no

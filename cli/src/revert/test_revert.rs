@@ -30,6 +30,7 @@ fn an_open_revert_comes_before_an_accepted_one_and_a_dropped_one_counts_for_noth
         {"id": "BP-1", "status": "done", "merged": "abc"},
         {"id": "BP-2", "status": "dropped", "reverts": "BP-1"},
         {"id": "BP-3", "status": "done", "closed": true, "reverts": "BP-1"},
+        {"id": "BP-9", "status": "done", "reverts": "BP-1"},
     ]));
     assert_eq!(reverted(&all, "BP-1"), None);
     assert_eq!(already(&all, "BP-1"), None);

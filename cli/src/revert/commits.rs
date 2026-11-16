@@ -1,10 +1,12 @@
 //! Which commits an accepted task left on its base, from its record alone (never from
 //! commit messages). An accept records `merged` (the base's head after it), and since
 //! `revert` came, `merged_how` (rebase, squash or merge) and in local mode `merged_from`
-//! (the base's head before it); `ready` records `commits` (how many the branch had).
+//! (the base's head before it) or, with a PR, `merged_commits` (how many commits gh says
+//! the PR had when it was merged); `ready` records `commits` (how many the branch had
+//! then, which a later push to the PR can leave behind).
 //!
-//!   rebase   the commits from `merged_from` to `merged` (without it, a PR's: the last
-//!            `commits` ones up to `merged`), each reverted
+//!   rebase   the commits from `merged_from` to `merged`; a PR's: the last
+//!            `merged_commits` ones up to `merged`
 //!   squash   `merged`, the one commit
 //!   merge    `merged`, the merge commit, reverted against its first parent (the base)
 //!   unknown  (accepted before `merged_how` was kept, or a PR merged outside bullpen):
@@ -42,7 +44,10 @@ pub enum Shape {
 /// has; or why it can't be told.
 pub fn shape(t: &Obj, parents: usize) -> Result<Shape, String> {
     let id = s(t, "id");
-    let n = t.get("commits").and_then(Value::as_i64).unwrap_or(0);
+    let count = |k: &str| t.get(k).and_then(Value::as_i64).filter(|n| *n >= 1);
+    let pr_had = count("merged_commits");
+    // what was merged, over what the last `ready` counted
+    let n = pr_had.or(count("commits")).unwrap_or(0);
     let odd = |how: &str, want: &str| {
         Err(format!(
             "{id}'s record says it was merged by {how}, but the commit it names has {parents} parent{}, not {want}: \
@@ -56,10 +61,13 @@ pub fn shape(t: &Obj, parents: usize) -> Result<Shape, String> {
         "squash" if parents == 1 => Ok(Shape::One),
         "squash" => odd("squash", "1"),
         "rebase" if truthy(t.get("merged_from")) => Ok(Shape::Since(s(t, "merged_from").to_string())),
-        "rebase" if n >= 1 => Ok(Shape::Last(n)),
-        "rebase" => Err(format!(
-            "{id}'s record doesn't say how many commits it had: its commits can't be told from it"
-        )),
+        "rebase" => match pr_had {
+            Some(n) => Ok(Shape::Last(n)),
+            None => Err(format!(
+                "{id}'s record doesn't say how many commits its PR had when it was merged: its commits can't be \
+                 told from it. Revert it by hand"
+            )),
+        },
         _ if parents == 2 => Ok(Shape::Merge),
         _ if parents == 1 && n == 1 => Ok(Shape::One),
         _ => Err(format!(
@@ -75,9 +83,9 @@ pub fn shape(t: &Obj, parents: usize) -> Result<Shape, String> {
     }
 }
 
-/// The commit a merged PR left on its base, as gh says it; None when the task has no
-/// PR, or gh doesn't say (offline, not merged).
-pub fn pr_merge_commit(repo: &Repo, t: &Obj) -> Option<String> {
+/// The commit a merged PR left on its base and how many commits the PR had, as gh says
+/// them; None when the task has no PR, or gh doesn't say the commit (offline, not merged).
+pub fn pr_merge_commit(repo: &Repo, t: &Obj) -> Option<(String, Option<i64>)> {
     if !truthy(t.get("pr")) {
         return None;
     }
@@ -88,12 +96,13 @@ pub fn pr_merge_commit(repo: &Repo, t: &Obj) -> Option<String> {
         "view".into(),
         pr,
         "--json".into(),
-        "mergeCommit".into(),
+        "mergeCommit,commits".into(),
     ];
     let p = run_in(&argv, &repo.root, false).ok().filter(|p| p.ok())?;
     let said: Value = serde_json::from_str(&p.stdout).ok()?;
     let oid = said.get("mergeCommit")?.get("oid")?.as_str()?;
-    (!oid.is_empty()).then(|| oid.to_string())
+    let had = said.get("commits").and_then(Value::as_array).map(|c| c.len() as i64);
+    (!oid.is_empty()).then(|| (oid.to_string(), had.filter(|n| *n >= 1)))
 }
 
 /// The base as it is now: origin's copy, fetched, when the repo has an origin; else the
@@ -116,12 +125,20 @@ fn short(sha: &str) -> String {
 /// The commits accepted task t left on its base, to revert; or a refusal that says why
 /// they can't be told, or that they're no longer in the base's history.
 pub fn commits_of(repo: &Repo, t: &Obj) -> Res<Taken> {
-    let (id, root) = (s(t, "id"), &repo.root);
     let base = py_str(t.get("base").unwrap_or(&Value::Null));
-    let merged = match s(t, "merged") {
-        "" => pr_merge_commit(repo, t),
+    let mut t = t.clone();
+    let merged = match s(&t, "merged") {
+        // an older record: gh says now what the accept would have kept
+        "" => pr_merge_commit(repo, &t).map(|(oid, had)| {
+            if let Some(n) = had {
+                t.insert("merged_commits".into(), serde_json::json!(n));
+            }
+            oid
+        }),
         sha => Some(sha.to_string()),
     };
+    let t = &t;
+    let (id, root) = (s(t, "id"), &repo.root);
     let Some(merged) = merged else {
         return fail(format!(
             "{id}'s record doesn't name the commit its merge left on {base}{}: its commits can't be told from it. \

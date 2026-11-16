@@ -276,9 +276,13 @@ pub fn merge(repo: &Repo, t: &mut Obj) -> Res<()> {
         }
         t.insert("merged_how".into(), json!(how)); // one merged outside bullpen has none: who knows how
     }
-    // for `revert`: the commit the merge left on the base, when gh says it
-    if let Some(oid) = crate::revert::commits::pr_merge_commit(repo, t) {
+    // for `revert`: the commit the merge left on the base and how many commits were merged,
+    // when gh says them
+    if let Some((oid, had)) = crate::revert::commits::pr_merge_commit(repo, t) {
         t.insert("merged".into(), json!(oid));
+        if let Some(n) = had {
+            t.insert("merged_commits".into(), json!(n));
+        }
     }
     Ok(())
 }
