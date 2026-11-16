@@ -518,7 +518,9 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
         .and_then(Value::as_object)
         .cloned();
     let rebase = if sent.is_some() { None } else { rebase };
-    let n = round_of(&old) + if sent.is_some() || rebase.is_some() { 0 } else { 1 };
+    // a round a change of the brief stopped (brief.rs) is run again, not counted
+    let again = sent.is_some() || rebase.is_some() || truthy(old.get("void"));
+    let n = round_of(&old) + if again { 0 } else { 1 };
     let id = s(t, "id").to_string();
     let briefs = repo.dir.join("briefs");
     let wt = s(t, "worktree").to_string();
@@ -526,7 +528,7 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
     std::fs::create_dir_all(&scratch)?;
     // the round the next one follows up on: the last one with a verdict
     let mut prev: Option<Obj> = if truthy(old.get("verdict")) {
-        let keys = ["round", "commit", "base", "findings", "verdict"];
+        let keys = ["round", "commit", "base", "findings", "verdict", "brief"];
         Some(
             keys.iter()
                 .map(|k| (k.to_string(), old.get(*k).cloned().unwrap_or(Value::Null)))
@@ -565,6 +567,7 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
         ("summary", summary),
         ("rules", review_rules(repo, t)?),
         ("why", why.clone().unwrap_or_default()),
+        ("brief_changed", crate::brief::changed_since(t, prev.as_ref())),
     ];
     if let Some(sent) = &sent {
         let (since, diff) = since_last(&wt, base_ref, sent)?;
@@ -664,6 +667,7 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
     r.insert("model".into(), json!(model));
     r.insert("prev".into(), prev.map_or(Value::Null, Value::Object));
     r.insert("scratch".into(), json!(scratch.display().to_string()));
+    r.insert("brief".into(), json!(crate::brief::count(t))); // the changes of the brief this round sees
     if let Some(sent) = &sent {
         r.insert("tour".into(), sent.get("n").cloned().unwrap_or(Value::Null));
     }

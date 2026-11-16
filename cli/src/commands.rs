@@ -58,6 +58,7 @@ pub const COMMANDS: &[Command] = &[
     c("start", COORDINATOR, "make a task's worktree and start its worker", crate::start::launch::cmd_start),
     c("resume", COORDINATOR, "restart a stopped worker, continuing its conversation", crate::start::launch::cmd_resume),
     c("tell", COORDINATOR, "type a message to a task's worker (after `Coordinator: ` from a coordinator's pane)", crate::start::launch::cmd_tell),
+    c("brief", COORDINATOR, "print a task's brief, or change it (--file, --add): its worker is told what changed", crate::brief::cmd_brief),
     c("peek", COORDINATOR, "print the end of a worker's screen", crate::start::peek::cmd_peek),
     c("ask", COORDINATOR, "(coordinator) the task needs the person: the question shows on the board", crate::triage::cmd_ask),
     c("ok", COORDINATOR, "(coordinator) a task waiting on you is seen to: back to work, nothing typed", crate::triage::cmd_ok),

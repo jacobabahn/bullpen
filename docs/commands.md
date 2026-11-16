@@ -36,6 +36,7 @@ bullpen news --recent --all-repos   # the last 20 news lines of every repository
 bullpen pick          # type part of any open task, in any repository, and go to it (the cmd+; j picker)
 bullpen pick --filter "lgn"   # just print the open tasks matching, best first
 bullpen tell BP-1 "Also cover the logout path"   # typed bare; from a coordinator's pane, after "Coordinator: "
+bullpen brief BP-1   # print its brief; --add "..." adds a dated section, --file FILE replaces it (see below)
 bullpen resume BP-1   # restart a stopped worker, continuing its conversation
 bullpen ask BP-1 "..."   # (coordinator) BP-1 needs you: the question shows on the board
 bullpen ok BP-1       # (coordinator) a task in triage is seen to: back to work, nothing typed
@@ -54,6 +55,35 @@ bullpen stats BP-1    # where its time went: its timeline and totals (no ID: acr
 A command that can't act on a task says its status in the board's words, with the
 status itself after them when they differ: "BP-4 has no pane: it's queued (todo)",
 "BP-2 needs you (stopped), not waiting on its coordinator".
+
+## Changing a task's brief
+
+`bullpen brief BP-1` prints a task's brief. `bullpen brief BP-1 --add "Also cover
+logout."` adds that to its end as a dated section (`## Added 2026-11-16 09:30`), and
+`bullpen brief BP-1 --file new.md` replaces it with the file's text. Use it in place of
+editing the file in the state folder, or of a `tell` that changes what's wanted: a
+`tell` reaches the worker, but the reviewer reads the brief.
+
+- A task that hasn't started just gets the new brief.
+- A started task's worker is told, as `tell` would: the added section, or the diff, typed
+  into its pane, so it needn't read the whole brief again. A change of more than 40 lines
+  is named by its file. The brief the worker reads (`briefs/<ID>.full.md`) is written
+  again. A task waiting on its coordinator goes back to work, as with `tell`.
+- A worker that isn't running, or is at a prompt, isn't typed to: the command prints the
+  `resume` or `tell` to run for it.
+- A task in review: the review under way is of work on the brief as it was, so its
+  reviewer is closed and the task goes back to its worker (resumed, if its pane is gone),
+  which runs `ready` again. The stopped round isn't counted.
+- A ready, finished or closed task is refused: send it back first (`bullpen tell`), or
+  add a follow-up task.
+
+Each change is kept as `briefs/<ID>.brief-<n>.md` (the added section, or the diff) and
+listed on the task (`brief_changes`); `bullpen show` says how often the brief changed. A
+review always reads the brief as it is now, and a round that follows another is told
+when the brief changed since that one, with the files that say what changed
+(docs/review.md).
+
+## More on some commands
 
 `bullpen diff BP-1` shows `git diff <base>...HEAD` from the task's worktree, then
 any changes not committed yet, in `delta` if it's installed, else `less -R`. The

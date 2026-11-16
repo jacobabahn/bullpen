@@ -324,8 +324,13 @@ pub fn cmd_show(argv: &[String]) -> Res<i32> {
             out.push(format!("{}: {}{failed}", rjust(name, 9), log.display()));
         }
     }
+    let changed = match crate::brief::count(&t) {
+        0 => String::new(),
+        1 => " (changed once since it was added)".into(),
+        n => format!(" (changed {n} times since it was added)"),
+    };
     out.push(format!(
-        "    brief: {}",
+        "    brief: {}{changed}",
         repo.dir.join("briefs").join(format!("{}.md", s(&t, "id"))).display()
     ));
     let nxt = next_steps(&t, &every);

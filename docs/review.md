@@ -71,6 +71,11 @@ Review costs only what it has to:
   correct. It counts as a round. Without a rebase, a change after an approval
   gets a follow-up review.
 
+A reviewer is pointed at the task's brief as it is now. When the brief changed
+(`bullpen brief`, docs/commands.md) since the round this one follows, its prompt says so
+under "What was asked", with the files that say what changed. A change during a review
+stops that review, and the round isn't counted.
+
 A reviewer's brief is headed with its round and kind, `# BP-3 review, round 2 of 2
 (follow-up review)`; a rebase check or a tour's review, which don't count as rounds,
 and a round past the limit leave out the "of 2".

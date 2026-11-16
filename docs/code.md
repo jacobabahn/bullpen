@@ -150,9 +150,12 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `doctor/`: `mod.rs`: `doctor` (and `--json`) and `up`'s hint; `all_repos.rs`: `doctor --all-repos`; `checks.rs`: the checks
 - `start/mod.rs`: `add`, `after`, `model`, `review-mode`, what a task waits on, and
   which saves move the run queue (`slot_freed`); `launch.rs`: `start`, `resume`, `tell`,
-  the worker's brief and pane (`start_task`, `launch`) and `hand_back`; `queue.rs`: the
+  the worker's brief and pane (`start_task`, `write_full`, `launch`) and `hand_back`; `queue.rs`: the
   run queue (`start_queued`); `peek.rs`: `peek`
 - `triage.rs`: `ask`, `ok` and `note`
+- `brief.rs`: `brief`: a task's brief printed, replaced or added to; the change kept
+  (`briefs/<ID>.brief-<n>.md`, the task's `brief_changes`), its worker told what changed
+  (`message`, `tell`), and the line a reviewer's follow-up round gets (`changed_since`)
 - `backlog/`: `later` (`mod.rs`: adding, who's calling, keep, drop, skip, moves, and
   `show`'s from line; `list.rs`: the list's lines; `start.rs`: an item made a task;
   `pickup.rs`: idle pickup, its caps, and the watcher's `_pickup`)

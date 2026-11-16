@@ -10,6 +10,7 @@ mod args;
 mod auto_accept;
 mod backlog;
 mod board;
+mod brief;
 mod build;
 mod check;
 mod close;

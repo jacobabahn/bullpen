@@ -176,9 +176,6 @@ pub fn start_task(repo: &Repo, t: &mut Obj, session: &str, model: Option<&str>) 
         return Ok(false);
     }
     let id = s(t, "id").to_string();
-    let briefs = repo.dir.join("briefs");
-    let brief = read_text(&briefs.join(format!("{id}.md")))?;
-    let full = briefs.join(format!("{id}.full.md"));
     // committed on its base, not the worktree's copy: a restarted task may have edited it
     let committed = committed_rules_on(repo, &task_base_ref(repo, t)?)?;
     let rules = rules_text(&rule_sources(repo, committed.as_deref(), "")?);
@@ -187,7 +184,27 @@ pub fn start_task(repo: &Repo, t: &mut Obj, session: &str, model: Option<&str>) 
     } else {
         format!("{rules}\n")
     };
-    std::fs::write(briefs.join(format!("{id}.rules.md")), saved)?;
+    std::fs::write(repo.dir.join("briefs").join(format!("{id}.rules.md")), saved)?;
+    let full = write_full(repo, t, &rules)?;
+    let first = format!(
+        "You are the worker for bullpen task {id}. Read your brief at {} and follow it.",
+        full.display()
+    );
+    if let Some(m) = model {
+        t.insert("worker_model".into(), json!(m)); // this task's own, over the config's
+    }
+    launch(repo, t, session, &first, false)?;
+    Ok(true)
+}
+
+/// Write the brief the worker reads (briefs/<ID>.full.md): the task's brief
+/// (briefs/<ID>.md), what it builds on, the repository's rules and the worker's footer.
+/// Its path. `start` writes it, and `brief` again when the task's brief changes.
+pub fn write_full(repo: &Repo, t: &Obj, rules: &str) -> Res<std::path::PathBuf> {
+    let id = s(t, "id");
+    let briefs = repo.dir.join("briefs");
+    let brief = read_text(&briefs.join(format!("{id}.md")))?;
+    let full = briefs.join(format!("{id}.full.md"));
     let section = if rules.is_empty() {
         String::new()
     } else {
@@ -200,15 +217,7 @@ pub fn start_task(repo: &Repo, t: &mut Obj, session: &str, model: Option<&str>) 
         footer(repo, t)?
     );
     std::fs::write(&full, text)?;
-    let first = format!(
-        "You are the worker for bullpen task {id}. Read your brief at {} and follow it.",
-        full.display()
-    );
-    if let Some(m) = model {
-        t.insert("worker_model".into(), json!(m)); // this task's own, over the config's
-    }
-    launch(repo, t, session, &first, false)?;
-    Ok(true)
+    Ok(full)
 }
 
 /// A file's text, as Path.read_text() reads it (universal newlines).

@@ -18,6 +18,8 @@ no tab until `bullpen go` shows it), its own git worktree and its own branch.
   person's to answer: tell the person.
 - Ask the person before anything risky or anything you're unsure they want.
   Otherwise keep going without chatter.
+- Never edit files in bullpen's state folder. To change what a task asks for, use
+  `bullpen brief`: a `tell` reaches the worker but not its reviewer.
 - Call tasks by their ID (`BP-3`). The person sees it in the Rex tab names and PR titles.
 
 ## Plan
@@ -67,6 +69,7 @@ bullpen go BP-3             # show the person that worker's pane, when they ask 
 bullpen ask BP-3 "..."      # BP-3 needs the person: the question shows on the board
 bullpen note BP-3 "..."     # an informational line on the board (not a question: that's ask)
 bullpen tell BP-3 "..."     # type a message to the worker (guidance, a fix request)
+bullpen brief BP-3 --add "..."  # change what a task asks for: add a section to its brief (`--file FILE` replaces it; alone: print it); its worker and its next review hear of it
 bullpen ok BP-3             # a task in triage is seen to: back to working, nothing typed
 bullpen review BP-3         # a new reviewer, in place of one that stopped without a verdict
 bullpen review-mode BP-3 full  # its first review: full, light or auto (the default: by size)

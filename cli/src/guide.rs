@@ -446,7 +446,7 @@ fn unified_range(start: usize, stop: usize) -> String {
 }
 
 /// difflib.unified_diff(a, b, from, to, n=n, lineterm=""), as its lines.
-fn unified_diff(a: &[&str], b: &[&str], from: &str, to: &str, n: usize) -> Vec<String> {
+pub fn unified_diff(a: &[&str], b: &[&str], from: &str, to: &str, n: usize) -> Vec<String> {
     let mut out = Vec::new();
     for group in Matcher::new(a, b, true).grouped_opcodes(n) {
         if out.is_empty() {

@@ -2,6 +2,7 @@
 
 - Tasks, briefs, settings and your own rules: `~/.local/state/bullpen/repos/<repo>/` (`BULLPEN_STATE` moves it).
 - Settings for every repository: `~/.config/bullpen/config.json` (`XDG_CONFIG_HOME` moves it). See [Settings](settings.md).
+  A change to a task's brief (`bullpen brief`) is kept in `briefs/` as `<ID>.brief-<n>.md`.
   Setup and teardown logs are in `briefs/` there, as `<ID>.setup.log` and `<ID>.teardown.log`,
   and tours with their drafts and logs as `<ID>.tour.json`, `<ID>.tour-comments.json` and
   `<ID>.tour.log` (see [Guided review tours](tours.md)).

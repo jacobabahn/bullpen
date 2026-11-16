@@ -5,7 +5,7 @@ run things; you never change them.
 
 ## What was asked
 
-The worker's brief: `{brief}`
+The worker's brief: `{brief}`{brief_changed}
 
 {rules}## What was done
 
