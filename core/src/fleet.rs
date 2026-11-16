@@ -66,13 +66,17 @@ pub struct Coordinator {
     pub at: Option<f64>,
     /// is its pane running: None until asked (Fleet::ask_alive)
     pub alive: Option<bool>,
+    /// its doing/ note is there but doesn't parse: its state isn't known (not idle)
+    pub unread: bool,
 }
 
 impl Coordinator {
-    /// Its state in a word: "gone", "working", "blocked" (on a question in its pane) or "idle".
+    /// Its state in a word: "gone", "working", "blocked" (on a question in its pane),
+    /// "idle", or "unknown" when its note doesn't parse.
     pub fn word(&self) -> &'static str {
         match (self.alive, self.state.as_str()) {
             (Some(false), _) => "gone",
+            _ if self.unread => "unknown",
             (_, "working") => "working",
             (_, "blocked") => "blocked",
             _ => "idle",
@@ -180,22 +184,30 @@ impl Reader {
             session: s(c, "session").into(),
             ..Default::default()
         };
-        if let Some(d) = self.doing(state, &out.block) {
-            out.state = s(&d, "state").into();
-            out.text = s(&d, "text").into();
-            out.at = d.get("at").and_then(Value::as_f64);
+        match self.doing_note(state, &out.block) {
+            Ok(Some(d)) => {
+                out.state = s(&d, "state").into();
+                out.text = s(&d, "text").into();
+                out.at = d.get("at").and_then(Value::as_f64);
+            }
+            Ok(None) => {}
+            Err(_) => out.unread = true,
         }
         out
     }
 
-    /// What the watcher noted pane block doing; None when nothing (or a file that doesn't parse).
+    /// What the watcher noted pane block doing; None when nothing. A note that doesn't
+    /// parse is None too: a task then says where it stands, as with no note.
     fn doing(&mut self, state: &Path, block: &str) -> Option<Obj> {
+        self.doing_note(state, block).ok().flatten()
+    }
+
+    /// The same, with Err for a note that doesn't parse.
+    fn doing_note(&mut self, state: &Path, block: &str) -> Result<Option<Obj>, String> {
         if block.is_empty() {
-            return None;
+            return Ok(None);
         }
         self.obj(&state.join("doing").join(format!("{}.json", safe(block))))
-            .ok()
-            .flatten()
     }
 
     /// A JSON object file: None when it's missing, Err with why when it doesn't parse.

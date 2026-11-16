@@ -127,6 +127,32 @@ fn a_task_file_that_doesnt_parse_is_named_and_left_out() {
 }
 
 #[test]
+fn a_doing_note_that_doesnt_parse_leaves_a_task_its_status_and_a_coordinator_unknown() {
+    let env = Env::new();
+    let cs = json!([{"id": "c1", "block": "block:a", "session": "s"}]);
+    let dir = repo(&env, "shop", false, cs, &[]);
+    task(
+        &dir,
+        json!({"id": "BP-1", "title": "t", "status": "working", "block": "block:w"}),
+    );
+    for block in ["block:a", "block:w"] {
+        let path = env.state().join("doing").join(format!("{}.json", safe(block)));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "{").unwrap();
+    }
+    let shop = &read().unwrap().repos[0];
+    // the task says where it stands, as with no note
+    assert_eq!(shop.open[0].doing, "");
+    assert_eq!(
+        shop.open[0].words,
+        board_sentence(&shop.repo.cfg, &shop.open[0].task, &shop.every, None, String::new())
+    );
+    // the coordinator isn't taken for idle
+    assert!(shop.coordinators[0].unread);
+    assert_eq!(shop.coordinators[0].word(), "unknown");
+}
+
+#[test]
 fn a_reader_kept_reads_a_file_again_only_when_it_changed() {
     let env = Env::new();
     let dir = repo(&env, "shop", false, json!([]), &["needs"]);
