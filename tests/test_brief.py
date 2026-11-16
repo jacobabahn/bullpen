@@ -157,6 +157,50 @@ class BriefReviewTest(BullpenTest):
         self.commit_and_ready(tid, 2)
         self.assertEqual(self.show(tid)["review"]["round"], 1)  # the stopped round isn't counted
 
+    def test_a_reviewer_at_a_prompt_or_a_task_asked_about_in_review_is_a_review_under_way(self):
+        tid = self.start_task()
+        worker = self.block(tid)
+        reviewer = self.commit_and_ready(tid)
+        self.bp("_event", reviewer, "blocked", "permission", "Allow curl?")
+        self.assertEqual(self.show(tid)["status"], "needs")
+        self.bp("brief", tid, "--add", "Also cover logout.")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["review"]["block"], t["review"]["void"]), ("working", None, True))
+        self.assertFalse((self.fake / "alive" / reviewer).exists())
+        self.assertEqual(self.typed()[-1][0], worker)
+        self.assertIn("run your ready command again", self.typed()[-1][1])
+        self.assertIn("review: round 1", self.bp("show", tid).stdout)
+        self.assertIn("stopped: the brief changed", self.bp("show", tid).stdout)
+        reviewer = self.commit_and_ready(tid, 2)
+        self.assertEqual(self.show(tid)["review"]["round"], 1)
+        self.bp("ask", tid, "Which database?")
+        self.assertEqual(self.show(tid)["asked_from"]["status"], "review")
+        self.bp("brief", tid, "--add", "And sign-up.")
+        self.assertEqual(self.show(tid)["status"], "working")
+        self.assertFalse((self.fake / "alive" / reviewer).exists())
+        self.commit_and_ready(tid, 3)
+        self.assertEqual(self.show(tid)["review"]["round"], 1)
+
+    def test_a_message_that_doesnt_reach_the_worker_during_a_review_goes_to_the_coordinator(self):
+        tid = self.start_task()
+        reviewer = self.commit_and_ready(tid)
+        (self.fake / f"send_fails_{self.block(tid)}").write_text("")
+        p = self.bp("brief", tid, "--add", "Also cover logout.", ok=False)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("BP-1's brief changed and its review is stopped, but the message didn't reach its worker",
+                      p.stderr)
+        self.assertIn('`bullpen tell BP-1 "Your brief changed', p.stderr)
+        self.assertIn("run your ready command again.\"`", p.stderr)
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("triage", "Its brief changed, but that didn't reach its worker"))
+        self.assertFalse((self.fake / "alive" / reviewer).exists())
+        self.assertEqual(len(t["brief_changes"]), 1)
+        (self.fake / f"send_fails_{self.block(tid)}").unlink()
+        self.bp("tell", tid, "Your brief changed.")
+        self.assertEqual(self.show(tid)["status"], "working")
+        self.commit_and_ready(tid, 2)
+        self.assertEqual(self.show(tid)["review"]["round"], 1)
+
 
 class BriefGuideTest(BullpenTest):
     def test_the_guide_has_the_command_and_the_rule(self):

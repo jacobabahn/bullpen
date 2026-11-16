@@ -5,6 +5,7 @@
 //! (`brief_changes`), so a worker is told only what changed and a reviewer's follow-up
 //! round is told the brief changed since the last one (`changed_since`).
 
+use crate::agents::whose_turn;
 use crate::args::{pos, value, Arg, Args, Nargs};
 use crate::guide::unified_diff;
 use crate::review::close_reviewer;
@@ -13,6 +14,7 @@ use crate::rules::task_rules;
 use crate::saves::save;
 use crate::start::launch::{hand_back, write_full};
 use crate::start::read_text;
+use crate::stops::stop;
 use bullpen_core::json::{self, obj, py_str, s, truthy, Obj};
 use bullpen_core::repo::repo_root;
 use bullpen_core::task::{at_prompt, back_to_work, clip, is_closed, is_status, is_waiting};
@@ -48,6 +50,9 @@ enum Told {
     NotRunning,
     AtPrompt,
     Failed(String),
+    /// it didn't reach the worker of a task in review: the review is stopped and the task
+    /// is its coordinator's (saved)
+    ReviewStopped(String),
 }
 
 /// `brief`: print a task's brief, or change it and tell its worker what changed.
@@ -102,7 +107,7 @@ pub fn cmd_brief(argv: &[String]) -> Res<i32> {
         write_full(&repo, &t, &task_rules(&repo, &t)?)?;
     }
     let told = tell(&repo, &mut t, &message(&change, &full, &kept))?;
-    if !matches!(told, Told::Yes) {
+    if !matches!(told, Told::Yes | Told::ReviewStopped(_)) {
         json::write_obj(&repo.task_path(&id), &t)?; // not a save: its status didn't change
     }
     let later = shell_quoted(&pointer(&full, &kept));
@@ -116,6 +121,13 @@ pub fn cmd_brief(argv: &[String]) -> Res<i32> {
             "{id}'s brief changed. Its worker is at a prompt, so it isn't told: once that's answered, \
              `bullpen tell {id} {later}`"
         ),
+        Told::ReviewStopped(why) => {
+            let later = shell_quoted(&format!("{} {REVIEW_STOPPED}", pointer(&full, &kept)));
+            return fail(format!(
+                "{id}'s brief changed and its review is stopped, but the message didn't reach its worker ({why}): \
+                 `bullpen tell {id} {later}`"
+            ));
+        }
         Told::Failed(why) => {
             return fail(format!(
                 "{id}'s brief changed, but the message didn't reach its worker ({why}): `bullpen tell {id} {later}`"
@@ -214,6 +226,19 @@ fn shell_quoted(text: &str) -> String {
     format!("\"{}\"", text.replace('"', "\\\""))
 }
 
+/// What a worker whose review was stopped is told after the change.
+const REVIEW_STOPPED: &str = "The review of your work that was under way has been stopped: when you've done what \
+                              changed, run your ready command again.";
+
+/// Is a reviewer on the task? In review, stopped on its reviewer (a prompt, no verdict),
+/// asked about during its review, or with a reviewer's pane and no verdict yet.
+fn in_review(t: &Obj) -> bool {
+    let r = obj(t, "review");
+    whose_turn(t) == Some("reviewer")
+        || s(obj(t, "asked_from"), "status") == "review"
+        || (truthy(r.get("block")) && !truthy(r.get("verdict")))
+}
+
 /// Tell the task's worker msg, the way `tell` would. A review under way is of work on
 /// the brief as it was: its reviewer is closed and the task goes back to its worker
 /// (resumed, if its pane is gone), which runs `ready` again; that round isn't counted.
@@ -222,20 +247,22 @@ fn tell(repo: &Repo, t: &mut Obj, msg: &str) -> Res<Told> {
     if status == "todo" || truthy(t.get("needs_setup")) {
         return Ok(Told::NotStarted);
     }
-    if status == "review" {
+    if in_review(t) {
         close_reviewer(t)?;
         if let Some(Value::Object(r)) = t.get_mut("review") {
             r.insert("void".into(), json!(true));
         }
-        let msg = format!(
-            "{msg}\n\nThe review of your work that was under way has been stopped: when you've done what changed, \
-             run your ready command again."
-        );
-        return Ok(match hand_back(repo, t, &msg, "person") {
-            Ok(None) => Told::Yes,
-            Ok(Some(why)) => Told::Failed(why),
-            Err(e) => Told::Failed(clip(&e.0, 160)),
-        });
+        let failed = match hand_back(repo, t, &format!("{msg}\n\n{REVIEW_STOPPED}"), "person") {
+            Ok(failed) => failed,
+            Err(e) => Some(clip(&e.0, 160)),
+        };
+        let Some(why) = failed else {
+            return Ok(Told::Yes);
+        };
+        // nobody is on it now: its coordinator's, not a review with no reviewer
+        let stopped = "Its brief changed, but that didn't reach its worker";
+        stop(repo, t, "worker", "not_sent", stopped, &[], "not-sent")?;
+        return Ok(Told::ReviewStopped(why));
     }
     if !alive(s(t, "session"), s(t, "block"))? {
         return Ok(Told::NotRunning);

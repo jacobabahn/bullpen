@@ -352,6 +352,9 @@ fn review_line(t: &Obj) -> Option<String> {
     let mut state = get(r, "verdict")
         .filter(|v| truthy(Some(v)))
         .map_or("in progress".into(), py_str);
+    if truthy(r.get("void")) {
+        state = "stopped: the brief changed".into();
+    }
     if s(r, "verdict") == "approved" && truthy(r.get("kept")) {
         let kept = &r["kept"];
         let one = kept.as_f64() == Some(1.0) || kept == &Value::Bool(true);

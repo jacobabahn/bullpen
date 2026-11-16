@@ -71,9 +71,11 @@ editing the file in the state folder, or of a `tell` that changes what's wanted:
   again. A task waiting on its coordinator goes back to work, as with `tell`.
 - A worker that isn't running, or is at a prompt, isn't typed to: the command prints the
   `resume` or `tell` to run for it.
-- A task in review: the review under way is of work on the brief as it was, so its
-  reviewer is closed and the task goes back to its worker (resumed, if its pane is gone),
-  which runs `ready` again. The stopped round isn't counted.
+- A task with a review under way (in review, or stopped on its reviewer, or asked about
+  during its review): that review is of work on the brief as it was, so its reviewer is
+  closed and the task goes back to its worker (resumed, if its pane is gone), which runs
+  `ready` again. The stopped round isn't counted. If the message doesn't reach the
+  worker, the task is its coordinator's (triage) and the command prints the `tell` to run.
 - A ready, finished or closed task is refused: send it back first (`bullpen tell`), or
   add a follow-up task.
 
