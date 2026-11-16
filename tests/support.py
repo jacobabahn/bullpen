@@ -8,6 +8,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import select
 import shutil
 import subprocess
@@ -101,12 +102,55 @@ def tearDownModule():
         raise AssertionError(f"tests left {len(left)} files in TMPDIR: {', '.join(left[:5])}")
 
 
+# The rows of the table in the coordinator's guide (prompts/coordinator.md, "News"): the
+# first cell of each, and the lines it is for. Its last row ("anything else") is left
+# out: a news line has to say what to do itself or match one of these.
+TASK = r"[A-Z]{2,5}-\d+"
+NEWS_ROWS = {
+    "starts `For the coordinator:`": r"^For the coordinator: ",
+    "says a task `needs the person`, or is at a prompt":
+        rf"^{TASK} needs the person|^{TASK}('s reviewer)? is at an? .*prompt|so it needs the person$",
+    "has the person's answer to your `ask` (`BP-3: ...`)": rf"^{TASK}: the person answers ",
+    "`is ready`, `finished` or auto-accepted":
+        rf"^{TASK} (is ready|finished \(|approved by review.* and auto-accepted \()",
+    "`accepted`, `closed`, `dropped`, `started`, `working again`, `sent back`, `After BP-3: ...`":
+        rf"^{TASK} (accepted \(|closed |dropped$|started |is working again |(was )?sent back )"
+        rf"|Sent back to its worker|^After {TASK}: ",
+    "two tasks `both changed` a file": rf"^{TASK} and {TASK} both changed ",
+}
+# What a line that says what to do itself has: a command to run, or who to tell.
+NEWS_OWN = r"`bullpen |`rex |[Tt]ell the person|[Aa]sk the person|[Nn]othing to do|^Your coordinator guide "
+
+
+def news_row(line):
+    """The guide's row for a news line (without its `bullpen · `), "own" for one that
+    says what to do itself, or None: the coordinator would have to guess."""
+    for row, pattern in NEWS_ROWS.items():
+        if re.search(pattern, line):
+            return row
+    return "own" if re.search(NEWS_OWN, line) else None
+
+
+def check_news(test):
+    """Every news line bullpen sent in a test says what to do itself, or matches a row
+    of the table in the coordinator's guide. A line a test wrote into the log by hand,
+    with an event its class names in `own_news_events`, isn't bullpen's."""
+    own = getattr(test, "own_news_events", ())
+    for log in (test.tmp / "state").rglob("news.log"):
+        for record in log.read_text().splitlines():
+            m = re.match(r"\S+(?: \[[^\]]*\])? \S+ ([^ :]+): bullpen · (.*)$", record)
+            if m and m.group(1) not in own and news_row(m.group(2)) is None:
+                test.fail(f"a news line that neither says what to do nor matches a row of the "
+                          f"guide's table ({m.group(1)}): {m.group(2)}")
+
+
 class BullpenTest(unittest.TestCase):
     """A project with a local origin, fake rex and gh, and its own state folder.
     The test classes of each area build on it."""
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.addCleanup(check_news, self)  # before the folder goes
         fake = self.tmp / "fake"
         fake.mkdir()
         for name in ("rex", "gh"):  # tests/fakes, built by tests/run.py
@@ -159,11 +203,13 @@ class BullpenTest(unittest.TestCase):
     def layer_states(self):
         return json.loads((self.fake / "reg.json").read_text())["layers"]
 
-    def typed(self):
-        """Lines typed into panes with `rex send`, as (block, text)."""
+    def typed(self, guide=False):
+        """Lines typed into panes with `rex send`, as (block, text). Without guide: not
+        the news that a coordinator's guide changed (a setting that brings a section,
+        a second coordinator), which the tests of something else don't count."""
         out = []
         for a in self.rex_calls():
-            if a[0] == "send":
+            if a[0] == "send" and (guide or not a[-1].startswith("bullpen · Your coordinator guide ")):
                 out.append((a[a.index("-b") + 1], a[-1]))
         return out
 

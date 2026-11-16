@@ -54,8 +54,15 @@ pub fn cmd_push(argv: &[String]) -> Res<i32> {
         ),
         None => (String::new(), ""),
     };
+    // the next accept or `up` pushes again by itself: only a push that keeps failing is the person's
+    let then = if why.starts_with("rejected") {
+        "Tell the person: it stays behind until they do that"
+    } else {
+        "Nothing to do the first time; if it keeps failing, tell the person"
+    };
     let line = format!(
-        "{after}{base} wasn't pushed to {remote}: {why}. {counts}`bullpen doctor` says how far behind {remote} is."
+        "{after}{base} wasn't pushed to {remote}: {why}. {counts}`bullpen doctor` says how far behind {remote} is. \
+         {then}."
     );
     // the news log's task column when no task is behind a push
     let push_news: Obj = json!({"id": "push"}).as_object().cloned().unwrap_or_default();

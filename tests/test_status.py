@@ -270,7 +270,8 @@ class StatusTest(BullpenTest):
         news = self.news()
         self.assertEqual(len(news), 1)
         self.assertRegex(news[0], r"^bullpen · BP-1 stopped at the usage limit, resets .*[AP]M: nothing to do, "
-                                  r"it is continued then\. `bullpen start` refuses meanwhile \(`--force` overrides\)$")
+                                  r"it is continued then\. `bullpen start` refuses meanwhile "
+                                  r"\(`--force` overrides, only if the person asks\)$")
         self.assertIn("Usage limit, resets", self.bp("ls").stdout)
         self.assertTrue(self.limit_file().exists())
 
@@ -346,7 +347,7 @@ class StatusTest(BullpenTest):
         cmd = self.api("session.new_layer")[-1]["layout"]["block"]["options"]["command"]
         self.assertIn("--continue", cmd)  # BP-2, resumed in a new pane
         self.assertEqual(self.news()[-1], "bullpen · the usage limit has reset: continued BP-1, "
-                                          "BP-2 (its pane was gone: resumed in a new one)")
+                                          "BP-2 (its pane was gone: resumed in a new one): nothing to do")
         for t in (self.show(tid), self.show(tid2)):
             self.assertEqual((t["status"], t["why"]), ("working", None))
             self.assertNotIn("limit", t)
@@ -366,6 +367,7 @@ class StatusTest(BullpenTest):
         self.assertEqual((t["status"], t["stop"]), ("triage", {"by": "worker", "kind": "limit"}))
         self.assertEqual(t["why"], "Couldn't be continued after the usage limit: rex: couldn't send to the block")
         self.assertIn("BP-1 (not continued, for its coordinator to see to: rex: couldn't send", self.news()[-1])
+        self.assertTrue(self.news()[-1].endswith("; `bullpen resume BP-1` continues it)"))
         (self.fake / f"send_fails_{worker}").unlink()
         self.bp("tell", tid, "Carry on.")
         self.assertEqual(self.show(tid)["status"], "working")
@@ -388,7 +390,7 @@ class StatusTest(BullpenTest):
         self.bp("_limit")
         self.assertIn((worker2, "The usage limit has reset. Carry on where you stopped."), self.typed())
         self.assertNotIn((worker, "The usage limit has reset. Carry on where you stopped."), self.typed())
-        self.assertEqual(self.news()[-1], "bullpen · the usage limit has reset: continued BP-2")
+        self.assertEqual(self.news()[-1], "bullpen · the usage limit has reset: continued BP-2: nothing to do")
         self.assertNotIn("limit", self.show(tid2))
         self.assertFalse(self.limit_file().exists())
 
@@ -436,7 +438,8 @@ class StatusTest(BullpenTest):
         self.reset_passed(tid)
         self.bp("_limit")
         self.assertIn((reviewer, "The usage limit has reset. Carry on where you stopped."), self.typed())
-        self.assertEqual(self.news()[-1], "bullpen · the usage limit has reset: continued BP-1's reviewer")
+        self.assertEqual(self.news()[-1], "bullpen · the usage limit has reset: continued BP-1's reviewer: "
+                                          "nothing to do")
         self.assertEqual(self.show(tid)["status"], "review")
 
     def test_a_limit_stays_with_the_screen_that_showed_it(self):

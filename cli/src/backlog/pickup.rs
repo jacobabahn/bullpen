@@ -198,7 +198,11 @@ fn run(repo: &Repo, st: &mut Obj, items: &[Obj]) -> Res<()> {
             st.insert("paused".into(), json!(true));
             let text = format!("Pickup paused: {} wait for you", and_list(ids));
             let first = repo.task(&ids[0])?;
-            say(repo, &first, "pickup", &text)?;
+            let told = format!(
+                "Pickup paused: {} wait for a look. Tell the person: it goes on once they have looked",
+                and_list(ids)
+            );
+            say(repo, &first, "pickup", &told)?;
             crate::notifications::tell_person(repo, &first, &text);
         }
         // Needed is checked first: the pause ends with the pile, not when something else holds it
@@ -210,7 +214,7 @@ fn run(repo: &Repo, st: &mut Obj, items: &[Obj]) -> Res<()> {
     if held == Some(Held::Spent) && s(st, "spent") != today.to_string() {
         st.insert("spent".into(), json!(today.to_string()));
         let text = format!(
-            "Pickup started its {} for today (pickup_per_day): the backlog waits for tomorrow",
+            "Pickup started its {} for today (pickup_per_day): the backlog waits for tomorrow, nothing to do",
             num(repo, "pickup_per_day")
         );
         say(repo, &item_as_task(&items[0]), "pickup", &text)?;
@@ -351,7 +355,10 @@ fn start(repo: &Repo, item: &Obj, session: &str) -> Res<()> {
             repo,
             &t,
             "pickup",
-            &format!("{id} is {tid} now, but it didn't start: {}", clip(&e, 200)),
+            &format!(
+                "{id} is {tid} now, but it didn't start: {}. `bullpen start {tid}` tries again",
+                clip(&e, 200)
+            ),
         ),
     }
 }

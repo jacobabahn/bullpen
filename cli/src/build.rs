@@ -383,7 +383,8 @@ fn start_rebuild(repo: &Repo, root: &Path) -> Res<Option<String>> {
                 p.set_stamp_in(root, "skipped", &src)?;
                 let text = format!(
                     "{} wasn't rebuilt: {} has uncommitted changes to {}, and a build would take them in. {}. \
-                     Commit or drop them, then run `bullpen up` (or `bullpen build` to build them as they are).",
+                     Tell the person: once they are committed or dropped, `bullpen up` builds it (or `bullpen build`, as \
+                     they are).",
                     p.subject(),
                     root.display(),
                     p.crates.join(", "),
@@ -668,7 +669,7 @@ pub fn cmd_build_bg(argv: &[String]) -> Res<i32> {
     let why = done.why.unwrap_or_default();
     for p in &done.failed {
         let text = format!(
-            "{} wasn't rebuilt: {why}. {}. Log: {}. Fix it, then run `bullpen build`.",
+            "{} wasn't rebuilt: {why}. {}. Log: {}. Tell the person: once it is fixed, `bullpen build` builds it.",
             p.subject(),
             p.keeps,
             build_log().display()

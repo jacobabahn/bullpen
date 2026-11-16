@@ -194,7 +194,7 @@ fn here(repo: &mut Repo, session: &str, live: &[(String, String)], monitor: bool
 
 /// Coordinator cid has the guide as it is now.
 fn given_guide(repo: &mut Repo, cid: &str) -> Res<()> {
-    let text = guide_text()?;
+    let text = guide_text(Some(repo))?;
     if let Some(c) = coordinator_mut(repo, cid) {
         give_guide(c, &text)?;
     }

@@ -1,21 +1,27 @@
 //! The coordinator's guide, and telling running coordinators when it changed
 //!.
 //!
+//! The guide is `prompts/coordinator.md` with the sections that apply to the repo put
+//! in at its `{{sections}}` line, each from a file of its own in `prompts/coordinator/`
+//! (SECTIONS): how news arrives when it isn't typed, pull requests, auto-accept, pickup,
+//! other coordinators. So a repo's guide changes with its settings.
+//!
 //! A coordinator gets its guide once, in its system prompt or by reading `bullpen guide`
 //! (`up --here`), and can't load it again. Each records the hash of the guide it was
 //! given (c["guide"]), and the text itself is kept in <state>/guides/<hash>.md: one
-//! folder for every repo, since they all run this bullpen's guide. `up` and `accept`
-//! compare each running coordinator's hash, in every repo, with the guide now. A
-//! coordinator whose guide is out of date gets one news line, only it, with the diff
-//! after the line when it is short, and its hash moves on, so each change is told once.
-//! One from before hashes, or whose old text is gone, is told to read the guide again.
+//! folder for every repo. `up`, `accept` and `config` compare each running coordinator's
+//! hash, in every repo, with its repo's guide now. A coordinator whose guide is out of
+//! date gets one news line, only it: with the new section after the line when a section
+//! came or went, else with the diff when it is short. Its hash moves on, so each change
+//! is told once. One from before hashes, or whose old text is gone, is told to read the
+//! guide again.
 
-use crate::args::Args;
-use crate::coordinators::alive;
+use crate::args::{flag, Arg, Args};
+use crate::coordinators::{alive, coordinators};
 use crate::news::{follow_cmd, news, Opts};
-use bullpen_core::json::{s, Obj};
+use bullpen_core::json::{s, truthy, Obj};
 use bullpen_core::paths::{prompts, state};
-use bullpen_core::repo::known_repos;
+use bullpen_core::repo::{known_repos, repo_root};
 use bullpen_core::text::{splitlines, strip};
 use bullpen_core::{Fail, Repo, Res};
 use serde_json::{json, Value};
@@ -84,17 +90,50 @@ fn mkdirs(path: &Path) -> Res<()> {
     std::fs::create_dir_all(path).map_err(|e| os_error(e, path))
 }
 
-/// The coordinator's guide, with this bullpen's own path in its commands.
-pub fn guide_text() -> Res<String> {
+/// Where the guide's sections go in `prompts/coordinator.md`: a line of its own.
+const SECTIONS_MARK: &str = "{{sections}}\n";
+
+/// The sections a guide has only when they apply, in the guide's order: the file in
+/// `prompts/coordinator/`, and whether the repo's guide has it.
+const SECTIONS: &[(&str, fn(&Repo) -> Res<bool>)] = &[
+    ("news-wake", |r| Ok(r.cfg_str("news") == "wake")),
+    ("news-monitor", |r| Ok(r.cfg_str("news") == "monitor")),
+    ("prs", |r| r.has_origin()),
+    ("auto-accept", |r| {
+        Ok(on(r, "auto_accept") || (on(r, "pickup") && on(r, "pickup_auto_accept")))
+    }),
+    ("pickup", |r| Ok(on(r, "pickup"))),
+    ("others", |r| Ok(coordinators(r).len() > 1)),
+];
+
+fn on(repo: &Repo, key: &str) -> bool {
+    truthy(repo.cfg.get(key))
+}
+
+/// The coordinator's guide for the repo, with the sections that apply to it (None:
+/// every section) and this bullpen's own path in its commands.
+pub fn guide_text(repo: Option<&Repo>) -> Res<String> {
+    let mut sections = String::new();
+    for (name, applies) in SECTIONS {
+        if match repo {
+            Some(r) => applies(r)?,
+            None => true,
+        } {
+            let text = read_text(&prompts().join("coordinator").join(format!("{name}.md")))?;
+            sections += &format!("{}\n\n", text.trim_end());
+        }
+    }
     let text = read_text(&prompts().join("coordinator.md"))?;
-    Ok(text.replace("{{follow}}", &follow_cmd()))
+    Ok(text
+        .replace(SECTIONS_MARK, &sections)
+        .replace("{{follow}}", &follow_cmd()))
 }
 
 /// The guide as a file, for the coordinator's system prompt.
 pub fn guide_file(repo: &Repo) -> Res<PathBuf> {
     let path = repo.dir.join("coordinator.md");
     mkdirs(&repo.dir)?;
-    write_text(&path, &guide_text()?)?;
+    write_text(&path, &guide_text(Some(repo))?)?;
     Ok(path)
 }
 
@@ -162,18 +201,22 @@ pub fn guide_sections(old: &str, new: &str) -> Vec<String> {
 }
 
 /// (line, lines after it) telling a coordinator given the guide old (None: not known)
-/// that it is now new.
-pub fn guide_news(old: Option<&str>, new: &str) -> (String, Vec<String>) {
+/// that it is now new. None when there is nothing to tell: the only change is sections
+/// that no longer apply, and following one of those does no harm.
+pub fn guide_news(old: Option<&str>, new: &str) -> Option<(String, Vec<String>)> {
     let follow = "follow it from now on";
     let Some(old) = old else {
-        return (
+        return Some((
             format!(
                 "Your coordinator guide may have changed since you were given it: run \
                  `bullpen guide` to read it all, and {follow}."
             ),
             vec![],
-        );
+        ));
     };
+    if let Some((gone, came)) = section_change(old, new) {
+        return sections_news(&gone, &came);
+    }
     let diff = unified_diff(&splitlines(old), &splitlines(new), "guide (yours)", "guide (now)", 3);
     let where_ = guide_sections(old, new);
     let where_ = match where_.len() {
@@ -182,40 +225,167 @@ pub fn guide_news(old: Option<&str>, new: &str) -> (String, Vec<String>) {
         _ => format!(" (sections: {})", where_.join(", ")),
     };
     if diff.len() <= GUIDE_DIFF_LINES {
-        return (
+        return Some((
             format!("Your coordinator guide changed{where_}. Read the change below and {follow}:"),
             diff,
-        );
+        ));
     }
     let line = format!(
         "Your coordinator guide changed{where_}, {} lines of diff: run `bullpen guide` to read it all, and {follow}.",
         diff.len()
     );
-    (line, vec![])
+    Some((line, vec![]))
+}
+
+/// A guide as (heading, lines) for each `## ` section, the text above the first under "".
+fn by_section(text: &str) -> Vec<(&str, Vec<&str>)> {
+    let mut out: Vec<(&str, Vec<&str>)> = vec![("", Vec::new())];
+    for line in splitlines(text) {
+        match line.strip_prefix("## ") {
+            Some(h) => out.push((strip(h), vec![line])),
+            None => out.last_mut().expect("never empty").1.push(line),
+        }
+    }
+    out
+}
+
+/// "X" for one name, "X and Y" for two, "X, Y and Z".
+fn listed(names: &[&str]) -> String {
+    match names.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        _ => names.concat(),
+    }
+}
+
+/// A section of a guide: its heading and its lines.
+type Section = (String, Vec<String>);
+
+/// (the headings that went, the sections that came) when the guides differ only in
+/// whole sections (a setting changed: a section applies now, or no longer does). None
+/// when they are the same, or anything else changed too.
+fn section_change(old: &str, new: &str) -> Option<(Vec<String>, Vec<Section>)> {
+    let own = |text: &str| -> Vec<Section> {
+        let each = by_section(text).into_iter();
+        each.map(|(h, l)| (h.to_string(), l.iter().map(|x| x.to_string()).collect()))
+            .collect()
+    };
+    let (a, b) = (own(old), own(new));
+    let has = |list: &[Section], h: &str| list.iter().any(|(x, _)| x == h);
+    let gone: Vec<Section> = a.iter().filter(|(h, _)| !has(&b, h)).cloned().collect();
+    let came: Vec<Section> = b.iter().filter(|(h, _)| !has(&a, h)).cloned().collect();
+    let kept = |list: &[Section], out: &[Section]| -> Vec<Section> {
+        list.iter().filter(|s| !out.contains(s)).cloned().collect()
+    };
+    if (gone.is_empty() && came.is_empty()) || kept(&a, &gone) != kept(&b, &came) {
+        return None;
+    }
+    Some((gone.into_iter().map(|(h, _)| h).collect(), came))
+}
+
+/// The news of sections that came (with those that went): the line, and the new
+/// sections after it, as they are. None when sections only went.
+fn sections_news(gone: &[String], came: &[Section]) -> Option<(String, Vec<String>)> {
+    if came.is_empty() {
+        return None;
+    }
+    let names = |list: Vec<&String>| listed(&list.iter().map(|h| h.as_str()).collect::<Vec<_>>());
+    let and = match gone.len() {
+        0 => String::new(),
+        1 => format!(", and its section {} no longer applies", names(gone.iter().collect())),
+        _ => format!(", and its sections {} no longer apply", names(gone.iter().collect())),
+    };
+    let one = came.len() == 1;
+    let line = format!(
+        "Your coordinator guide changed with this repo's settings: it has the section{} {} now{and}. Read {} \
+         below and follow it from now on:",
+        if one { "" } else { "s" },
+        names(came.iter().map(|(h, _)| h).collect()),
+        if one { "it" } else { "them" }
+    );
+    let mut more: Vec<String> = came.iter().flat_map(|(_, lines)| lines.clone()).collect();
+    while more.last().is_some_and(|l| l.is_empty()) {
+        more.pop();
+    }
+    Some((line, more))
+}
+
+/// A section's lines as a guide has them (`prompts/coordinator/<name>.md`), for a
+/// message that carries it.
+pub fn section_lines(name: &str) -> Res<Vec<String>> {
+    let text = read_text(&prompts().join("coordinator").join(format!("{name}.md")))?;
+    let text = text.replace("{{follow}}", &follow_cmd());
+    Ok(splitlines(text.trim_end()).into_iter().map(String::from).collect())
+}
+
+/// `config --news` told these coordinators of the switch itself, with the section for
+/// the new way: each whose guide differs from the repo's now only in its "News by"
+/// sections has the guide as it is now, with no news of it.
+pub fn told_by_switch(repo: &mut Repo, cids: &[String]) -> Res<()> {
+    let text = guide_text(Some(repo))?;
+    for cid in cids {
+        let had = crate::coordinators::coordinator(repo, cid).map(|c| s(c, "guide").to_string());
+        let Some(old) = old_guide(&had.unwrap_or_default())? else {
+            continue;
+        };
+        let news_only = |(gone, came): (Vec<String>, Vec<Section>)| {
+            let came = came.iter().map(|(h, _)| h);
+            gone.iter().chain(came).all(|h| h.starts_with("News by "))
+        };
+        if section_change(&old, &text).is_some_and(news_only) {
+            if let Some(c) = crate::coordinators::coordinator_mut(repo, cid) {
+                give_guide(c, &text)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Tell each running coordinator, in this repo and every other, whose guide isn't the
 /// current one what changed. Never fails the command that called it.
 pub fn tell_guide_changes(repo: &mut Repo) {
-    if let Err(e) = tell_all(repo) {
+    tell_changes(repo, true)
+}
+
+/// The same, for `config`: nothing is printed (its --json is all it prints).
+pub fn tell_guide_changes_quietly(repo: &mut Repo) {
+    tell_changes(repo, false)
+}
+
+fn tell_changes(repo: &mut Repo, says: bool) {
+    if let Err(e) = tell_all(repo, says) {
         eprintln!("bullpen: couldn't tell the coordinators about their guide: {e}");
     }
 }
 
-fn tell_all(repo: &mut Repo) -> Res<()> {
-    let text = guide_text()?;
-    let h = guide_hash(&text);
+fn tell_all(repo: &mut Repo, says: bool) -> Res<()> {
     let mut others: Vec<Repo> = known_repos()?.into_iter().filter(|o| o.dir != repo.dir).collect();
-    tell_repo(repo, &text, &h, false)?;
+    tell_repo(repo, says.then_some(false))?;
     for r in &mut others {
-        tell_repo(r, &text, &h, true)?;
+        tell_repo(r, says.then_some(true))?;
     }
     Ok(())
 }
 
-/// Tell repo r's running coordinators whose guide isn't h (the guide text); other: r
-/// isn't the repo the command runs in, so the lines name its root.
-fn tell_repo(r: &mut Repo, text: &str, h: &str, other: bool) -> Res<()> {
+/// `config --global` changed what every repo falls back on: tell the coordinators of
+/// each repo whose guide that changed. Never fails the command.
+pub fn tell_guide_changes_everywhere() {
+    let told = || -> Res<()> {
+        for r in &mut known_repos()? {
+            tell_repo(r, None)?;
+        }
+        Ok(())
+    };
+    if let Err(e) = told() {
+        eprintln!("bullpen: couldn't tell the coordinators about their guide: {e}");
+    }
+}
+
+/// Tell repo r's running coordinators whose guide isn't r's guide now. says: print who
+/// was told (None: nothing), and whether r isn't the repo the command runs in, so the
+/// lines name its root.
+fn tell_repo(r: &mut Repo, says: Option<bool>) -> Res<()> {
+    let text = &guide_text(Some(r))?;
+    let h = &guide_hash(text);
     let list = r
         .cfg
         .get("coordinators")
@@ -226,7 +396,7 @@ fn tell_repo(r: &mut Repo, text: &str, h: &str, other: bool) -> Res<()> {
     for (n, c) in list.iter().enumerate() {
         let Some(c) = c.as_object() else { continue };
         // a coordinator another copy of bullpen started has that copy's guide: it tells its own
-        if c.get("guide").and_then(Value::as_str) != Some(h) && crate::copies::ours(c) && alive(Some(c))? {
+        if c.get("guide").and_then(Value::as_str) != Some(h.as_str()) && crate::copies::ours(c) && alive(Some(c))? {
             told.push(n);
         }
     }
@@ -234,28 +404,33 @@ fn tell_repo(r: &mut Repo, text: &str, h: &str, other: bool) -> Res<()> {
     for &n in &told {
         let c = list[n].as_object().cloned().unwrap_or_default();
         let old = old_guide(c.get("guide").and_then(Value::as_str).unwrap_or(""))?;
-        let (line, more) = guide_news(old.as_deref(), text);
-        let to = Some(vec![s(&c, "id").to_string()]);
-        news(
-            r,
-            &task,
-            "guide",
-            &line,
-            Opts {
-                to,
-                more,
-                ..Default::default()
-            },
-        )?;
+        let told = guide_news(old.as_deref(), text);
+        if let Some((line, more)) = &told {
+            let to = Some(vec![s(&c, "id").to_string()]);
+            let more = more.clone();
+            news(
+                r,
+                &task,
+                "guide",
+                line,
+                Opts {
+                    to,
+                    more,
+                    ..Default::default()
+                },
+            )?;
+        }
         if let Some(c) = coordinator_at_mut(r, n) {
             give_guide(c, text)?;
         }
-        let of = if other {
-            format!(" of {}", r.root.display())
-        } else {
-            String::new()
-        };
-        println!("coordinator {}{of}: told that its guide changed", s(&c, "id"));
+        if let (Some(_), Some(other)) = (&told, says) {
+            let of = if other {
+                format!(" of {}", r.root.display())
+            } else {
+                String::new()
+            };
+            println!("coordinator {}{of}: told that its guide changed", s(&c, "id"));
+        }
     }
     if !told.is_empty() {
         r.save()?;
@@ -272,10 +447,20 @@ fn coordinator_at_mut(r: &mut Repo, n: usize) -> Option<&mut Obj> {
         .as_object_mut()
 }
 
-/// `guide`: print the coordinator's guide.
+const GUIDE: &[Arg] = &[flag(
+    "--all",
+    "with every section, not only those that apply to this repository",
+)];
+
+/// `guide`: print the coordinator's guide for this repository (outside one, or with
+/// --all: with every section).
 pub fn cmd_guide(argv: &[String]) -> Res<i32> {
-    Args::parse("guide", argv, &[]);
-    print!("{}\n", guide_text()?);
+    let a = Args::parse("guide", argv, GUIDE);
+    let repo = match a.flag("--all") {
+        true => None,
+        false => repo_root().ok().map(Repo::new).transpose()?,
+    };
+    print!("{}\n", guide_text(repo.as_ref())?);
     Ok(0)
 }
 

@@ -194,7 +194,7 @@ pub fn limit_hit(repo: &Repo, t: &mut Obj, who: &str, block: &str, state: &str, 
         )
     };
     if before.is_none() {
-        line += ". `bullpen start` refuses meanwhile (`--force` overrides)";
+        line += ". `bullpen start` refuses meanwhile (`--force` overrides, only if the person asks)";
     }
     crate::news::say(repo, t, "limit", &line)?;
     Ok(true)

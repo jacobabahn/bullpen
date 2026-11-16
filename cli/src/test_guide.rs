@@ -91,7 +91,7 @@ fn test_guide_sections_names_those_around_changes_and_those_gone() {
 
 #[test]
 fn test_guide_news_short_long_and_unknown() {
-    let (line, more) = guide_news(Some(G), &G.replace("news 2", "news two\nnews three"));
+    let (line, more) = guide_news(Some(G), &G.replace("news 2", "news two\nnews three")).unwrap();
     assert_eq!(
         line,
         "Your coordinator guide changed (section: News). Read the change below and follow it from now on:"
@@ -112,20 +112,61 @@ fn test_guide_news_short_long_and_unknown() {
     ];
     assert_eq!(more, want);
     let many: Vec<String> = (0..40).map(|i| i.to_string()).collect();
-    let (line, more) = guide_news(Some(G), &G.replace("news 1", &many.join("\n")));
+    let (line, more) = guide_news(Some(G), &G.replace("news 1", &many.join("\n"))).unwrap();
     assert_eq!(
         line,
         "Your coordinator guide changed (section: News), 50 lines of diff: run `bullpen guide` to read it all, \
          and follow it from now on."
     );
     assert!(more.is_empty());
-    let (line, more) = guide_news(None, G);
+    let (line, more) = guide_news(None, G).unwrap();
     assert_eq!(
         line,
         "Your coordinator guide may have changed since you were given it: run `bullpen guide` to read it all, \
          and follow it from now on."
     );
     assert!(more.is_empty());
+}
+
+/// A guide with sections that come and go with a repo's settings.
+const S: &str =
+    "intro\n\n## News\nnews 1\n\n## Auto-accept\nauto 1\nauto 2\n\n## Pickup\npick 1\n\n## Reporting\nrep 1\n";
+
+#[test]
+fn test_a_section_that_came_is_told_whole_and_one_that_only_went_is_not() {
+    let without = |h: &str, body: &str| S.replace(&format!("## {h}\n{body}\n\n"), "");
+    let (no_auto, no_pickup) = (without("Auto-accept", "auto 1\nauto 2"), without("Pickup", "pick 1"));
+    let neither = no_auto.replace("## Pickup\npick 1\n\n", "");
+    let (line, more) = guide_news(Some(&no_auto), S).unwrap();
+    assert_eq!(
+        line,
+        "Your coordinator guide changed with this repo's settings: it has the section Auto-accept now. Read it \
+         below and follow it from now on:"
+    );
+    assert_eq!(more, ["## Auto-accept", "auto 1", "auto 2"]);
+    let (line, more) = guide_news(Some(&neither), S).unwrap();
+    assert_eq!(
+        line,
+        "Your coordinator guide changed with this repo's settings: it has the sections Auto-accept and Pickup now. \
+         Read them below and follow it from now on:"
+    );
+    assert_eq!(more, ["## Auto-accept", "auto 1", "auto 2", "", "## Pickup", "pick 1"]);
+    let (line, more) = guide_news(Some(&no_auto), &no_pickup).unwrap();
+    assert_eq!(
+        line,
+        "Your coordinator guide changed with this repo's settings: it has the section Auto-accept now, and its \
+         section Pickup no longer applies. Read it below and follow it from now on:"
+    );
+    assert_eq!(more, ["## Auto-accept", "auto 1", "auto 2"]);
+    assert_eq!(guide_news(Some(S), &no_auto), None); // only went: following it does no harm
+    assert_eq!(guide_news(Some(S), &neither), None);
+    // anything else changed too: the diff, as for any change
+    let (line, _) = guide_news(Some(&no_auto), &S.replace("rep 1", "rep one")).unwrap();
+    assert_eq!(
+        line,
+        "Your coordinator guide changed (sections: Auto-accept, Reporting). Read the change below and follow it from \
+         now on:"
+    );
 }
 
 #[test]

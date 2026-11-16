@@ -201,6 +201,7 @@ pub fn cmd_config(argv: &[String]) -> Res<i32> {
     let unset = a.all("--unset");
     check_unset(&unset, Some(&repo))?;
     let news_was = repo.cfg_str("news").to_string();
+    let changed = !ch.is_empty() || !unset.is_empty();
     for k in unset {
         repo.unset(k)?;
     }
@@ -226,11 +227,15 @@ pub fn cmd_config(argv: &[String]) -> Res<i32> {
         repo.set(k, v.clone());
     }
     if ch.contains_key("news") {
-        crate::news::switch::switched(&repo, &news_was)?; // before the save: `wake` can be refused
+        let told = crate::news::switch::switched(&repo, &news_was)?; // before the save: `wake` can be refused
         eprintln!("{}", news_mode_line(&repo));
+        crate::guide::told_by_switch(&mut repo, &told)?;
     }
     repo.save()?;
     reindex(&repo)?;
+    if changed {
+        crate::guide::tell_guide_changes_quietly(&mut repo); // a setting may have brought its guide a section
+    }
     show_config(Some(&repo), a.flag("--json"))?;
     Ok(0)
 }
@@ -274,6 +279,7 @@ fn config_global(a: &Args) -> Res<i32> {
                 _ => {}
             }
         }
+        crate::guide::tell_guide_changes_everywhere();
     }
     let repo = repo_root().ok().map(Repo::new).transpose().ok().flatten();
     show_config(repo.as_ref(), a.flag("--json"))?;

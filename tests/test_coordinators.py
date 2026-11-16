@@ -359,7 +359,7 @@ class GuideTextTest(BullpenTest):
     """The lines the prompt audit (BP-133, finding 8) added to the coordinator's guide."""
 
     def has(self, *lines):
-        guide = " ".join(self.bp("guide").stdout.split())  # however its lines are wrapped
+        guide = " ".join(self.bp("guide", "--all").stdout.split())  # every section, however its lines are wrapped
         for line in lines:
             self.assertIn(line, guide)
 
@@ -400,5 +400,5 @@ class GuideTextTest(BullpenTest):
                  "open finding is and ask which they want",
                  "worker to rebase (keeping both where both sides changed the same place), run the full suite "
                  "again and run `ready` again")
-        self.assertNotIn("fix the conflicts and run `ready` again", " ".join(self.bp("guide").stdout.split()))
+        self.assertNotIn("fix the conflicts and run `ready` again", " ".join(self.bp("guide", "--all").stdout.split()))
 

@@ -6,18 +6,22 @@
 //!   end parks its first waiter.
 //! - Away from `wake`: the hook is removed, and a parked waiter ends.
 //! - To `monitor`: running coordinators get one last typed line telling them to start it.
+//! - That last typed line carries the guide's section for the new way, which their
+//!   guide didn't have; with a switch to `type` the follower or the waiter says so
+//!   as it ends. Either way those coordinators need no news that their guide changed.
 //! - From typed news to news that isn't: every cursor goes to the end of the log, since
 //!   what was typed already isn't news again.
 
 use super::read::{news_size, set_news_cursor};
 use super::wake::typed_mode;
-use super::{follow_cmd, hook, type_news, NEWS_MARK};
+use super::{hook, type_news, LINE_BREAK, NEWS_MARK};
 use crate::coordinators::{alive, calling_coordinator, coordinators};
 use bullpen_core::json::{s, Obj};
 use bullpen_core::{fail, Repo, Res};
 
-/// The repo's `news` was `was`, and is what repo.cfg says now (not saved yet).
-pub fn switched(repo: &Repo, was: &str) -> Res<()> {
+/// The repo's `news` was `was`, and is what repo.cfg says now (not saved yet). The
+/// coordinators that heard of the switch, and of what their guide says of the new way.
+pub fn switched(repo: &Repo, was: &str) -> Res<Vec<String>> {
     let now = repo.cfg_str("news");
     if now == "wake" {
         // first, so a refusal changes nothing
@@ -27,7 +31,7 @@ pub fn switched(repo: &Repo, was: &str) -> Res<()> {
         hook::install(repo)?;
     }
     if now == was {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let ids: Vec<String> = coordinators(repo).iter().map(|c| s(c, "id").to_string()).collect();
     if typed_mode(was) && !typed_mode(now) {
@@ -45,17 +49,22 @@ pub fn switched(repo: &Repo, was: &str) -> Res<()> {
     }
     let line = match now {
         "monitor" => format!(
-            "{NEWS_MARK}news now comes by monitor and is no longer typed: start the Monitor tool on `{}` now, \
-             as your guide says",
-            follow_cmd()
+            "{NEWS_MARK}news now comes by monitor and is no longer typed: start the Monitor tool now, as this \
+             section of your guide says:"
         ),
         "wake" => format!(
             "{NEWS_MARK}news now wakes you by itself and is no longer typed: there is nothing to start, and a \
              news monitor that still runs can be stopped. It comes as \"Stop hook feedback\" when your turn has \
-             ended: that is bullpen's news, not an error and not the person's words."
+             ended: that is bullpen's news, not an error and not the person's words. Your guide's section for it:"
         ),
-        _ => return Ok(()),
+        // typed again: the follower or the waiter says so as it ends
+        _ => return Ok(ids),
     };
+    let section = crate::guide::section_lines(&format!("news-{now}"))?;
+    let line = std::iter::once(line)
+        .chain(section)
+        .collect::<Vec<_>>()
+        .join(LINE_BREAK);
     // The last typed line: running coordinators have to hear of the switch. Not the one
     // that ran `config` itself: it sees the answer.
     let me = calling_coordinator(repo).map(|c| c as *const Obj);
@@ -68,5 +77,5 @@ pub fn switched(repo: &Repo, was: &str) -> Res<()> {
     if !told.is_empty() {
         type_news(repo, &line, &told)?;
     }
-    Ok(())
+    Ok(told)
 }

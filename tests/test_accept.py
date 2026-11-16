@@ -146,7 +146,8 @@ class AcceptTest(BullpenTest):
         t = self.show(tid)
         self.assertNotEqual(t["status"], "done")
         self.assertNotIn("auto_wait", t)
-        self.assertIn("bullpen · BP-1 not auto-accepted: its PR's checks failed", self.news_lines())
+        self.assertIn("bullpen · BP-1 not auto-accepted: its PR's checks failed "
+                      "(nothing to do: the news about that follows)", self.news_lines())
         self.assertFalse(any(a[:2] == ["pr", "merge"] for a in self.merges()))
         timeline = next((self.tmp / "state").rglob(f"timeline/{tid}.jsonl")).read_text().splitlines()
         refused = [json.loads(l) for l in timeline if '"accept_refused"' in l]
@@ -237,7 +238,8 @@ class AcceptTest(BullpenTest):
             {"id": "c1", "author": {"login": "pat"}, "body": "Hold on, rename it."}])
         self.bp("_prs")
         self.assertNotEqual(self.show(tid)["status"], "done")
-        self.assertIn("bullpen · BP-1 not auto-accepted: its PR has new comments", self.news_lines())
+        self.assertIn("bullpen · BP-1 not auto-accepted: its PR has new comments "
+                      "(nothing to do: the news about that follows)", self.news_lines())
         self.assertEqual(self.merges(), [])
 
     def test_a_new_comment_is_forwarded_once(self):
@@ -277,8 +279,8 @@ class AcceptTest(BullpenTest):
         self.bp("_prs")
         self.bp("_prs")
         merged = [l for l in self.news_lines() if "merged outside bullpen" in l]
-        self.assertEqual(merged, ["bullpen · BP-1's PR #7 was merged outside bullpen: "
-                                  "`bullpen accept BP-1` cleans up"])
+        self.assertEqual(merged, ["bullpen · BP-1's PR #7 was merged outside bullpen: tell the person; "
+                                  "`bullpen accept BP-1` cleans up when they say so"])
         self.assertEqual(len(self.gh_views()), 1)  # a merged PR isn't looked at again
         self.assertFalse((self.tmp / "state" / "prs").exists())
         t = self.show(tid)
@@ -295,8 +297,8 @@ class AcceptTest(BullpenTest):
         self.commit_and_ready_no_review(tid)
         self.github(state="CLOSED")
         self.bp("_prs")
-        self.assertEqual(self.news_lines()[-1], "bullpen · BP-1's PR #7 was closed outside bullpen: "
-                                                "`bullpen drop BP-1` cleans up")
+        self.assertEqual(self.news_lines()[-1], "bullpen · BP-1's PR #7 was closed outside bullpen: tell the person; "
+                                                "`bullpen drop BP-1` cleans up when they say so")
 
     def test_feedback_for_a_worker_that_is_gone_goes_to_the_coordinator(self):
         tid = self.start_task()

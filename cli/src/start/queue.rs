@@ -89,7 +89,10 @@ pub fn start_queued(repo: &Repo, by: &Obj, how: &str) -> Res<()> {
                 repo,
                 &t,
                 "queue",
-                &format!("{id} couldn't start ({why}): {}", clip(&e, 200)),
+                &format!(
+                    "{id} couldn't start ({why}): {}. `bullpen start {id}` tries again",
+                    clip(&e, 200)
+                ),
             )?,
         }
     }

@@ -146,7 +146,11 @@ fn supervise(job: &Job, tell: Option<RawFd>) -> Option<u32> {
     if let Some(why) = &why {
         let _ = writeln!(f, "{} failed: {why}", iso_now());
         drop(f);
-        let line = format!("{} failed: {why}. Log: {}", job.what, log.display());
+        let line = format!(
+            "{} failed: {why}. Log: {}. Tell the person if it isn't yours to settle",
+            job.what,
+            log.display()
+        );
         if let Err(e) = job_failed(job.cwd, job.task, &line) {
             if let Ok(mut f) = OpenOptions::new().append(true).open(log) {
                 let _ = writeln!(f, "{} and saying so failed: {e}", iso_now());

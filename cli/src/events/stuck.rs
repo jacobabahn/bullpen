@@ -90,7 +90,10 @@ pub fn cmd_limit(argv: &[String]) -> Res<i32> {
         }
         if let Some((first, _)) = done.first() {
             let said: Vec<&str> = done.iter().map(|(_, said)| said.as_str()).collect();
-            let line = format!("the usage limit has reset: continued {}", said.join(", "));
+            let mut line = format!("the usage limit has reset: continued {}", said.join(", "));
+            if !line.contains("(not continued") {
+                line += ": nothing to do";
+            }
             news(
                 &repo,
                 first,
@@ -129,12 +132,11 @@ fn continue_limited(repo: &Repo, t: &mut Obj) -> Res<String> {
             let e = clip(&e.to_string(), 120);
             let why = format!("Couldn't be continued after the usage limit: {e}");
             stop(repo, t, &who, "limit", &why, &[], "stopped")?;
-            let whom = if s(t, "status") == "triage" {
-                "its coordinator"
+            Ok(if s(t, "status") == "triage" {
+                format!("{id} (not continued, for its coordinator to see to: {e}; `bullpen resume {id}` continues it)")
             } else {
-                "the person"
-            };
-            Ok(format!("{id} (not continued, for {whom} to see to: {e})"))
+                format!("{id} (not continued: {e}; tell the person)")
+            })
         }
     }
 }

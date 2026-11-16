@@ -162,7 +162,9 @@ fn accepted(
                         everyone: true,
                         ..Opts::default()
                     };
-                    news(repo, t, "keys", KEYS_CHANGED, everyone)?;
+                    // the board's line, and for a coordinator, whose it is to do
+                    let line = format!("{KEYS_CHANGED} (tell the person: the cmd+; keys run the old ones until then)");
+                    news(repo, t, "keys", &line, everyone)?;
                     println!("{KEYS_CHANGED}");
                 }
                 Ok(())
@@ -170,7 +172,8 @@ fn accepted(
         ),
     ];
     run_steps(id, steps, &mut |line| {
-        news(repo, t, "accept_failed", line, Opts::default())
+        let line = format!("{line}. The accept still counts: tell the person");
+        news(repo, t, "accept_failed", &line, Opts::default())
     });
 }
 

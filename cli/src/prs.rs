@@ -150,7 +150,9 @@ fn follow_pr(repo: &Repo, t: &Obj) -> Res<()> {
         gh(&mut t).insert("state".into(), json!(state));
         write_obj(&path, &t)?;
         let verb = if state == "merged" { "accept" } else { "drop" };
-        let line = format!("{id}'s {pr_name} was {state} outside bullpen: `bullpen {verb} {id}` cleans up");
+        let line = format!(
+            "{id}'s {pr_name} was {state} outside bullpen: tell the person; `bullpen {verb} {id}` cleans up when they say so"
+        );
         return news(repo, &t, &format!("pr-{state}"), &line, Opts::default());
     }
     let (summary, failed) = checks(&pr);
@@ -189,7 +191,7 @@ fn follow_pr(repo: &Repo, t: &Obj) -> Res<()> {
             repo,
             &t,
             "ready",
-            &format!("{id} not auto-accepted: {why}"),
+            &format!("{id} not auto-accepted: {why} (nothing to do: the news about that follows)"),
             Opts::default(),
         )?;
     } else if truthy(t.get("auto_wait")) && summary != Some("running") && s(&t, "status") == "ready" {

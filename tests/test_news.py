@@ -304,10 +304,11 @@ class NewsTest(BullpenTest):
             self.assertIn(f"{BULLPEN} news --follow", last)
 
     def test_the_guide_names_the_follow_command_in_full(self):
+        self.assertNotIn("news --follow", self.bp("guide").stdout)  # typed news: no monitor to start
+        self.bp("config", "--news", "monitor")
         guide = self.bp("guide").stdout
         self.assertIn(f"{BULLPEN} news --follow`", guide)
         self.assertNotIn("{{", guide)
-        self.bp("config", "--news", "monitor")
         self.bp("up")
         run = next(a for a in self.rex_calls() if a[0] == "run")
         prompt = Path(run[run.index("--append-system-prompt-file") + 1]).read_text()
@@ -463,7 +464,7 @@ class NewsTest(BullpenTest):
         return {c["block"]: c.get("guide") for c in self.coordinators()}
 
     def guide_news(self, block="blk1"):
-        return [l for b, l in self.typed() if b == block and "coordinator guide" in l]
+        return [l for b, l in self.typed(guide=True) if b == block and "coordinator guide" in l]
 
     def test_a_short_guide_change_is_told_once_with_its_diff(self):
         self.bp("up")
@@ -495,17 +496,16 @@ class NewsTest(BullpenTest):
     def test_a_long_guide_change_names_its_sections_and_points_at_the_guide(self):
         self.bp("up")
         now = self.guide()
-        old = now.replace("## Review\n", "## Review\n" + "An old rule.\n" * 50)
+        old = now.replace("## Plan\n", "## Plan\n" + "An old rule.\n" * 50)
         old = old.replace("- When there's nothing to add, reply with a single short line or nothing at all.\n"
                           "  Several news lines at once get one reply.", "- Reply to each news line.")
-        old = old.replace("When a worker runs `ready`, its PR opens (or, when the repo has no remote, its\n"
-                          "local branch is marked ready)", "When a worker is ready")
+        old = old.replace("When a worker runs `ready`, bullpen publishes its branch", "When a worker is ready")
         self.assertEqual(old.count("When a worker is ready"), 1)
         self.give_old_guide("blk1", old)
         self.bp("up")
         [msg] = self.guide_news()
         self.assertNotIn("\n", msg)
-        self.assertRegex(msg, r"^bullpen · Your coordinator guide changed \(sections: Review, News\), "
+        self.assertRegex(msg, r"^bullpen · Your coordinator guide changed \(sections: Plan, News\), "
                               r"\d+ lines of diff: run `bullpen guide` to read it all, and follow it from now on\.$")
 
     def test_a_coordinator_from_before_guide_hashes_is_told_once_without_a_diff(self):
@@ -534,14 +534,14 @@ class NewsTest(BullpenTest):
         self.give_old_guide(other, old)
         self.give_old_guide(third, old)
         (self.fake / "alive" / third).unlink()  # its agent is closed: nobody to tell
-        before = self.typed()
+        before = self.typed(guide=True)
         self.bp("accept", tid)
-        told = [(b, l.split("\n")[0]) for b, l in self.typed()[len(before):] if "coordinator guide" in l]
+        told = [(b, l.split("\n")[0]) for b, l in self.typed(guide=True)[len(before):] if "coordinator guide" in l]
         line = "bullpen · Your coordinator guide changed (section: News). Read the change below and follow it from now on:"
         self.assertEqual(sorted(told), sorted([("blk1", line), (other, line)]))
         self.assertEqual(self.guide_hashes()[third], hashlib.sha256(old.encode()).hexdigest())
         self.bp("up")  # drops the closed one; nothing more to tell
-        self.assertEqual(len([l for b, l in self.typed() if "coordinator guide" in l]), 2)
+        self.assertEqual(len([l for b, l in self.typed(guide=True) if "guide changed (section: News)" in l]), 2)
 
     def test_a_guide_diff_comes_after_its_line_by_monitor(self):
         self.bp("up")
