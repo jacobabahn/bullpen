@@ -77,7 +77,7 @@ class IssuesTest(IssuesBase):
         self.assertEqual(self.bp("issues").stdout.splitlines(),
                          ["#12  L2  asks  Board flickers on resize (#12, ann)",
                           "#15  L3  asks  Support fish shell (#15, bob)"])
-        self.assertEqual(self.typed(), [])  # nothing is said to anyone: no news in this part
+        self.assertEqual(self.typed(), [])  # a read by hand tells nobody: the news is the timer's
         self.assertEqual(list((self.tmp / "state").rglob("news.log")), [])
 
     def test_a_second_read_with_nothing_new(self):
@@ -324,6 +324,17 @@ class IssuesTimerTest(IssuesBase):
         self.assertEqual([(i["id"], i["state"]) for i in self.items()],
                          [("L1", "asks"), ("L2", "done"), ("L3", "asks")])
         self.assertIn("new: L3  Docs typo (#20, cy)", self.state_file("jobs.log").read_text())
+
+    def test_for_real_the_read_runs_in_the_background(self):
+        del self.env["BULLPEN_ISSUES_WAIT"]
+        self.github_issues(issue(12, "Board flickers on resize"))
+        self.tick()
+        for _ in range(100):  # the job outlives `_issues`: wait for what it does
+            if self.items() and "new issue" in self.news_log():
+                break
+            time.sleep(0.1)
+        self.assertEqual([(i["id"], i["state"]) for i in self.items()], [("L1", "asks")])
+        self.assertIn("1 new issue to judge: #12 ", self.news_log())
 
     def test_the_line_names_five_and_never_the_body(self):
         self.bp("up")

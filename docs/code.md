@@ -173,7 +173,9 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   `later` remembers (`decided`); `repo.rs`: which repository (`issues_repo`, `slug`) and
   the one call to gh, always with `-R` (`gh_json`); `store.rs`: `issues.json` under its
   lock; `text.rs`: an issue's text made safe to print (the item's title, the fence, the
-  cut); `view.rs`: `issue N`
+  cut, the news line for new issues); `view.rs`: `issue N`; `timer.rs`: the watcher's
+  `_issues` (a read, as a job, in each repo that is due one; `<state>/issues` says when
+  the next is), the news of new issues and of a read that failed
 - `config.rs`: `config`, its flags made from the settings table
 - `pick.rs`: the jump picker (`pick`, `--filter`, `--pane`)
 - `line_edit.rs`: typing on a terminal: raw mode, bracketed paste, the keys a read

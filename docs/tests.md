@@ -44,7 +44,8 @@ run `bin/bullpen` as you do. The fakes are Rust, in `tests/fakes/` (the crate
 `target/fake-gh`). They answer from files a test drops in that folder (`FAKE_DIR`): the
 fake Rex keeps its blocks, layers and windows in `reg.json` and logs each call to
 `rex.log`, and a file such as `send_fails_<block>`, `server_down` or `screen` changes
-what it does; the fake gh logs to `gh.log` and reads `pr.json`, `gh_signed_out`,
+what it does; the fake gh logs to `gh.log` and reads `pr.json`, `gh_signed_out`, `gh_scopes` (the
+token scopes `auth status` names),
 `merge_refused` (a refused merge, saying the file's text), `meanwhile` (a command
 `pr view` runs before it answers: a slow gh) and `issues.json` (the repository's issues,
 for `issue list` and `issue view`). The top of `tests/fakes/src/rex.rs` and

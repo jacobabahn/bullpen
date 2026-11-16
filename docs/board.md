@@ -147,7 +147,8 @@ above Closed, with `f`), folded to one line:
 Later · 6 · next: Tidy the watcher's error messages
 ```
 
-In amber when something there waits on you, a worker's idea asking for a yes:
+In amber when something there waits on you, a worker's idea or a
+[GitHub issue](issues.md) asking for a yes:
 `Later · 6 · 2 to decide (L8, L9)`. An empty backlog has no line. `L` shows a row per
 item, in list order, and selects the first: `?` in amber for one that asks, `◇` dim for
 a kept one, then its ID and title; the selected one has a line saying what to know

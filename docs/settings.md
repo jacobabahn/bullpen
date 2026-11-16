@@ -61,7 +61,9 @@ themselves when there's room, under caps (`--pickup-running`, `--pickup-waiting`
 [Pickup](backlog.md#pickup)). `bullpen config --issues on` lets `bullpen issues --now` read
 the repository's open GitHub issues into the backlog, each asking for a yes (off by
 default), and `--issues-repo OWNER/REPO` names the repository when it isn't origin's, or
-in local mode the push remote's (see [GitHub issues](issues.md)).
+in local mode the push remote's. While it is on the watcher reads them too, every
+`--issues-every` minutes (30), and tells the coordinator of new ones (see
+[GitHub issues](issues.md)).
 
 ## Where panes live
 

@@ -77,7 +77,8 @@ notification for that batch ("Your coordinator (c1) has news it hasn't seen").
 Bookkeeping doesn't wake a coordinator by itself: lines for `started`,
 `rebased`, `accepted`, `closed`, `queue`, `pickup`, `kept`, `dropped`, `later`,
 `tour-sent` and `keys` ride along with the next line that does (or wait for
-`bullpen news`). Every other line wakes, a new kind of line too.
+`bullpen news`). Every other line wakes, a new kind of line too. The line for new
+[GitHub issues](issues.md#on-a-timer) wakes: each of them asks you.
 
 ## The waiter (`config --news wake`)
 
@@ -198,6 +199,7 @@ repository's guide has one only when it applies:
 | Pull requests | `prs.md` | the repository has an `origin` remote |
 | Auto-accept | `auto-accept.md` | `auto_accept` is on, or `pickup` with `pickup_auto_accept` |
 | Pickup | `pickup.md` | `pickup` is on |
+| GitHub issues | `issues.md` | `issues` is on |
 | Other coordinators | `others.md` | the repository has more than one coordinator |
 
 `bullpen guide` prints the guide for the repository it runs in; `bullpen guide --all`
@@ -224,7 +226,7 @@ a section) finds that a running coordinator's guide is
 out of date, in any repository, it sends that coordinator alone one news line, and
 records the new hash, so each change is told once.
 
-When a setting brought the guide a section (auto-accept or pickup turned on, a second
+When a setting brought the guide a section (auto-accept, pickup or issues turned on, a second
 coordinator started, a remote added), the section comes after the line, whole:
 
 ```

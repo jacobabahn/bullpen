@@ -6,7 +6,11 @@ non-zero when anything fails. It checks:
 
 - `rex` is on PATH and its server is preview.13 or later (`rex server status`)
 - `gh` is installed and signed in (`gh auth status`), unless the repo is in
-  [local mode](local-mode.md)
+  [local mode](local-mode.md). With [`issues`](issues.md) on it is checked in local
+  mode too, and for the `repo` scope, which reading a private repository's issues
+  needs: `gh auth login` when it isn't signed in, `gh auth refresh -s repo` when the
+  scope is missing. A token that names no scopes (a fine-grained one) passes: doctor
+  can't tell what it may read
 - the programs in the coordinator, worker and reviewer commands (Claude Code's
   `claude`, unless you changed them) are on PATH
 - bullpen's command line (`bullpen`) and the board (`board`) are each built from

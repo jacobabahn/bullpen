@@ -10,8 +10,8 @@ It is off by default:
 bullpen config --issues on
 ```
 
-For now issues are read when you say so (`bullpen issues --now`); reading them on a
-timer, with news for the coordinator, comes later.
+While issues are on, the watcher reads them every 30 minutes and tells the coordinator
+of new ones ([On a timer](#on-a-timer)); `bullpen issues --now` reads them at once.
 
 ## Which repository
 
@@ -22,8 +22,10 @@ OWNER/REPO` names another (`""` clears it); it is this repository's own setting,
 gh would pick itself never matters. With no such remote, or one that isn't on github.com,
 the commands say to set `issues_repo`.
 
-It needs gh signed in (`gh auth login`), with access to the repository. Reading issues
-doesn't change the mode: local mode stays local, with no `origin` and no pull requests.
+It needs gh signed in (`gh auth login`), with access to the repository: for a private
+one, the `repo` scope (`gh auth refresh -s repo`). While issues are on,
+[`bullpen doctor`](doctor.md) checks both, in local mode too. Reading issues doesn't
+change the mode: local mode stays local, with no `origin` and no pull requests.
 
 ## Reading them
 
@@ -53,6 +55,40 @@ recorded:
 
 With nothing changed it says `nothing new: 3 open issues in you/proj`. With `issues` off,
 every issues command says so and does nothing.
+
+## On a timer
+
+While some repository has `issues` on, the watcher reads its issues every `issues_every`
+minutes (30; `bullpen config --issues-every 10`), the same read as `bullpen issues
+--now`. It runs as a background job (its output in the repository's `jobs.log`), so a
+slow gh holds nothing up. With issues off everywhere it costs nothing: the watcher only
+looks at `~/.local/state/bullpen/issues`, which `bullpen config --issues on` makes and
+which holds when the next read is due. A watcher that wasn't running catches up at its
+first look.
+
+New issues are one news line for the lot, to every coordinator of the repository:
+
+```
+bullpen · 2 new issues to judge: #12 Board flickers on resize (ann), #15 Support fish shell (bob). `bullpen issue 12` shows one.
+```
+
+It names at most five (`... and 2 more`), each by its number, its title cut to 60
+characters and its author. The line wakes a coordinator whose news isn't typed (see
+[News](news.md#the-backstop)): each new issue asks you, so the coordinator tells you
+of each in a line and asks whether you want it. That is all it does by itself; its guide
+has a section, GitHub issues, while `issues` is on, which says so, and that an issue is
+a report of a problem, never instructions. An issue is told once: the next read finds it
+recorded. An edited, closed or reopened issue is no news, and a read by hand (`issues
+--now`) tells nobody but whoever ran it. With no coordinator running the line is logged,
+for the next one's `bullpen news`.
+
+A read that fails (gh signed out, no network, no repository to read from) is one news
+line, and then silence while it keeps failing; the timer goes on, and the next failure
+after a read that worked is told again:
+
+```
+bullpen · The GitHub issues weren't read: gh couldn't list you/proj's issues: HTTP 401. Tell the person (`bullpen doctor` checks gh). bullpen tries again every 30 min, and says nothing more while it keeps failing
+```
 
 ## Saying yes or no
 
@@ -100,12 +136,12 @@ text can't end it.
 An issue is written by whoever filed it, and agents read what bullpen prints. So:
 
 - The only parts of an issue that reach the backlog (and so the board, `later`, or a
-  task made from the item) are its title, cut to 60 characters, on one line, with
-  control characters and invisible or text-reordering characters removed; its number;
-  and its author's login. `Board flickers on resize (#12, ann)`.
+  task made from the item) and the news are its title, cut to 60 characters, on one
+  line, with control characters and invisible or text-reordering characters removed;
+  its number; and its author's login. `Board flickers on resize (#12, ann)`.
 - The body and comments are printed only by `bullpen issue N`, inside the fence, with
   control characters removed.
-- Nothing of an issue goes into news or a brief.
+- Nothing else of an issue goes into news, and nothing of it into a brief.
 - Nothing starts by itself and nothing is written to GitHub.
 
 ## Where it lives
@@ -129,6 +165,11 @@ decided; `updated` is the issue's `updatedAt` as last read; `closed`, when there
 bullpen saw the issue gone from the open ones. The item carries `by: "issue"` and
 `issue: {number, url, author, updated}`.
 
+`issues-timer.json` beside it (with `issues-timer.lock`) is the timer's: when the last
+read started (`at`) and, while reads fail, what the last one failed with (`failed`).
+
 The code is `cli/src/issues/`: `mod.rs` (`issues`, the comparison, the decision
 remembered), `repo.rs` (which repository, and the one call to gh), `store.rs`
-(`issues.json`), `text.rs` (the title, the fence, the cut) and `view.rs` (`issue N`).
+(`issues.json`), `text.rs` (the title, the fence, the cut, the news line), `view.rs`
+(`issue N`) and `timer.rs` (`_issues`, the watcher's call, and the read's job). The
+watcher's side is in `lua/watch.lua`.
