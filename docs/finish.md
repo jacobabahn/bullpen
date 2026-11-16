@@ -3,7 +3,8 @@
 Some tasks leave nothing in the repository: a video, research notes, an answer.
 Their worker ends with `bullpen finish BP-3 --summary-file <file>` instead of
 `ready`. It refuses while the branch changes anything against its base (commits
-that cancel each other out count as no change), and says to run `ready` instead.
+that cancel each other out count as no change), and names both ways out: `ready`,
+or `finish --keep-branch` when the brief asked for the branch to be kept.
 Otherwise the task is `finished`, with the summary kept as `ready` keeps it: no PR,
 no review. The news says `BP-3 finished (nothing to merge): <first line of the
 summary>`, and the board lists it under "Finished" with that line.
@@ -38,7 +39,25 @@ drop; workers and coordinators don't run it unasked) ends any open task that way
 - Tasks added `--after` it stay queued, as after a drop (its work isn't on the base
   branch), with the same news line.
 
-`close` on an unfinished task and `finish` on a branch with commits point to it.
+`close` on an unfinished task points to it.
+
+### The worker's side: `finish --keep-branch`
+
+A worker whose brief asks for its branch to be kept and not merged ends with
+`bullpen finish BP-3 --keep-branch --summary-file <file>` (its instructions say so).
+It refuses uncommitted changes and a branch with no commits on its base (plain
+`finish` is for that). Otherwise the task is `finished` with `keep_branch: true`: no
+PR, no review, nothing pushed yet, and the worktree and pane stay.
+
+- The news says `BP-3 finished (branch to be kept, not merged): <first line of the
+  summary>`; `ls`, `show` and the board say "Finished, branch to be kept: ...", and
+  `show` names `bullpen close BP-3 --keep-branch` as the next step.
+- The close is yours. `bullpen close BP-3 --keep-branch [--as NAME]` ends it as
+  above; so do plain `bullpen close BP-3`, `bullpen accept BP-3` and `a` on the board
+  (which asks "Close it and keep its branch?"): on a task finished this way they
+  keep the branch too, never remove it. `drop` still discards it.
+- Auto-accept never closes it: the close pushes the branch, which is your call.
+- If its worker runs `ready` afterwards, the task is to merge again.
 
 ## Sent back
 

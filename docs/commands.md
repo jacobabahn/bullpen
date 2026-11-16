@@ -35,7 +35,7 @@ bullpen go BP-1 --board         # its board, with BP-1 selected
 bullpen news --recent --all-repos   # the last 20 news lines of every repository (N: the last N); moves no cursor
 bullpen pick          # type part of any open task, in any repository, and go to it (the cmd+; j picker)
 bullpen pick --filter "lgn"   # just print the open tasks matching, best first
-bullpen tell BP-1 "Also cover the logout path"
+bullpen tell BP-1 "Also cover the logout path"   # typed bare; from a coordinator's pane, after "Coordinator: "
 bullpen resume BP-1   # restart a stopped worker, continuing its conversation
 bullpen ask BP-1 "..."   # (coordinator) BP-1 needs you: the question shows on the board
 bullpen ok BP-1       # (coordinator) a task in triage is seen to: back to work, nothing typed
@@ -63,4 +63,10 @@ takes you back to the board.
 
 A worker finishes with `bullpen ready <ID> --summary-file <file>`, which refuses
 uncommitted changes, pushes the branch and opens (or updates) the pull request, or,
-when the task leaves nothing to merge, with `bullpen finish <ID> --summary-file <file>`.
+when the task leaves nothing to merge, with `bullpen finish <ID> --summary-file <file>`
+(`--keep-branch` when its branch is to be kept unmerged: see finish.md).
+
+`bullpen tell` says who is typing. Run from a coordinator's own pane it types
+`Coordinator: ` before the words; from anywhere else (your shell, the board, the
+stepper) it types them bare, as yours. The worker's instructions say what the prefix
+means, and that a line cut off or meant for another pane isn't an instruction.

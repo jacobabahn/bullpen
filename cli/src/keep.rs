@@ -68,6 +68,7 @@ pub fn keep_branch(repo: &Repo, t: &mut Obj, name: Option<&str>) -> Res<()> {
     // the PR (remote mode) is closed; its branch on origin goes only when kept under another name
     withdraw(repo, t, name != branch)?;
     t.insert("kept".into(), json!({"branch": name, "remote": remote}));
+    t.shift_remove("keep_branch"); // `finish --keep-branch` asked for this: done
     let said = |t: &Obj| -> Res<()> {
         if name != branch {
             git(&repo.root, &["branch", "-m", &branch, &name], true)?;

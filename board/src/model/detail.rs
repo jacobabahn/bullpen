@@ -84,10 +84,7 @@ pub fn detail_with_auto(t: &Task, cfg: &Config, at: Stamp) -> String {
 /// "a closes it." (the bottom line shows its keys).
 fn status_detail(t: &Task, cfg: &Config, at: Stamp) -> String {
     if t.status == "finished" && t.note.as_deref().unwrap_or("").is_empty() {
-        return match words::first_sentence(t.summary.as_deref().unwrap_or("")).as_str() {
-            "" => "Finished, nothing to merge.".into(),
-            line => format!("Finished, nothing to merge: {line}"),
-        };
+        return words::finished_detail(t.obj());
     }
     words::status_detail(cfg.obj(), t.obj(), &t.waits, Some(at))
 }

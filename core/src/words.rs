@@ -4,7 +4,7 @@
 
 use crate::json::{self, get, obj, py_str, s, truthy, Obj};
 use crate::paths::{safe, state};
-use crate::task::{is_closed, own_model, pr_short, stamp, task_num};
+use crate::task::{is_closed, keeps_branch, own_model, pr_short, stamp, task_num};
 use crate::text::{splitlines, squash, strip, upper_first};
 use crate::timeutil::{self, clock, seconds_since, Stamp};
 use crate::{Fail, Res};
@@ -359,10 +359,14 @@ pub fn status_detail(cfg: &Obj, t: &Obj, waits: &str, at: Option<Stamp>) -> Stri
             format!("{} on round {rnd} of {rounds}.", upper_first(kind))
         }
         "ready" if why.starts_with("Nothing to merge") => "Done, with nothing to merge.".into(),
-        "finished" => match first_sentence(&or_empty(t, "summary")).as_str() {
-            "" => "Finished, nothing to merge. a closes it.".into(),
-            line => format!("Finished, nothing to merge: {line} a closes it."),
-        },
+        "finished" => {
+            let closes = if keeps_branch(t) {
+                "a closes it, keeping the branch."
+            } else {
+                "a closes it."
+            };
+            format!("{} {closes}", finished_detail(t))
+        }
         "ready" => {
             let text = match s(r, "verdict") {
                 "approved" => format!("{pr}, approved by {}.", board_kind(r.get("kind")).unwrap_or("review")),
@@ -403,6 +407,20 @@ pub fn status_detail(cfg: &Obj, t: &Obj, waits: &str, at: Option<Stamp>) -> Stri
         "done" => "Accepted.".into(),
         "dropped" => "Dropped.".into(),
         _ => String::new(),
+    }
+}
+
+/// A finished task: nothing to merge, or its branch to be kept, then its summary's
+/// first sentence.
+pub fn finished_detail(t: &Obj) -> String {
+    let what = if keeps_branch(t) {
+        "Finished, branch to be kept"
+    } else {
+        "Finished, nothing to merge"
+    };
+    match first_sentence(&or_empty(t, "summary")).as_str() {
+        "" => format!("{what}."),
+        line => format!("{what}: {line}"),
     }
 }
 

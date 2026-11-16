@@ -13,7 +13,7 @@ use bullpen_core::json::{s, truthy, Obj};
 use bullpen_core::proc::git;
 use bullpen_core::repo::{repo_root, unindex_block};
 use bullpen_core::settings::CLOSED;
-use bullpen_core::task::{is_status, set_status};
+use bullpen_core::task::{is_status, keeps_branch, set_status};
 use bullpen_core::text::strip;
 use bullpen_core::{fail, Repo, Res};
 use serde_json::{json, Value};
@@ -68,13 +68,14 @@ pub fn close(
 
 /// `close` (the person's call): close a finished task: its worktree, branch and pane
 /// go. `accept` does the same on a finished task; this stays as another name for it.
-/// With --keep-branch, any open task, its branch kept (keep.rs).
+/// With --keep-branch, any open task, its branch kept (keep.rs); so is that of a task
+/// finished with `finish --keep-branch`, flag or no.
 pub fn cmd_close(argv: &[String]) -> Res<i32> {
     let a = Args::parse("close", argv, CLOSE);
     let repo = Repo::new(repo_root()?)?;
     let mut t = repo.task(a.arg("id").unwrap_or(""))?;
     let name = a.opt("--as").filter(|n| !n.is_empty());
-    if a.flag("--keep-branch") {
+    if a.flag("--keep-branch") || keeps_branch(&t) {
         crate::keep::keep_branch(&repo, &mut t, name)?;
         return Ok(0);
     }

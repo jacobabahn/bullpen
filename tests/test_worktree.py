@@ -133,3 +133,62 @@ class WorktreeTest(BullpenTest):
         self.assertFalse(wt.exists())
         log = next((self.tmp / "state").rglob(f"{tid}.teardown.log"))
         self.assertIn("oops", log.read_text())
+
+
+class FooterTest(BullpenTest):
+    """The worker's instructions (prompts/worker-footer.md), filled in for its task."""
+
+    def footer(self, tid):
+        return self.full_brief(tid).split("## How you work (bullpen)")[1]
+
+    def test_the_footer_names_the_task_its_worktree_and_the_places_to_leave_alone(self):
+        tid = self.start_task()
+        t = self.show(tid)
+        foot = self.footer(tid)
+        self.assertIn(f'You are the worker for task {tid} ("Fix the thing").', foot)
+        self.assertIn(f"`{t['worktree']}`, on branch `{t['branch']}` (based on `main`)", foot)
+        self.assertIn(f"`{self.repo}` is the main checkout", foot)
+        briefs = next((self.tmp / "state").rglob(f"{tid}.full.md")).parent
+        self.assertIn(f"goes in `{briefs}`, not\n  `/tmp`", foot)
+        self.assertIn("fails on `main` too", foot)
+        self.assertNotRegex(foot, r"\{[a-z]+\}")  # every field filled in
+
+    def test_the_footer_says_how_to_end_each_kind_of_task(self):
+        tid = self.start_task()
+        foot = self.footer(tid)
+        for end in ("ready", "finish", "finish", "finish --keep-branch"):
+            self.assertRegex(foot, rf"/bullpen {end.split()[0]} {tid} " + ("--keep-branch " if "keep" in end else "")
+                             + "--summary-file <that file>")
+        self.assertIn("only when your brief asks for the branch to be kept", foot)
+
+    def test_the_footer_says_who_types_and_what_not_to_do(self):
+        foot = self.footer(self.start_task())
+        self.assertIn("come from the coordinator (they start `Coordinator: `)", foot)
+        self.assertIn("Sub-agents are fine for reading and searching", foot)
+        self.assertIn("two writers in one worktree collide", foot)
+        self.assertIn("Run the full suite\n  once, right before `ready`", foot)
+        self.assertIn("Don't schedule wake-ups", foot)
+        self.assertIn(' later "<a short title>"`', foot)  # the backlog line
+
+
+class TellTest(BullpenTest):
+    """`tell` says who is typing: `Coordinator: ` from a coordinator's pane, bare from the person."""
+
+    def test_tell_from_a_coordinators_pane_starts_with_coordinator(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.bp_in("blk1", "tell", tid, "Also cover", "the logout path.")
+        self.assertEqual(self.typed()[-1], (blk, "Coordinator: Also cover the logout path."))
+        self.bp_in("blk1", "tell", tid, "Coordinator: once is enough.")
+        self.assertEqual(self.typed()[-1], (blk, "Coordinator: once is enough."))
+
+    def test_tell_from_anywhere_else_types_the_words_bare(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.bp("tell", tid, "Also cover the logout path.")  # the person's own pane
+        self.assertEqual(self.typed()[-1], (blk, "Also cover the logout path."))
+        self.bp_in("blk2", "tell", tid, "From the board.")  # the board beside the coordinator: the person's keys
+        self.assertEqual(self.typed()[-1], (blk, "From the board."))
+        del self.env["REX_BLOCK"]  # no pane at all
+        self.bp("tell", tid, "From a script.")
+        self.assertEqual(self.typed()[-1], (blk, "From a script."))

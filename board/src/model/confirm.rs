@@ -99,6 +99,7 @@ pub fn confirm_texts(action: Action, t: &Task, cfg: &Config) -> Vec<String> {
         }
         Action::Accept if pr.is_empty() => "Accept and clean up".into(),
         Action::Accept => format!("Accept and {verb}"),
+        Action::Close if bullpen_core::task::keeps_branch(t.obj()) => "Close it and keep its branch".into(),
         Action::Close => "Close it and remove its worktree".into(),
         Action::Drop | Action::DropItem if pr.is_empty() => "Drop it".into(),
         Action::Drop | Action::DropItem => format!("Drop it and close {pr}"),

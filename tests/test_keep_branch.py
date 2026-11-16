@@ -116,7 +116,64 @@ class KeepBranchLocalTest(unittest.TestCase):
         f = self.tmp / "f.md"
         f.write_text("Ported.")
         p = self.bp("finish", tid, "--summary-file", str(f), cwd=t["worktree"], ok=False)
-        self.assertIn(f"`bullpen close {tid} --keep-branch`", p.stderr)
+        self.assertIn("so there is something to merge: run `ready` instead, or "
+                      f"`finish {tid} --keep-branch` if your brief asked for the branch to be kept and not "
+                      "merged", p.stderr)
+        self.assertEqual(self.show(tid)["status"], "working")
+
+    def finish_keeping(self, tid, t, ok=True):
+        f = self.tmp / "f.md"
+        f.write_text("Ported the parser, as an experiment\n\nIt is 2x faster.")
+        return self.bp("finish", tid, "--keep-branch", "--summary-file", str(f), cwd=t["worktree"], ok=ok)
+
+    def test_finish_keep_branch_marks_it_finished_with_its_branch_to_be_kept(self):
+        tid, t = self.experiment()
+        self.bp("config", "--auto-accept", "on")  # never closes it: the close is the person's
+        p = self.finish_keeping(tid, t)
+        self.assertIn(f"{tid} finished, its branch to be kept. The person closes it: end your turn.", p.stdout)
+        k = self.show(tid)
+        self.assertEqual((k["status"], k["keep_branch"]), ("finished", True))
+        self.assertIsNone(k.get("review"))  # no review
+        self.assertTrue(Path(t["worktree"]).exists())
+        self.assertTrue((self.fake / "alive" / t["block"]).exists())
+        self.assertEqual(self.news()[-1], "bullpen · BP-1 finished (branch to be kept, not merged): "
+                         "Ported the parser, as an experiment")
+        said = "Finished, branch to be kept: Ported the parser, as an experiment. a closes it, keeping the branch."
+        self.assertIn(said, self.bp("ls").stdout)
+        shown = self.bp("show", tid).stdout
+        self.assertIn("Finished, branch to be kept", shown)
+        self.assertIn(f"`bullpen close {tid} --keep-branch` keeps its branch", shown)
+
+    def test_finish_keep_branch_refuses_a_branch_with_no_commits_or_uncommitted_changes(self):
+        tid = self.start_task("Try a port")
+        t = self.show(tid)
+        p = self.finish_keeping(tid, t, ok=False)
+        self.assertIn(f"so there's no branch to keep: run `finish {tid}` without --keep-branch", p.stderr)
+        (Path(t["worktree"]) / "dirty.txt").write_text("x\n")
+        self.assertIn("uncommitted changes", self.finish_keeping(tid, t, ok=False).stderr)
+        self.assertEqual(self.show(tid)["status"], "working")
+
+    def test_close_and_accept_keep_the_branch_of_a_task_finished_that_way(self):
+        for n, cmd in enumerate((["close"], ["accept"], ["close", "--as", "port"]), 1):
+            tid, t = self.experiment()
+            self.finish_keeping(tid, t)
+            name = "port" if "--as" in cmd else t["branch"]
+            p = self.bp(cmd[0], tid, *cmd[1:])
+            self.assertIn(f"BP-{n} closed. Closed, branch kept here: {name}, not pushed.", p.stdout)
+            k = self.show(tid)
+            self.assertEqual((k["status"], k["kept"]), ("done", {"branch": name, "remote": None}))
+            self.assertNotIn("keep_branch", k)
+            self.assertFalse(Path(t["worktree"]).exists())
+            self.assertEqual(self.git("show", f"{name}:port.txt"), "ported")
+            self.git("branch", "-D", name)  # the next round's branch may take the name
+
+    def test_ready_after_finish_keep_branch_is_to_merge_again(self):
+        tid, t = self.experiment()
+        self.finish_keeping(tid, t)
+        self.bp("ready", tid, "--summary", "Ported.", cwd=t["worktree"])
+        k = self.show(tid)
+        self.assertNotIn("keep_branch", k)
+        self.assertNotEqual(k["status"], "finished")
 
     def test_what_waited_on_it_keeps_waiting(self):
         tid, t = self.experiment()

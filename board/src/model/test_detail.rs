@@ -134,6 +134,10 @@ fn a_finished_task_shows_its_summary_and_closes_with_a() {
     assert!(task_keys(Some(&t)).contains(&("v", "diff")));
     assert_eq!(confirm_text(Action::Close, &t, &merge("rebase")), "Close it and remove its worktree?");
     assert_eq!(task_stat(&t), "");
+    // finished with `finish --keep-branch`: a keeps the branch
+    let kept = t.clone().with(json!({"keep_branch": true}));
+    assert_eq!(detail(&kept), "Finished, branch to be kept: Recorded the demo video.");
+    assert_eq!(confirm_text(Action::Close, &kept, &merge("rebase")), "Close it and keep its branch?");
     // once closed it is done, under Closed, and counts as done for what waits on it
     let closed = t.with(json!({"status": "done", "closed": true, "worktree": null}));
     assert_eq!(detail(&closed), "Closed, nothing to merge.");

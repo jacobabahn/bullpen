@@ -1,8 +1,9 @@
 //! A worker's `ready`: publish the branch (pushed with a PR, or a
 //! local branch), then review it or mark it ready; its `finish`, for a task with
-//! nothing to merge; and the summary a worker or reviewer gives.
+//! nothing to merge (or, with --keep-branch, a branch to keep unmerged); and the
+//! summary a worker or reviewer gives.
 
-use crate::args::{pos, value, Arg, Args, Nargs};
+use crate::args::{flag, pos, value, Arg, Args, Nargs};
 use crate::close::close_task;
 use crate::modes::{is_local, publish, task_base_ref};
 use crate::news::ready_news;
@@ -22,7 +23,17 @@ use serde_json::{json, Value};
 pub const SUMMARY: Arg = value("--summary", "SUMMARY", "what you did, as text");
 pub const SUMMARY_FILE: Arg = value("--summary-file", "FILE", "the same, read from a file");
 
-const READY: &[Arg] = &[pos("id", Nargs::One, "the task, like BP-3"), SUMMARY, SUMMARY_FILE];
+const ID: Arg = pos("id", Nargs::One, "the task, like BP-3");
+const READY: &[Arg] = &[ID, SUMMARY, SUMMARY_FILE];
+const FINISH: &[Arg] = &[
+    ID,
+    SUMMARY,
+    SUMMARY_FILE,
+    flag(
+        "--keep-branch",
+        "the branch has commits to keep, not merge: the person's close keeps it",
+    ),
+];
 
 /// The text of --summary-file (or --summary). An empty file is refused: it is a write
 /// that failed (a full disk, /tmp out of inodes), not "nothing to say".
@@ -97,6 +108,7 @@ fn ready(repo: &Repo, t: &mut Obj, a: &Args) -> Res<()> {
         }
     }
     t.shift_remove("from_ready");
+    t.shift_remove("keep_branch"); // an earlier `finish --keep-branch`: it is to merge now
     let local = is_local(repo, t)?;
     t.insert("local".into(), json!(local)); // its mode, fixed now: every later step goes by it
     let review = truthy(repo.cfg.get("review"));
@@ -157,7 +169,7 @@ fn ready(repo: &Repo, t: &mut Obj, a: &Args) -> Res<()> {
 
 /// `finish` (worker): the task is done and leaves nothing to merge.
 pub fn cmd_finish(argv: &[String]) -> Res<i32> {
-    let a = Args::parse("finish", argv, READY);
+    let a = Args::parse("finish", argv, FINISH);
     let repo = Repo::new(repo_root()?)?;
     let mut t = repo.task(a.arg("id").unwrap_or(""))?;
     finish(&repo, &mut t, &a)?;
@@ -177,12 +189,20 @@ fn finish(repo: &Repo, t: &mut Obj, a: &Args) -> Res<()> {
         return fail("uncommitted changes: commit them and run `ready`, or discard them and run finish again");
     }
     let base_ref = task_base_ref(repo, t)?;
-    if !git(&wt, &["diff", "--quiet", &format!("{base_ref}...HEAD")], false)?.ok() {
+    let keep = a.flag("--keep-branch");
+    if keep {
+        let ahead = git(&wt, &["rev-list", "--count", &format!("{base_ref}..HEAD")], true)?.stdout;
+        if strip(&ahead) == "0" {
+            return fail(format!(
+                "your branch has no commits on {base_ref}, so there's no branch to keep: run `finish {id}` without \
+                 --keep-branch"
+            ));
+        }
+    } else if !git(&wt, &["diff", "--quiet", &format!("{base_ref}...HEAD")], false)?.ok() {
         let changes = shortstat(&wt, &base_ref)?.unwrap_or_else(|| "files".into());
         return fail(format!(
-            "your branch changes {changes} against {base_ref}, so there is something to merge: run `ready` instead. \
-             If this work is to stay on its own branch and never merge, say so to the person and end your turn: \
-             they end the task with `bullpen close {id} --keep-branch`"
+            "your branch changes {changes} against {base_ref}, so there is something to merge: run `ready` instead, \
+             or `finish {id} --keep-branch` if your brief asked for the branch to be kept and not merged"
         ));
     }
     let summary = summary_text(a, "summary", true)?;
@@ -194,8 +214,20 @@ fn finish(repo: &Repo, t: &mut Obj, a: &Args) -> Res<()> {
     set_status(t, "finished", None, None);
     t.insert("summary".into(), json!(summary));
     t.insert("diffstat".into(), Value::Null);
+    if keep {
+        t.insert("keep_branch".into(), json!(true));
+    } else {
+        t.shift_remove("keep_branch");
+    }
     save(repo, t)?;
     let first = first_line(&summary);
+    if keep {
+        // never auto-accept's: the close pushes the branch, and that is the person's call
+        let line = format!("{id} finished (branch to be kept, not merged): {first}");
+        news(repo, t, "finished", &line, Opts::default())?;
+        println!("{id} finished, its branch to be kept. The person closes it: end your turn.");
+        return Ok(());
+    }
     if auto_accepts(repo, t) {
         println!("{id} finished, with nothing to merge; auto-accept closes it now. End your turn.");
         return close_task(repo, t, true, &first); // last: this closes the pane we run in

@@ -166,8 +166,9 @@ tried out) is the person's to end: `bullpen close <ID> --keep-branch`, with `--a
 local mode (never forced; a failed push refuses, and nothing changes), or with
 neither keeps the local branch. Then it closes the task like a drop, but keeps the
 branch, and the task shows as closed with its branch kept, not dropped. Tasks
-waiting on it stay queued, as after a drop. A worker whose `finish` refuses for
-commits it means to keep unmerged asks you: pass that on to the person.
+waiting on it stay queued, as after a drop. A worker whose brief asks for its
+branch to be kept ends with `bullpen finish <ID> --keep-branch`: the task is finished
+with its branch to be kept, and the person's close (or accept) keeps it.
 
 The person can ask for a guided tour of a ready task (or one in review): `bullpen
 tour <ID>` starts a cheap agent that writes the change out in reading order, one

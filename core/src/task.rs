@@ -159,6 +159,12 @@ pub fn auto_accepts(repo: &Repo, t: &Obj) -> bool {
     }
 }
 
+/// Is the task finished with its branch to be kept (`finish --keep-branch`)? Its
+/// close keeps the branch (`close --keep-branch`), and auto-accept leaves it.
+pub fn keeps_branch(t: &Obj) -> bool {
+    s(t, "status") == "finished" && truthy(t.get("keep_branch"))
+}
+
 // ---------- agents' commands ----------
 
 /// Does the command run claude?

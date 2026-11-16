@@ -4,7 +4,7 @@
 
 use super::by_id;
 use crate::args::{flag, pos, value, Arg, Args, Nargs};
-use crate::coordinators::session_for;
+use crate::coordinators::{calling_coordinator, session_for};
 use crate::hooks::{hook_log, set_up};
 use crate::limit::{limit_active, limit_phrase};
 use crate::modes::task_base_ref;
@@ -197,7 +197,7 @@ pub fn start_task(repo: &Repo, t: &mut Obj, session: &str, model: Option<&str>) 
         "# {id}: {}\n\n{brief}\n{}{section}{}",
         s(t, "title"),
         deps_section(repo, t)?,
-        footer(t)?
+        footer(repo, t)?
     );
     std::fs::write(&full, text)?;
     let first = format!(
@@ -292,7 +292,7 @@ fn findings_of(repo: &Repo, d: &str) -> Vec<String> {
 }
 
 /// The worker's footer (prompts/worker-footer.md), filled in for t.
-fn footer(t: &Obj) -> Res<String> {
+fn footer(repo: &Repo, t: &Obj) -> Res<String> {
     let text = read_text(&prompts().join("worker-footer.md"))?;
     let bin = self_bin().display().to_string();
     let fields = [
@@ -302,6 +302,8 @@ fn footer(t: &Obj) -> Res<String> {
         ("branch", py_str(t.get("branch").unwrap_or(&Value::Null))),
         ("base", py_str(t.get("base").unwrap_or(&Value::Null))),
         ("bin", bin),
+        ("root", repo.root_str().to_string()),
+        ("briefs", repo.dir.join("briefs").display().to_string()),
     ];
     Ok(py_format(&text, &fields))
 }
@@ -426,6 +428,17 @@ pub fn cmd_resume(argv: &[String]) -> Res<i32> {
     Ok(0)
 }
 
+/// What `tell` types: the words bare from the person, and after `Coordinator: ` from a
+/// coordinator's pane, so the worker knows who is typing (its footer says so).
+fn told(words: &str, coordinator: bool) -> String {
+    if coordinator && !words.starts_with(FROM_COORDINATOR) {
+        return format!("{FROM_COORDINATOR}{words}");
+    }
+    words.to_string()
+}
+
+const FROM_COORDINATOR: &str = "Coordinator: ";
+
 /// `tell`: type a message to a task's worker.
 pub fn cmd_tell(argv: &[String]) -> Res<i32> {
     let a = Args::parse("tell", argv, TELL);
@@ -435,7 +448,8 @@ pub fn cmd_tell(argv: &[String]) -> Res<i32> {
     if !alive(s(&t, "session"), s(&t, "block"))? {
         return fail(format!("{id}'s agent isn't running; use `resume {id} \"...\"`"));
     }
-    rex_type(s(&t, "session"), s(&t, "block"), &a.args("message").join(" "))?;
+    let words = told(&a.args("message").join(" "), calling_coordinator(&repo).is_some());
+    rex_type(s(&t, "session"), s(&t, "block"), &words)?;
     if matches!(s(&t, "status"), "needs" | "triage" | "ready" | "finished") {
         if matches!(s(&t, "status"), "ready" | "finished") {
             timeline::send_back(&mut t, "person"); // a ready task told more: sent back

@@ -7,7 +7,7 @@ use crate::task_line::{colored, task_line, task_rows, term_width};
 use bullpen_core::fleet;
 use bullpen_core::json::{dumps, get, obj, py_str, s, truthy, Obj};
 use bullpen_core::repo::repo_root;
-use bullpen_core::task::{listed, own_model};
+use bullpen_core::task::{keeps_branch, listed, own_model};
 use bullpen_core::text::{len, lstrip, rjust, splitlines, strip, width, wrap};
 use bullpen_core::words::{
     ago, board_detail, board_order, every, is_limited, is_stuck, pr_phrase, stuck_phrase, waits_phrase, Every,
@@ -414,6 +414,10 @@ pub fn next_steps(t: &Obj, every: &Every) -> String {
         "stopped" => format!("`bullpen resume {tid}` (r on the board), or `bullpen drop {tid}` (d)"),
         "triage" => format!("nothing: its coordinator is on it. `bullpen go {tid}` opens it (⏎ on the board)"),
         "ready" => format!("`bullpen accept {tid}` (a on the board); `bullpen diff {tid}` shows the change (v)"),
+        "finished" if keeps_branch(t) => format!(
+            "`bullpen close {tid} --keep-branch` keeps its branch (`--as NAME` names it; a on the board), \
+             or `bullpen drop {tid}` (d)"
+        ),
         "finished" => format!("`bullpen close {tid}` (a on the board), or `bullpen drop {tid}` (d)"),
         "review" => {
             format!("nothing until its review is done; `bullpen go {tid} --review` opens the reviewer (⏎ on the board)")

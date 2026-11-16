@@ -22,7 +22,7 @@ use bullpen_core::json::{obj, py_str, s, truthy, Obj};
 use bullpen_core::paths::home;
 use bullpen_core::proc::git;
 use bullpen_core::repo::repo_root;
-use bullpen_core::task::{is_status, pr_short};
+use bullpen_core::task::{is_status, keeps_branch, pr_short};
 use bullpen_core::text::squash;
 use bullpen_core::{fail, Repo, Res};
 use serde_json::{json, Value};
@@ -46,6 +46,9 @@ pub fn cmd_accept(argv: &[String]) -> Res<i32> {
 pub fn accept(repo: &Repo, t: &mut Obj, auto: bool) -> Res<()> {
     let merged_outside = s(obj(t, "gh"), "state") == "merged";
     let status = s(t, "status");
+    if keeps_branch(t) && !merged_outside {
+        return crate::keep::keep_branch(repo, t, None); // the person's yes on a branch to be kept
+    }
     if status == "finished" && !merged_outside {
         return close_task(repo, t, false, ""); // the person's yes on work with nothing to merge
     }

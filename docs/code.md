@@ -164,7 +164,7 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   `keep_approval`), the kind of a first review, starting a reviewer (`start_review`),
   `close_reviewer`, what `ready` does with review on (`review_at_ready`), and the
   coordinator's `review`
-- `ready.rs`: `ready`, `finish`, and the summary a worker or reviewer gives (`summary_text`)
+- `ready.rs`: `ready`, `finish` (and `finish --keep-branch`), and the summary a worker or reviewer gives (`summary_text`)
 - `risk.rs`: a ready task's risk label (docs/review.md): bullpen's rules on the diff
   (`rules_of`, `risk_paths`, `adds_dependency`), the reviewer's `## Risk`
   (`reviewer_of`), and `assess`, which each step that makes a task ready calls

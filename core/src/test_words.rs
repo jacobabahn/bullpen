@@ -60,6 +60,14 @@ fn test_the_boards_sentence() {
     );
     assert_eq!(
         d(
+            json!({"id": "BP-1", "status": "finished", "keep_branch": true, "summary": "Ported the parser"}),
+            &[],
+            none.clone()
+        ),
+        "Finished, branch to be kept: Ported the parser. a closes it, keeping the branch."
+    );
+    assert_eq!(
+        d(
             json!({"id": "BP-1", "status": "ready", "pr": "https://github.com/a/b/pull/41",
                    "review": {"verdict": "approved", "kind": "full"}, "gh": {"checks": "passing"}}),
             &[],
