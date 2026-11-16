@@ -10,6 +10,13 @@ mod restart;
 pub(crate) mod testing;
 
 pub use jobs::Job;
+
+/// Run `bullpen <args>` in cwd and wait: did it work, and the last line it said.
+pub fn run_bullpen(bullpen: &std::path::Path, cwd: &std::path::Path, args: &[&str]) -> (bool, String) {
+    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    let (ok, out) = jobs::run(bullpen, cwd, &args);
+    (ok, jobs::last_line(&out))
+}
 pub use restart::{parse_args, Args, ExeId};
 
 use crate::edit::LineEdit;
@@ -128,6 +135,9 @@ pub struct App {
     peek_due: Instant,
     /// the board's own program, as it was when it started: replaced, the board reloads
     pub exe: Option<(PathBuf, ExeId)>,
+    /// the Rex session `v` opens a diff over (`diff --session`); None: the command's own
+    /// choice, the coordinator's. Mission control sets its own, so the diff opens over it.
+    pub pane_session: Option<String>,
 }
 
 pub enum Msg {
@@ -173,7 +183,16 @@ impl App {
             peek_failed: false,
             peek_due: Instant::now(),
             exe: exe.and_then(|p| ExeId::of(&p).map(|id| (p, id))),
+            pane_session: None,
         }
+    }
+
+    /// A repo's board with nothing read yet and no program to reload, which mission
+    /// control drives: it fills in `tasks` and `cfg` from its snapshot, and sends it the
+    /// keys it acts on a task with. Its background commands answer on tx.
+    pub fn for_repo(dir: PathBuf, root: PathBuf, bullpen: PathBuf, tx: Sender<Msg>) -> App {
+        let args = Args { dir, root, bullpen, ..Default::default() };
+        App::new(args, None, tx)
     }
 
     pub fn reload(&mut self) {

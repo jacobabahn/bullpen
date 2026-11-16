@@ -16,7 +16,7 @@ const MESSAGE_LINES: usize = 3;
 /// The message rows above the keys, at most `most` of them: the y/n question being
 /// asked (red when risky), what just happened (a failure red, what worked green),
 /// else what's still running.
-pub(super) fn message(app: &App, w: usize, most: usize) -> Vec<Span<'static>> {
+pub(crate) fn message(app: &App, w: usize, most: usize) -> Vec<Span<'static>> {
     let room = w.saturating_sub(2);
     let most = MESSAGE_LINES.min(most).max(1);
     if let Some((action, t)) = app.pending.as_ref().and_then(|(a, id)| Some((*a, app.tasks.iter().find(|t| &t.id == id)?))) {
@@ -63,22 +63,8 @@ pub(super) fn draw_bottom(buf: &mut Buffer, area: Rect, app: &App, s: &Sizes, ms
         put(buf, area, last, 1, span(model::first_fit(&texts.map(String::from), w.saturating_sub(2)), bold()));
     } else if let Mode::Stale { .. } = &app.mode {
         put(buf, area, last, 1, span(fit("n new tour   o the old one   esc cancels", w.saturating_sub(2)), bold()));
-    } else if let Some((action, tid)) = &app.pending {
-        let t = app.tasks.iter().find(|t| &t.id == tid);
-        let risky = t.is_some_and(|t| model::confirm_risky(*action, t, &app.cfg));
-        // the PR a drop closes, said here too: a narrow row has no room for it
-        let pr = model::pr_short(t.and_then(|t| t.pr.as_deref()));
-        let verb = match action {
-            Action::Accept if risky => "accept anyway".to_string(),
-            Action::Accept => "accept".into(),
-            Action::Close => "close".into(),
-            Action::Drop if !pr.is_empty() => format!("drop and close {pr}"),
-            Action::Drop => "drop".into(),
-            Action::DropForce => "discard and drop".into(),
-        };
-        let texts = [format!("y {verb}   any other key cancels"), format!("y {verb}   n cancels")];
-        let tone = if risky { bold().fg(Color::Red) } else { bold() };
-        put(buf, area, last, 1, span(model::first_fit(&texts, w.saturating_sub(2)), tone));
+    } else if let Some(line) = pending_keys(app, w) {
+        put(buf, area, last, 1, line);
     } else {
         let keys = match app.current_item() {
             Some(i) => model::item_keys(i),
@@ -89,8 +75,29 @@ pub(super) fn draw_bottom(buf: &mut Buffer, area: Rect, app: &App, s: &Sizes, ms
     None
 }
 
+/// The key row while a y/n is asked about a task: what y does (red when risky), and
+/// that any other key cancels. None when nothing is asked.
+pub(crate) fn pending_keys(app: &App, w: usize) -> Option<Span<'static>> {
+    let (action, tid) = app.pending.as_ref()?;
+    let t = app.tasks.iter().find(|t| &t.id == tid);
+    let risky = t.is_some_and(|t| model::confirm_risky(*action, t, &app.cfg));
+    // the PR a drop closes, said here too: a narrow row has no room for it
+    let pr = model::pr_short(t.and_then(|t| t.pr.as_deref()));
+    let verb = match action {
+        Action::Accept if risky => "accept anyway".to_string(),
+        Action::Accept => "accept".into(),
+        Action::Close => "close".into(),
+        Action::Drop if !pr.is_empty() => format!("drop and close {pr}"),
+        Action::Drop => "drop".into(),
+        Action::DropForce => "discard and drop".into(),
+    };
+    let texts = [format!("y {verb}   any other key cancels"), format!("y {verb}   n cancels")];
+    let tone = if risky { bold().fg(Color::Red) } else { bold() };
+    Some(span(model::first_fit(&texts, w.saturating_sub(2)), tone))
+}
+
 /// The footer's keys: each key bold, what it does dim.
-pub(super) fn key_line(keys: &[(&str, &str)]) -> Line<'static> {
+pub(crate) fn key_line(keys: &[(&str, &str)]) -> Line<'static> {
     let mut spans = Vec::new();
     for (i, (key, what)) in keys.iter().enumerate() {
         if i > 0 {
@@ -104,7 +111,7 @@ pub(super) fn key_line(keys: &[(&str, &str)]) -> Line<'static> {
 
 /// A label, then what's typed, at row y: the part around the cursor when it's longer
 /// than the line. Returns the cursor's column.
-pub(super) fn input_line(buf: &mut Buffer, area: Rect, y: usize, label: &str, text: &LineEdit) -> usize {
+pub(crate) fn input_line(buf: &mut Buffer, area: Rect, y: usize, label: &str, text: &LineEdit) -> usize {
     let w = area.width as usize;
     let x = width(label) + 2;
     let (shown, at) = text.view(w.saturating_sub(x + 2));

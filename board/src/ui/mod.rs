@@ -4,11 +4,11 @@
 //! list (`list`, its Later group `later`), the bottom rows (`bottom`), a full-screen view (`overlay`) or the
 //! `?` list (`help`).
 
-mod bottom;
+pub(crate) mod bottom;
 mod help;
 mod later;
 mod list;
-mod overlay;
+pub(crate) mod overlay;
 #[cfg(test)]
 pub(crate) mod testing;
 
@@ -20,22 +20,22 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::Frame;
 
-fn dim() -> Style {
+pub(crate) fn dim() -> Style {
     Style::new().add_modifier(Modifier::DIM)
 }
-fn bold() -> Style {
+pub(crate) fn bold() -> Style {
     Style::new().add_modifier(Modifier::BOLD)
 }
-fn rev() -> Style {
+pub(crate) fn rev() -> Style {
     Style::new().add_modifier(Modifier::REVERSED)
 }
-const AMBER: Color = Color::Yellow;
+pub(crate) const AMBER: Color = Color::Yellow;
 /// Under the selected task's rows: a tint from the terminal's own palette, so status
 /// colours still show on it. Some themes make it the background colour, so the ID
 /// in reverse video is what says which task is selected in every theme.
-const TINT: Color = Color::DarkGray;
+pub(crate) const TINT: Color = Color::DarkGray;
 
-fn mark_style(status: &str) -> Style {
+pub(crate) fn mark_style(status: &str) -> Style {
     match status {
         "needs" => bold().fg(AMBER),
         "stopped" => bold().fg(Color::Red),
@@ -46,7 +46,12 @@ fn mark_style(status: &str) -> Style {
 }
 
 fn frame(app: &App, frames: &[&'static str], ms: u128) -> &'static str {
-    frames[(app.started.elapsed().as_millis() / ms) as usize % frames.len()]
+    frame_at(app.started, frames, ms)
+}
+
+/// The frame of an animation that began at `started`, each frame held `ms`.
+pub(crate) fn frame_at(started: std::time::Instant, frames: &[&'static str], ms: u128) -> &'static str {
+    frames[(started.elapsed().as_millis() / ms) as usize % frames.len()]
 }
 
 /// A task with a command running (accept, drop, start, resume): a ring with a gap going round.
@@ -68,20 +73,20 @@ fn review_mark(app: &App) -> &'static str {
 /// How long the working and review marks hold each frame.
 pub const MARK_MS: u128 = 200;
 
-const SPINNER: &[&str] = &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
+pub(crate) const SPINNER: &[&str] = &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
 
-const WORKING: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const REVIEW: &[&str] = &["◜", "◝", "◞", "◟"];
+pub(crate) const WORKING: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+pub(crate) const REVIEW: &[&str] = &["◜", "◝", "◞", "◟"];
 
 /// Write a line at (x, y), never into the last column.
-fn put(buf: &mut Buffer, area: Rect, y: usize, x: usize, line: impl Into<Line<'static>>) {
+pub(crate) fn put(buf: &mut Buffer, area: Rect, y: usize, x: usize, line: impl Into<Line<'static>>) {
     let (w, h) = (area.width as usize, area.height as usize);
     if y < h && x + 1 < w {
         buf.set_line(area.x + x as u16, area.y + y as u16, &line.into(), (w - 1 - x) as u16);
     }
 }
 
-fn span(text: impl Into<String>, style: Style) -> Span<'static> {
+pub(crate) fn span(text: impl Into<String>, style: Style) -> Span<'static> {
     Span::styled(text.into(), style)
 }
 

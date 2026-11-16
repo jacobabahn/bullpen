@@ -10,9 +10,13 @@
 //! changes), it execs the new one in place, keeping its selection and `f`.
 //!
 //! Usage: bullpen-board --dir <repo state dir> --root <repo> --bullpen <bullpen program>
+//!
+//! With `--mission` first it's mission control instead, every repo on one screen
+//! (mission/; `bullpen mission` runs it).
 
 mod app;
 mod edit;
+mod mission;
 mod model;
 mod ui;
 
@@ -46,7 +50,11 @@ fn status(report: &str) {
 }
 
 fn main() {
-    let args = match parse_args(std::env::args().skip(1)) {
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv.first().map(String::as_str) == Some("--mission") {
+        return mission::run::main(argv[1..].to_vec());
+    }
+    let args = match parse_args(argv) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("bullpen-board: {e}");

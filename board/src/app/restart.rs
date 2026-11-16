@@ -32,13 +32,18 @@ impl App {
     /// or answered. (An overlay just closes.)
     pub fn replaced(&self) -> Option<PathBuf> {
         let (path, was) = self.exe.as_ref()?;
-        let busy = !self.running.is_empty()
-            || self.pending.is_some()
-            || matches!(self.mode, Mode::Tell { .. } | Mode::Answer { .. } | Mode::Stale { .. } | Mode::Quit);
         match ExeId::of(path) {
-            Some(now) if now != *was && !busy => Some(path.clone()),
+            Some(now) if now != *was && !self.busy() => Some(path.clone()),
             _ => None,
         }
+    }
+
+    /// Would a reload lose something: a command running, a y/n asked, something being
+    /// typed or answered?
+    pub fn busy(&self) -> bool {
+        !self.running.is_empty()
+            || self.pending.is_some()
+            || matches!(self.mode, Mode::Tell { .. } | Mode::Answer { .. } | Mode::Stale { .. } | Mode::Quit)
     }
 
     /// The arguments the new program starts with: these, plus what the board shows

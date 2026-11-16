@@ -363,7 +363,11 @@ impl App {
                 self.peek();
             }
             (_, Some('v')) => {
-                let (ok, out) = self.bp(&["diff", sel, "--pane"]);
+                let mut args = vec!["diff", sel, "--pane"];
+                if let Some(session) = self.pane_session.as_deref() {
+                    args.extend(["--session", session]);
+                }
+                let (ok, out) = self.bp(&args);
                 self.msg = Note::of(ok, format!("Opened {sel}'s diff."), out);
             }
             (_, Some('t')) => self.mode = Mode::Tell { id: sel.into(), text: LineEdit::default(), reply: false },

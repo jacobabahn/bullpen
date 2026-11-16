@@ -54,7 +54,7 @@ fn peek_foot(w: usize, live: bool) -> Line<'static> {
 
 /// `i` on a coordinator's question: the task, the whole question wrapped, then the
 /// line the answer is typed on. Returns the cursor's column and row.
-pub(super) fn draw_ask(buf: &mut Buffer, area: Rect, h: usize, title: &str, question: &str, text: &LineEdit) -> (usize, usize) {
+pub(crate) fn draw_ask(buf: &mut Buffer, area: Rect, h: usize, title: &str, question: &str, text: &LineEdit) -> (usize, usize) {
     let w = area.width as usize;
     put(buf, area, 0, 1, span(fit(title, w.saturating_sub(2)), bold()));
     // the title, a gap, the question, a gap, the answer and the foot
@@ -70,7 +70,7 @@ pub(super) fn draw_ask(buf: &mut Buffer, area: Rect, h: usize, title: &str, ques
 
 /// The prompt a task's agent is at: the end of its screen, then its options, one a
 /// line, each with the key that presses it.
-pub(super) fn draw_answer(buf: &mut Buffer, area: Rect, h: usize, title: &str, prompt: Option<&model::Prompt>) {
+pub(crate) fn draw_answer(buf: &mut Buffer, area: Rect, h: usize, title: &str, prompt: Option<&model::Prompt>) {
     let w = area.width as usize;
     put(buf, area, 0, 1, span(fit(title, w.saturating_sub(2)), bold()));
     let (screen, options): (&[String], Vec<Line<'static>>) = match prompt {
