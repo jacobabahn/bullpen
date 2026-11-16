@@ -41,6 +41,7 @@ mod review;
 mod rex;
 mod rules;
 mod saves;
+mod say;
 mod screen;
 mod show;
 mod start;

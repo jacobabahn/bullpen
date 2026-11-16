@@ -23,6 +23,53 @@ class CoordinatorsTest(BullpenTest):
         self.assertIn("coordinators already running: c1 (blk1), c2 (", self.bp("up", "--verbose").stdout)
         self.assertEqual([a[0] for a in self.rex_calls()].count("run"), 1)
 
+    def test_say_types_into_the_only_coordinator_from_another_repo(self):
+        self.bp("up")
+        self.bp("config", "--news", "monitor")  # what you say is typed all the same
+        shop = self.other_repo("shop")
+        p = self.bp("say", "--repo", str(self.repo), "Look", "at", "BP-2 first", cwd=shop)
+        self.assertEqual(p.stdout, "typed to c1 in proj\n")
+        self.assertEqual(self.typed()[-1], ("blk1", "Look at BP-2 first"))
+        self.assertIn(["send-key", "-s", "session:1", "-b", "blk1", "enter"], self.rex_calls())
+        self.bp("say", "From", "here")  # in the repo: its coordinator
+        self.assertEqual(self.typed()[-1], ("blk1", "From here"))
+        p = self.bp_in("blk1", "say", "hi", ok=False)
+        self.assertIn("this is c1's own pane", p.stderr)
+        p = self.bp("say", "--repo", str(shop), "hi", ok=False)
+        self.assertIn(f"bullpen has no tasks for {shop}", p.stderr)
+
+    def test_say_waits_for_an_empty_input(self):
+        self.bp("up")
+        (self.fake / "screen").write_text("❯ half a message\n")
+        p = self.bp("say", "Two\nlines")
+        self.assertIn("half-typed in c1 in proj's input: this is typed once it's empty", p.stdout)
+        self.assertEqual(self.typed(), [])
+        (self.fake / "screen").write_text("❯ \n")
+        self.bp("_flush")
+        self.assertEqual(self.typed(), [("blk1", "Two\nlines")])
+
+    def test_say_with_several_coordinators_wants_one_named(self):
+        other = self.two_coordinators()
+        p = self.bp("say", "hi", ok=False)
+        self.assertIn("proj has 2 coordinators (c1, c2): say which with --coordinator", p.stderr)
+        self.bp("say", "--coordinator", "c2", "hi")
+        self.assertEqual(self.typed()[-1], (other, "hi"))
+        p = self.bp("say", "--coordinator", "c7", "hi", ok=False)
+        self.assertIn("proj has no coordinator c7; it has c1, c2", p.stderr)
+
+    def test_say_says_when_the_coordinator_is_gone_or_refuses_typing(self):
+        self.assertIn("run `bullpen up`", self.bp("say", "hi", ok=False).stderr)  # no bullpen here yet
+        self.bp("add", "Here", "--brief", "x")
+        p = self.bp("say", "hi", ok=False)
+        self.assertIn("proj has no coordinator: `bullpen up` there starts one", p.stderr)
+        self.bp("up")
+        (self.fake / "send_fails_blk1").write_text("")
+        p = self.bp("say", "hi", ok=False)
+        self.assertIn("couldn't type into c1 in proj's pane: rex: couldn't send to the block", p.stderr)
+        (self.fake / "alive" / "blk1").unlink()
+        p = self.bp("say", "hi", ok=False)
+        self.assertIn("c1's pane in proj is gone: `bullpen up` there starts a coordinator again", p.stderr)
+
     def test_board_others_is_a_setting_per_board(self):
         other = self.two_coordinators()
         self.assertNotIn("board_others", self.coordinators()[0])  # off by default

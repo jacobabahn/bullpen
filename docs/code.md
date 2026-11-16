@@ -162,6 +162,7 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   feedback, a merge or close outside bullpen, a waiting auto-accept
 - `keys.rs`: `keys` (and `--install`), and the hash accept checks to say keys.lua changed
 - `answer.rs`: answering a prompt from the board (`prompt`, `answer`), and `reply`
+- `say.rs`: `say`, a message typed into a repo's coordinator from any pane
 - `screen/mod.rs`: what Claude Code's screen says, shared by events, check and answer
   (a background shell still running, compacting, `screen_state`), with Python's
   regexes matched by hand; `screen/prompt.rs`: the prompt a pane's screen ends with

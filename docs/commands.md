@@ -21,6 +21,7 @@ bullpen peek BP-1     # the end of the worker's screen
 bullpen prompt BP-1   # the prompt its worker (or reviewer) is at, and its screen, as JSON
 bullpen answer BP-1 2 # press option 2 of that prompt (or y, n), as you would in its pane
 bullpen reply BP-1 "Postgres"   # answer the coordinator's `ask`: it goes to the coordinator
+bullpen say "Start BP-4 next"   # type a message to the coordinator (--repo PATH, --coordinator c2)
 bullpen diff BP-1     # its changes against its base, in a pager (--stat: just the files)
 bullpen check         # tasks whose status is out of step with their agent; --fix catches up
 bullpen go BP-1       # focus its pane (`go` alone: the coordinator; --next: next needing you;

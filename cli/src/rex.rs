@@ -43,7 +43,11 @@ pub fn rex_type(session: &str, block: &str, text: &str) -> Res<()> {
 /// Type msg into the task's worker. None if it went through, else why not (the caller
 /// leaves the task where it was and says so).
 pub fn type_to_worker(t: &Obj, msg: &str) -> Res<Option<String>> {
-    let (session, block) = (s(t, "session"), s(t, "block"));
+    type_into(s(t, "session"), s(t, "block"), msg)
+}
+
+/// Type msg into a pane and press Enter. None if it went through, else why not.
+pub fn type_into(session: &str, block: &str, msg: &str) -> Res<Option<String>> {
     for argv in [
         rex_argv(session, &["send"], &["-b", block, msg]),
         rex_argv(session, &["send-key"], &["-b", block, "enter"]),

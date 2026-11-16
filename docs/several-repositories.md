@@ -14,6 +14,14 @@ checkout is gone is left out of what follows.
 - `cmd+;` then `j` (`bullpen pick`) picks any open task of any repository by
   typing part of it (see [Keys](keys.md)); `bullpen go BP-1 --repo PATH` goes to a
   task of another repository.
+- `bullpen say --repo PATH TEXT` types TEXT into that repository's coordinator's
+  pane, as if you typed it there, from any pane or folder (without `--repo`: the
+  pane's repository, else the folder's). With several coordinators, name one with
+  `--coordinator c2`; without it `say` lists them and types nothing. It waits for
+  an empty input as typed news does: while something is half-typed there it says
+  so, and the watcher types it once the input is empty. It's typed whatever the
+  repository's `news` setting, since it's you talking, not news. It says so when
+  the coordinator's pane is gone (`bullpen up` there starts one) or refuses typing.
 - The board's top line, after the repository's name, names the other
   repositories with something for you: `shop: 1 needs you, 2 ready` (need you:
   needs or stopped; ready: ready to accept, or finished), shortened to

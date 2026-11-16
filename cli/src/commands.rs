@@ -38,6 +38,7 @@ pub const COMMANDS: &[Command] = &[
     c("diff", YOU, "a task's changes against its base, in a pager (delta if installed)", crate::diff::cmd_diff),
     c("answer", YOU, "press an option of the prompt a task's agent is at", crate::answer::cmd_answer),
     c("reply", YOU, "answer what the coordinator asked about a task: it goes to the coordinator", crate::answer::cmd_reply),
+    c("say", YOU, "type a message to a repository's coordinator, from any pane (--repo, --coordinator)", crate::say::cmd_say),
     c("prompt", COORDINATOR, "the prompt a task's agent is at, and its screen, as JSON (for the board)", crate::answer::cmd_prompt),
     c("accept", YOU, "(the person's call) merge a ready task's PR, or its local branch without a remote (config --merge), and clean up; on a finished task (nothing to merge), close it", crate::accept::cmd_accept),
     c("close", YOU, "(the person's call) close a finished task: remove its worktree, branch and pane (the same as accept on it); --keep-branch ends any task unmerged, its branch kept (and pushed)", crate::close::cmd_close),
