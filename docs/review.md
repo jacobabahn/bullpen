@@ -178,7 +178,9 @@ bullpen config --remove-risk-path cli/src/review.rs
 one a run. `--level` is `high` or `medium` (`high` when left out) and `--why` is what
 the label says ("changes <pattern>" when left out). `--remove-risk-path` drops one,
 and can be repeated. A pattern ending in `/` is a folder, `*` is any run of
-characters, and anything else is a file (or a folder of that name). A path that
+characters, and anything else is a file (or a folder of that name). It is a path from the repository's
+top, as git names it: a leading `./` is dropped, and one that starts with `/` or `../`
+is refused. A path that
 matches several patterns is in the most sensitive one's, then the first's.
 
 In `config.json` it is `{"pattern": {"level": "medium", "why": "..."}}`. The forms

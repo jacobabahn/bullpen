@@ -111,6 +111,15 @@ fn a_high_area_is_high_whatever_its_size_and_says_its_lines() {
         ),
         part("high", "changes the fakes (3 lines)")
     );
+    // a folder named without its /, too
+    for folder in ["tests", "cli/tests", "cli/tests/"] {
+        let numstat = format!("3\t0\t{}/fakes/rex.rs\n", folder.trim_end_matches('/'));
+        assert_eq!(
+            with(&json!({folder: "changes the fakes"}), &numstat),
+            part("high", "changes the fakes (3 lines)"),
+            "{folder}"
+        );
+    }
     // docs count, and a bare list reads
     let list = json!(["docs/secret.md"]);
     assert_eq!(

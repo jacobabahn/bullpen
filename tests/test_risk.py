@@ -246,13 +246,16 @@ class RiskPathsTest(RiskTest):
                 (["--level", "medium"], "--level and --why go with --risk-path PATTERN"),
                 (["--why", "x"], "--level and --why go with --risk-path PATTERN"),
                 (["--risk-path", " "], "--risk-path takes a path in the repository"),
+                (["--risk-path", "/abs/bin"], "--risk-path takes a path in the repository, from its top"),
+                (["--risk-path", "../bin"], "--risk-path takes a path in the repository, from its top"),
+                (["--risk-path", "./"], "--risk-path takes a path in the repository, from its top"),
                 (["--risk-path", "a", "--risk-path", "b"], "--risk-path takes one pattern a run"),
                 (["--remove-risk-path", "bin/"], "no risk path bin/: this repository has none"),
                 (["--global", "--risk-path", "bin/", "--level", "high"],
                  "--risk-path, --level are per repository, so not for the global config")):
             self.assertIn(says, self.bp("config", *flags, ok=False).stderr)
         self.assertIn("invalid choice: 'low'", self.bp("config", "--risk-path", "a", "--level", "low", ok=False).stderr)
-        self.bp("config", "--risk-path", "lua/")
+        self.bp("config", "--risk-path", "./lua/")  # as git names it, without the ./
         p = self.bp("config", "--remove-risk-path", "bin/", ok=False)
         self.assertIn("no risk path bin/: this repository has lua/", p.stderr)
         self.assertEqual(list(self.paths()), ["lua/"])

@@ -255,7 +255,7 @@ fn by_areas(rows: &[Row], entries: &[Entry], sizes: Sizes) -> Option<Part> {
     let mut touched: Vec<Option<(i64, bool)>> = vec![None; entries.len()];
     for (lines, path) in rows {
         let Some(i) = area_of(entries, path) else { continue };
-        if area(path) == Area::Tests && area(&entries[i].pattern) != Area::Tests {
+        if area(path) == Area::Tests && !names_tests(&entries[i].pattern) {
             continue; // a test beside an area's code isn't the area, unless the pattern names tests
         }
         let (n, binary) = touched[i].unwrap_or((0, false));
@@ -288,6 +288,13 @@ fn by_areas(rows: &[Row], entries: &[Entry], sizes: Sizes) -> Option<Part> {
             format!("{}, and {n} more sensitive path{}", top.why, plural(n)),
         ),
     })
+}
+
+/// Whether a risk_paths pattern is itself a test's path: a test file, or a tests folder,
+/// with its `/` or without (`tests`, `cli/tests`: a plain name is a folder too).
+fn names_tests(pattern: &str) -> bool {
+    let folder = !pattern.contains('*') && !pattern.ends_with('/');
+    area(pattern) == Area::Tests || (folder && area(&format!("{pattern}/")) == Area::Tests)
 }
 
 /// The part a change's kind and size give: docs and tests alone are low; a prompt is

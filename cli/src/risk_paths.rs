@@ -123,10 +123,14 @@ pub fn changed(repo: &Repo, a: &Args) -> Res<Option<Value>> {
         }
         return removed(repo, &a.all(REMOVE)).map(Some);
     };
-    let pattern = pattern.trim();
-    if pattern.is_empty() {
+    // git's paths are relative to the repository's top, with no ./ before them
+    let mut pattern = pattern.trim();
+    while let Some(rest) = pattern.strip_prefix("./") {
+        pattern = rest;
+    }
+    if pattern.is_empty() || pattern == "." || pattern.starts_with('/') || pattern.starts_with("../") {
         return fail(format!(
-            "{ADD} takes a path in the repository: a file, a folder/ or a glob with *"
+            "{ADD} takes a path in the repository, from its top: a file, a folder/ or a glob with *"
         ));
     }
     let mut paths = as_obj(&removed(repo, &a.all(REMOVE))?);
