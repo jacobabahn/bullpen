@@ -125,6 +125,60 @@ class NewsTest(BullpenTest):
         self.ask(tid, "new")
         self.assertEqual(self.bp_in("blk1", "news").stdout, "bullpen · BP-1 is at a prompt (question): new\n")
 
+    def test_news_recent_prints_the_last_lines_and_moves_no_cursor(self):
+        self.assertEqual(self.bp("news", "--recent").stdout, "no news yet\n")
+        tid = self.start_task()
+        self.bp("config", "--news", "monitor")
+        self.bp_in("blk1", "news")  # the coordinator's cursor starts here
+        p, lines, _ = self.follow()
+        for word in ["one", "two", "three"]:
+            self.ask(tid, word)
+        self.assertEqual(len(lines(3)), 3)
+        self.stop(p)
+        cursors = {c.name: c.read_text() for c in (self.tmp / "state").rglob("*.cursor")}
+        for word in ["four", "five"]:  # logged while no monitor runs
+            self.ask(tid, word)
+        out = self.bp("news", "--recent").stdout.splitlines()  # from any pane, or none
+        self.assertEqual([l.split("  ", 1)[1].lstrip() for l in out[-2:]], ["BP-1 is at a prompt (question): four",
+                                                                   "BP-1 is at a prompt (question): five"])
+        self.assertRegex(out[-1], r"^\d{1,2}:\d\d [AP]M +BP-1 ")  # today's time first
+        self.assertEqual(len(self.bp_in("blk9", "news", "--recent", "2").stdout.splitlines()), 2)
+        js = json.loads(self.bp_in("blk1", "news", "--recent", "1", "--json").stdout)
+        self.assertEqual([(j["repo"], j["task"], j["event"], j["text"]) for j in js],
+                         [(str(self.repo), "BP-1", "needs-you", "BP-1 is at a prompt (question): five")])
+        self.assertRegex(js[0]["time"], r"^\d{4}-\d\d-\d\dT")
+        self.assertEqual({c.name: c.read_text() for c in (self.tmp / "state").rglob("*.cursor")}, cursors)
+        p, lines, quiet = self.follow()  # the coordinator still gets every line after
+        self.assertEqual([l.rsplit(" ", 1)[-1] for l in lines(2)], ["four", "five"])
+        self.assertTrue(quiet())
+        self.assertIn("don't go together", self.bp("news", "--recent", "--follow", ok=False).stderr)
+        self.assertIn("go with --recent", self.bp("news", "--json", ok=False).stderr)
+        self.assertIn("not a count", self.bp("news", "--recent", "many", ok=False).stderr)
+
+    def test_news_recent_all_repos_puts_every_repo_in_time_order(self):
+        here = self.start_task("Here")
+        shop = self.other_repo("shop")
+        self.bp("up", cwd=shop)
+        self.bp("add", "Sell it", "--brief", "x", cwd=shop)
+        self.bp("start", "BP-1", cwd=shop)
+        theirs = json.loads(self.bp("show", "BP-1", "--json", cwd=shop).stdout)["block"]
+        self.ask(here, "early")
+        self.bp("_event", theirs, "blocked", "question", "middle", cwd=shop)
+        self.ask(here, "late")
+        minute = {"early": 1, "middle": 2, "late": 3}
+        for log in (self.tmp / "state").rglob("news.log"):  # stamps a minute apart, whatever the clock did
+            log.write_text("".join(f"2026-11-15T09:0{minute[l.split()[-1]]}:00-06:00 {l.split(' ', 1)[1]}"
+                                   if l.split()[-1] in minute else l
+                                   for l in log.read_text().splitlines(keepends=True)))
+        out = self.bp("news", "--recent", "--all-repos", cwd=self.tmp).stdout  # works outside a repository
+        said = [l for l in out.splitlines() if l.split()[-1] in minute]
+        self.assertEqual([l.split("  ", 1)[1].lstrip() for l in said], [
+            "proj  BP-1 is at a prompt (question): early",
+            "shop  BP-1 is at a prompt (question): middle",
+            "proj  BP-1 is at a prompt (question): late"])
+        js = json.loads(self.bp("news", "--recent", "2", "--all-repos", "--json").stdout)
+        self.assertEqual([(j["repo"], j["text"].split()[-1]) for j in js], [(str(shop), "middle"), (str(self.repo), "late")])
+
     def test_monitor_mode_types_nothing_and_keeps_no_outbox(self):
         tid = self.start_task()
         p = self.bp("config", "--news", "monitor", "--json")

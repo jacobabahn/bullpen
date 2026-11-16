@@ -1,8 +1,9 @@
 //! News for the coordinators: a news line, logged, and the outboxes
 //! the watcher types into their panes. `bullpen news` (one-off and `--follow`) is in
-//! read.rs.
+//! read.rs, `news --recent` in recent.rs.
 
 pub mod read;
+pub mod recent;
 
 use crate::coordinators::{alive, calling_coordinator, coordinators, sees_to};
 use crate::rex;

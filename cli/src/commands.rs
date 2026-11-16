@@ -61,7 +61,7 @@ pub const COMMANDS: &[Command] = &[
     c("review", COORDINATOR, "(coordinator) a new reviewer in place of one that stopped without a verdict", crate::review::cmd_review),
     c("note", COORDINATOR, "an informational line on the board about a task", crate::triage::cmd_note),
     c("check", COORDINATOR, "compare each task's status with what its agent is doing now", crate::check::cmd_check),
-    c("news", COORDINATOR, "print news logged since the last time; --follow keeps printing", crate::news::read::cmd_news),
+    c("news", COORDINATOR, "print news logged since the last time; --follow keeps printing; --recent the last lines", crate::news::read::cmd_news),
     c("guide", COORDINATOR, "print the coordinator's guide", crate::guide::cmd_guide),
     c("ready", WORKER, "(worker) push the branch, open the PR (none without a remote), tell the coordinator", crate::ready::cmd_ready),
     c("finish", WORKER, "(worker) the task is done with nothing to merge: no PR, no review", crate::ready::cmd_finish),

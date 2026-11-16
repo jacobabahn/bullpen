@@ -11,6 +11,9 @@ checkout is gone is left out of what follows.
 - `bullpen go --next --all-repos` goes to the next task that needs you in any
   repository, the one waiting longest first, as `go --next` does in one. In the
   repository it runs for, it skips what that board hides, as `go --next` does.
+- `bullpen news --recent --all-repos` prints the last news lines of every
+  repository, in time order, each with its repository and time (see
+  [News](news.md)).
 - `cmd+;` then `j` (`bullpen pick`) picks any open task of any repository by
   typing part of it (see [Keys](keys.md)); `bullpen go BP-1 --repo PATH` goes to a
   task of another repository.

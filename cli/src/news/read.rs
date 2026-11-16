@@ -10,7 +10,7 @@
 //! lock the Python took; a second follower waits, a one-off read doesn't.
 
 use super::NEWS_MARK;
-use crate::args::{flag, value, Args};
+use crate::args::{flag, pos, value, Args, Nargs};
 use crate::coordinators::{calling_coordinator, coordinator_at, coordinators, primary};
 use bullpen_core::config::load_config;
 use bullpen_core::json::s;
@@ -27,6 +27,16 @@ their news: don't start the monitor again (`bullpen up --here` here makes it one
 const SPEC: &[crate::args::Arg] = &[
     flag("--follow", "keep running and print each line as it is logged"),
     value("--every", "EVERY", crate::args::SUPPRESS), // seconds between looks
+    flag(
+        "--recent",
+        "print the last N lines (20 without N), each with its time, and exit; it reads only: no cursor moves",
+    ),
+    pos("N", Nargs::Maybe, "with --recent: how many lines"),
+    flag(
+        "--all-repos",
+        "with --recent: every repo bullpen knows, each line with its repo",
+    ),
+    flag("--json", "with --recent: the lines as JSON"),
 ];
 
 /// Set by SIGINT: stop between records.
@@ -45,6 +55,22 @@ enum Out {
 pub fn cmd_news(argv: &[String]) -> Res<i32> {
     let a = Args::parse("news", argv, SPEC);
     let follow = a.flag("--follow");
+    if a.flag("--recent") {
+        if follow {
+            crate::args::usage_error("news", SPEC, "--recent and --follow don't go together");
+        }
+        let n = match a.arg("N") {
+            None => super::recent::RECENT,
+            Some(n) => match bullpen_core::text::strip(n).parse::<usize>() {
+                Ok(n) => n,
+                Err(_) => crate::args::usage_error("news", SPEC, &format!("argument N: not a count of lines: '{n}'")),
+            },
+        };
+        return super::recent::print_recent(n, a.flag("--all-repos"), a.flag("--json"));
+    }
+    if a.arg("N").is_some() || a.flag("--all-repos") || a.flag("--json") {
+        crate::args::usage_error("news", SPEC, "N, --all-repos and --json go with --recent");
+    }
     let every = match a.opt("--every") {
         None => 0.5,
         Some(e) => match bullpen_core::text::strip(e).parse::<f64>() {

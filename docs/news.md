@@ -22,6 +22,18 @@ sets how it reaches the coordinator, and `bullpen up --verbose` says which is in
 News is for the coordinator. You hear of a task that needs you by a notification
 (see [Notifications](notifications.md)).
 
+To look at it yourself, `bullpen news --recent` prints the last 20 lines
+(`--recent 50`: the last 50), oldest first, each after the time it was logged
+(`3:04 PM` today, `Mon 3:04 PM` this week, `Oct 9 3:04 PM` before), with the length of
+a guide's diff after its line (`(24 more lines: --json prints them)`). `--all-repos` takes the news of every repository
+bullpen knows, in time order, each line with its repository's name, and works from
+any folder; `--json` prints a list of `{"repo", "time", "task", "event", "to",
+"text", "more"}` (`to`: the coordinators it was for, `[]` for all; `more`: a diff's
+lines). It only reads `news.log`: it runs from any pane, takes no lock and moves no
+coordinator's cursor, so `bullpen news` and `news --follow` print every line
+afterwards just as they would have. A line still being written, and the one before
+it, show a moment later.
+
 Each line starts with the task's ID and what happened, so the start is what
 counts when a narrow pane cuts it: `BP-3 is ready: Fix login redirect (2 commits,
 PR #12, approved by full review)`, `BP-4 is at a permission prompt: Allow npm
