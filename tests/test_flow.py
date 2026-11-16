@@ -68,7 +68,7 @@ class FlowTest(BullpenTest):
         self.assertNotIn("Claude", gh[0]["body"])
         block, line = self.typed()[-1]
         self.assertEqual(block, "blk1")
-        self.assertEqual(line, "bullpen · BP-1 is ready: Fix the thing (1 commit, PR #7)")
+        self.assertEqual(line, "bullpen · BP-1 is ready: Fix the thing (1 commit, PR #7); risk: low · a small change (1 line in 1 file)")
 
     def test_ready_refuses_uncommitted_changes(self):
         tid = self.start_task()
@@ -326,7 +326,8 @@ class FlowTest(BullpenTest):
         self.assertEqual(t["review"]["verdict"], "approved")
         self.assertFalse((self.fake / "alive" / reviewer).exists())
         self.assertEqual(self.typed()[-1], ("blk1",
-            "bullpen · BP-1 is ready: Fix the thing (1 commit, PR #7, approved by light review: 1 line in 1 file)"))
+            "bullpen · BP-1 is ready: Fix the thing (1 commit, PR #7, approved by light review: 1 line in 1 file)"
+            "; risk: low · a small change (1 line in 1 file)"))
 
     def test_changes_go_back_to_the_worker_then_ready_after_the_last_round(self):
         tid = self.start_task()

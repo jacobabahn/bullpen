@@ -112,7 +112,7 @@ class TourTest(unittest.TestCase):
         self.assertEqual((step["title"], step["note"]), ("The top of a.txt", "Line 2."))
         self.assertIn("+line 2, changed", step["diff"])
         self.assertEqual(self.news()[-1], "bullpen · BP-1 is ready: Fix the thing (2 commits, PR #7, approved by "
-                         "light review: 5 lines in 2 files)")  # a tour is no news
+                         "light review: 5 lines in 2 files); risk: low · a small change (5 lines in 2 files)")  # a tour is no news
 
     def test_a_tour_is_refused_while_the_task_is_working(self):
         tid = self.start_task()

@@ -209,7 +209,8 @@ class AcceptTest(BullpenTest):
         tid, _ = self.approved_with_auto_accept("--no-auto-accept")
         self.assertEqual(self.show(tid)["status"], "ready")
         self.assertEqual(self.news_lines()[-1],
-                         "bullpen · BP-1 is ready: Fix the thing (1 commit, PR #7, approved by light review: 1 line in 1 file)")
+                         "bullpen · BP-1 is ready: Fix the thing (1 commit, PR #7, approved by light review: 1 line in 1 file)"
+                         "; risk: low · a small change (1 line in 1 file)")
         self.assertIn("kept for you", self.bp("show", tid).stdout)
 
     def test_auto_accept_on_a_task_wins_over_the_config(self):

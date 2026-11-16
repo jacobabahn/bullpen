@@ -103,7 +103,7 @@ class LocalModeTest(unittest.TestCase):
         self.assertEqual(t["commits"], 1)
         self.bp("_prs")  # no PR to follow: no gh call (tearDown checks)
         self.assertFalse((self.tmp / "state" / "prs").exists())
-        self.assertEqual(self.typed()[-1], ("blk1", "bullpen · BP-1 is ready: Fix the thing (1 commit)"))
+        self.assertEqual(self.typed()[-1], ("blk1", "bullpen · BP-1 is ready: Fix the thing (1 commit); risk: low · a small change (1 line in 1 file)"))
         ls = self.bp("ls").stdout
         self.assertIn("Local branch bullpen/bp-1-fix-the-thing.", ls)
         self.assertNotIn("None", ls)
@@ -112,6 +112,7 @@ class LocalModeTest(unittest.TestCase):
         self.assertNotIn("None", show)
 
     def test_a_task_ready_once_more_is_ready_again_and_says_after_a_rebase(self):
+        RISK = "; risk: low · a small change (1 line in 1 file)"
         tid, wt = self.ready_task()
         self.bp("ready", tid, "--summary", "Same.", cwd=wt)
         self.git("rebase", "-q", "main", cwd=wt)
@@ -119,10 +120,10 @@ class LocalModeTest(unittest.TestCase):
         self.bp("ready", tid, "--summary", "Same.", cwd=wt)
         self.bp("ready", tid, "--summary", "Same.", cwd=wt)  # word for word the last: no news
         self.assertEqual([l for b, l in self.typed() if b == "blk1" and "ready" in l],
-                         ["bullpen · BP-1 is ready: Fix the thing (1 commit)",
-                          "bullpen · BP-1 is ready again: Fix the thing (1 commit)",
-                          "bullpen · BP-1 is ready again after a rebase: Fix the thing (1 commit)",
-                          "bullpen · BP-1 is ready again: Fix the thing (1 commit)"])
+                         [f"bullpen · BP-1 is ready: Fix the thing (1 commit){RISK}",
+                          f"bullpen · BP-1 is ready again: Fix the thing (1 commit){RISK}",
+                          f"bullpen · BP-1 is ready again after a rebase: Fix the thing (1 commit){RISK}",
+                          f"bullpen · BP-1 is ready again: Fix the thing (1 commit){RISK}"])
 
     def test_ready_still_refuses_uncommitted_changes_and_handles_no_commits(self):
         tid = self.start_task()
@@ -149,7 +150,7 @@ class LocalModeTest(unittest.TestCase):
         self.assertIn(f"diff main...HEAD", prompt)
         self.bp("verdict", tid, "approve", "--summary", "Fine.")
         self.assertEqual(self.typed()[-1][1], "bullpen · BP-1 is ready: Fix the thing (1 commit, approved by "
-                                              "light review: 1 line in 1 file)")
+                                              "light review: 1 line in 1 file); risk: low · a small change (1 line in 1 file)")
 
     def accepted(self, tid, wt):
         t = self.show(tid)
