@@ -1,9 +1,10 @@
 //! The board's state and what it does with a key or a message: `App`, its modes, and
-//! the selection. The keys, the background commands and reloading the board's program
-//! are child modules, so they share `App`'s private fields.
+//! the selection. The keys (the Later group's apart), the background commands and
+//! reloading the board's program are child modules, so they share `App`'s private fields.
 
 mod jobs;
 mod keys;
+mod later;
 mod restart;
 #[cfg(test)]
 pub(crate) mod testing;
@@ -12,7 +13,7 @@ pub use jobs::Job;
 pub use restart::{parse_args, Args, ExeId};
 
 use crate::edit::LineEdit;
-use crate::model::{self, Action, Config, Prompt, Task};
+use crate::model::{self, Action, Config, Item, Prompt, Task};
 use ratatui::crossterm::event::KeyEvent;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
@@ -95,6 +96,10 @@ pub struct App {
     pub repo_name: String,
     pub cfg: Config,
     pub tasks: Vec<Task>,
+    /// the backlog's open items, in list order: the Later group
+    pub later: Vec<Item>,
+    /// `L`: the Later group shows a row per item, not its one line
+    pub later_open: bool,
     /// what needs you or is ready in other repositories, looked at every few seconds
     pub others: model::OtherRepos,
     pub sel: Option<String>,
@@ -145,6 +150,8 @@ impl App {
         App {
             cfg: Config::load(&dir),
             tasks: Vec::new(),
+            later: Vec::new(),
+            later_open: false,
             others: Default::default(),
             dir,
             root,
@@ -172,6 +179,7 @@ impl App {
     pub fn reload(&mut self) {
         self.cfg = Config::load(&self.dir);
         self.tasks = model::load_tasks(&self.dir);
+        self.later = model::load_later(&self.dir);
         if self.cfg.other_repos {
             self.others.refresh(&self.dir);
         } else {
@@ -240,18 +248,21 @@ impl App {
         };
     }
 
+    /// The selected task: none while an item of the Later group is selected.
     pub fn current(&self) -> Option<&Task> {
+        if self.current_item().is_some() {
+            return None;
+        }
         let order = self.order();
         let sel = self.sel.as_deref();
         order.iter().find(|t| Some(t.id.as_str()) == sel).or(order.first()).copied()
     }
 
-
-    /// Keep the selection on a task that's still shown.
+    /// Keep the selection on a task (or item) that's still shown.
     pub fn settle(&mut self) {
-        let first = self.order().first().map(|t| t.id.clone());
-        if !self.order().iter().any(|t| Some(&t.id) == self.sel.as_ref()) {
-            self.sel = first;
+        let ids = self.nav_ids();
+        if !ids.iter().any(|id| Some(id) == self.sel.as_ref()) {
+            self.sel = ids.first().cloned();
         }
     }
 

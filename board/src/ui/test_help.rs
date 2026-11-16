@@ -28,8 +28,8 @@ fn the_help_fits_a_narrow_board_and_scrolls_to_its_end() {
     let Mode::Help { top } = a.mode else { panic!() };
     assert!(top < 999 && top > 0);
     assert!(s[1].ends_with("↑"), "{s:#?}");
-    assert_eq!(row(&s, 2), "   ▌     needs you; red: stopped", "{s:#?}");
-    for line in ["   ●     needs you", "   ✔     ready to accept", "   ◜ ◐   in review (it turns)", "   ·     accepted"] {
+    assert_eq!(row(&s, 2), "   ◇     an idea on the list", "{s:#?}");
+    for line in ["   ▌     needs you; red: stopped", "   ◌↻    came from the backlog", "   ●     needs you", "   ✔     ready to accept", "   ◜ ◐   in review (it turns)", "   ·     accepted"] {
         assert!(s.contains(&line.to_string()), "{line}: {s:#?}");
     }
 

@@ -449,6 +449,38 @@ pub fn auto_detail(cfg: &Obj, t: &Obj) -> &'static str {
     }
 }
 
+/// Did the task come from the backlog (`bullpen later L7 --start`, or pickup)? It has an
+/// `origin` then.
+pub fn from_backlog(t: &Obj) -> bool {
+    !s(t, "origin").is_empty()
+}
+
+/// What follows a task's mark (before its ID) on the board, in `ls` and in `pick`: a
+/// dim "↻" for one that came from the backlog, else the usual space.
+pub fn from_mark(t: &Obj) -> &'static str {
+    if from_backlog(t) {
+        "↻"
+    } else {
+        " "
+    }
+}
+
+/// Where an open task from the backlog came from: "From the backlog (L7).", or for one
+/// pickup started, "Started by itself (L7)."; "" for any other.
+pub fn from_detail(t: &Obj) -> String {
+    if !from_backlog(t) || is_closed(s(t, "status")) {
+        return String::new();
+    }
+    let item = match s(t, "from") {
+        "" => String::new(),
+        f => format!(" ({f})"),
+    };
+    match s(t, "started_by") {
+        "itself" => format!("Started by itself{item}."),
+        _ => format!("From the backlog{item}."),
+    }
+}
+
 /// The board's sentence for a task: what its agent is doing now, else where it stands,
 /// what GitHub said, what auto-accept does with it and its own model.
 pub fn board_detail(cfg: &Obj, t: &Obj, every: &Every, at: Option<Stamp>) -> Res<String> {
@@ -463,13 +495,20 @@ pub fn board_sentence(cfg: &Obj, t: &Obj, every: &Every, at: Option<Stamp>, doin
     }
     let text = with_gh(t, status_detail(cfg, t, &waits_phrase(t, every), at));
     let model = model_detail(cfg, t);
-    let parts = [text.as_str(), auto_detail(cfg, t), model.as_str()];
-    parts
-        .iter()
-        .filter(|p| !p.is_empty())
-        .copied()
-        .collect::<Vec<_>>()
-        .join(" ")
+    from_around(t, &[text.as_str(), auto_detail(cfg, t), model.as_str()])
+}
+
+/// A task's sentence from its parts, with where it came from: first for one that
+/// started itself (that's what to notice), else last.
+pub fn from_around(t: &Obj, parts: &[&str]) -> String {
+    let from = from_detail(t);
+    let mut all: Vec<&str> = parts.to_vec();
+    if s(t, "started_by") == "itself" {
+        all.insert(0, &from);
+    } else {
+        all.push(&from);
+    }
+    all.into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" ")
 }
 
 #[cfg(test)]

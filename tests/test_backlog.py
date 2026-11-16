@@ -84,6 +84,12 @@ class BacklogTest(BullpenTest):
         i = self.item("L1")
         self.assertEqual((i["state"], i["task"]), ("started", "BP-1"))
         self.assertIn("     from: the backlog (L1), started by you", self.bp("show", "BP-1").stdout)
+        # a dim ↻ after its mark, wherever it's said, and its sentence says where it came from
+        line = self.bp("ls").stdout.splitlines()[0]
+        self.assertTrue(line.startswith("○↻BP-1  Tidy the errors"), line)
+        self.assertTrue(line.endswith("From the backlog (L1)."), line)
+        picked = self.bp("pick", "--filter", "Tidy", "--from", "nowhere").stdout
+        self.assertEqual(picked, "○↻BP-1  Tidy the errors\n")
         self.assertEqual(self.later().stdout, "↳ L1  Tidy the errors · BP-1, working\n")
         self.assertIn("a task already (BP-1)", self.later("L1", "--start", ok=False).stderr)
         # from the coordinator's pane, the task says so

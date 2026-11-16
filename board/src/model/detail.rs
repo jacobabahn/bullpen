@@ -71,13 +71,13 @@ pub fn yours_phrase(t: &Task, minutes: u64, at: Stamp) -> String {
 }
 
 /// task_detail, then when a task its coordinator is on comes to you, what
-/// auto-accept does with it and the model it chose.
+/// auto-accept does with it, the model it chose and where it came from (the backlog).
 pub fn detail_with_auto(t: &Task, cfg: &Config, at: Stamp) -> String {
     let text = task_detail(t, cfg, at);
     let yours = yours_phrase(t, cfg.triage_minutes, at);
     let model = words::model_detail(cfg.obj(), t.obj());
     let parts = [text.as_str(), yours.as_str(), words::auto_detail(cfg.obj(), t.obj()), model.as_str()];
-    parts.iter().filter(|p| !p.is_empty()).copied().collect::<Vec<_>>().join(" ").trim().to_string()
+    words::from_around(t.obj(), &parts).trim().to_string()
 }
 
 /// Where the task stands: bullpen-core's sentence, but a finished task's without

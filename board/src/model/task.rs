@@ -267,6 +267,11 @@ impl Task {
         })
     }
 
+    /// Did it come from the backlog? A dim ↻ follows its mark.
+    pub fn is_from_backlog(&self) -> bool {
+        words::from_backlog(&self.obj)
+    }
+
     /// When it entered its current status.
     pub fn stamp(&self) -> Option<&str> {
         core::stamp(&self.obj)

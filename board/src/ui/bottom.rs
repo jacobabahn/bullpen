@@ -80,7 +80,11 @@ pub(super) fn draw_bottom(buf: &mut Buffer, area: Rect, app: &App, s: &Sizes, ms
         let tone = if risky { bold().fg(Color::Red) } else { bold() };
         put(buf, area, last, 1, span(model::first_fit(&texts, w.saturating_sub(2)), tone));
     } else {
-        put(buf, area, last, 1, key_row(model::task_keys(cur), w));
+        let keys = match app.current_item() {
+            Some(i) => model::item_keys(i),
+            None => model::task_keys(cur),
+        };
+        put(buf, area, last, 1, key_row(keys, w));
     }
     None
 }

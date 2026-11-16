@@ -4,7 +4,8 @@ The task board (`bullpen board`, a Rust program in `board/`) sits in a narrow
 pane beside the coordinator and updates as soon as a task changes.
 It groups tasks by what you do next: needs you, coordinator on it (dimmed: see
 [Triage](triage.md)), ready to accept, finished (nothing to merge, see
-[Finish](finish.md)), in review, working, queued; `f` adds
+[Finish](finish.md)), in review, working, queued, and last the backlog's ideas
+(Later, see [The Later group](#the-later-group)); `f` adds
 the closed ones (accepted, closed, dropped). `l` switches to a compact layout,
 one line per task under its group's name (dim), with the selected task's detail
 at the bottom (what its agent is doing first). A board with tasks but none to
@@ -30,6 +31,7 @@ Each task starts with its mark, the same one `?` shows under "Marks":
 | `–` dim | dropped |
 | `⣾` turning, in place of the mark | a command (accept, drop, start, resume) or its tour being written |
 | `▌` at the left edge | needs you (amber), stopped (red), or no progress (amber) |
+| `↻` dim, after the mark | the task came from the backlog |
 
 A turning mark stands still, in amber, when its agent has shown no progress for
 a while (see [No progress](check.md#no-progress)), and in its own colour at the usage
@@ -62,7 +64,7 @@ counts shrink to marks, then to what needs you alone; the other repositories go
 only when even their marks don't fit.
 
 `bullpen ls`, `bullpen show` and the picker (`cmd+;` `j`) say a task the way the
-board does: its mark (from the table above), its ID, title and age, then the
+board does: its mark (from the table above, with the `↻` of a task from the backlog), its ID, title and age, then the
 board's line for it, needs-you first as on the board.
 Piped, `ls` prints each task whole on one line; on a terminal it is in colour and
 each line is cut to the width. When that would leave too little room for the line
@@ -99,6 +101,8 @@ in the order `?` lists them:
 | `g` | its guided tour (see [Guided review tours](tours.md), with the keys inside a tour) |
 | `s` | start it |
 | `r` | resume a stopped worker |
+| `L` | the Later group: show its items, or fold them back to its line (see [The Later group](#the-later-group)) |
+| `y` `n` `s` `J` `K` `⏎` | on an item of the Later group: keep it, drop it, start it, move it down or up, show it in full |
 | `l` | switch layout: compact, one line a task, or back |
 | `f` | show the closed tasks too |
 | `o` | show other coordinators' tasks too (see [Several coordinators](several-coordinators.md)) |
@@ -132,6 +136,34 @@ Accepting or dropping from the board (or a shell) is news to the coordinator:
 coordinator's own pane, `accept` and `drop` post nothing: it already knows.
 Tasks that waited on the accepted one start by themselves (see
 [Dependencies](dependencies.md)).
+
+## The Later group
+
+The backlog's open items (see [The backlog](backlog.md)) sit last, under Queued (and
+above Closed, with `f`), folded to one line:
+
+```
+Later · 6 · next: Tidy the watcher's error messages
+```
+
+In amber when something there waits on you, a worker's idea asking for a yes:
+`Later · 6 · 2 to decide (L8, L9)`. An empty backlog has no line. `L` shows a row per
+item, in list order, and selects the first: `?` in amber for one that asks, `◇` dim for
+a kept one, then its ID and title; the selected one has a line saying what to know
+(who it asks from, why the coordinator skipped it, whether it has a brief) and the key
+line its keys. `j` `k` move between tasks and items as one list; `L` again folds it,
+back on the last task. On an item:
+
+| Key | Does |
+| --- | --- |
+| `y` | keep it: an idea that asks goes on the list (`bullpen later L8 --keep`) |
+| `n` | drop it (`--drop`); the next item is selected |
+| `s` | start it: one with a brief becomes a task and starts, in the background, and the new task is selected (`--start`). One with no brief can't start yet: the board asks the coordinator to write one and start it (typed into its pane, as `bullpen say` does) and takes you there, as `c` does |
+| `J` `K` | move it down or up the list (`--down`, `--up`) |
+| `⏎` | the item in full (`bullpen later L7`) |
+
+A task started from the backlog has a dim `↻` after its mark, here, in `ls` and in the
+picker, and its line ends "From the backlog (L7).".
 
 ## Typing a line
 

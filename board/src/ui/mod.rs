@@ -1,11 +1,12 @@
 //! Drawing the board. It sits in a narrow pane, so every line is cut to fit.
 //!
 //! `draw` picks what the mode shows, sizes the board once (`Sizes`), then draws the
-//! list (`list`), the bottom rows (`bottom`), a full-screen view (`overlay`) or the
+//! list (`list`, its Later group `later`), the bottom rows (`bottom`), a full-screen view (`overlay`) or the
 //! `?` list (`help`).
 
 mod bottom;
 mod help;
+mod later;
 mod list;
 mod overlay;
 #[cfg(test)]

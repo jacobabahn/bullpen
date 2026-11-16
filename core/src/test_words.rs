@@ -176,3 +176,25 @@ fn test_a_task_closed_with_its_branch_kept() {
     let after = task(json!({"id": "BP-3", "status": "todo", "after": ["BP-2"]}));
     assert_eq!(waits_phrase(&after, &every), "Waits on BP-2 (branch kept, not merged)");
 }
+
+#[test]
+fn test_a_task_from_the_backlog_says_where_it_came_from() {
+    let plain = task(json!({"id": "BP-1", "status": "todo"}));
+    assert_eq!((from_mark(&plain), from_detail(&plain).as_str()), (" ", ""));
+    let by_hand = task(json!({"id": "BP-2", "status": "todo", "from": "L7", "origin": "backlog", "started_by": "c1"}));
+    assert_eq!(
+        (from_mark(&by_hand), from_detail(&by_hand).as_str()),
+        ("↻", "From the backlog (L7).")
+    );
+    // last in the sentence for one started by hand, first for one that started itself
+    assert_eq!(
+        from_around(&by_hand, &["Not started.", "", "Model: opus."]),
+        "Not started. Model: opus. From the backlog (L7)."
+    );
+    let itself =
+        task(json!({"id": "BP-3", "status": "working", "from": "L8", "origin": "check", "started_by": "itself"}));
+    assert_eq!(from_around(&itself, &["Working."]), "Started by itself (L8). Working.");
+    // closed, it keeps its mark but its sentence doesn't say it
+    let done = task(json!({"id": "BP-4", "status": "done", "from": "L9", "origin": "backlog"}));
+    assert_eq!((from_mark(&done), from_detail(&done).as_str()), ("↻", ""));
+}

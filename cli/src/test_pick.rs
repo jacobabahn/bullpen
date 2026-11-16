@@ -24,6 +24,16 @@ fn test_the_picker_shows_marks_in_colour() {
 }
 
 #[test]
+fn test_a_task_from_the_backlog_has_its_arrow_dim() {
+    let mut p = picker(&["◌↻BP-3  From the backlog"], &["2"]);
+    let out = p.screen(80, 4);
+    assert_eq!(
+        out[2],
+        "\x1b[7m> \x1b[2m◌\x1b[22;39m\x1b[2m↻\x1b[22mBP-3  From the backlog\x1b[0m"
+    );
+}
+
+#[test]
 fn test_fuzzy_matches_each_word_in_order_ignoring_case() {
     let f = fuzzy_score;
     assert!(f("lgn", "Fix the LOGIN redirect").is_some());

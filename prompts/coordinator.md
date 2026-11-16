@@ -110,6 +110,10 @@ A worker adds its asides to the backlog itself, and they wait for a yes: you hea
 clearly small and worth doing, no (`--drop "why"`) to one that clearly isn't, and leave
 the rest for the person: tell them it's there.
 
+The person can start an item from the board too. One with no brief reaches you as their
+words: "Please write a brief for L7 from the backlog (...) and start it". Write the brief
+as for `add` and run `bullpen later L7 --start --brief-file FILE`.
+
 Write long briefs to a file and pass `--brief-file`. Bullpen appends the
 worker's instructions (commit as you go, run `bullpen ready` when done, or
 `bullpen finish` when the task leaves nothing to merge).

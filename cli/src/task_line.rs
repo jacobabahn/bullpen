@@ -4,7 +4,9 @@
 use bullpen_core::json::{s, Obj};
 use bullpen_core::task::is_closed;
 use bullpen_core::text::{fit, len, ljust, width, wrap};
-use bullpen_core::words::{ago, board_detail, is_limited, is_stuck, mark, mark_color, pr_phrase, stale, Every};
+use bullpen_core::words::{
+    ago, board_detail, from_mark, is_limited, is_stuck, mark, mark_color, pr_phrase, stale, Every,
+};
 use bullpen_core::{Repo, Res};
 
 fn sgr(code: &str, text: &str, color: bool) -> String {
@@ -27,9 +29,16 @@ fn title_code(t: &Obj) -> &'static str {
 
 /// The mark, the ID and the title, coloured as on the board.
 fn head(t: &Obj, tid: &str, title: &str, color: bool) -> String {
+    // a task from the backlog has a dim ↻ in the space after its mark
+    let from = from_mark(t);
     format!(
-        "{} {}  {}",
+        "{}{}{}  {}",
         sgr(mark_color(t), mark(s(t, "status")), color),
+        if from == " " {
+            from.to_string()
+        } else {
+            sgr("2", from, color)
+        },
         sgr("2", tid, color),
         sgr(title_code(t), title, color)
     )

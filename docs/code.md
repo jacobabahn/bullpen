@@ -67,7 +67,7 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `text.rs`, `printable.rs`: the width of text (`unicode-width`'s, one function for
   `ls` and the board), cuts as Python's, textwrap, `isprintable` and `shlex.join`
 - `words.rs`: what the board says about a task, for `ls`, `show` and the board: its
-  mark, the board's order, its age, and the board's sentence (`board_detail`, and its
+  mark (and a backlog task's `↻`, `from_mark`, `from_detail`), the board's order, its age, and the board's sentence (`board_detail`, and its
   parts: `status_detail`, `with_gh`, `auto_detail`, `model_detail`, `doing_said`)
 - `fleet.rs`: every known repo in one snapshot (`Fleet`): its root and settings, its
   coordinators (with the watcher's note on each, and Rex's alive, asked apart:
@@ -213,7 +213,11 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `model/groups.rs`, `top.rs`, `confirm.rs`, `text.rs`: the groups and what a board
   hides, the top line's counts (other repos from core's `fleet.rs` snapshot), the confirm
   questions, and fitting text (core's width)
-- `app/` (keys, background jobs, reloading), `ui/` (drawing), `edit.rs` (a line editor)
+- `model/backlog.rs`: the backlog's open items as the board shows them (`load_later`,
+  core's `backlog::read`), the Later line, and each item's mark, line and keys
+- `app/` (keys, background jobs, reloading; `later.rs`: the Later group's keys, `L` and
+  an item's `y` `n` `s` `J` `K` `⏎`), `ui/` (drawing; `later.rs`: the Later group's
+  rows), `edit.rs` (a line editor)
 
 ## Closing a task
 

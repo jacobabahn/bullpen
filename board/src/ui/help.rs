@@ -31,6 +31,14 @@ pub const BOARD_KEYS: &[(&str, &[(&str, &str)])] = &[
         ("s", "start it"),
         ("r", "resume a stopped worker"),
     ]),
+    ("Later: the backlog", &[
+        ("L", "show its items, or fold them"),
+        ("y", "keep an idea that asks"),
+        ("n", "drop the item"),
+        ("s", "start it (or ask for a brief)"),
+        ("J K", "move it down, up the list"),
+        ("⏎", "the item in full"),
+    ]),
     ("The board", &[
         ("l", "switch layout"),
         ("f", "show closed tasks too"),
@@ -87,6 +95,9 @@ fn help_lines(w: usize) -> Vec<Line<'static>> {
         m("dropped", "dropped"),
         (SPINNER[0].to_string(), "a command or its tour running", bold()),
         ("▌".to_string(), "needs you; red: stopped", Style::new().fg(AMBER)),
+        (format!("{}↻", model::mark("todo")), "came from the backlog", dim()),
+        ("?".to_string(), "an idea asking for a yes", bold().fg(AMBER)),
+        ("◇".to_string(), "an idea on the list", dim()),
     ]);
     out
 }

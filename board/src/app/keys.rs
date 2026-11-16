@@ -1,5 +1,5 @@
 //! What each key does: a mode's keys while one is open, else the board's and the
-//! selected task's.
+//! selected task's (or the selected backlog item's: later.rs).
 
 use super::jobs::{last_line, run};
 use super::{App, Job, Kind, Mode, Note};
@@ -11,7 +11,7 @@ use std::time::Instant;
 /// Does this key do something to a task (or leave the board for the coordinator)?
 /// Esc counts too: it puts a failure away.
 fn acts_on_task(code: KeyCode, ch: Option<char>) -> bool {
-    matches!(code, KeyCode::Enter | KeyCode::Esc) || ch.is_some_and(|c| "adsrpvtigc".contains(c))
+    matches!(code, KeyCode::Enter | KeyCode::Esc) || ch.is_some_and(|c| "adsrpvtigcyJK".contains(c))
 }
 
 /// A key in a peek: None stays in it, Some(false) goes back to the board, Some(true)
@@ -236,7 +236,16 @@ impl App {
             return true;
         }
 
-        let ids: Vec<String> = self.order().iter().map(|t| t.id.clone()).collect();
+        if ch == Some('L') && !ctrl {
+            self.toggle_later();
+            return true;
+        }
+        // an item of the Later group selected: its keys first (its n drops, its s starts)
+        if !ctrl && self.item_key(k.code, ch) {
+            return true;
+        }
+
+        let ids = self.nav_ids();
         let i = ids.iter().position(|x| Some(x) == self.sel.as_ref()).unwrap_or(0);
         // the selection moves; the list scrolls to keep it in view
         let page = self.page.max(1);

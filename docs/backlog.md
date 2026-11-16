@@ -62,6 +62,9 @@ A started item's task carries where it came from: `from` (the item, `L7`), `orig
      from: the backlog (L7), started by c1
 ```
 
+On the board, in `ls` and in the picker the task has a dim `↻` after its mark
+(`○↻BP-9  Tidy the watcher's error messages`), and its line ends "From the backlog (L7).".
+
 The item becomes `started`, its `task` the new task's ID. A task dropped or closed with its
 branch kept leaves its item `started`: it was tried. `bullpen later "..."` again to retry.
 
@@ -159,5 +162,13 @@ its lock (`backlog.lock`) so two commands adding at once both land; an item's br
 `dropped` or `done`. `note` is why it was dropped; `skipped`, why it was passed over
 (until pickup's next start).
 
+## On the board
+
+The board's last group, Later, is the list: one line (`Later · 6 · next: ...`, amber with
+items that ask), and with `L` a row per item, where `y` keeps, `n` drops, `s` starts
+(asking the coordinator for a brief when there's none) and `J` `K` move. See
+[The Later group](board.md#the-later-group).
+
 The code: `core/src/backlog.rs` (the item, loading and saving under the lock, the order),
-shared with the board, and the command in `cli/src/backlog/`.
+shared with the board (`board/src/model/backlog.rs`, `app/later.rs`, `ui/later.rs`), and
+the command in `cli/src/backlog/`.

@@ -9,7 +9,7 @@ use bullpen_core::repo::{find_repo, known_repos};
 use bullpen_core::settings::TERMINAL;
 use bullpen_core::task::is_closed;
 use bullpen_core::text::{fit, len, ljust, strip};
-use bullpen_core::words::{board_order, mark, mark_color, MARKED};
+use bullpen_core::words::{board_order, from_mark, mark, mark_color, MARKED};
 use bullpen_core::{fail, Repo, Res};
 use serde_json::{json, Value};
 use std::io::{IsTerminal, Write};
@@ -82,8 +82,9 @@ fn pick_lines(items: &[(std::rc::Rc<Repo>, Obj)]) -> Vec<String> {
                 String::new()
             };
             format!(
-                "{name}{} {}  {}",
+                "{name}{}{}{}  {}",
                 mark(s(t, "status")),
+                from_mark(t),
                 ljust(s(t, "id"), iw),
                 t.get("title").map_or(String::new(), py_str)
             )
@@ -268,13 +269,12 @@ impl Picker {
         match (self.colors.is_empty(), at) {
             (false, Some(at)) => {
                 let part = |a: usize, b: usize| chars[a..b].iter().collect::<String>();
-                format!(
-                    "{}\x1b[{}m{}\x1b[22;39m{}",
-                    part(0, at),
-                    self.colors[i],
-                    chars[at],
-                    part(at + 1, chars.len())
-                )
+                // a task from the backlog: its ↻ dim
+                let rest = match chars.get(at + 1) {
+                    Some('↻') => format!("\x1b[2m↻\x1b[22m{}", part(at + 2, chars.len())),
+                    _ => part(at + 1, chars.len()),
+                };
+                format!("{}\x1b[{}m{}\x1b[22;39m{rest}", part(0, at), self.colors[i], chars[at])
             }
             _ => line.into(),
         }

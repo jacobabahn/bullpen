@@ -1,8 +1,10 @@
 //! The board's list: the header line, the rows of tasks under their groups, scrolled
-//! to keep the selected task in view, and the compact layout's detail panel.
+//! to keep the selected task in view, and the compact layout's detail panel. The
+//! Later group's rows are later.rs's.
 
+use super::later::{draw_item, draw_item_detail, draw_later_line, later_rows};
 use super::{bold, dim, mark_style, put, rev, review_mark, span, spinner, working_mark, Sizes, AMBER, TINT};
-use crate::model::{self, fit, pad, width, Layout, Task, STALE};
+use crate::model::{self, fit, pad, width, Item, Layout, Task, STALE};
 use crate::App;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -11,13 +13,28 @@ use ratatui::text::Line;
 
 type Now = chrono::DateTime<chrono::FixedOffset>;
 
-enum Row<'a> {
+pub(super) enum Row<'a> {
     Head(String),
     Title(&'a Task),
     /// a line under a task; loud when it says what the task needs from you; its first
     /// columns (on a narrow board) the task's age
     Detail(&'a Task, String, bool, usize),
     Gap,
+    /// what a board with no tasks to show says instead; the first line bold
+    Empty(String, bool),
+    /// the Later group folded to one line; amber when something there waits on you
+    Later(String, bool),
+    /// an item of the Later group, expanded
+    Item(&'a Item),
+    /// a line under the selected item
+    ItemDetail(String),
+}
+
+impl Row<'_> {
+    /// A line under a task or an item: scrolling keeps them with it.
+    fn is_detail(&self) -> bool {
+        matches!(self, Row::Detail(..) | Row::ItemDetail(..))
+    }
 }
 
 /// How many lines of detail the selected task gets.
@@ -32,27 +49,30 @@ pub(super) fn draw_list(buf: &mut Buffer, area: Rect, app: &mut App, s: &Sizes, 
     let groups = model::shown_groups(&app.tasks, &app.cfg, app.me.as_deref(), app.closed);
     let cur_id = app.current().map(|t| t.id.clone());
     let is_cur = |t: &Task| Some(&t.id) == cur_id.as_ref();
+    let item_id = app.current_item().map(|i| i.id.clone());
+    // the selected task's row, or the selected item's
+    let is_sel = |r: &Row| match r {
+        Row::Title(t) => is_cur(t),
+        Row::Item(i) => Some(&i.id) == item_id.as_ref(),
+        _ => false,
+    };
     // IDs share a column as wide as the longest, so titles and details line up
-    let idw = groups.iter().flat_map(|(_, ts)| ts).map(|t| width(&t.id)).max().unwrap_or(0);
+    let items = app.later.iter().filter(|_| app.later_open).map(|i| width(&i.id));
+    let idw = groups.iter().flat_map(|(_, ts)| ts).map(|t| width(&t.id)).chain(items).max().unwrap_or(0);
     let age_on_detail = s.narrow && layout == Layout::Grouped;
     // from under the ID to the right edge
     let detail_w = w.saturating_sub(5);
 
     header(buf, area, app, &groups, w);
 
-    let rows = build_rows(app, &groups, &is_cur, age_on_detail, detail_w, now);
-    let top = scroll(&rows, app.top, s.avail, &is_cur);
+    // by copy, as the groups are by field: app.top changes while the rows are in use
+    let later = app.later.clone();
+    let rows = build_rows(app, &groups, &later, &is_cur, age_on_detail, detail_w, now);
+    let top = scroll(&rows, app.top, s.avail, &is_sel);
     app.top = top;
-    // a page, for PgDn and PgUp: the tasks this list has room for
-    app.page = rows.iter().skip(top).take(s.avail).filter(|r| matches!(r, Row::Title(_))).count().max(1);
+    // a page, for PgDn and PgUp: the tasks (and items) this list has room for
+    app.page = rows.iter().skip(top).take(s.avail).filter(|r| matches!(r, Row::Title(_) | Row::Item(_))).count().max(1);
     let app = &*app;
-
-    if groups.is_empty() {
-        let lines = model::empty_board(&app.tasks, &app.cfg, app.me.as_deref(), app.closed);
-        for (j, line) in lines.iter().enumerate() {
-            put(buf, area, 2 + j, 1, span(fit(line, w.saturating_sub(2)), if j == 0 { bold() } else { dim() }));
-        }
-    }
 
     for (j, row) in rows.iter().skip(top).take(s.avail).enumerate() {
         let y = 2 + j;
@@ -80,6 +100,9 @@ pub(super) fn draw_list(buf: &mut Buffer, area: Rect, app: &mut App, s: &Sizes, 
                     None => span(model::mark(&t.status), mark_style(&t.status)),
                 };
                 put(buf, area, y, 1, mark);
+                if t.is_from_backlog() {
+                    put(buf, area, y, 2, span("↻", dim()));
+                }
                 put(buf, area, y, 3, title_line(app, t, is_cur(t), w, idw, s.narrow, !age_on_detail, now));
             }
             Row::Detail(t, text, loud, lead) => {
@@ -97,6 +120,10 @@ pub(super) fn draw_list(buf: &mut Buffer, area: Rect, app: &mut App, s: &Sizes, 
                 put(buf, area, y, 3, Line::from(vec![span(age, age_style(t, is_cur(t), now)), span(rest, style)]));
             }
             Row::Gap => {}
+            Row::Empty(text, first) => put(buf, area, y, 1, span(fit(text, w.saturating_sub(2)), if *first { bold() } else { dim() })),
+            Row::Later(text, amber) => draw_later_line(buf, area, y, app, text, *amber, w),
+            Row::Item(i) => draw_item(buf, area, y, app, i, idw, w),
+            Row::ItemDetail(text) => draw_item_detail(buf, area, y, text, detail_w),
         }
     }
     if top + s.avail < rows.len() {
@@ -161,10 +188,13 @@ fn header(buf: &mut Buffer, area: Rect, app: &App, groups: &[(&'static str, Vec<
 }
 
 /// The list's rows: each group's heading, then its tasks, each (grouped) with its
-/// detail lines.
+/// detail lines; the Later group after the open ones, before Closed. With no group
+/// to show, what the board says instead.
+#[allow(clippy::too_many_arguments)]
 fn build_rows<'a>(
     app: &App,
     groups: &[(&'static str, Vec<&'a Task>)],
+    later: &'a [Item],
     is_cur: &dyn Fn(&Task) -> bool,
     age_on_detail: bool,
     detail_w: usize,
@@ -172,7 +202,16 @@ fn build_rows<'a>(
 ) -> Vec<Row<'a>> {
     let layout = app.cfg.layout;
     let mut rows: Vec<Row> = Vec::new();
+    if groups.is_empty() {
+        let lines = model::empty_board(&app.tasks, &app.cfg, app.me.as_deref(), app.closed);
+        rows.extend(lines.into_iter().enumerate().map(|(j, l)| Row::Empty(l, j == 0)));
+    }
+    let mut later_due = true;
     for (gi, (heading, ts)) in groups.iter().enumerate() {
+        if *heading == "Closed" {
+            later_due = false;
+            rows.extend(later_rows(app, later, !rows.is_empty(), detail_w));
+        }
         // the compact layout's group names, dim, sit where the grouped one leaves a blank row
         if gi > 0 && layout == Layout::Grouped {
             rows.push(Row::Gap);
@@ -216,15 +255,18 @@ fn build_rows<'a>(
             }
         }
     }
+    if later_due {
+        rows.extend(later_rows(app, later, !rows.is_empty(), detail_w));
+    }
     rows
 }
 
-/// The first row to show, from `top`: keeps the selected task in view with its
-/// details, starting at a heading or a task.
-fn scroll(rows: &[Row], mut top: usize, avail: usize, is_cur: &dyn Fn(&Task) -> bool) -> usize {
-    let sel_row = rows.iter().position(|r| matches!(r, Row::Title(t) if is_cur(t)));
+/// The first row to show, from `top`: keeps the selected task (or item) in view with
+/// its details, starting at a heading or a task.
+fn scroll(rows: &[Row], mut top: usize, avail: usize, is_sel: &dyn Fn(&Row) -> bool) -> usize {
+    let sel_row = rows.iter().position(is_sel);
     if let Some(i) = sel_row {
-        let details = rows[i + 1..].iter().take_while(|r| matches!(r, Row::Detail(..))).count();
+        let details = rows[i + 1..].iter().take_while(|r| r.is_detail()).count();
         // the row after its last detail too, so the next row shows there's more
         let end = i + details + 1;
         if i < top {
@@ -234,7 +276,7 @@ fn scroll(rows: &[Row], mut top: usize, avail: usize, is_cur: &dyn Fn(&Task) -> 
         }
     }
     top = top.min(rows.len().saturating_sub(avail));
-    while top > 0 && top < rows.len() && matches!(rows[top], Row::Detail(..) | Row::Gap) {
+    while top > 0 && top < rows.len() && (rows[top].is_detail() || matches!(rows[top], Row::Gap)) {
         top += 1;
     }
     if let Some(i) = sel_row {

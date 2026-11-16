@@ -19,6 +19,8 @@ pub enum Job {
     DropForce,
     Start,
     Resume,
+    /// a backlog item made a task and started (`later L7 --start`)
+    StartItem,
 }
 
 impl Job {
@@ -30,6 +32,7 @@ impl Job {
             Job::DropForce => &["drop", id, "--force"],
             Job::Start => &["start", id],
             Job::Resume => &["resume", id],
+            Job::StartItem => &["later", id, "--start"],
         };
         a.iter().map(|s| s.to_string()).collect()
     }
@@ -40,7 +43,7 @@ impl Job {
             Job::Accept => "Accepting",
             Job::Close => "Closing",
             Job::Drop | Job::DropForce => "Dropping",
-            Job::Start => "Starting",
+            Job::Start | Job::StartItem => "Starting",
             Job::Resume => "Resuming",
         }
     }
@@ -51,7 +54,7 @@ impl Job {
             Job::Accept => "Accepted",
             Job::Close => "Closed",
             Job::Drop | Job::DropForce => "Dropped",
-            Job::Start => "Started",
+            Job::Start | Job::StartItem => "Started",
             Job::Resume => "Resumed",
         }
     }
@@ -140,7 +143,9 @@ impl App {
                 self.sel = Some(next);
             }
         }
-        if job == Job::Drop && !ok && out.contains("uncommitted") && self.pending.is_none() {
+        if job == Job::StartItem {
+            self.item_started(&id, ok, out);
+        } else if job == Job::Drop && !ok && out.contains("uncommitted") && self.pending.is_none() {
             // ask again on its row, about losing the changes this time
             self.sel = Some(id.clone());
             self.pending = Some((Action::DropForce, id));

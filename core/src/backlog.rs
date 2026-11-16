@@ -46,7 +46,13 @@ fn lock_path(repo: &Repo) -> PathBuf {
 
 /// The repo's backlog as it is now (empty when it has none).
 pub fn load(repo: &Repo) -> Res<Backlog> {
-    let Some(o) = json::read_obj(&path(repo))? else {
+    read(&path(repo))
+}
+
+/// The backlog in this file (empty when there's none): the board reads its repo's
+/// `backlog.json` by path.
+pub fn read(file: &std::path::Path) -> Res<Backlog> {
+    let Some(o) = json::read_obj(file)? else {
         return Ok(Backlog {
             next: 1,
             items: Vec::new(),
