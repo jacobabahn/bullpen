@@ -296,6 +296,15 @@ impl Waiter {
             lines.extend(old.into_iter().filter(|r| r.end <= cursor).filter_map(|r| r.said));
         }
         lines.extend(new.iter().filter_map(|r| r.said.clone()));
+        if lines.is_empty() {
+            self.batch = None; // nothing of the failed wake is left to say (the log was cut)
+            update_wait(&self.repo, &self.cid, |w| {
+                if let Some(woke) = w.get_mut("woke").and_then(Value::as_object_mut) {
+                    woke.remove("from");
+                }
+            })?;
+            return Ok(Step::Wait);
+        }
         let end = new.last().map_or(cursor, |r| r.end);
         // From here to the exit nothing stops it: moving the cursor and printing go together.
         hold_signals();
