@@ -67,6 +67,19 @@ const TELL: &[Arg] = &[ID, pos("message", Nargs::Some, "the words to type")];
 
 /// `start`: make a task's worktree and start its worker.
 pub fn cmd_start(argv: &[String]) -> Res<i32> {
+    let t = start(argv)?;
+    println!(
+        "{} started in {} (branch {}, pane {})",
+        s(&t, "id"),
+        s(&t, "worktree"),
+        s(&t, "branch"),
+        s(&t, "block")
+    );
+    Ok(0)
+}
+
+/// Start the task as `start` would with these arguments; the task, started.
+pub fn start(argv: &[String]) -> Res<bullpen_core::Obj> {
     let a = Args::parse("start", argv, START);
     let repo = Repo::new(repo_root()?)?;
     let mut t = repo.task(a.arg("id").unwrap_or(""))?;
@@ -119,13 +132,7 @@ pub fn cmd_start(argv: &[String]) -> Res<i32> {
             hook_log(&repo, &t, "setup").display()
         ));
     }
-    println!(
-        "{id} started in {} (branch {}, pane {})",
-        s(&t, "worktree"),
-        s(&t, "branch"),
-        s(&t, "block")
-    );
-    Ok(0)
+    Ok(t)
 }
 
 /// --pane: where the task's worker pane goes from its next start on, over the `workers`

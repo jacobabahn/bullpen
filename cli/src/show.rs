@@ -246,6 +246,7 @@ pub fn cmd_show(argv: &[String]) -> Res<i32> {
         let after: Vec<String> = t["after"].as_array().into_iter().flatten().map(py_str).collect();
         out.push(format!("    after: {}", after.join(", ")));
     }
+    out.extend(crate::backlog::from_line(&t));
     let own = owner(&repo, &t);
     if coordinators(&repo).len() > 1 || (truthy(t.get("coordinator")) && own.is_none()) {
         out.push(match own {

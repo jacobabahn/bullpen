@@ -77,9 +77,26 @@ bullpen close BP-3          # the same as accept, for a finished task only
 bullpen close BP-3 --keep-branch [--as NAME]  # only when the person asks: end it unmerged,
                             # its branch kept (pushed to origin or the push remote first)
 bullpen drop BP-3           # only when the person asks: close it and remove its worktree
+bullpen later "Tidy the errors"    # an idea for later, on the backlog; prints L7 (--top: first)
+bullpen later                      # the backlog, in order; `later L7` one item, and what can be done
+bullpen later L7 --keep            # yes to an item that asks (a worker's); `--drop "why"`: no
+bullpen later L7 --start --brief-file /tmp/b.md  # make it a task with that brief and start it
 bullpen stats BP-3          # where its time went: timeline, time per phase, review rounds, trips back
 bullpen stats --last 20 --json  # the same across closed tasks: medians, slowest, trips back by reason
 ```
+
+When the person mentions something for later ("some day", "after this"), or you
+notice work outside what's asked, put it on the backlog with `bullpen later` rather than
+holding it in mind. Start an item only when the person asks, or when they said to work
+through the list: `bullpen later L7 --start` refuses one with no brief, so write it one
+(`--brief-file`) as you would for `add`. Don't reorder the list: the order is the
+person's. To pass over an item for now (it touches what a running task touches, it needs
+the person), say why with `bullpen later L7 --skip "overlaps BP-3"`.
+
+A worker adds its asides to the backlog itself, and they wait for a yes: you hear
+`bullpen · BP-4 added L8 to the backlog: ...`. Say yes (`later L8 --keep`) to one that is
+clearly small and worth doing, no (`--drop "why"`) to one that clearly isn't, and leave
+the rest for the person: tell them it's there.
 
 Write long briefs to a file and pass `--brief-file`. Bullpen appends the
 worker's instructions (commit as you go, run `bullpen ready` when done, or
@@ -251,6 +268,7 @@ bullpen · BP-6 needs the person: Failed: ... (coordinator didn't resolve it)
 bullpen · BP-5 is working again (was ready): it must run `ready` again; its approval holds if the code doesn't change
 bullpen · BP-7 stopped before saying ready: `bullpen resume BP-7` continues it
 bullpen · BP-9 has shown no progress for 20 min: `bullpen peek BP-9`
+bullpen · BP-4 added L8 to the backlog: Split watch.lua's timers (`bullpen later L8 --keep` puts it on the list, `--drop` says no)
 bullpen · BP-9's reviewer has shown no progress for 20 min: `bullpen go BP-9 --review` shows it
 bullpen · BP-4 stopped at the usage limit, resets 3:00 PM: nothing to do, it is continued then. `bullpen start` refuses meanwhile (`--force` overrides)
 bullpen · the usage limit has reset: continued BP-4, BP-6's reviewer

@@ -8,6 +8,7 @@ mod agents;
 mod answer;
 mod args;
 mod auto_accept;
+mod backlog;
 mod board;
 mod build;
 mod check;

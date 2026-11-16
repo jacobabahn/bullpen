@@ -2,6 +2,7 @@
 //! table, a repo's config and tasks, a task's status, and the Python's ways with JSON,
 //! text, time and programs (bullpen was Python first), so the files it writes stay the same.
 
+pub mod backlog;
 pub mod config;
 pub mod fail;
 pub mod fleet;

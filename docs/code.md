@@ -81,6 +81,8 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `proc.rs`: running a program, `git`, `file_hash` (`sha256.rs`)
 - `sha1.rs`: SHA-1, for a review's own lines (hashlib's)
 - `lock.rs`: flock
+- `backlog.rs`: the backlog (`backlog.json`): its items, loading and saving under its
+  lock (`change`), the order and moves
 
 `cli/src/`:
 
@@ -143,6 +145,8 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   the worker's brief and pane (`start_task`, `launch`) and `hand_back`; `queue.rs`: the
   run queue (`start_queued`); `peek.rs`: `peek`
 - `triage.rs`: `ask`, `ok` and `note`
+- `backlog/`: `later` (`mod.rs`: adding, who's calling, keep, drop, skip, moves, and
+  `show`'s from line; `list.rs`: the list's lines; `start.rs`: an item made a task)
 - `config.rs`: `config`, its flags made from the settings table
 - `pick.rs`: the jump picker (`pick`, `--filter`, `--pane`)
 - `line_edit.rs`: typing on a terminal: raw mode, bracketed paste, the keys a read

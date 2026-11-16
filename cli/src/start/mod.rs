@@ -184,7 +184,7 @@ pub fn slot_freed(old: &Obj, t: &Obj) -> Option<&'static str> {
 }
 
 /// Path.read_text(): the file as UTF-8, with universal newlines.
-fn read_text(path: &str) -> Res<String> {
+pub fn read_text(path: &str) -> Res<String> {
     let bytes = std::fs::read(path).map_err(|e| {
         let n = e.raw_os_error().unwrap_or(0);
         let said = e.to_string();
@@ -199,6 +199,13 @@ fn read_text(path: &str) -> Res<String> {
 
 /// `add`: add a task; prints its ID.
 pub fn cmd_add(argv: &[String]) -> Res<i32> {
+    println!("{}", add(argv, Obj::new())?);
+    Ok(0)
+}
+
+/// Add the task `add` would with these arguments, with extra's fields on it too (the
+/// backlog's `from` and `origin`); its ID.
+pub fn add(argv: &[String], extra: Obj) -> Res<String> {
     let a = Args::parse("add", argv, ADD);
     let mut repo = Repo::new(repo_root()?)?;
     let brief = match a.opt("--brief-file").filter(|f| !f.is_empty()) {
@@ -254,12 +261,12 @@ pub fn cmd_add(argv: &[String]) -> Res<i32> {
     if let Some(pane) = a.opt("--pane").filter(|p| !p.is_empty()) {
         t.insert("placement".into(), json!(pane)); // over the workers setting, from its next start
     }
+    t.extend(extra);
     let briefs = repo.dir.join("briefs");
     std::fs::create_dir_all(&briefs)?;
     std::fs::write(briefs.join(format!("{tid}.md")), format!("{}\n", rstrip(&brief)))?;
     crate::saves::save(&repo, &mut t)?;
-    println!("{tid}");
-    Ok(0)
+    Ok(tid)
 }
 
 /// `after`, `model` and `review-mode` change only a task that isn't closed.

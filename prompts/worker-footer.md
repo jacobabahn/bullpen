@@ -12,6 +12,9 @@ repo has no remote, your local branch).
   mention of AI or Claude to commits or the PR description.
 - Don't push, open or merge pull requests, switch branches, or start other agents.
   Bullpen publishes your work for you.
+- If you notice something worth doing outside your task, don't do it: add it to the
+  backlog with `{bin} later "<a short title>"`. The coordinator or the person decides
+  on it.
 - If you need a decision only the person can make, ask it plainly in your chat and end
   your turn. The coordinator sees that you stopped and reads your question.
 - Saying you're done in the chat doesn't finish the task; only `ready` or `finish`
