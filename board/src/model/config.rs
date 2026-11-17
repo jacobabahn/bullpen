@@ -3,7 +3,8 @@
 //! view (`Config`). A setting of the wrong shape counts as its default.
 
 use bullpen_core::config::{load_config, read_own};
-use bullpen_core::json::Obj;
+use bullpen_core::coordinators::sees_to;
+use bullpen_core::json::{self, Obj};
 use bullpen_core::settings::defaults;
 use serde_json::Value;
 use std::path::Path;
@@ -37,15 +38,18 @@ pub struct Config {
 }
 
 impl Config {
-    /// Is the task another coordinator's? Only when there are several: a task with
-    /// no owner, or one whose owner is gone, is everyone's. bullpen drops a coordinator
-    /// once its pane closes, so a listed one is running: this agrees with bullpen's
-    /// `sees_to` without asking Rex about panes.
+    /// Is the task another coordinator's: its owner, not me, sees to it (core's
+    /// `sees_to`)? Only when there are several: a task with no owner, or one whose owner
+    /// is gone, is everyone's. bullpen drops a coordinator once its pane closes, so a
+    /// listed one is taken as running, without asking Rex about panes.
     pub fn theirs(&self, t: &Task, me: Option<&str>) -> bool {
-        match (me, t.coordinator.as_deref()) {
-            (Some(me), Some(o)) => self.coordinators.len() > 1 && o != me && self.coordinators.iter().any(|c| c == o),
-            _ => false,
+        let (Some(me), Some(owner)) = (me, t.coordinator.as_deref()) else { return false };
+        if self.coordinators.len() < 2 || owner == me {
+            return false;
         }
+        let cs: Vec<Obj> = self.coordinators.iter().map(|id| Obj::from_iter([("id".into(), Value::from(id.as_str()))])).collect();
+        let sees = sees_to(cs.iter().collect(), t.obj(), |_| Ok(true)).unwrap_or_default();
+        matches!(sees.as_slice(), [c] if json::s(c, "id") == owner)
     }
 
     /// Does the board beside coordinator me show the other coordinators' tasks?

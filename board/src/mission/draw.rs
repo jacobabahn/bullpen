@@ -258,7 +258,7 @@ fn draw_list(buf: &mut Buffer, area: Rect, m: &mut Mission, size: Size, now: Now
 /// The amber (or red) bar beside a task that needs you, or whose agent went quiet.
 fn bar(buf: &mut Buffer, area: Rect, y: usize, t: &TaskState) {
     let st = items::status(t);
-    if matches!(st, "needs" | "stopped") || bullpen_core::words::is_stuck(&t.task) {
+    if bullpen_core::task::needs_you(st) || bullpen_core::words::is_stuck(&t.task) {
         let c = if st == "stopped" { Color::Red } else { AMBER };
         put(buf, area, y, 0, span("▌", Style::new().fg(c)));
     }
@@ -299,7 +299,7 @@ fn title_line(m: &Mission, i: Item, t: &TaskState, repo: &str, repow: usize, idw
     let right = width(&age) + risk.map_or(0, |r| width(r) + if age.is_empty() { 0 } else { 2 });
     let room = all.saturating_sub(width(&lead) + idw + 2 + right + 2);
     let middle = pad(&format!("  {}", fit(title, room)), all.saturating_sub(width(&lead) + idw + right));
-    let stale = matches!(items::status(t), "needs" | "stopped")
+    let stale = bullpen_core::task::needs_you(items::status(t))
         && bullpen_core::task::stamp(&t.task).is_some_and(|s| bullpen_core::timeutil::seconds_since(s, Some(now)) >= model::STALE);
     let age_style = if stale { bold().fg(Color::Red) } else { dim() };
     let (lead_style, id_style, title_style, age_style) = match (asked, selected) {
@@ -388,7 +388,7 @@ fn draw_detail(buf: &mut Buffer, area: Rect, m: &Mission, now: Now) {
 /// now, where it stands (with auto-accept and the model it chose), the size of its
 /// change and its tour.
 fn detail_texts(app: &App, t: &Task, ts: &TaskState, now: Now) -> Vec<(String, Style)> {
-    let loud = if matches!(t.status.as_str(), "needs" | "stopped" | "ready" | "finished") { Style::new() } else { dim() };
+    let loud = if t.needs_you() || t.awaits_accept() { Style::new() } else { dim() };
     let mut out = Vec::new();
     if !ts.doing.is_empty() {
         out.push((ts.doing.clone(), Style::new()));

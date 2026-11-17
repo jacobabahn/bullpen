@@ -15,13 +15,14 @@ use crate::news::say;
 use crate::risk::{assess, Said};
 use bullpen_core::json::{obj, s, write_obj, Obj};
 use bullpen_core::risk::{label, stored};
+use bullpen_core::task::nothing_to_merge;
 use bullpen_core::{Repo, Res};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 /// Is the task ready with a change, and with no word about its risk in its record?
 pub fn unlabelled(t: &Obj) -> bool {
-    s(t, "status") == "ready" && !t.contains_key("risk") && !s(t, "why").starts_with("Nothing to merge")
+    s(t, "status") == "ready" && !t.contains_key("risk") && !nothing_to_merge(t)
 }
 
 /// Where the findings of the round that approved the task are, or None (no approval).

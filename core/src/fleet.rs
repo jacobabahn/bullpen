@@ -10,9 +10,10 @@
 //! coordinator's pane is alive is Rex's to say, so it's asked apart (`Fleet::ask_alive`).
 
 use crate::config::{load_config, read_own, task_files};
+use crate::coordinators;
 use crate::json::{self, s, Obj};
 use crate::paths::{safe, state};
-use crate::task::{is_closed, task_num};
+use crate::task::{awaits_accept, is_closed, needs_you, task_num};
 use crate::words::{agent_block, board_order, board_sentence, doing_said, every, mark, Every};
 use crate::{Fail, Repo, Res};
 use serde_json::{json, Value};
@@ -144,7 +145,7 @@ impl Reader {
             .into_iter()
             .map(|t| self.task_state(state, &repo, &every, t))
             .collect();
-        let coordinators = coordinator_list(&repo)
+        let coordinators = coordinators::list(&repo.cfg)
             .into_iter()
             .map(|c| self.coordinator(state, c))
             .collect();
@@ -319,21 +320,17 @@ pub fn unread(state: &Path) -> Vec<Unread> {
         .collect()
 }
 
-/// The repo's coordinators, oldest first (an entry that isn't an object is left out).
-fn coordinator_list(repo: &Repo) -> Vec<&Obj> {
-    let list = repo.cfg.get("coordinators").and_then(Value::as_array);
-    list.into_iter().flatten().filter_map(Value::as_object).collect()
-}
-
 /// What needs you, what's ready and what's running among these tasks.
 pub fn counts<'a>(tasks: impl Iterator<Item = &'a Obj>) -> Counts {
     let mut c = Counts::default();
     for t in tasks {
-        match s(t, "status") {
-            "needs" | "stopped" => c.needs += 1,
-            "ready" | "finished" => c.ready += 1,
-            "working" | "review" => c.running += 1,
-            _ => {}
+        let st = s(t, "status");
+        if needs_you(st) {
+            c.needs += 1;
+        } else if awaits_accept(st) {
+            c.ready += 1;
+        } else if matches!(st, "working" | "review") {
+            c.running += 1;
         }
     }
     c

@@ -44,7 +44,7 @@ pub fn tour_phrase(t: &Task) -> &'static str {
     if t.tour_writing() {
         return "Writing its tour…";
     }
-    if t.status != "ready" || t.why.as_deref().unwrap_or("").starts_with("Nothing to merge") {
+    if t.status != "ready" || t.nothing_to_merge() {
         return "";
     }
     match t.tour.as_ref().map(|r| r.state.as_str()) {

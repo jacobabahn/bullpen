@@ -202,6 +202,23 @@ fn only_the_agent_a_task_waits_on_is_limited() {
 }
 
 #[test]
+fn what_needs_you_and_what_waits_on_your_accept() {
+    let needs: Vec<&str> = crate::words::MARKED.into_iter().filter(|st| needs_you(st)).collect();
+    assert_eq!(needs, ["needs", "stopped"]);
+    let accept: Vec<&str> = crate::words::MARKED
+        .into_iter()
+        .filter(|st| awaits_accept(st))
+        .collect();
+    assert_eq!(accept, ["ready", "finished"]);
+    let nothing = json!({"status": "ready", "why": "Nothing to merge (no commits)"});
+    assert!(nothing_to_merge(&task(nothing)));
+    assert!(!nothing_to_merge(&task(json!({"status": "ready", "why": "Approved"}))));
+    assert!(!nothing_to_merge(&task(json!({"status": "ready"}))));
+    let review = json!({"status": "review", "why": "Nothing to merge (no commits)"});
+    assert!(!nothing_to_merge(&task(review)));
+}
+
+#[test]
 fn statuses_and_numbers() {
     assert!(is_closed("done") && is_closed("dropped") && !is_closed("ready"));
     assert!(is_waiting("triage") && !is_waiting("stopped"));

@@ -314,7 +314,7 @@ pub(super) fn draw_panel(buf: &mut Buffer, area: Rect, app: &App, s: &Sizes, cur
 /// ready, finished); background is dim (working, queued, in review, the coordinator's,
 /// closed), and so is all of another coordinator's task, as its title is.
 fn loud_detail(app: &App, t: &Task) -> bool {
-    matches!(t.status.as_str(), "needs" | "stopped" | "ready" | "finished") && !app.cfg.theirs(t, app.me.as_deref())
+    (t.needs_you() || t.awaits_accept()) && !app.cfg.theirs(t, app.me.as_deref())
 }
 
 /// A task's age's style: red once it has needed you STALE seconds, on the tint when selected.

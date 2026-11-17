@@ -7,7 +7,7 @@ Words bullpen's code and docs use. The code for a task's lifecycle is in
 
 **Coordinator**: the agent you talk to. It turns what you ask into tasks, starts their workers and sees to their stops. A repository can have several, `c1`, `c2`, ...
 
-**Sees to**: the coordinators who see to a task: its own (the one that added it, or adopted it) while that one's pane is running, else every running coordinator, else nobody, and the task needs the person. They get its news and its triage stops, its panes go in their tab, and their boards show it. A coordinator whose pane closes is dropped, so a listed coordinator is a running one. `sees_to` in `cli/src/coordinators.rs` is the rule.
+**Sees to**: the coordinators who see to a task: its own (the one that added it, or adopted it) while that one's pane is running, else every running coordinator, else nobody, and the task needs the person. They get its news and its triage stops, its panes go in their tab, and their boards show it. A coordinator whose pane closes is dropped, so a listed coordinator is a running one. `sees_to` in `core/src/coordinators.rs` is the rule: the command line asks Rex whether each pane is running, and the board takes a listed one as running.
 
 **Worker**: the agent doing one task, in its own pane, worktree and branch. A **reviewer** is the agent that checks it after `ready`.
 
@@ -24,7 +24,7 @@ _Avoid_: window, block (Rex's API word for it).
 
 ## A task's lifecycle
 
-**Task status**: where a task is: `todo`, `working`, `review`, `ready`, `finished`, `triage`, `needs`, `stopped`, `done`, `dropped`. It changes only through `set_status`. The board and `ls` show it in words: queued (`todo`), working, in review, ready to accept, finished, coordinator on it (`triage`), needs you (`needs`, `stopped`), closed (`done`, `dropped`).
+**Task status**: where a task is: `todo`, `working`, `review`, `ready`, `finished`, `triage`, `needs`, `stopped`, `done`, `dropped`. It changes only through `set_status`. The board and `ls` show it in words: queued (`todo`), working, in review, ready to accept, finished, coordinator on it (`triage`), needs you (`needs`, `stopped`), closed (`done`, `dropped`). What needs you (`needs`, `stopped`) and what waits on your accept or close (`ready`, `finished`) are `needs_you` and `awaits_accept` in `core/src/task.rs`, counted in the same words ("2 need you", "3 ready") by the board's top line, mission control and `repos`.
 
 **Stop**: why a task waits on someone, recorded as `{"by": "worker" | "reviewer", "kind": ...}`: at a prompt, failed, ended its turn without `ready`, exited, its pane gone after a Rex restart, a message that didn't reach the worker, not continued after the usage limit, or its worktree's setup failed (so no worker started). Only a task in `triage`, `needs` or `stopped` has one. The task's `why` says the same thing in words, for people and the board; code never goes by its wording.
 _Avoid_: reason (for the recorded stop), needs (for any stop).

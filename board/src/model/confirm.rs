@@ -47,7 +47,7 @@ pub fn confirm_risks(action: Action, t: &Task, cfg: &Config) -> Vec<(&'static st
                 Some("running") => risks.push(("Checks still running", "Checks running")),
                 _ => {}
             }
-            let nothing = t.why.as_deref().unwrap_or("").starts_with("Nothing to merge");
+            let nothing = t.nothing_to_merge();
             match t.review.as_ref().and_then(|r| r.verdict.as_deref()) {
                 Some("approved") => {}
                 Some("changes") => risks.push(("Review asks for changes", "Changes asked")),
@@ -91,7 +91,7 @@ pub fn confirm_texts(action: Action, t: &Task, cfg: &Config) -> Vec<String> {
         "squash" => "squash-merge",
         other => other,
     };
-    let nothing = t.why.as_deref().unwrap_or("").starts_with("Nothing to merge");
+    let nothing = t.nothing_to_merge();
     let risks = confirm_risks(action, t, cfg);
     let ask = match action {
         Action::Accept if pr.is_empty() && t.is_local() && !nothing => {

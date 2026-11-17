@@ -233,3 +233,11 @@ fn a_worker_waiting_on_its_job_says_so() {
         "Waiting on its background job: it takes another turn when that ends."
     );
 }
+
+#[test]
+fn counts_in_words() {
+    assert_eq!(count_phrase(1, "needs"), "1 needs you");
+    assert_eq!(count_phrase(2, "needs"), "2 need you");
+    assert_eq!(count_phrase(1, "ready"), "1 ready");
+    assert_eq!(count_phrase(3, "running"), "3 running");
+}

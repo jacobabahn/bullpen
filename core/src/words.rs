@@ -7,7 +7,9 @@
 
 use crate::json::{self, get, obj, py_str, s, truthy, Obj};
 use crate::paths::{safe, state};
-use crate::task::{is_closed, is_limited, keeps_branch, on_waited, own_model, pr_short, stamp, task_num};
+use crate::task::{
+    is_closed, is_limited, keeps_branch, nothing_to_merge, on_waited, own_model, pr_short, stamp, task_num,
+};
 use crate::text::{splitlines, squash, strip, upper_first};
 use crate::timeutil::{self, clock, seconds_since, Stamp};
 use crate::{Fail, Res};
@@ -47,6 +49,17 @@ pub fn mark(status: &str) -> &'static str {
 pub const MARKED: [&str; 10] = [
     "needs", "stopped", "triage", "ready", "finished", "done", "review", "working", "todo", "dropped",
 ];
+
+/// A count of tasks in words, as the board's top line, mission control and `repos` say
+/// it: "1 needs you", "2 need you" (what: "needs"), else "3 ready", "4 running" (what
+/// is the word).
+pub fn count_phrase(n: usize, what: &str) -> String {
+    match what {
+        "needs" if n == 1 => "1 needs you".into(),
+        "needs" => format!("{n} need you"),
+        _ => format!("{n} {what}"),
+    }
+}
 
 /// The board's groups, in order: what you do next first.
 fn board_group(status: &str) -> u8 {
@@ -343,7 +356,7 @@ pub fn status_detail(cfg: &Obj, t: &Obj, waits: &str, at: Option<Stamp>) -> Stri
             let rounds = cfg.get("review_rounds").map_or("None".into(), py_str);
             format!("{} on round {rnd} of {rounds}.", upper_first(kind))
         }
-        "ready" if why.starts_with("Nothing to merge") => "Done, with nothing to merge.".into(),
+        "ready" if nothing_to_merge(t) => "Done, with nothing to merge.".into(),
         "finished" => {
             let closes = if keeps_branch(t) {
                 "a closes it, keeping the branch."

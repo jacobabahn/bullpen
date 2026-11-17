@@ -312,8 +312,7 @@ impl App {
                 (0..order.len()).filter(|&j| pick(order[j]) && Some(order[j].id.as_str()) != skip).collect();
             js.iter().find(|&&j| j > i).or(js.first()).map(|&j| order[j].id.clone())
         };
-        let yours = |t: &Task| matches!(t.status.as_str(), "ready" | "finished");
-        after(&|t: &Task| t.needs_you()).map(|id| (id, true)).or_else(|| after(&yours).map(|id| (id, false)))
+        after(&Task::needs_you).map(|id| (id, true)).or_else(|| after(&Task::awaits_accept).map(|id| (id, false)))
     }
 
     /// How long the loop may wait for something to happen before redrawing.

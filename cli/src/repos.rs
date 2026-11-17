@@ -7,6 +7,7 @@ use crate::show::print_all;
 use bullpen_core::fleet::{self, Fleet, RepoState};
 use bullpen_core::json::dumps;
 use bullpen_core::text::width;
+use bullpen_core::words::count_phrase;
 use bullpen_core::Res;
 
 const REPOS: &[Arg] = &[flag(
@@ -60,17 +61,12 @@ fn coordinators_words(r: &RepoState) -> String {
 /// "nothing open"; and the task files that don't parse.
 fn count_words(r: &RepoState) -> Vec<String> {
     let c = r.counts;
-    let mut out = Vec::new();
-    match c.needs {
-        0 => {}
-        1 => out.push("1 needs you".into()),
-        n => out.push(format!("{n} need you")),
-    }
-    for (n, word) in [(c.ready, "ready"), (c.running, "running")] {
-        if n > 0 {
-            out.push(format!("{n} {word}"));
-        }
-    }
+    let counts = [(c.needs, "needs"), (c.ready, "ready"), (c.running, "running")];
+    let mut out: Vec<String> = counts
+        .iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|&(n, what)| count_phrase(n, what))
+        .collect();
     if out.is_empty() {
         out.push(match r.open.len() {
             0 => "nothing open".into(),

@@ -2,6 +2,7 @@
 //! snapshot).
 
 use bullpen_core::fleet::Reader;
+use bullpen_core::words::count_phrase;
 use std::path::Path;
 use std::time::{Duration, Instant};
 use super::*;
@@ -55,20 +56,11 @@ impl OtherRepos {
     }
 }
 
-/// "1 needs you", "2 need you", "3 ready": a count of what you act on, in words.
-fn act_words(n: usize, status: &str) -> String {
-    match status {
-        "needs" if n == 1 => "1 needs you".into(),
-        "needs" => format!("{n} need you"),
-        _ => format!("{n} ready"),
-    }
-}
-
 /// What you act on among these tasks: how many need you (needs or stopped) and
 /// how many wait on your accept or close (ready or finished).
 pub fn acts(tasks: &[&Task]) -> (usize, usize) {
-    let n = |sts: &[&str]| tasks.iter().filter(|t| sts.contains(&t.status.as_str())).count();
-    (n(&["needs", "stopped"]), n(&["ready", "finished"]))
+    let n = |pick: fn(&Task) -> bool| tasks.iter().filter(|t| pick(t)).count();
+    (n(Task::needs_you), n(Task::awaits_accept))
 }
 
 /// This repository's part of the top line: what needs you and what's ready, each
@@ -78,7 +70,7 @@ pub fn act_parts(needs: usize, ready: usize, words: bool) -> Vec<(String, &'stat
     [(needs, "needs"), (ready, "ready")]
         .into_iter()
         .filter(|(n, _)| *n > 0)
-        .map(|(n, st)| (if words { act_words(n, st) } else { format!("{}{n}", mark(st)) }, st))
+        .map(|(n, st)| (if words { count_phrase(n, st) } else { format!("{}{n}", mark(st)) }, st))
         .collect()
 }
 
@@ -97,7 +89,7 @@ fn others_words(counts: &[RepoCount]) -> String {
         let parts: Vec<String> = [(c.needs, "needs"), (c.ready, "ready")]
             .into_iter()
             .filter(|(n, _)| *n > 0)
-            .map(|(n, st)| act_words(n, st))
+            .map(|(n, st)| count_phrase(n, st))
             .collect();
         format!("{}: {}", c.name, parts.join(", "))
     };

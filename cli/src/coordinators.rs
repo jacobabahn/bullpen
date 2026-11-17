@@ -8,7 +8,7 @@
 //! "session", "board": {"block", "session"}, "board_others", "bullpen": the copy of
 //! bullpen it was started from (copies.rs)}. A task belongs to the one
 //! that added it (t["coordinator"]). Who sees to it is that one alone while its pane is
-//! running, else every running coordinator.
+//! running, else every running coordinator: core's `sees_to` (core/src/coordinators.rs).
 
 use crate::args::{pos, value, Arg, Args, Nargs};
 use crate::jobs::{background, Job};
@@ -20,8 +20,7 @@ use serde_json::{json, Value};
 
 /// The repo's coordinators, oldest (the primary) first (an entry that isn't an object is left out).
 pub fn coordinators(repo: &Repo) -> Vec<&Obj> {
-    let list = repo.cfg.get("coordinators").and_then(Value::as_array);
-    list.into_iter().flatten().filter_map(Value::as_object).collect()
+    bullpen_core::coordinators::list(&repo.cfg)
 }
 
 pub fn coordinator<'a>(repo: &'a Repo, cid: &str) -> Option<&'a Obj> {
@@ -218,19 +217,10 @@ pub fn primary(repo: &Repo) -> Option<&Obj> {
 }
 
 /// The coordinators who see to a task: its owner while the owner's pane is running,
-/// else every running coordinator, else none (the task needs the person).
+/// else every running coordinator, else none (the task needs the person). Core's rule,
+/// with Rex saying which panes are running.
 pub fn sees_to<'a>(repo: &'a Repo, t: &Obj) -> Res<Vec<&'a Obj>> {
-    let own = owner(repo, t);
-    if alive(own)? {
-        return Ok(own.into_iter().collect());
-    }
-    let mut out = Vec::new();
-    for c in coordinators(repo) {
-        if alive(Some(c))? {
-            out.push(c);
-        }
-    }
-    Ok(out)
+    bullpen_core::coordinators::sees_to(coordinators(repo), t, |c| alive(Some(c)))
 }
 
 /// Where a task's panes live: with the coordinator who sees to it, else (none running)

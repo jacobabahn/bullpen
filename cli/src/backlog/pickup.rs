@@ -19,7 +19,7 @@ use bullpen_core::backlog::{self, Backlog};
 use bullpen_core::json::{self, s, truthy, Obj};
 use bullpen_core::paths::state;
 use bullpen_core::repo::known_repos;
-use bullpen_core::task::{clip, is_closed};
+use bullpen_core::task::{clip, is_closed, needs_you};
 use bullpen_core::timeutil::{clock, iso_now, parse, seconds_since};
 use bullpen_core::{Fail, Repo, Res};
 use chrono::{Local, NaiveDate};
@@ -98,7 +98,7 @@ pub enum Held {
 /// The caps, from the tasks as they are: what holds pickup back, or None (it may start one).
 pub fn held(tasks: &[Obj], caps: [i64; 4], today: NaiveDate) -> Option<Held> {
     let [max_running, running, waiting, per_day] = caps;
-    if tasks.iter().any(|t| matches!(s(t, "status"), "needs" | "stopped")) {
+    if tasks.iter().any(|t| needs_you(s(t, "status"))) {
         return Some(Held::Needed);
     }
     if let Some(ids) = pile(tasks, waiting) {

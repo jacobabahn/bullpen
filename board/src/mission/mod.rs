@@ -334,9 +334,8 @@ impl Mission {
     /// once nothing does, the next that's ready or finished.
     fn next(&mut self, i: usize) {
         let order = self.order();
-        let after = |sts: &[&str]| {
-            let js: Vec<usize> =
-                (0..order.len()).filter(|&j| sts.contains(&items::status(items::task(&self.fleet, order[j])))).collect();
+        let after = |part: fn(&str) -> bool| {
+            let js: Vec<usize> = (0..order.len()).filter(|&j| part(items::status(items::task(&self.fleet, order[j])))).collect();
             js.iter().find(|&&j| j > i).or(js.first()).map(|&j| order[j])
         };
         let (needs, ready) = (items::INBOX[0].1, items::INBOX[1].1);

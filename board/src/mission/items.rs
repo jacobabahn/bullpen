@@ -5,6 +5,8 @@
 
 use bullpen_core::fleet::{Coordinator, Fleet, RepoState, TaskState};
 use bullpen_core::json::s;
+use bullpen_core::task::{awaits_accept, needs_you};
+use bullpen_core::words::count_phrase;
 use bullpen_core::timeutil::{parse, Stamp};
 
 /// A task on the screen: fleet.repos[repo].open[task].
@@ -27,8 +29,8 @@ pub enum Row {
 }
 
 /// The inbox's two parts: what needs you (needs, stopped), then what waits on your
-/// accept or close (ready, finished).
-pub const INBOX: &[(&str, &[&str])] = &[("NEEDS YOU", &["needs", "stopped"]), ("READY", &["ready", "finished"])];
+/// accept or close (ready, finished): core's rules, by status.
+pub const INBOX: &[(&str, fn(&str) -> bool)] = &[("NEEDS YOU", needs_you), ("READY", awaits_accept)];
 
 pub fn status(t: &TaskState) -> &str {
     s(&t.task, "status")
@@ -40,7 +42,7 @@ pub fn id(t: &TaskState) -> &str {
 
 /// Is it in the inbox?
 pub fn in_inbox(t: &TaskState) -> bool {
-    INBOX.iter().any(|(_, sts)| sts.contains(&status(t)))
+    INBOX.iter().any(|(_, part)| part(status(t)))
 }
 
 /// When it entered its current status, for "longest wait first"; None sorts last.
@@ -48,13 +50,13 @@ fn since(t: &TaskState) -> Option<Stamp> {
     bullpen_core::task::stamp(&t.task).and_then(parse)
 }
 
-/// The inbox's tasks of these statuses, every repo's, longest wait first (the order
-/// `go --next --all-repos` takes), then by repo and the board's order.
-fn inbox_part(fleet: &Fleet, statuses: &[&str]) -> Vec<Item> {
+/// The inbox's tasks whose status is in this part, every repo's, longest wait first
+/// (the order `go --next --all-repos` takes), then by repo and the board's order.
+fn inbox_part(fleet: &Fleet, part: fn(&str) -> bool) -> Vec<Item> {
     let mut items: Vec<(Option<Stamp>, Item)> = Vec::new();
     for (ri, r) in fleet.repos.iter().enumerate() {
         for (ti, t) in r.open.iter().enumerate() {
-            if statuses.contains(&status(t)) {
+            if part(status(t)) {
                 items.push((since(t), Item { repo: ri, task: ti }));
             }
         }
@@ -68,8 +70,8 @@ fn inbox_part(fleet: &Fleet, statuses: &[&str]) -> Vec<Item> {
 /// open tasks that aren't in the inbox, a gap between each.
 pub fn rows(fleet: &Fleet) -> Vec<Row> {
     let mut rows = Vec::new();
-    for (head, statuses) in INBOX {
-        let items = inbox_part(fleet, statuses);
+    for (head, part) in INBOX {
+        let items = inbox_part(fleet, *part);
         if !items.is_empty() {
             rows.push(Row::Head(head));
             rows.extend(items.into_iter().map(|i| Row::Task(i, true)));
@@ -129,15 +131,8 @@ pub fn totals(fleet: &Fleet) -> Totals {
 /// The top line's totals in words: "3 need you · 2 ready · 4 of 9 running · 2 repos";
 /// what's 0 is left out, but the repos always show.
 pub fn totals_words(t: Totals) -> String {
-    let mut parts = Vec::new();
-    match t.needs {
-        0 => {}
-        1 => parts.push("1 needs you".to_string()),
-        n => parts.push(format!("{n} need you")),
-    }
-    if t.ready > 0 {
-        parts.push(format!("{} ready", t.ready));
-    }
+    let mut parts: Vec<String> =
+        [(t.needs, "needs"), (t.ready, "ready")].into_iter().filter(|(n, _)| *n > 0).map(|(n, what)| count_phrase(n, what)).collect();
     if t.running > 0 {
         parts.push(format!("{} of {} running", t.running, t.open));
     } else if t.open > 0 {

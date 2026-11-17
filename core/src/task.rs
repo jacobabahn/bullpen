@@ -1,5 +1,6 @@
-//! A task: its status (changed only by set_status), its stop, its own settings, and
-//! the task in words.
+//! A task: its status (changed only by set_status), its stop, who it waits on
+//! (`waits_on`, `whose_turn`), what needs you (`needs_you`, `awaits_accept`), its own
+//! settings, and the task in words. The command line and the board both go by these.
 //!
 //! A stopped task (STOPPED) has a stop, {"by": "worker" or "reviewer", "kind": ...},
 //! saying who stopped and how:
@@ -12,7 +13,8 @@
 //!   limit      it couldn't be continued after the usage limit
 //!   setup      its worktree's setup failed, so its worker never started
 //!   other      a stop from before stops were recorded, of no known kind
-//! why is the stop in words, for people and the board: nothing goes by its wording.
+//! why is the stop in words, for people and the board: nothing goes by its wording but
+//! a ready task's "Nothing to merge" (`nothing_to_merge`).
 //! ask and ok are said of the status they were set in, and end with it.
 
 use crate::json::{get, obj, s, truthy, Obj};
@@ -163,6 +165,26 @@ pub fn is_waiting(status: &str) -> bool {
 pub fn is_stopped(status: &str) -> bool {
     STOPPED.contains(&status)
 }
+
+/// Does a task in this status need you: it needs the person ("needs"), or its worker's
+/// pane is gone ("stopped")? The board's "Needs you" and mission control's inbox.
+pub fn needs_you(status: &str) -> bool {
+    matches!(status, "needs" | "stopped")
+}
+
+/// Does a task in this status wait on your accept ("ready") or close ("finished")?
+pub fn awaits_accept(status: &str) -> bool {
+    matches!(status, "ready" | "finished")
+}
+
+/// Is the task ready with nothing to merge (its branch had no commits at `ready`)?
+/// It needs no review, no tour and no merge: accepting it only cleans up.
+pub fn nothing_to_merge(t: &Obj) -> bool {
+    s(t, "status") == "ready" && s(t, "why").starts_with(NOTHING_TO_MERGE)
+}
+
+/// How a ready task's why starts when its branch has no commits.
+pub const NOTHING_TO_MERGE: &str = "Nothing to merge";
 
 /// A task's number: 3 for BP-3 (0 when its ID has none).
 pub fn task_num(t: &Obj) -> i64 {

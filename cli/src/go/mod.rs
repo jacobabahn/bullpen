@@ -16,7 +16,7 @@ use crate::saves::save;
 use bullpen_core::json::{self, dumps_line, obj, py_str, s, truthy, Obj};
 use bullpen_core::paths::{safe, state};
 use bullpen_core::repo::{find_repo, known_repos, lookup_block, repo_root};
-use bullpen_core::task::{is_status, on_reviewer};
+use bullpen_core::task::{awaits_accept, is_status, on_reviewer};
 use bullpen_core::{fail, Fail, Repo, Res};
 use relink::relink;
 use serde_json::{json, Value};
@@ -157,7 +157,7 @@ fn needing(t: &Obj) -> (String, String) {
 /// repository), or None.
 fn next_to_accept(repo: &Repo, g: &Go) -> Res<Option<(Repo, Obj)>> {
     let c = pane_coordinator(repo, &g.from_block)?;
-    let done = |t: &Obj| matches!(s(t, "status"), "ready" | "finished");
+    let done = |t: &Obj| awaits_accept(s(t, "status"));
     let mut found = Vec::new();
     for t in repo.tasks()? {
         if done(&t) && on_board(repo, c.as_ref(), &t)? {

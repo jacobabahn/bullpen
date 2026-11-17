@@ -4,6 +4,7 @@
 
 pub mod backlog;
 pub mod config;
+pub mod coordinators;
 pub mod fail;
 pub mod fleet;
 pub mod json;

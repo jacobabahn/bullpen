@@ -196,8 +196,19 @@ impl Task {
         core::task_num(&self.obj)
     }
 
+    /// Does it need you (needs, or stopped)? Core's rule.
     pub fn needs_you(&self) -> bool {
-        matches!(self.status.as_str(), "needs" | "stopped")
+        core::needs_you(&self.status)
+    }
+
+    /// Does it wait on your accept or close (ready, or finished)? Core's rule.
+    pub fn awaits_accept(&self) -> bool {
+        core::awaits_accept(&self.status)
+    }
+
+    /// Is it ready with nothing to merge (no commits): no review, tour or merge to do?
+    pub fn nothing_to_merge(&self) -> bool {
+        core::nothing_to_merge(&self.obj)
     }
 
     /// Stopped on something its coordinator sees to: not yours (yet).
