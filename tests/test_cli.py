@@ -358,6 +358,36 @@ class CodeTest(unittest.TestCase):
         long = {str(f.relative_to(ROOT)): n for f in sorted(files) if (n := len(f.read_text().splitlines())) >= 1000}
         self.assertEqual(long, {})
 
+    def modules(self):
+        """Every module the code map lists: the crates' Rust but their tests, and the Lua."""
+        rust = [f for d in ("core", "cli", "board", "tests/fakes") for f in (ROOT / d / "src").rglob("*.rs")
+                if not f.name.startswith("test_")]
+        return {str(f.relative_to(ROOT)) for f in [*rust, *(ROOT / "lua").glob("*.lua")]}
+
+    def test_each_module_says_what_it_is_for_in_its_header(self):
+        # the code map is made from these, so a new module edits no shared list
+        bare = [m for m in sorted(self.modules())
+                if not re.match(r"(//!|--) \S", (ROOT / m).read_text().split("\n", 1)[0])]
+        self.assertEqual(bare, [])
+
+    def test_the_code_map_has_a_line_for_each_module(self):
+        p = subprocess.run([str(ROOT / "bin" / "code-map")], text=True, capture_output=True)
+        self.assertEqual((p.returncode, p.stderr), (0, ""))
+        lines = [line for line in p.stdout.splitlines() if line and not line.startswith("## ")]
+        self.assertEqual(sorted(line.split(": ", 1)[0] for line in lines), sorted(self.modules()))
+        self.assertIn("\ncli/src/news/mod.rs: News for the coordinators", p.stdout)
+        self.assertEqual([line for line in lines if line.endswith(": (no header)")], [])
+
+    def test_the_code_map_of_some_folders(self):
+        p = subprocess.run([str(ROOT / "bin" / "code-map"), "cli/src/news/", "lua/watch.lua"], text=True,
+                           capture_output=True)
+        listed = [line.split(": ", 1)[0] for line in p.stdout.splitlines() if ": " in line]
+        self.assertEqual(listed, ["cli/src/news/mod.rs", *sorted(m for m in self.modules()
+                                  if m.startswith("cli/src/news/") and not m.endswith("mod.rs")), "lua/watch.lua"])
+        full = subprocess.run([str(ROOT / "bin" / "code-map"), "--full", "cli/src/news/wake.rs"], text=True,
+                              capture_output=True).stdout
+        self.assertIn("\n    A pause (`news-<cid>.wait`", full)
+
     def rust_calls(self, names):
         """(file, function called, its arguments' text) for each call of one of names in
         cli/src (not its tests; not a method or a path's, like libc::close)."""

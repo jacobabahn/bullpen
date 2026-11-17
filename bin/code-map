@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""Print the code map: every module of bullpen with what it's for, from its own header.
+
+    bin/code-map                  # the whole map, a line per file
+    bin/code-map cli/src/news     # only the files under these paths
+    bin/code-map --full board     # each file's whole header, not just its first paragraph
+
+A module's header is its opening comment (`//!` in Rust, `--` in Lua); its first
+paragraph is the file's line in the map. The map is read from the checkout this script
+is in, so a worktree maps its own code, built or not. Tests (`test_*.rs`) are left out:
+each sits beside the module it tests.
+"""
+
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+# (folder, its comment marker), in the map's order
+ROOTS = ("lib.rs", "main.rs", "mod.rs")
+PLACES = [("core/src", "//!"), ("cli/src", "//!"), ("board/src", "//!"), ("tests/fakes/src", "//!"), ("lua", "--")]
+
+
+def modules(folder, ext):
+    """The folder's modules, a folder's files together (its root first: lib.rs, main.rs or
+    mod.rs), files before folders."""
+    files = [f for f in (ROOT / folder).rglob("*" + ext) if not f.name.startswith("test_")]
+    return sorted(files, key=lambda f: (f.parent.relative_to(ROOT / folder).parts, f.name not in ROOTS, f.name))
+
+
+def header(path, mark):
+    """The file's opening comment, as lines, without its marker."""
+    out = []
+    for line in path.read_text().splitlines():
+        if not line.startswith(mark):
+            break
+        out.append(line[len(mark):].removeprefix(" ").rstrip())
+    return out
+
+
+def first_paragraph(lines):
+    para = []
+    for line in lines:
+        if not line.strip():
+            if para:
+                break
+            continue
+        para.append(line.strip())
+    return " ".join(para)
+
+
+def crate_name(folder):
+    toml = ROOT / Path(folder).parent / "Cargo.toml"
+    m = re.search(r'^name\s*=\s*"([^"]+)"', toml.read_text(), re.M) if toml.exists() else None
+    return f" ({m.group(1)})" if m else ""
+
+
+def wanted(rel, only):
+    return not only or any(rel == o or rel.startswith(o.rstrip("/") + "/") for o in only)
+
+
+def main(argv):
+    full = "--full" in argv
+    only = [a.rstrip("/") for a in argv if a != "--full"]
+    if any(a.startswith("-") for a in only):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    for folder, mark in PLACES:
+        ext = ".rs" if mark == "//!" else ".lua"
+        shown = [f for f in modules(folder, ext) if wanted(str(f.relative_to(ROOT)), only)]
+        if not shown:
+            continue
+        print(f"## {folder}/{crate_name(folder)}")
+        last = None
+        for f in shown:
+            if last and f.parent != last:
+                print()  # a folder's files together
+            last = f.parent
+            lines = header(f, mark)
+            rel = f.relative_to(ROOT)
+            if full:
+                print(f"{rel}:")
+                print("\n".join(("    " + line).rstrip() for line in lines))
+            else:
+                print(f"{rel}: {first_paragraph(lines) or '(no header)'}")
+        print()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
