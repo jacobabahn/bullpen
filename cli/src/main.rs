@@ -59,6 +59,7 @@ mod show;
 mod start;
 mod stats;
 mod stepper;
+mod stop_hook;
 mod stops;
 mod task_line;
 mod tours;

@@ -223,3 +223,16 @@ fn a_ready_tasks_sentence_ends_with_its_risk() {
     working.insert("status".into(), json!("working"));
     assert!(!status_detail(&config(json!({})), &working, "", None).contains("risk"));
 }
+
+#[test]
+fn a_worker_waiting_on_its_job_says_so() {
+    let job = |what: Value| task(json!({"id": "BP-1", "status": "working", "job": {"what": what, "since": "x"}}));
+    assert_eq!(
+        status_detail(&config(json!({})), &job(json!("cargo test")), "", None),
+        "Waiting on its job (cargo test): it takes another turn when that ends."
+    );
+    assert_eq!(
+        status_detail(&config(json!({})), &job(Value::Null), "", None),
+        "Waiting on its background job: it takes another turn when that ends."
+    );
+}

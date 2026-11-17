@@ -384,6 +384,10 @@ pub fn status_detail(cfg: &Obj, t: &Obj, waits: &str, at: Option<Stamp>) -> Stri
                 None => text,
             }
         }
+        "working" if obj(t, "job").contains_key("since") => match s(obj(t, "job"), "what") {
+            "" => "Waiting on its background job: it takes another turn when that ends.".into(),
+            what => format!("Waiting on its job ({what}): it takes another turn when that ends."),
+        },
         "working" if sent_back_by_github(t) => "Fixing what GitHub said.".into(),
         "working" if s(r, "verdict") == "changes" => format!("Fixing what review round {rnd} found."),
         "working" if s(r, "verdict") == "approved" && truthy(r.get("conflict")) => {

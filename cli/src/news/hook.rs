@@ -202,7 +202,7 @@ pub fn current(settings: &Obj, command: &str) -> bool {
 
 /// Write the settings: 2 spaces, the keys in their order, by rename over the file a
 /// link leads to, with the mode it had.
-fn write(path: &Path, settings: &Obj) -> Res<()> {
+pub fn write(path: &Path, settings: &Obj) -> Res<()> {
     use std::os::unix::fs::PermissionsExt;
     let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let dir = path.parent().unwrap_or(Path::new("."));
@@ -223,7 +223,7 @@ fn write(path: &Path, settings: &Obj) -> Res<()> {
 }
 
 /// Git leaves the file out of the checkout's commits: a line in `.git/info/exclude`.
-fn ignore(repo: &Repo) -> Res<()> {
+pub fn ignore(repo: &Repo) -> Res<()> {
     let line = format!("/{FILE}");
     let said = git(&repo.root, &["rev-parse", "--git-path", "info/exclude"], true)?;
     let exclude = repo.root.join(said.stdout.trim());

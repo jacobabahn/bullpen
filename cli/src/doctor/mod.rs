@@ -9,6 +9,7 @@
 mod all_repos;
 mod checks;
 mod news;
+mod workers;
 
 use crate::args::{flag, Arg, Args};
 use crate::push_remote::{check_push, check_push_seen};
@@ -127,6 +128,12 @@ fn doctor_checks(place: &Place, run: Run) -> Vec<Line> {
         ),
         ("news", false, true, Box::new(|| news::check_news(repo, why_not))),
         (
+            "workers",
+            false,
+            true,
+            Box::new(|| workers::check_workers(repo, why_not)),
+        ),
+        (
             "push",
             false,
             true,
@@ -174,7 +181,7 @@ const DOCTOR: &[Arg] = &[
         "--fix",
         "first fix what bullpen can by itself: the Claude scratch folders closed tasks of any repository left in \
          the temp folder; and in this repository, the news hook in .claude/settings.local.json (written with \
-         `config --news wake`, removed with any other news)",
+         `config --news wake`, removed with any other news), and a running worker's Stop hook",
     ),
 ];
 
@@ -224,6 +231,10 @@ fn fix(place: &Place, json: bool) -> Res<()> {
         Ok(None) => {}
         Ok(Some(did)) => said("news", &did),
         Err(e) => eprintln!("bullpen: --fix left the news hook as it was: {}", e.0),
+    }
+    match workers::fix_workers(repo) {
+        Ok(did) => did.iter().for_each(|d| said("workers", d)),
+        Err(e) => eprintln!("bullpen: --fix left the workers' Stop hooks as they were: {}", e.0),
     }
     Ok(())
 }

@@ -355,6 +355,7 @@ pub fn launch(repo: &Repo, t: &mut Obj, session: &str, first: &str, resume: bool
     let cmd = with_model(&worker, model.as_deref());
     let running = if is_claude(&cmd) { model_in(&cmd) } else { None };
     t.insert("model".into(), json!(running));
+    crate::stop_hook::install(repo, t, &cmd); // Claude Code's: what it waits on when its turn ends
     let mut argv = resolve(&cmd);
     if resume {
         argv.push("--continue".into());

@@ -14,6 +14,7 @@ use crate::review::{keep_approval, rebase_check, Check};
 use crate::rex::screen;
 use crate::saves::save;
 use crate::screen::{compacting, shell_running};
+use crate::stop_hook::turn::{ended_line, jobs_phrase, this_turn, wait_on_job};
 use crate::stops::stop;
 use bullpen_core::json::{s, truthy, Obj};
 use bullpen_core::proc::git;
@@ -107,6 +108,11 @@ pub fn event(ev: &Event) -> Res<()> {
     let id = s(&t, "id").to_string();
     let after_working = s(&t, "last").starts_with("working|");
     if state == "working" {
+        if !after_working {
+            t.insert("turn_at".into(), json!(bullpen_core::timeutil::iso_now_micro()));
+            // a turn begins: an older turn record is a past turn's
+        }
+        t.shift_remove("job");
         if is_stopped(&status) || limit_over(&mut t)? {
             set_status(&mut t, "working", None, None);
         } else if status == "ready" && !after_working {
@@ -182,23 +188,25 @@ pub fn event(ev: &Event) -> Res<()> {
         }
         "done" | "idle" => {
             let shell_min = ev.shell_min; // from `check`: its shell has run this long
-            if s(&t, "status") != "working"
-                || (shell_min.is_none() && shell_running(&screen(s(&t, "session"), s(&t, "block"))?))
-            {
-                // a background shell of its own still runs: it takes another turn when that ends
+            if s(&t, "status") != "working" {
                 return save(&repo, &mut t);
+            }
+            let turn = this_turn(&repo, &t); // what its Stop hook said of this turn
+            let waited = t.contains_key("job");
+            if shell_min.is_none() {
+                let jobs = turn.as_ref().and_then(jobs_phrase).is_some();
+                if shell_running(&screen(s(&t, "session"), s(&t, "block"))?) || (jobs && !waited) {
+                    // a background job of its own still runs: it takes another turn when that ends
+                    wait_on_job(&mut t, turn.as_ref());
+                    return save(&repo, &mut t);
+                }
             }
             crate::overlap::check(&repo, &t); // the end of a turn: its branch may share files with another's now
             if ready_again(&repo, &mut t)? {
                 return Ok(());
             }
-            let line = match shell_min {
-                None => format!("{id} ended its turn without `ready`: read it with `bullpen peek {id}`"),
-                Some(m) => format!(
-                    "{id} ended its turn without `ready` {m} min ago, and a background shell of its own still runs \
-                     (a server, a watch?): read it with `bullpen peek {id}`"
-                ),
-            };
+            let line = ended_line(&id, &t, turn.as_ref(), shell_min, waited && shell_min.is_none());
+            t.shift_remove("job");
             stop(
                 &repo,
                 &mut t,

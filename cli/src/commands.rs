@@ -91,6 +91,7 @@ pub const COMMANDS: &[Command] = &[
     c("_event", INTERNAL, "", crate::events::cmd_event),
     c("_stuck", INTERNAL, "", crate::events::stuck::cmd_stuck),
     c("_limit", INTERNAL, "", crate::events::stuck::cmd_limit),
+    c("_worker_stop", INTERNAL, "", crate::stop_hook::turn::cmd_worker_stop),
     c("_gone", INTERNAL, "", crate::events::cmd_gone),
     c("_nop", INTERNAL, "", cmd_nop),
     c("_commands", INTERNAL, "", cmd_commands),
