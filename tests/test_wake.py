@@ -15,6 +15,21 @@ from support import setUpModule, tearDownModule, BullpenTest, BULLPEN  # a temp 
 STAMP = re.compile(r"^\S+")
 
 
+def give_input(p, text):
+    """Write text to p's stdin and close it. A waiter with nothing to wait for (not a pane
+    of bullpen's) exits without reading its input, as a hook may, so its pipe can be gone
+    by then: that is no failure. Its exit code and output say how it went, and the tests
+    check those."""
+    try:
+        p.stdin.write(text)
+    except BrokenPipeError:
+        pass
+    try:
+        p.stdin.close()  # flushes: where a gone reader shows
+    except BrokenPipeError:
+        pass  # closed all the same
+
+
 class WakeCase(BullpenTest):
     """A task, and news that isn't typed."""
     def setUp(self):
@@ -205,8 +220,7 @@ class WaiterTest(WakeCase):
                              env={**self.env, "REX_BLOCK": block}, stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.addCleanup(lambda: (p.kill(), p.wait(), p.stdout.close(), p.stderr.close()))
-        p.stdin.write(json.dumps({"session_id": "sess-1", "hook_event_name": event}))
-        p.stdin.close()
+        give_input(p, json.dumps({"session_id": "sess-1", "hook_event_name": event}))
         return p
 
     def parked(self, p):

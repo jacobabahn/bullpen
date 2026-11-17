@@ -29,6 +29,19 @@ FAKE_TOUR = textwrap.dedent("""\
 """)
 
 
+def running(pid):
+    """Is the process pid running (None: there's none)?"""
+    if pid is None:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass  # there, not ours
+    return True
+
+
 class TourTest(unittest.TestCase):
     """Guided review tours: the tour agent (a fake), the tour file, comments sent back."""
 
@@ -74,6 +87,17 @@ class TourTest(unittest.TestCase):
         self.commit_and_ready(tid)  # adds fix1.txt
         self.verdict(tid, "approve")
         return tid
+
+    def writer_done(self, tid, wait=15):
+        """Wait until the background writer of tid's tour has ended. A test that ends while
+        it runs removes its folder as the writer still writes there, and leaves part of it
+        in TMPDIR."""
+        pid = self.show(tid)["tour"].get("pid")  # set while it writes
+        end = time.time() + wait
+        while self.show(tid)["tour"]["state"] == "writing" or running(pid):
+            if time.time() > end:
+                self.fail(f"{tid}'s tour writer (pid {pid}) is still running after {wait} s")
+            time.sleep(0.05)
 
     def tour_file(self, tid):
         return json.loads(next((self.tmp / "state").rglob(f"{tid}.tour.json")).read_text())
@@ -127,10 +151,7 @@ class TourTest(unittest.TestCase):
         self.assertEqual(self.show(tid)["status"], "review")
         self.answer([{"title": "All of it", "note": "n", "hunks": [{"file": "fix1.txt"}]}])
         self.assertIn("writing a tour of BP-1 in the background", self.bp("tour", tid).stdout)
-        for _ in range(100):
-            if self.show(tid)["tour"]["state"] != "writing":
-                break
-            time.sleep(0.1)
+        self.writer_done(tid)
         self.assertEqual(self.show(tid)["tour"]["state"], "written")
         self.assertEqual([s["title"] for s in self.tour_file(tid)["steps"]], ["All of it"])
         self.assertEqual(self.show(tid)["status"], "review")
@@ -376,6 +397,8 @@ class TourTest(unittest.TestCase):
                       self.bp("tour", tid, "--pane", "--from", "blk1").stdout)
         self.assertEqual(self.agent_runs(), 1)
         self.assertIn("writing a tour", self.bp("tour", tid, "--pane", "--new", "--from", "blk1").stdout)
+        self.writer_done(tid)
+        self.assertEqual(self.show(tid)["tour"]["state"], "written")
         self.assertIn("is working", self.bp("tour", self.start_task("Other"), "--pane", ok=False).stderr)
 
     def stepper_on_a_terminal(self, tid, keys, how=("--view",)):
