@@ -17,13 +17,20 @@ on that base up to date, and they don't drift behind and conflict later:
   about conflicts: there are none yet. Otherwise it's left alone: nothing needs a working task to be
   on top of its base (`accept` rebases when it merges). Its worktree isn't touched
   under it.
-- In review, or with its reviewer waiting on you: left alone. Its next `ready`
-  brings it up to date. If it's approved meanwhile, it comes back ready on the old
-  base: `bullpen show <ID>` then has a `rebase:` line when its branch no longer
-  rebases onto its base (`no longer rebases onto main: conflicts in README.md`),
-  as it has for any ready task. It's a trial merge against the base as it is here:
-  nothing is fetched or written. `bullpen tell` the task to rebase and run `ready`
-  again, rather than wait for the accept to fail.
+- In review, or with its reviewer waiting on you: left alone (`BP-5 left in review`),
+  and noted on the task. When that review approves, bullpen checks the branch
+  against its base first (after `git fetch origin`, with a remote), with the same
+  trial merge as `show`'s `rebase:` line. If it conflicts, it gets what a ready task
+  that conflicts gets here: bullpen keeps both sides of a trivial conflict, or sends
+  it back to its worker to rebase, keep both sides, run the full suite again and run
+  `ready` again. The news is the same words, with no ready news: `After BP-4: BP-5
+  conflicts in bin/bullpen, sent back.` (`After BP-4 and BP-6: ...` when two accepts
+  went by during one review). Its next `ready` treats the approval as after any rebase
+  ([Review](review.md)): kept, a rebase check of the resolution, or a review after a
+  rebase. If it doesn't conflict, nothing is done to it: it's ready on the old base,
+  not rebased (bullpen rebases only for a conflict). Findings leave it to its worker,
+  as always. With auto-accept on, a task sent back here isn't tried, so it isn't one
+  of the auto-accept's trips back (below).
 - Waiting on you or the coordinator mid-turn (a permission prompt, a failure): not
   rebased, and the news says so.
 - Between turns (needs you, triage, stopped, ready): bullpen rebases its branch itself,

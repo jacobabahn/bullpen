@@ -6,6 +6,7 @@
 //! waits for the PR's checks ("auto_wait"), which the PR follow-up (prs.rs) looks at.
 
 use crate::accept::accept;
+use crate::accept::left_in_review;
 use crate::accept::rebase::{base_conflict, names_of, send_back_conflict};
 use crate::agents::pane;
 use crate::args::{pos, Arg, Args, Nargs};
@@ -84,12 +85,15 @@ pub fn cmd_verdict(argv: &[String]) -> Res<i32> {
         t.shift_remove("tour_sent"); // reviewed: the next review follows up on this one
     }
     let n = r.get("round").and_then(Value::as_i64).unwrap_or(0);
+    let left_by = left_in_review::take(&mut t); // accepts while it was in review
     if approve {
         let base_ref = crate::modes::task_base_ref(&repo, &t)?;
         crate::risk::assess(&repo, &mut t, &base_ref, crate::risk::Said::Approval(&text))?;
         set_status(&mut t, "ready", None, None);
         save(&repo, &mut t)?;
-        if auto_accepts(&repo, &t) {
+        if !left_in_review::after_approval(&repo, &mut t, &left_by)? {
+            // sent back to rebase, or reviewed again: its news said so
+        } else if auto_accepts(&repo, &t) {
             auto_accept(&repo, &id);
         } else {
             let why = match r.get("why").filter(|w| truthy(Some(w))) {

@@ -115,7 +115,7 @@ NEWS_ROWS = {
         rf"^{TASK} (is ready|finished \(|approved by review.* and auto-accepted \()",
     "`accepted`, `closed`, `dropped`, `started`, `working again`, `sent back`, `After BP-3: ...`":
         rf"^{TASK} (accepted \(|closed |dropped$|started |is working again |(was )?sent back )"
-        rf"|Sent back to its worker|^After {TASK}: ",
+        rf"|Sent back to its worker|^After {TASK}((, {TASK})* and {TASK})?: ",
     "two tasks `both changed` a file": rf"^{TASK} and {TASK} both changed ",
 }
 # What a line that says what to do itself has: a command to run, or who to tell.

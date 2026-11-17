@@ -86,6 +86,13 @@ Review costs only what it has to:
   since the approval just fits the change onto the new base, and whether that is
   correct. It counts as a round. Without a rebase, a change after an approval
   gets a follow-up review.
+- **An approval after another task's accept.** A task that was in review when
+  another task was accepted (`After BP-4: BP-5 left in review`) is checked against
+  its base when its review approves. If its branch conflicts with the base now, it
+  isn't ready: it goes back to its worker to rebase, as after an accept ([After
+  accept](accept.md#after-accept)), and its next `ready` gets a rebase check of the
+  resolution, or keeps its approval when its own lines didn't change. If it doesn't
+  conflict, it's ready as it is, not rebased.
 
 A reviewer is pointed at the task's brief as it is now. When the brief changed
 (`bullpen brief`, docs/commands.md) since the round this one follows, its prompt says so

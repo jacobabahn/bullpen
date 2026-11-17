@@ -74,7 +74,9 @@ fn rebase_other(repo: &Repo, t: &mut Obj, accepted: &Obj, touched: Option<&BTree
     let r = obj(t, "review");
     let status = s(t, "status");
     if status == "review" || (truthy(r.get("block")) && !truthy(r.get("verdict"))) {
-        return Ok(Some(format!("{id} left in review"))); // a reviewer is on it; its next ready rebases it
+        // a reviewer is on it: its approval checks it against the base (left_in_review.rs)
+        super::left_in_review::mark(repo, t, s(accepted, "id"))?;
+        return Ok(Some(format!("{id} left in review")));
     }
     if status == "working" && alive(s(t, "session"), s(t, "block"))? {
         return tell_to_rebase(t, accepted, &base_ref, touched).map(Some);
@@ -91,6 +93,14 @@ fn rebase_other(repo: &Repo, t: &mut Obj, accepted: &Obj, touched: Option<&BTree
     if !strip(&git(&wt, &["status", "--porcelain"], true)?.stdout).is_empty() {
         return Ok(Some(format!("{id} has uncommitted changes, not rebased")));
     }
+    rebase_task(repo, t, s(accepted, "id"), &base_ref).map(Some)
+}
+
+/// Rebase a task between turns onto base_ref, keeping both sides of a trivial conflict;
+/// one that conflicts otherwise goes back to its worker. by: the accepts that moved the
+/// base, in words ("BP-3", "BP-3 and BP-5"). Says how in a few words.
+pub fn rebase_task(repo: &Repo, t: &mut Obj, by: &str, base_ref: &str) -> Res<String> {
+    let (id, wt) = (s(t, "id").to_string(), s(t, "worktree").to_string());
     let mut done = git(&wt, &["rebase", "-q", &base_ref], false)?.ok();
     let mut both: Vec<String> = Vec::new(); // files where bullpen kept both sides of a conflict
     while !done {
@@ -99,7 +109,7 @@ fn rebase_other(repo: &Repo, t: &mut Obj, accepted: &Obj, touched: Option<&BTree
         let shown = git(&wt, &["diff"], false)?.stdout; // the conflicts, before anything is resolved
         if files.is_empty() || !files.iter().all(|f| keep_both_sides(&wt, f)) {
             git(&wt, &["rebase", "--abort"], false)?;
-            return rebase_conflict(repo, t, accepted, &base_ref, &files, &shown).map(Some);
+            return rebase_conflict(repo, t, by, base_ref, &files, &shown);
         }
         let mut add = vec!["add", "--"];
         add.extend(files.iter().map(String::as_str));
@@ -122,23 +132,23 @@ fn rebase_other(repo: &Repo, t: &mut Obj, accepted: &Obj, touched: Option<&BTree
     }
     if let Some(failed) = refresh(repo, t)? {
         // its PR gets the rebased branch
-        return Ok(Some(format!("{id} rebased, but the push failed: {failed}")));
+        return Ok(format!("{id} rebased, but the push failed: {failed}"));
     }
     let base = t.get("base").cloned().unwrap_or(Value::Null);
     t.insert("rebased".into(), base);
     if s(t, "status") == "ready" && truthy(t.get("diffstat")) {
-        t.insert("diffstat".into(), json!(shortstat(&wt, &base_ref)?));
+        t.insert("diffstat".into(), json!(shortstat(&wt, base_ref)?));
     }
     let mut rebased = format!("{id} rebased");
     if !both.is_empty() {
         rebased += &format!(", keeping both sides of a conflict in {}", both.join(", "));
     }
     if s(obj(t, "review"), "verdict") == "approved" {
-        let check = rebase_check(t, &base_ref)?;
+        let check = rebase_check(t, base_ref)?;
         if let Some(Check::Kept(why)) = &check {
-            keep_approval(t, &base_ref)?;
+            keep_approval(t, base_ref)?;
             save(repo, t)?;
-            return Ok(Some(format!("{rebased}; its approval carried over ({why})")));
+            return Ok(format!("{rebased}; its approval carried over ({why})"));
         }
         if s(t, "status") == "ready" && truthy(repo.cfg.get("review")) {
             let rebase = match check {
@@ -146,16 +156,16 @@ fn rebase_other(repo: &Repo, t: &mut Obj, accepted: &Obj, touched: Option<&BTree
                 _ => None,
             };
             let checked = rebase.is_some();
-            start_review(repo, t, &base_ref, rebase)?;
-            return Ok(Some(if checked {
+            start_review(repo, t, base_ref, rebase)?;
+            return Ok(if checked {
                 format!("{rebased}; a rebase check looks at the resolution")
             } else {
                 format!("{rebased}, but its patch changed: a reviewer checks it again")
-            }));
+            });
         }
     }
     save(repo, t)?; // same status: it stays where it was
-    Ok(Some(rebased))
+    Ok(rebased)
 }
 
 /// What a working task's work meets in the accepted change.
@@ -434,19 +444,12 @@ pub fn both_sides(content: &str) -> Option<String> {
 
 /// The task's branch doesn't rebase onto the moved base: it's left as it was, and the
 /// conflict goes to its worker, like review findings do.
-fn rebase_conflict(
-    repo: &Repo,
-    t: &mut Obj,
-    accepted: &Obj,
-    base_ref: &str,
-    files: &[String],
-    shown: &str,
-) -> Res<String> {
+fn rebase_conflict(repo: &Repo, t: &mut Obj, by: &str, base_ref: &str, files: &[String], shown: &str) -> Res<String> {
     let id = s(t, "id").to_string();
+    let were = if by.contains(" and ") { "were" } else { "was" };
     let why = format!(
-        "{} moved ({} was accepted) and your branch doesn't rebase cleanly onto it",
+        "{} moved ({by} {were} accepted) and your branch doesn't rebase cleanly onto it",
         py_str(t.get("base").unwrap_or(&Value::Null)),
-        s(accepted, "id"),
     );
     let names = names_of(files);
     if let Some(failed) = send_back_conflict(repo, t, &why, base_ref, files, shown)? {
@@ -531,12 +534,22 @@ pub fn stale_conflicts(repo: &Repo, t: &Obj) -> Res<Option<Vec<String>>> {
         return Ok(None);
     }
     let base_ref = task_base_ref(repo, t)?;
-    let head = format!("refs/heads/{branch}");
-    if git(&repo.root, &["merge-base", "--is-ancestor", &base_ref, &head], false)?.ok() {
+    conflicts_with(
+        &repo.root.display().to_string(),
+        &base_ref,
+        &format!("refs/heads/{branch}"),
+    )
+}
+
+/// The files head conflicts with base_ref in (a trial merge in dir, nothing written):
+/// the one test of a conflict for `show`'s rebase line and an approval after an accept
+/// (left_in_review.rs). None when head is on top of base_ref, merges cleanly, or that
+/// can't be told.
+pub fn conflicts_with(dir: &str, base_ref: &str, head: &str) -> Res<Option<Vec<String>>> {
+    if git(dir, &["merge-base", "--is-ancestor", base_ref, head], false)?.ok() {
         return Ok(None); // on top of it (or the branch is gone, which merge-tree says below)
     }
-    let root = repo.root.display().to_string();
-    Ok(merge_conflicts(&root, &base_ref, &head)?.filter(|files| !files.is_empty()))
+    Ok(merge_conflicts(dir, base_ref, head)?.filter(|files| !files.is_empty()))
 }
 
 /// `show`'s line for a ready task that no longer rebases onto its base.

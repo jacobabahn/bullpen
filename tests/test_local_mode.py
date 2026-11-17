@@ -535,6 +535,84 @@ class LocalModeTest(unittest.TestCase):
         self.assertTrue((self.fake / "alive" / reviewer).exists())
         self.assertEqual(self.news_lines()[-1], "bullpen · After BP-1: BP-2 left in review.")
 
+    def in_review_at_an_accept(self, name, text):
+        """BP-1 (fix.txt) approved, and BP-2 (a commit to name) in review when BP-1 is
+        accepted. Returns BP-2's worktree and its commit."""
+        tid, _ = self.ready_task(review=True)
+        self.bp("verdict", tid, "approve", "--summary", "Fine.")
+        wt = self.second_ready(name, text)
+        self.assertEqual(self.show("BP-2")["status"], "review")
+        head = self.git("rev-parse", "HEAD", cwd=wt)
+        self.bp("accept", tid)
+        self.assertEqual(self.news_lines()[-1], "bullpen · After BP-1: BP-2 left in review.")
+        return wt, head
+
+    def test_a_task_left_in_review_that_conflicts_is_sent_back_when_approved(self):
+        wt, head = self.in_review_at_an_accept("fix.txt", "fixed differently\n")
+        self.bp("verdict", "BP-2", "approve", "--summary", "Fine.")
+        t = self.show("BP-2")
+        self.assertEqual((t["status"], t["review"]["conflict"]), ("working", ["fix.txt"]))
+        self.assertNotIn("left_in_review", t)
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=wt), head)  # its branch as it was
+        self.assertEqual(self.news_lines()[-1], "bullpen · After BP-1: BP-2 conflicts in fix.txt, sent back.")
+        self.assertFalse([l for l in self.news_lines() if "BP-2 is ready" in l])
+        line = [l for b, l in self.typed() if b == t["block"]][-1]
+        self.assertIn("main moved (BP-1 was accepted) and your branch doesn't rebase cleanly onto it: conflicts in "
+                      "fix.txt. Your branch is as it was. Now rebase your branch onto main", line)
+        # the worker rebases and resolves it by hand: a rebase check, as after any rebase
+        subprocess.run(["git", "-C", wt, "rebase", "-q", "main"], capture_output=True)
+        (Path(wt) / "fix.txt").write_text("fixed, and fixed differently\n")
+        self.git("add", "fix.txt", cwd=wt)
+        sh("git", "-C", wt, "-c", "core.editor=true", "rebase", "--continue")
+        self.bp("ready", "BP-2", "--summary", "Rebased.", cwd=wt)
+        r = self.show("BP-2")["review"]
+        self.assertEqual((r["kind"], r["round"]), ("rebase", 1))
+        self.bp("verdict", "BP-2", "approve", "--summary", "Both kept.")
+        self.assertEqual(self.show("BP-2")["status"], "ready")
+        # its first ready news: the approval before the rebase never said it
+        self.assertIn("bullpen · BP-2 is ready: Second (1 commit, a rebase check approved the conflict resolution)",
+                      self.news_lines()[-1])
+
+    def test_a_task_left_in_review_that_rebases_cleanly_is_ready_as_it_is(self):
+        wt, head = self.in_review_at_an_accept("two.txt", "two\n")
+        self.bp("verdict", "BP-2", "approve", "--summary", "Fine.")
+        t = self.show("BP-2")
+        self.assertEqual(t["status"], "ready")
+        self.assertNotIn("left_in_review", t)
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=wt), head)  # not rebased
+        self.assertNotIn("rebased", t)
+        self.assertIn("bullpen · BP-2 is ready: Second", self.news_lines()[-1])
+
+    def test_a_task_left_in_review_that_gets_findings_is_left_to_its_worker(self):
+        wt, head = self.in_review_at_an_accept("fix.txt", "fixed differently\n")
+        self.bp("verdict", "BP-2", "changes", "--summary", "Fix the typo.")
+        t = self.show("BP-2")
+        self.assertEqual(t["status"], "working")
+        self.assertNotIn("left_in_review", t)
+        self.assertNotIn("conflict", t["review"])
+        self.assertFalse([l for l in self.news_lines() if "conflicts in" in l])
+
+    def test_a_task_left_in_review_by_two_accepts_names_both(self):
+        tid, _ = self.ready_task(review=True)
+        self.bp("verdict", tid, "approve", "--summary", "Fine.")
+        wt = self.second_ready("fix.txt", "fixed differently\n")
+        self.bp("add", "Third", "--brief", "x")
+        self.bp("start", "BP-3")
+        self.commit(self.show("BP-3")["worktree"], "three.txt", "three\n", "Third")
+        self.bp("ready", "BP-3", "--summary", "done", cwd=self.show("BP-3")["worktree"])
+        self.bp("verdict", "BP-3", "approve", "--summary", "Fine.")
+        self.bp("accept", tid)
+        self.bp("accept", "BP-3")
+        self.assertEqual(self.news_lines()[-1], "bullpen · After BP-3: BP-2 left in review.")
+        self.assertEqual(self.show("BP-2")["left_in_review"], ["BP-1", "BP-3"])
+        self.bp("verdict", "BP-2", "approve", "--summary", "Fine.")
+        t = self.show("BP-2")
+        self.assertEqual(t["status"], "working")
+        self.assertEqual(self.news_lines()[-1],
+                         "bullpen · After BP-1 and BP-3: BP-2 conflicts in fix.txt, sent back.")
+        line = [l for b, l in self.typed() if b == t["block"]][-1]
+        self.assertIn("main moved (BP-1 and BP-3 were accepted)", line)
+
     def test_rebase_others_off(self):
         tid, _ = self.ready_task()
         wt = self.second_ready("two.txt", "two\n")

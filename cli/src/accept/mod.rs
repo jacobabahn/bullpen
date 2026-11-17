@@ -8,6 +8,7 @@
 //! process is one compiled image, so it runs its own code to the end; the next call runs
 //! the new build (docs/rebuilds.md).
 
+pub mod left_in_review;
 pub mod rebase;
 
 use crate::args::{pos, Arg, Args, Nargs};

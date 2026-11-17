@@ -391,6 +391,62 @@ class ReviewTest(BullpenTest):
         if more:
             self.commit_file("BP-2", more, "more\n")
 
+    def left_in_review(self, name, text):
+        """BP-1 adds c to list.txt and is approved; BP-2 (a commit to name) is in review
+        when BP-1 is accepted. Returns BP-2's worktree and its commit."""
+        self.base_file("list.txt", "a\nb\n")
+        tid = self.start_task()
+        self.commit_file(tid, "list.txt", "a\nb\nc\n")
+        self.ready(tid)
+        self.verdict(tid, "approve")
+        self.bp("add", "Second", "--brief", "x")
+        self.bp("start", "BP-2")
+        wt = self.commit_file("BP-2", name, text)
+        self.ready("BP-2")
+        head = sh("git", "-C", wt, "rev-parse", "HEAD").strip()
+        self.merge_on_github(tid)
+        self.bp("accept", tid)
+        self.assertEqual(self.news()[-1], "bullpen · After BP-1: BP-2 left in review.")
+        self.assertEqual(self.show("BP-2")["left_in_review"], ["BP-1"])
+        return wt, head
+
+    def test_a_task_left_in_review_that_conflicts_with_origin_is_sent_back_when_approved(self):
+        wt, head = self.left_in_review("list.txt", "a\nb\nd\n")
+        self.verdict("BP-2", "approve")
+        t = self.show("BP-2")
+        self.assertEqual((t["status"], t["review"]["conflict"]), ("working", ["list.txt"]))
+        self.assertEqual(sh("git", "-C", wt, "rev-parse", "HEAD").strip(), head)
+        self.assertEqual(self.news()[-1], "bullpen · After BP-1: BP-2 conflicts in list.txt, sent back.")
+        self.assertFalse([l for l in self.news() if "BP-2 is ready" in l])
+        self.assertIn("run `git fetch origin`, then rebase your branch onto origin/main",
+                      [l for b, l in self.typed() if b == t["block"]][-1])
+        self.resolve(wt, {"list.txt": "a\nb\nd\n"})  # drops BP-1's line: a rebase check
+        self.assertIn("A reviewer checks it now (rebase check)", self.ready("BP-2").stdout)
+        self.verdict("BP-2", "approve")
+        self.assertEqual(self.show("BP-2")["status"], "ready")
+        self.assertIn("a rebase check approved the conflict resolution", self.news()[-1])
+
+    def test_a_task_left_in_review_that_rebases_cleanly_onto_origin_is_ready_unrebased(self):
+        wt, head = self.left_in_review("two.txt", "two\n")
+        self.verdict("BP-2", "approve")
+        t = self.show("BP-2")
+        self.assertEqual(t["status"], "ready")
+        self.assertNotIn("left_in_review", t)
+        self.assertEqual(sh("git", "-C", wt, "rev-parse", "HEAD").strip(), head)
+        pushed = sh("git", "-C", str(self.tmp / "origin.git"), "rev-parse", t["branch"]).strip()
+        self.assertEqual(pushed, head)  # nothing pushed either
+        self.assertIn("bullpen · BP-2 is ready: Second", self.news()[-1])
+
+    def test_an_auto_accept_of_a_task_left_in_review_that_conflicts_is_not_tried(self):
+        wt, head = self.left_in_review("list.txt", "a\nb\nd\n")
+        self.bp("config", "--auto-accept", "on")
+        self.verdict("BP-2", "approve")
+        t = self.show("BP-2")
+        self.assertEqual(t["status"], "working")
+        self.assertNotIn("conflict_sends", t)  # sent back before the accept: not one of its trips
+        self.assertEqual(self.news()[-1], "bullpen · After BP-1: BP-2 conflicts in list.txt, sent back.")
+        self.assertFalse([l for l in self.news() if "auto-accept" in l])
+
     def test_after_accept_a_rebase_that_changes_only_context_keeps_the_approval(self):
         self.base_file("list.txt", "a\nb\nc\nd\ne\nf\n")
         # two lines apart: it rebases cleanly, but BP-1's line is in BP-2's patch's context
