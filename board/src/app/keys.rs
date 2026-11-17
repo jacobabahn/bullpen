@@ -333,7 +333,7 @@ impl App {
         let sel = cur.id.as_str();
         match (code, ch) {
             (KeyCode::Enter, _) => {
-                let reviewer = cur.status == "review" || cur.on_reviewer();
+                let reviewer = cur.reviewers_turn();
                 // a pane that opens in another tab shows nothing here: say it worked
                 self.msg = if reviewer {
                     let (ok, out) = self.go(sel, true);
@@ -371,7 +371,7 @@ impl App {
             (_, Some('r')) => self.spawn(sel, Job::Resume),
             (_, Some('p')) => {
                 // in review, the reviewer's screen: what ⏎ opens
-                self.peek_review = cur.status == "review" || cur.on_reviewer();
+                self.peek_review = cur.reviewers_turn();
                 let whose = if self.peek_review { " · its reviewer" } else { "" };
                 self.mode = Mode::Overlay {
                     title: format!("{sel}  {}{whose}", cur.title),

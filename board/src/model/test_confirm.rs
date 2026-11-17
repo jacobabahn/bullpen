@@ -9,10 +9,13 @@ fn keys_fit_the_task() {
     let asked = task("BP-1", "needs").with(json!({"ask": true}));
     assert_eq!(task_keys(Some(&asked))[..2], [("i", "answer"), ("⏎", "open")]);
     // stopped on its reviewer, ⏎ opens the reviewer, as in review
-    let on_reviewer = |st: &str| task("BP-1", st).with(json!({"why": "Reviewer ended its turn without a verdict"}));
-    assert_eq!(task_keys(Some(&on_reviewer("needs")))[0], ("⏎", "reviewer"));
-    assert_eq!(task_keys(Some(&on_reviewer("triage")))[0], ("⏎", "reviewer"));
+    let stopped = |st: &str, kind: &str| task("BP-1", st).with(json!({"stop": {"by": "reviewer", "kind": kind}}));
+    assert_eq!(task_keys(Some(&stopped("needs", "ended")))[0], ("⏎", "reviewer"));
+    assert_eq!(task_keys(Some(&stopped("triage", "ended")))[0], ("⏎", "reviewer"));
     assert_eq!(task_keys(Some(&task("BP-1", "triage")))[0], ("⏎", "open"));
+    // a reviewer stopped at the usage limit is seen to as its worker's: ⏎ opens the worker
+    let limit = stopped("triage", "limit").with(json!({"why": "Reviewer stopped at the usage limit"}));
+    assert_eq!(task_keys(Some(&limit))[0], ("⏎", "open"));
     assert!(task_keys(None).is_empty());
     let wt = |st: &str| task("BP-1", st).with(json!({"worktree": "/w"}));
     assert_eq!(task_keys(Some(&wt("working"))).last(), Some(&("v", "diff")));
@@ -74,7 +77,10 @@ fn an_accept_names_its_risks_worst_first() {
 fn a_drop_names_the_agent_it_stops() {
     let cfg = merge("rebase");
     let worker = |st: &str| task("BP-3", st).with(json!({"block": "w3"}));
-    let reviewer = |st: &str, why: &str| worker(st).with(json!({"why": why, "review": {"block": "r3"}}));
+    let reviewer = |st: &str, why: &str| {
+        let stop = json!({"by": "reviewer", "kind": "prompt"});
+        worker(st).with(json!({"why": why, "stop": stop, "review": {"block": "r3"}}))
+    };
     let t = worker("working").with(json!({"pr": "https://x/pull/42"}));
     assert_eq!(
         confirm_texts(Action::Drop, &t, &cfg),

@@ -7,7 +7,7 @@
 //! there. A task the coordinator asked the person about (`ask`) is answered with `reply`:
 //! the answer goes to the coordinator, never to the worker.
 
-use crate::agents::{pane, running, waits_on};
+use crate::agents::{pane, running};
 use crate::args::{pos, usage_error, value, Arg, Args, Nargs};
 use crate::coordinators::sees_to;
 use crate::news::{news, Opts};
@@ -19,7 +19,7 @@ use bullpen_core::json::{dumps_line, obj, s, truthy, Obj};
 use bullpen_core::paths::rex;
 use bullpen_core::proc::run;
 use bullpen_core::repo::repo_root;
-use bullpen_core::task::{clip, ok, set_status};
+use bullpen_core::task::{clip, ok, set_status, waits_on};
 use bullpen_core::text::squash;
 use bullpen_core::{fail, Repo, Res};
 use serde_json::{json, Value};

@@ -59,7 +59,7 @@ pub fn confirm_risks(action: Action, t: &Task, cfg: &Config) -> Vec<(&'static st
             // only while its pane is open: bullpen clears the block when the pane goes
             let open = |b: Option<&str>| b.is_some_and(|b| !b.is_empty());
             let reviewer = t.review.as_ref().and_then(|r| r.block.as_deref());
-            if t.status == "review" || t.on_reviewer() {
+            if t.reviewers_turn() {
                 if open(reviewer) {
                     risks.push(("Its reviewer is still running", "Reviewer running"));
                 }

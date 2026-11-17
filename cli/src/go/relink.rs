@@ -1,7 +1,6 @@
 //! A Rex restart brings panes back with new block IDs: `relink` finds bullpen's own
 //! again by their labels. `go` runs it when the pane it would show is gone.
 
-use crate::agents::{is_limited, whose_turn};
 use crate::coordinators::alive;
 use crate::panes::{find, View};
 use crate::rex::{board_label, coordinator_label, find_pane, find_panes, review_label, rex_close, rex_view};
@@ -9,7 +8,7 @@ use crate::saves::save;
 use crate::stops::stop;
 use bullpen_core::json::{obj, py_str, s, truthy, Obj};
 use bullpen_core::repo::{index_block, unindex_block};
-use bullpen_core::task::{is_closed, is_waiting, set_status};
+use bullpen_core::task::{is_closed, is_limited, is_waiting, set_status, whose_turn};
 use bullpen_core::{Repo, Res};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};

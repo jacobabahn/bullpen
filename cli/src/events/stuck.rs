@@ -2,7 +2,7 @@
 //! (`_stuck`), and the usage limit's reset (`_limit`), which continues the agents that
 //! stopped at it.
 
-use crate::agents::{is_limited, pane};
+use crate::agents::pane;
 use crate::args::{pos, usage_error, Arg, Args, Nargs};
 use crate::limit::{limit_active, limit_file, LIMIT_CONTINUE, LIMIT_GRACE};
 use crate::modes::task_base_ref;
@@ -15,7 +15,7 @@ use crate::start::peek::py_int;
 use crate::stops::stop;
 use bullpen_core::json::{obj, s, Obj};
 use bullpen_core::repo::{known_repos, lookup_block};
-use bullpen_core::task::clip;
+use bullpen_core::task::{clip, is_limited};
 use bullpen_core::text::split;
 use bullpen_core::timeutil::{iso_seconds, now, seconds_since};
 use bullpen_core::{fail, Repo, Res};

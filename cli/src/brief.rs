@@ -6,7 +6,6 @@
 //! round is told the brief changed since the last one (`changed_since`). What the
 //! worker is told is `message`, typed by `tell`.
 
-use crate::agents::whose_turn;
 use crate::args::{pos, value, Arg, Args, Nargs};
 use crate::guide::unified_diff;
 use crate::review::close_reviewer;
@@ -18,7 +17,7 @@ use crate::start::read_text;
 use crate::stops::stop;
 use bullpen_core::json::{self, obj, py_str, s, truthy, Obj};
 use bullpen_core::repo::repo_root;
-use bullpen_core::task::{at_prompt, back_to_work, clip, is_closed, is_status, is_waiting};
+use bullpen_core::task::{at_prompt, back_to_work, clip, is_closed, is_status, is_waiting, whose_turn};
 use bullpen_core::text::{rstrip, splitlines, strip};
 use bullpen_core::timeutil::{iso_now, now};
 use bullpen_core::{fail, Repo, Res};

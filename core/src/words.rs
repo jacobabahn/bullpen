@@ -7,7 +7,7 @@
 
 use crate::json::{self, get, obj, py_str, s, truthy, Obj};
 use crate::paths::{safe, state};
-use crate::task::{is_closed, keeps_branch, own_model, pr_short, stamp, task_num};
+use crate::task::{is_closed, is_limited, keeps_branch, on_waited, own_model, pr_short, stamp, task_num};
 use crate::text::{splitlines, squash, strip, upper_first};
 use crate::timeutil::{self, clock, seconds_since, Stamp};
 use crate::{Fail, Res};
@@ -100,28 +100,10 @@ pub fn stale(t: &Obj, at: Option<Stamp>) -> bool {
     s(t, "status") == "needs" && stamp(t).is_some_and(|st| seconds_since(st, at) >= STALE)
 }
 
-/// Is the record at key (stuck, limit) about the agent the task waits on now: its
-/// reviewer in review, its worker while working? One of the wrong shape (not an
-/// object) counts as none.
-fn on_waited(t: &Obj, key: &str) -> bool {
-    !obj(t, key).is_empty()
-        && s(t, "status")
-            == if s(obj(t, key), "who") == "reviewer" {
-                "review"
-            } else {
-                "working"
-            }
-}
-
 /// Has the agent the task waits on (its worker, or its reviewer in review) shown no
 /// progress for too long?
 pub fn is_stuck(t: &Obj) -> bool {
     on_waited(t, "stuck")
-}
-
-/// agents.is_limited: is the agent the task waits on stopped at the usage limit?
-pub fn is_limited(t: &Obj) -> bool {
-    on_waited(t, "limit")
 }
 
 /// "no progress for 25 min", or "" for a task that isn't stuck.

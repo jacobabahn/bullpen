@@ -4,7 +4,7 @@
 
 pub mod stuck;
 
-use crate::agents::{on_reviewer, pane, whose_turn};
+use crate::agents::pane;
 use crate::args::{pos, Arg, Args, Nargs};
 use crate::coordinators::{coordinator_at, coordinator_gone};
 use crate::limit::{limit_hit, limit_over, limited, LIMIT_STATES};
@@ -19,7 +19,7 @@ use crate::stops::stop;
 use bullpen_core::json::{s, truthy, Obj};
 use bullpen_core::proc::git;
 use bullpen_core::repo::{lookup_block, mark_compacting, unindex_block};
-use bullpen_core::task::{back_to_work, is_closed, is_stopped, is_waiting, set_status};
+use bullpen_core::task::{back_to_work, is_closed, is_stopped, is_waiting, on_reviewer, set_status, whose_turn};
 use bullpen_core::text::{split, strip};
 use bullpen_core::timeutil::iso_now;
 use bullpen_core::{Repo, Res};

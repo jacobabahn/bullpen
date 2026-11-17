@@ -86,6 +86,56 @@ pub fn reviewers_stop(t: &Obj) -> bool {
     s(stop, "by") == "reviewer" && s(stop, "kind") != "limit"
 }
 
+// ---------- who it waits on ----------
+
+/// Is the record at key (stuck, limit) about the agent the task waits on now: its
+/// reviewer in review, its worker while working? One of the wrong shape (not an
+/// object) counts as none.
+pub(crate) fn on_waited(t: &Obj, key: &str) -> bool {
+    let rec = obj(t, key);
+    let waits = if s(rec, "who") == "reviewer" {
+        "review"
+    } else {
+        "working"
+    };
+    !rec.is_empty() && s(t, "status") == waits
+}
+
+/// Is the agent the task waits on stopped at the usage limit?
+pub fn is_limited(t: &Obj) -> bool {
+    on_waited(t, "limit")
+}
+
+/// Is the task stopped on its reviewer (a prompt, or no verdict)?
+pub fn on_reviewer(t: &Obj) -> bool {
+    is_waiting(s(t, "status")) && reviewers_stop(t)
+}
+
+/// "reviewer" while the task is in review or its stop is the reviewer's (but not a
+/// usage-limit stop, seen to as its worker's), "worker" while it's working or stopped
+/// on anything else, else None. The usage limit makes no difference here. Its ⏎ and
+/// peek on the board open this agent's pane.
+pub fn whose_turn(t: &Obj) -> Option<&'static str> {
+    let st = s(t, "status");
+    if st == "review" || on_reviewer(t) {
+        Some("reviewer")
+    } else if st == "working" || is_waiting(st) {
+        Some("worker")
+    } else {
+        None
+    }
+}
+
+/// "worker" or "reviewer": the agent the task waits on now (whose_turn), or None when it
+/// waits on the usage limit, or on no agent.
+pub fn waits_on(t: &Obj) -> Option<&'static str> {
+    if is_limited(t) {
+        None
+    } else {
+        whose_turn(t)
+    }
+}
+
 /// Is the task's worker stopped at a prompt?
 pub fn at_prompt(t: &Obj) -> bool {
     t.get("stop") == Some(&json!({"by": "worker", "kind": "prompt"}))

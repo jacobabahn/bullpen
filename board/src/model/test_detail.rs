@@ -108,9 +108,10 @@ fn triage_is_the_coordinators_not_yours() {
     assert_eq!(detail(&t), "Failed: API error");
     assert_eq!(detail(&why("triage", "Ended its turn without saying ready")), "Ended its turn without ready.");
     assert_eq!(task_keys(Some(&t)), vec![("⏎", "open"), ("p", "peek"), ("t", "tell")]);
-    assert!(why("triage", "Reviewer stopped without a verdict").on_reviewer());
-    assert!(!t.on_reviewer());
-    let asked = why("needs", "Reviewer needs you (permission)");
+    let stop = |by: &str, kind: &str| json!({"stop": {"by": by, "kind": kind}});
+    assert!(why("triage", "Reviewer stopped without a verdict").with(stop("reviewer", "ended")).on_reviewer());
+    assert!(!t.with(stop("worker", "failed")).on_reviewer());
+    let asked = why("needs", "Reviewer needs you (permission)").with(stop("reviewer", "prompt"));
     assert!(asked.on_reviewer() && asked.flagged());
     // escalated: it needs you, with its reason
     let late = why("needs", "Failed (coordinator didn't resolve it)");

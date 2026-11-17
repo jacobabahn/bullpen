@@ -15,7 +15,7 @@
 //! as a round); a change anywhere else gets a review after a rebase (rebased: only that
 //! the change still fits, as there are no findings to check).
 
-use crate::agents::{pane, running, whose_turn};
+use crate::agents::{pane, running};
 use crate::args::{pos, Arg, Args, Nargs};
 use crate::coordinators::session_for;
 use crate::git_names::{unquote, Changed};
@@ -30,7 +30,7 @@ use bullpen_core::json::{get, obj, py_str, s, truthy, Obj};
 use bullpen_core::paths::{home, prompts, self_bin};
 use bullpen_core::proc::{git, head, merge_base, resolve, run_input};
 use bullpen_core::repo::{index_block, repo_root, unindex_block};
-use bullpen_core::task::{auto_accepts, commits, is_closed, is_status, set_status, where_, with_model};
+use bullpen_core::task::{auto_accepts, commits, is_closed, is_status, set_status, where_, whose_turn, with_model};
 use bullpen_core::{fail, Repo, Res};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;

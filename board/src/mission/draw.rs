@@ -269,7 +269,7 @@ fn bar(buf: &mut Buffer, area: Rect, y: usize, t: &TaskState) {
 fn task_mark(m: &Mission, i: Item, t: &TaskState) -> Span<'static> {
     let st = items::status(t);
     let board = m.boards.get(&m.fleet.repos[i.repo].repo.dir);
-    let still = bullpen_core::words::is_stuck(&t.task) || bullpen_core::words::is_limited(&t.task);
+    let still = bullpen_core::words::is_stuck(&t.task) || bullpen_core::task::is_limited(&t.task);
     if board.and_then(|b| b.job(items::id(t))).is_some() {
         span(frame_at(m.started, SPINNER, 100), bold())
     } else if still {

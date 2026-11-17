@@ -1,13 +1,13 @@
 //! The coordinator's commands for a task that stopped: `ask` and `ok`; and `note`.
 //! `review` (a new reviewer) is in review.rs.
 
-use crate::agents::{running, waits_on};
+use crate::agents::running;
 use crate::args::{pos, Arg, Args, Nargs};
 use crate::news::tell_coordinator;
 use crate::saves::save;
 use bullpen_core::json::{self, s};
 use bullpen_core::repo::repo_root;
-use bullpen_core::task::{ask, is_closed, is_status, ok};
+use bullpen_core::task::{ask, is_closed, is_status, ok, waits_on};
 use bullpen_core::text::squash;
 use bullpen_core::{fail, Repo, Res};
 use serde_json::json;

@@ -12,7 +12,7 @@
 //! in notify.json, and once none has come for NOTIFY_QUIET seconds the watcher's outbox
 //! round (`_flush`) sends "3 tasks need you: BP-3, BP-4, BP-5".
 
-use crate::agents::{pane, placed, waits_on};
+use crate::agents::{pane, placed};
 use crate::args::Args;
 use crate::coordinators::home_of;
 use crate::news::{deliver, touch, NEWS_MARK};
@@ -20,7 +20,7 @@ use crate::rex::{pane_tty, rex_view};
 use bullpen_core::config::load_config;
 use bullpen_core::json::{self, obj, s, truthy, Obj};
 use bullpen_core::paths::state;
-use bullpen_core::task::clip;
+use bullpen_core::task::{clip, waits_on};
 use bullpen_core::timeutil::iso_now;
 use bullpen_core::{Fail, Repo, Res};
 use serde_json::{json, Value};

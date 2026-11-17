@@ -135,6 +135,73 @@ fn whose_stop_it_is() {
 }
 
 #[test]
+fn a_task_is_on_its_reviewer_by_its_stop() {
+    assert!(on_reviewer(&stopped("needs", "reviewer", "prompt", json!({}))));
+    assert!(on_reviewer(&stopped("triage", "reviewer", "exited", json!({}))));
+    assert!(on_reviewer(&stopped(
+        "needs",
+        "reviewer",
+        "ended",
+        json!({"ask": true})
+    )));
+    assert!(!on_reviewer(&stopped("triage", "reviewer", "limit", json!({})))); // seen to as its worker's
+    assert!(!on_reviewer(&stopped("triage", "worker", "ended", json!({}))));
+    assert!(!on_reviewer(&task(json!({"status": "review"}))));
+    // its why's wording makes no difference
+    let why = json!({"why": "Reviewer stopped at the usage limit"});
+    assert!(!on_reviewer(&stopped("triage", "reviewer", "limit", why)));
+}
+
+#[test]
+fn a_task_waits_on_its_reviewer_in_review_or_for_its_stop() {
+    assert_eq!(waits_on(&task(json!({"status": "review"}))), Some("reviewer"));
+    assert_eq!(
+        waits_on(&stopped("needs", "reviewer", "prompt", json!({}))),
+        Some("reviewer")
+    );
+    assert_eq!(
+        waits_on(&stopped("triage", "reviewer", "limit", json!({}))),
+        Some("worker")
+    );
+    assert_eq!(
+        whose_turn(&stopped("triage", "reviewer", "limit", json!({}))),
+        Some("worker")
+    );
+    assert_eq!(
+        waits_on(&stopped("triage", "worker", "exited", json!({}))),
+        Some("worker")
+    );
+    assert_eq!(waits_on(&stopped("stopped", "worker", "pane_gone", json!({}))), None); // its pane is gone
+    assert_eq!(waits_on(&task(json!({"status": "working"}))), Some("worker"));
+    for status in ["todo", "ready", "finished", "done", "dropped"] {
+        assert_eq!(waits_on(&task(json!({"status": status}))), None);
+        assert_eq!(whose_turn(&task(json!({"status": status}))), None);
+    }
+    let lim = json!({"who": "reviewer", "text": "limit"});
+    assert_eq!(waits_on(&task(json!({"status": "review", "limit": lim}))), None); // waits on the usage limit
+    assert_eq!(
+        whose_turn(&task(json!({"status": "review", "limit": lim}))),
+        Some("reviewer")
+    );
+    let worker_lim = json!({"who": "worker", "text": "limit"});
+    assert_eq!(waits_on(&task(json!({"status": "working", "limit": worker_lim}))), None);
+}
+
+#[test]
+fn only_the_agent_a_task_waits_on_is_limited() {
+    let lim = json!({"who": "worker", "resets": "2026-11-11T15:00:00-06:00", "text": "x"});
+    assert!(is_limited(&task(json!({"status": "working", "limit": lim}))));
+    assert!(!is_limited(&task(json!({"status": "ready", "limit": lim}))));
+    assert!(!is_limited(&task(json!({"status": "review", "limit": lim}))));
+    let lim = json!({"who": "reviewer", "text": "x"});
+    assert!(is_limited(&task(json!({"status": "review", "limit": lim}))));
+    // a record of the wrong shape, or an empty one, is none
+    assert!(!is_limited(&task(json!({"status": "working", "limit": {}}))));
+    assert!(!is_limited(&task(json!({"status": "working", "limit": "x"}))));
+    assert!(!is_limited(&task(json!({"status": "working", "limit": true}))));
+}
+
+#[test]
 fn statuses_and_numbers() {
     assert!(is_closed("done") && is_closed("dropped") && !is_closed("ready"));
     assert!(is_waiting("triage") && !is_waiting("stopped"));

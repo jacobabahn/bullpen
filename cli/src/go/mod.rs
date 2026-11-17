@@ -4,7 +4,7 @@
 
 pub mod relink;
 
-use crate::agents::{on_reviewer, pane};
+use crate::agents::pane;
 use crate::args::{flag, pos, value, Arg, Args, Nargs};
 use crate::board::{ensure_board, realpath};
 use crate::coordinators::{
@@ -16,7 +16,7 @@ use crate::saves::save;
 use bullpen_core::json::{self, dumps_line, obj, py_str, s, truthy, Obj};
 use bullpen_core::paths::{safe, state};
 use bullpen_core::repo::{find_repo, known_repos, lookup_block, repo_root};
-use bullpen_core::task::is_status;
+use bullpen_core::task::{is_status, on_reviewer};
 use bullpen_core::{fail, Fail, Repo, Res};
 use relink::relink;
 use serde_json::{json, Value};

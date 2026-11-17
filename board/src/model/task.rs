@@ -66,8 +66,8 @@ impl TourShow {
 /// Why a task waits on someone: {"by": "worker" | "reviewer", "kind": "prompt" | ...}.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Stop {
-    /// read only by the tests: the board says who from `why` (once main.rs's `App` was
-    /// in a private module, the compiler saw that)
+    /// read only by the tests: who it waits on is core's rule, which reads the task's
+    /// object (once main.rs's `App` was in a private module, the compiler saw that)
     #[serde(default)]
     #[allow(dead_code)]
     pub by: String,
@@ -205,9 +205,16 @@ impl Task {
         self.status == "triage"
     }
 
-    /// Is it stopped on its reviewer (a prompt, or no verdict), so ⏎ opens the reviewer?
+    /// Is it stopped on its reviewer (a prompt, or no verdict)? Core's rule, by its stop:
+    /// one stopped at the usage limit is seen to as its worker's.
     pub fn on_reviewer(&self) -> bool {
-        matches!(self.status.as_str(), "needs" | "triage") && self.why.as_deref().unwrap_or("").starts_with("Reviewer")
+        core::on_reviewer(&self.obj)
+    }
+
+    /// Is it its reviewer's turn (in review, or stopped on its reviewer), so ⏎ and peek
+    /// open the reviewer? Core's `whose_turn`, as the command line has it.
+    pub fn reviewers_turn(&self) -> bool {
+        core::whose_turn(&self.obj) == Some("reviewer")
     }
 
     pub fn closed(&self) -> bool {
@@ -240,7 +247,7 @@ impl Task {
 
     /// Is the agent the task is waiting on stopped at the usage limit?
     pub fn is_limited(&self) -> bool {
-        words::is_limited(&self.obj)
+        core::is_limited(&self.obj)
     }
 
     /// Does it get the amber (or red) bar: it needs you, or its agent has gone quiet.

@@ -7,10 +7,10 @@ use crate::task_line::{colored, task_line, task_rows, term_width};
 use bullpen_core::fleet;
 use bullpen_core::json::{dumps, get, obj, py_str, s, truthy, Obj};
 use bullpen_core::repo::repo_root;
-use bullpen_core::task::{keeps_branch, listed, own_model};
+use bullpen_core::task::{is_limited, keeps_branch, listed, own_model};
 use bullpen_core::text::{len, lstrip, rjust, splitlines, strip, width, wrap};
 use bullpen_core::words::{
-    ago, board_detail, board_order, every, is_limited, is_stuck, pr_phrase, stuck_phrase, waits_phrase, Every,
+    ago, board_detail, board_order, every, is_stuck, pr_phrase, stuck_phrase, waits_phrase, Every,
 };
 use bullpen_core::{Repo, Res};
 use serde_json::{json, Value};

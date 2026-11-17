@@ -335,6 +335,32 @@ fn enter_and_v_in_a_peek_go_back_and_open_the_pane_or_diff() {
 }
 
 #[test]
+fn enter_and_peek_go_to_the_agent_whose_turn_it_is() {
+    let d = Scratch::new("whose-turn");
+    let exe = fake_bullpen(&d, "current");
+    let stopped = |id: &str, kind: &str, why: &str| {
+        let stop = json!({"by": "reviewer", "kind": kind});
+        task(id, "triage").with(json!({"why": why, "stop": stop, "block": "b1", "review": {"block": "b2"}}))
+    };
+    let tasks = vec![
+        stopped("BP-1", "ended", "Reviewer ended its turn without a verdict"),
+        // a reviewer stopped at the usage limit: the worker's to see to, as the command line has it
+        stopped("BP-2", "limit", "Reviewer stopped at the usage limit"),
+    ];
+    let mut a = App::for_test(tasks);
+    (a.bullpen, a.root) = (exe, d.0.clone());
+    for (id, opened, reviewer) in [("BP-1", "Opened BP-1's reviewer.", true), ("BP-2", "Opened BP-2.", false)] {
+        a.sel = Some(id.into());
+        key(&mut a, KeyCode::Enter);
+        assert_eq!(a.msg, Note::done(opened));
+        peek_at(&mut a, id);
+        assert_eq!(a.peek_review, reviewer, "{id}");
+        key(&mut a, KeyCode::Esc);
+    }
+    assert_eq!(calls(&d), ["go BP-1 --review", "go BP-2"]);
+}
+
+#[test]
 fn q_asks_before_quitting_the_board_and_ctrl_c_doesnt() {
     let mut a = App::for_test(vec![task("BP-1", "ready")]);
     assert!(a.key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)));

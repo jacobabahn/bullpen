@@ -14,12 +14,12 @@
 //! Python's patterns (LIMIT_RE, RESET_RE and the older Unix-time form) are matched by
 //! hand here, with re's own rules: (?i)'s case folds, Unicode `\s`, `\d` and `\w`.
 
-use crate::agents::{is_limited, pane};
+use crate::agents::pane;
 use bullpen_core::json::{self, obj, s, truthy, Obj};
 use bullpen_core::paths::{is_word, rex, state};
 use bullpen_core::proc::run;
 use bullpen_core::repo::Repo;
-use bullpen_core::task::{clip, is_waiting, set_status};
+use bullpen_core::task::{clip, is_limited, is_waiting, set_status};
 use bullpen_core::text::{is_space, splitlines, squash, strip};
 use bullpen_core::timeutil::{clock, iso_now, iso_seconds, now, parse, seconds_since, Stamp};
 use bullpen_core::Res;

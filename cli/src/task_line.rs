@@ -4,11 +4,9 @@
 
 use bullpen_core::json::{s, Obj};
 use bullpen_core::risk::level_sgr;
-use bullpen_core::task::is_closed;
+use bullpen_core::task::{is_closed, is_limited};
 use bullpen_core::text::{fit, len, ljust, width, wrap};
-use bullpen_core::words::{
-    ago, board_detail, from_mark, is_limited, is_stuck, mark, mark_color, pr_phrase, stale, Every,
-};
+use bullpen_core::words::{ago, board_detail, from_mark, is_stuck, mark, mark_color, pr_phrase, stale, Every};
 use bullpen_core::{Repo, Res};
 
 fn sgr(code: &str, text: &str, color: bool) -> String {
