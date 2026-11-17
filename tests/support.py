@@ -178,6 +178,8 @@ class BullpenTest(unittest.TestCase):
                     "BULLPEN_REX": str(fake / "rex"), "BULLPEN_GH": str(fake / "gh"),
                     "FAKE_DIR": str(fake), "REX_SESSION": "session:1", "REX_BLOCK": "me",
                     "XDG_CONFIG_HOME": str(self.tmp / "xdg"),
+                    # Claude Code's scratch folders (cli/src/claude_tmp.rs): the test's own, never the real /tmp
+                    "BULLPEN_CLAUDE_TMP": str(self.tmp / "ctmp"),
                     "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@example.com",
                     "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@example.com"}
 

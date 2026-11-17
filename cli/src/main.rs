@@ -14,6 +14,7 @@ mod brief;
 mod build;
 mod build_watch;
 mod check;
+mod claude_tmp;
 mod close;
 mod commands;
 mod config;

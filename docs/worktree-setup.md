@@ -21,3 +21,18 @@ the worker. A worktree that was set up is never set up again, not by `resume` ei
 `.bullpen/teardown.sh` (or `bullpen config --teardown "..."`) runs the same way just
 before `accept`, `close` or `drop` removes a worktree, its output in
 `<ID>.teardown.log`. A failure is said and logged, but the worktree goes anyway.
+
+## Claude Code's scratch folder
+
+Claude Code keeps a scratch folder for each folder it runs in:
+`/tmp/claude-<uid>/<the folder's path, each character but a letter or digit turned
+into ->`, so the worktree `~/dev/bullpen-bullpen/BP-12` has
+`/tmp/claude-1000/-home-me-dev-bullpen-bullpen-BP-12`. A task's worker and reviewer
+both run in its worktree, so it's theirs. Once `accept`, `close` (`--keep-branch`
+too) or `drop` has removed the worktree, that folder goes too, when the worker or
+reviewer command is `claude`. Only a folder named for the worktree's exact path, right
+in `claude-<uid>`, goes: not `BP-120`'s for `BP-12`, and never a symlink, nor anything
+a symlink inside it points to. It's looked for in `$CLAUDE_CODE_TMPDIR`, `$TMPDIR`
+and `/tmp`. A folder that can't be removed stays, quietly: it never stops the close.
+[Doctor](doctor.md)'s `temp` line counts the ones closed tasks left from before, and
+`bullpen doctor --fix` removes them.

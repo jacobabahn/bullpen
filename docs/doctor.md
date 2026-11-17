@@ -1,8 +1,9 @@
 # Doctor
 
 `bullpen doctor` checks the setup and prints one line per check: `ok`, `FAIL` with
-the exact fix, or `--` when a check doesn't apply or can't be told. It exits
-non-zero when anything fails. It checks:
+the exact fix, `WARN` for something to see to that stops nothing, or `--` when a
+check doesn't apply or can't be told. It exits non-zero when anything fails (a warning
+isn't a failure). It checks:
 
 - `rex` is on PATH and its server is preview.13 or later (`rex server status`)
 - `gh` is installed and signed in (`gh auth status`), unless the repo is in
@@ -27,6 +28,16 @@ non-zero when anything fails. It checks:
   stamp, `target/bullpen.json`; the hashes in `watcher.json`) of the copy of bullpen it
   runs: this one, or the one `watcher.json` names, which the line then says
 - the state folder is writable, and this repo's `config.json` parses
+- the temp folder (`temp`): how full its filesystem is, and the Claude Code scratch
+  folders ([Worktree setup](worktree-setup.md#claude-codes-scratch-folder)) closed
+  tasks left in it, of any repository bullpen knows: "/tmp is 71% full (4.1 GB free);
+  132 Claude scratch folders of closed tasks hold 9.8 GB: `bullpen doctor --fix`
+  removes them". A folder counts only when it's named for a closed task's worktree,
+  that worktree isn't there, and no open task's worktree has its name. 90% full or
+  more is a warning (`WARN`), never a failure: a full `/tmp` stops workers with a quota
+  error, but nothing about bullpen is broken. The temp folder is each of
+  `$CLAUDE_CODE_TMPDIR`, `$TMPDIR` and `/tmp` that has a `claude-<uid>` folder in it
+  (`/tmp` when none has)
 - the global `config.json` (see [Settings](settings.md)), if there is one, parses
   and sets nothing only a repository can have
 - the setup and teardown hooks, if there are any: `.bullpen/setup.sh` as committed
@@ -102,14 +113,16 @@ non-zero when anything fails. It checks:
   With any other news it is `--`, unless the file still has bullpen's entries:
   `bullpen doctor --fix` removes them.
 
-`bullpen doctor --fix` first fixes what bullpen can by itself, in this repository,
-and then runs the checks. For now that is the news hook: written when news is
-`wake`, removed when it isn't. It says what it did ("fixed  news: removed bullpen's
+`bullpen doctor --fix` first fixes what bullpen can by itself, and then runs the
+checks. That is the Claude scratch folders the `temp` line counts, which it removes
+(it works outside a repository too); and in this repository, the news hook: written
+when news is `wake`, removed when it isn't. It says what it did ("fixed  temp: removed
+132 Claude scratch folders of closed tasks (9.8 GB)", "fixed  news: removed bullpen's
 news hook from .claude/settings.local.json"), on stderr with `--json`, and it
 doesn't go with `--all-repos`.
 
 `bullpen up` runs the quick checks (not `gh` or the push remote, which need the
-network, nor the watcher, the coordinators and the news hook, which `up` sees to itself) and, if any fail, prints one
+network, nor `temp`, which sizes folders, nor the watcher, the coordinators and the news hook, which `up` sees to itself) and, if any fail, prints one
 line: "2 problems: run `bullpen doctor`". Doctor itself ends with the failed checks'
 names ("2 problems: keys, watcher."), and writes paths in your home folder with `~`.
 
@@ -118,7 +131,7 @@ names ("2 problems: keys, watcher."), and writes paths in your home folder with 
 `bullpen doctor --all-repos` checks every repository bullpen has state for (as
 `ls --all-repos` does, it works from anywhere, and leaves out a repo whose checkout is
 gone). The checks about the setup, which are the same for every repo (`rex`,
-`bullpen`, `board`, `cargo`, `keys`, `watcher`, `state`, `global`), run once, under
+`bullpen`, `board`, `cargo`, `keys`, `watcher`, `state`, `temp`, `global`), run once, under
 "Setup, for every repo". Then each repo gets its own (`gh`, `agents`, `config`,
 `setup`, `teardown`, `coordinators`, `copy`, `risk`, `news`, `push`) under its name and folder. A repo whose
 board runs an older build shows up on its `coordinators` line, and one whose
@@ -135,7 +148,7 @@ Plain `doctor` in a repo asks the remote itself.
 
 `--json`, alone or with `--all-repos`, prints the same checks for a script or the
 mission screen's health line. Each check is `{name, state, text}`, with `state` one of
-`ok`, `fail` or `skip` and the text as doctor prints it. Alone it is
+`ok`, `warn`, `fail` or `skip` and the text as doctor prints it. Alone it is
 `{repo, checks, problems}` (`repo` is null outside a repository); with `--all-repos`,
 `{shared, repos: [{repo, name, checks}], problems}` (`repo` is null for a repo whose
 `config.json` doesn't parse). `problems` lists the failed checks' names, as the last

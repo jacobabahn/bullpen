@@ -132,6 +132,9 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `stops.rs`: a worker or reviewer stopping, and a triage passed on to the person
 - `hooks.rs`: a worktree's setup and teardown hooks (`set_up`), and removing a
   worktree (`remove_worktree`)
+- `claude_tmp.rs`: Claude Code's scratch folder for a worktree (`<temp>/claude-<uid>/<path>`):
+  removed with the worktree (`names`, `forget`), and doctor's `temp` line and its
+  `--fix` (`check`, `fix`, `leftovers`)
 - `rules.rs`: the rules every worker and reviewer gets (`task_rules`), and `rules`
 - `limit.rs`: the usage limit: in force for `start` and the queue (`limit_active`,
   `limit_phrase`), and read off an agent's turn or screen for the watcher (`limit_hit`,
@@ -281,7 +284,7 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 
 Accept, close, drop, finish's auto-accept and auto-accept end a task through one close
 step, `close` in `cli/src/close.rs`, in one order: the reviewer's pane, the PR
-(withdrawn, unless it was merged), the worktree and branch, the status and the save,
+(withdrawn, unless it was merged), the worktree (and its Claude scratch folder) and branch, the status and the save,
 then what the caller says and does (`then`: news, and after an accept the rebase of
 the other tasks), and the worker's pane last, since the step may run in it. Each
 caller says only what to tell and how to merge. Nothing calls the run queue: the save

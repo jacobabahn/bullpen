@@ -2,9 +2,10 @@
 
 import json
 import os
+import re
 from pathlib import Path
 
-from support import setUpModule, tearDownModule, BullpenTest  # a temp folder for each module
+from support import setUpModule, tearDownModule, sh, BullpenTest  # a temp folder for each module
 
 
 class WorktreeTest(BullpenTest):
@@ -133,6 +134,81 @@ class WorktreeTest(BullpenTest):
         self.assertFalse(wt.exists())
         log = next((self.tmp / "state").rglob(f"{tid}.teardown.log"))
         self.assertIn("oops", log.read_text())
+
+
+def scratch(test, wt):
+    """Claude Code's scratch folder for the worktree wt, in the test's own temp folder
+    (BULLPEN_CLAUDE_TMP), with a session's file in it."""
+    d = test.tmp / "ctmp" / f"claude-{os.getuid()}" / re.sub("[^A-Za-z0-9]", "-", str(wt))
+    (d / "session").mkdir(parents=True)
+    (d / "session" / "f").write_text("x\n")
+    return d
+
+
+class ClaudeScratchTest(BullpenTest):
+    """The task's Claude scratch folder goes with its worktree, and nothing else does."""
+
+    def finish(self, tid):
+        f = self.tmp / "finish.md"
+        f.write_text("Answered\n\nIt's 42.")
+        self.bp("finish", tid, "--summary-file", str(f), cwd=self.show(tid)["worktree"])
+
+    def test_accept_removes_it_and_leaves_a_near_miss_and_a_link(self):
+        tid = self.ready_with_a_commit()
+        wt = Path(self.show(tid)["worktree"])
+        d = scratch(self, wt)
+        near = scratch(self, f"{wt}0")  # BP-10's, say
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        link = d.parent / (d.name + "-x")
+        link.symlink_to(outside)
+        self.bp("accept", tid)
+        self.assertEqual(self.show(tid)["status"], "done")
+        self.assertFalse(d.exists())
+        self.assertTrue((near / "session" / "f").exists())
+        self.assertTrue(link.is_symlink())
+        self.assertTrue(outside.is_dir())
+
+    def test_a_link_in_its_name_is_left_alone(self):
+        tid = self.ready_with_a_commit()
+        wt = Path(self.show(tid)["worktree"])
+        outside = self.tmp / "outside"
+        (outside / "keep").mkdir(parents=True)
+        root = self.tmp / "ctmp" / f"claude-{os.getuid()}"
+        root.mkdir(parents=True)
+        (root / re.sub("[^A-Za-z0-9]", "-", str(wt))).symlink_to(outside)
+        self.bp("accept", tid)
+        self.assertTrue((outside / "keep").is_dir())
+
+    def test_close_drop_and_keep_branch_remove_it(self):
+        tid = self.start_task()
+        self.finish(tid)
+        d = scratch(self, self.show(tid)["worktree"])
+        self.bp("close", tid)
+        self.assertFalse(d.exists())
+        tid = self.bp("add", "Another", "--brief", "x").stdout.strip()
+        self.bp("start", tid)
+        d = scratch(self, self.show(tid)["worktree"])
+        self.bp("drop", tid)
+        self.assertFalse(d.exists())
+        tid = self.bp("add", "A port", "--brief", "x").stdout.strip()
+        self.bp("start", tid)
+        wt = self.show(tid)["worktree"]
+        (Path(wt) / "port.txt").write_text("ported\n")
+        sh("git", "-C", wt, "add", ".")
+        sh("git", "-C", wt, "commit", "-qm", "Port it")
+        d = scratch(self, wt)
+        self.bp("close", tid, "--keep-branch")
+        self.assertEqual(self.show(tid)["status"], "done")
+        self.assertFalse(d.exists())
+
+    def test_nothing_goes_when_the_agents_arent_claude(self):
+        self.set_commands(worker=["codex"], reviewer=["codex"])
+        tid = self.start_task()
+        d = scratch(self, self.show(tid)["worktree"])
+        self.bp("drop", tid)
+        self.assertEqual(self.show(tid)["status"], "dropped")
+        self.assertTrue((d / "session" / "f").exists())
 
 
 class FooterTest(BullpenTest):

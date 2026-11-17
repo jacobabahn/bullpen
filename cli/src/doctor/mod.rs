@@ -1,7 +1,8 @@
 //! doctor: is everything bullpen needs in place?
 //!
 //! Each check (checks.rs) returns (state, what it found): "ok", "fail" (with the fix in
-//! the text) or "skip" (it doesn't apply, or can't be told). `doctor` runs them all; `up`
+//! the text), "warn" (something to see to, that stops nothing) or "skip" (it doesn't
+//! apply, or can't be told). `doctor` runs them all; `up`
 //! runs the cheap ones (no network, nothing `up` itself just fixed) and only counts problems.
 //! `doctor --all-repos` (all_repos.rs) runs those about the setup once, then each repo's.
 
@@ -91,6 +92,7 @@ fn doctor_checks(place: &Place, run: Run) -> Vec<Line> {
         ("keys", true, false, Box::new(check_keys)),
         ("watcher", true, true, Box::new(check_watcher)),
         ("state", true, false, Box::new(check_state)),
+        ("temp", true, true, Box::new(|| Ok(crate::claude_tmp::check()))),
         ("global", true, false, Box::new(check_global)),
         (
             "config",
@@ -170,8 +172,9 @@ const DOCTOR: &[Arg] = &[
     ),
     flag(
         "--fix",
-        "first fix what bullpen can by itself, in this repository: the news hook in .claude/settings.local.json \
-         (written with `config --news wake`, removed with any other news)",
+        "first fix what bullpen can by itself: the Claude scratch folders closed tasks of any repository left in \
+         the temp folder; and in this repository, the news hook in .claude/settings.local.json (written with \
+         `config --news wake`, removed with any other news)",
     ),
 ];
 
@@ -204,16 +207,22 @@ pub fn cmd_doctor(argv: &[String]) -> Res<i32> {
 /// `doctor --fix`: what bullpen can fix by itself, before the checks. Said on stderr
 /// with --json, whose output is the checks alone.
 fn fix(place: &Place, json: bool) -> Res<()> {
+    let said = |name: &str, did: &str| match json {
+        true => eprintln!("fixed  {name}: {did}"),
+        false => println!("fixed  {name}: {did}"),
+    };
+    if let Some(did) = crate::claude_tmp::fix() {
+        said("temp", &did);
+    }
     let Some(repo) = place.repo.as_ref() else {
-        return bullpen_core::fail(match place.why_not {
-            Some(why) => format!("--fix can't tell this repository's settings: {why}"),
-            None => "--fix is for a repository: run it in one".into(),
-        });
+        return match place.why_not {
+            Some(why) => bullpen_core::fail(format!("--fix can't tell this repository's settings: {why}")),
+            None => Ok(()), // outside a repository: the temp folder alone
+        };
     };
     match crate::news::hook::sync(repo) {
         Ok(None) => {}
-        Ok(Some(did)) if json => eprintln!("fixed  news: {did}"),
-        Ok(Some(did)) => println!("fixed  news: {did}"),
+        Ok(Some(did)) => said("news", &did),
         Err(e) => eprintln!("bullpen: --fix left the news hook as it was: {}", e.0),
     }
     Ok(())
@@ -230,6 +239,7 @@ fn print_lines(res: &[Line], indent: &str) {
         let mark = match *st {
             "ok" => "ok",
             "fail" => "FAIL",
+            "warn" => "WARN",
             _ => "--",
         };
         println!("{indent}{mark:<4}  {name}: {}", homes(text));

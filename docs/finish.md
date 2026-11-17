@@ -32,7 +32,8 @@ drop; workers and coordinators don't run it unasked) ends any open task that way
   no remote it keeps the local branch and says so.
 - Then the close step, keeping the local branch (renamed to `--as`'s name): the
   reviewer, the PR (closed; its branch on origin stays when it's the one kept), the
-  worktree and the pane go. The task is `done`, with `kept: {"branch", "remote"}`.
+  worktree, its Claude scratch folder ([Worktree setup](worktree-setup.md#claude-codes-scratch-folder))
+  and the pane go. The task is `done`, with `kept: {"branch", "remote"}`.
 - `ls --all`, `show` and the board's closed list say "Closed, branch kept: rust on
   github." (or "branch kept here: ..., not pushed."), and the news "BP-3 closed
   without merging. ...". It doesn't read as dropped.

@@ -132,11 +132,13 @@ fn tear_down(repo: &Repo, t: &Obj) -> bool {
     }
 }
 
-/// Remove the task's worktree (its teardown first) and its branch.
+/// Remove the task's worktree (its teardown first), Claude Code's scratch folder for it
+/// (`<temp>/claude-<uid>/<its path, / turned into ->`: claude_tmp.rs), and its branch.
 pub fn remove_worktree(repo: &Repo, t: &Obj, force: bool) -> Res<()> {
     // what a teardown leaves behind mustn't keep the worktree (drop checked it was clean before)
     let force = tear_down(repo, t) || force;
     let wt = s(t, "worktree");
+    let scratch = crate::claude_tmp::names(repo, wt); // Claude Code's scratch folder for it, gone with it
     if !wt.is_empty() && Path::new(wt).exists() {
         let mut args = vec!["worktree", "remove"];
         if force {
@@ -145,6 +147,7 @@ pub fn remove_worktree(repo: &Repo, t: &Obj, force: bool) -> Res<()> {
         args.push(wt);
         git(&repo.root, &args, true)?;
     }
+    crate::claude_tmp::forget(&scratch);
     let branch = s(t, "branch");
     if !branch.is_empty() && !truthy(t.get("kept")) {
         // a task closed with --keep-branch keeps it (close::keep_branch)
