@@ -1,7 +1,7 @@
 //! doctor's `news`: with news by `wake`, the hook that parks the waiter is in place
 //! (news/hook.rs) and has what it needs; with any other news, none of it is left over.
 
-use super::checks::Check;
+use super::Check;
 use crate::coordinators::{alive, coordinators};
 use crate::news::hook::{self, FILE};
 use crate::news::wake::{has_waiter, paused};

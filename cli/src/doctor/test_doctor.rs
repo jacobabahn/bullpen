@@ -1,4 +1,6 @@
-use super::checks::{json_error, repo_scope, rex_version_key, shebang_program, shlex_split, REX_MIN};
+use super::files::json_error;
+use super::hooks::{shebang_program, shlex_split};
+use super::tools::{repo_scope, rex_version_key, REX_MIN};
 use super::{problems_phrase, summary};
 
 #[test]

@@ -2,7 +2,7 @@
 //! which says what it waits on when its turn ends. A task started before workers had
 //! one isn't a problem: its worker does without, until it starts again.
 
-use super::checks::Check;
+use super::Check;
 use crate::rex::alive;
 use crate::stop_hook::{missing, rewrite};
 use bullpen_core::json::{s, truthy, Obj};

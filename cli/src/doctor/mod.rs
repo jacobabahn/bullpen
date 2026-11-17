@@ -1,6 +1,6 @@
 //! doctor: is everything bullpen needs in place?
 //!
-//! Each check (checks.rs) returns (state, what it found): "ok", "fail" (with the fix in
+//! Each check (tools.rs, builds.rs, in_rex.rs, files.rs, hooks.rs, repo.rs, ...) returns (state, what it found): "ok", "fail" (with the fix in
 //! the text), "warn" (something to see to, that stops nothing) or "skip" (it doesn't
 //! apply, or can't be told). `doctor` runs them all; `up`
 //! runs the cheap ones (no network, nothing `up` itself just fixed) and only counts problems.
@@ -10,21 +10,34 @@
 //! setting) and the workers' Stop hooks.
 
 mod all_repos;
-mod checks;
+mod builds;
+mod files;
+mod hooks;
+mod in_rex;
 mod news;
+mod repo;
+mod tools;
 mod workers;
 
 use crate::args::{flag, Arg, Args};
 use crate::push_remote::{check_push, check_push_seen};
+use builds::{check_board, check_cargo, check_cli};
 use bullpen_core::config::read_global_file;
 use bullpen_core::json::dumps;
 use bullpen_core::paths::{homes, safe, state};
 use bullpen_core::repo::repo_root;
 use bullpen_core::settings::defaults;
 use bullpen_core::{Obj, Repo, Res};
-use checks::*;
+use files::{check_config, check_global, check_state};
+use hooks::check_hook;
+use in_rex::{check_keys, check_watcher};
+use repo::check_coordinators;
 use serde_json::{json, Value};
 use std::path::PathBuf;
+use tools::{check_agents, check_gh, check_rex};
+
+/// A check's result.
+pub type Check = Res<(&'static str, String)>;
 
 /// The repo a run of the checks is about: its Repo, its state folder, and why there's
 /// no Repo when there's a folder (its config.json, or the global one, doesn't parse).
