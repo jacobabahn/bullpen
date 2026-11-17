@@ -4,7 +4,7 @@ import json
 import unittest
 from pathlib import Path
 
-from support import setUpModule, tearDownModule, sh, BullpenTest  # a temp folder for each module
+from support import setUpModule, tearDownModule, sh, odd_name, BullpenTest  # a temp folder for each module
 
 
 class AcceptTest(BullpenTest):
@@ -442,6 +442,26 @@ class AcceptTest(BullpenTest):
         sh("git", "-C", t["worktree"], "merge-base", "--is-ancestor", main, pushed)
         self.assertEqual(t["rebased"], "main")  # the board says "Rebased onto main."
         self.assertEqual(self.news_lines()[-1], "bullpen · After BP-1: BP-2 rebased.")
+
+    def test_after_accept_a_conflict_in_a_doc_whose_name_git_quotes_keeps_both_sides(self):
+        name = odd_name("notes") + ".md"
+        (self.repo / name).write_text("Notes.\n")
+        sh("git", "-C", str(self.repo), "add", ".")
+        sh("git", "-C", str(self.repo), "commit", "-qm", "Notes")
+        sh("git", "-C", str(self.repo), "push", "-q", "origin", "HEAD:main")
+        self.two_tasks()
+        for tid in ("BP-1", "BP-2"):
+            self.commit_file(tid, name, f"Notes.\n{tid} was here.\n")
+        self.bp("ready", "BP-1", "--summary", "done")
+        self.bp("ready", "BP-2", "--summary", "done")
+        self.merge_on_github("BP-1")
+        self.bp("accept", "BP-1")
+        t = self.show("BP-2")
+        self.assertEqual(t["status"], "ready")
+        self.assertEqual((Path(t["worktree"]) / name).read_text(), "Notes.\nBP-1 was here.\nBP-2 was here.\n")
+        shown = name.replace("\t", "\\t").replace("\n", "\\n")
+        self.assertEqual(self.news_lines()[-1],
+                         f"bullpen · After BP-1: BP-2 rebased, keeping both sides of a conflict in {shown}.")
 
     def test_show_says_when_a_ready_task_no_longer_rebases_onto_origins_base(self):
         self.two_tasks()

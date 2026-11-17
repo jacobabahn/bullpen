@@ -3,6 +3,7 @@
 //! accepted change meets its work, one between turns is rebased, and a running review
 //! is left be. One news line sums it up. Off with `config --rebase-others off`.
 
+use crate::git_names::{self, listed};
 use crate::modes::{is_local, quiet_git, refresh, task_base_ref};
 use crate::news::{news, Opts};
 use crate::review::{is_doc, keep_approval, rebase_check, shortstat, start_review, Check};
@@ -103,8 +104,7 @@ pub fn rebase_task(repo: &Repo, t: &mut Obj, by: &str, base_ref: &str) -> Res<St
     let mut done = git(&wt, &["rebase", "-q", &base_ref], false)?.ok();
     let mut both: Vec<String> = Vec::new(); // files where bullpen kept both sides of a conflict
     while !done {
-        let unmerged = git(&wt, &["diff", "--name-only", "--diff-filter=U"], false)?.stdout;
-        let files: Vec<String> = split(&unmerged).into_iter().map(String::from).collect();
+        let files = unmerged(&wt)?;
         let shown = git(&wt, &["diff"], false)?.stdout; // the conflicts, before anything is resolved
         if files.is_empty() || !files.iter().all(|f| keep_both_sides(&wt, f)) {
             git(&wt, &["rebase", "--abort"], false)?;
@@ -140,7 +140,7 @@ pub fn rebase_task(repo: &Repo, t: &mut Obj, by: &str, base_ref: &str) -> Res<St
     }
     let mut rebased = format!("{id} rebased");
     if !both.is_empty() {
-        rebased += &format!(", keeping both sides of a conflict in {}", both.join(", "));
+        rebased += &format!(", keeping both sides of a conflict in {}", listed(&both));
     }
     if s(obj(t, "review"), "verdict") == "approved" {
         let check = rebase_check(t, base_ref)?;
@@ -178,16 +178,14 @@ pub enum Need {
     Alone(&'static str),
 }
 
-/// The names a git command lists with -z (added last).
+/// The names a git command lists (git_names::names); none when git fails.
 fn names(wt: &str, args: &[&str]) -> Res<BTreeSet<String>> {
-    let mut args = args.to_vec();
-    args.push("-z");
-    Ok(git(wt, &args, false)?
-        .stdout
-        .split('\0')
-        .filter(|f| !f.is_empty())
-        .map(String::from)
-        .collect())
+    Ok(git_names::names(wt, args)?.unwrap_or_default().into_iter().collect())
+}
+
+/// The files a rebase stopped with unmerged, exactly as named.
+fn unmerged(wt: &str) -> Res<Vec<String>> {
+    Ok(git_names::names(wt, &["diff", "--name-only", "--diff-filter=U"])?.unwrap_or_default())
 }
 
 /// Whether a working task's work meets the accepted change (the files in touched;
@@ -239,14 +237,7 @@ fn merge_conflicts(dir: &str, base_ref: &str, head: &str) -> Res<Option<Vec<Stri
     Ok(match p.code {
         0 => Some(Vec::new()),
         // the tree, then the conflicted files
-        1 => Some(
-            p.stdout
-                .split('\0')
-                .skip(1)
-                .filter(|f| !f.is_empty())
-                .map(String::from)
-                .collect(),
-        ),
+        1 => Some(git_names::names_of(&p.stdout).into_iter().skip(1).collect()),
         _ => None,
     })
 }
@@ -271,8 +262,8 @@ fn tell_to_rebase(t: &Obj, accepted: &Obj, base_ref: &str, touched: Option<&BTre
     let need = rebase_need(s(t, "worktree"), base_ref, touched)?;
     let said = match &need {
         Need::Alone(why) => return Ok(format!("{id} left alone ({why})")),
-        Need::Conflict(files) => format!("conflicts in {}", files.join(", ")),
-        Need::Uncommitted(files) => format!("uncommitted changes in {}", files.join(", ")),
+        Need::Conflict(files) => format!("conflicts in {}", listed(files)),
+        Need::Uncommitted(files) => format!("uncommitted changes in {}", listed(files)),
     };
     let base = py_str(t.get("base").unwrap_or(&Value::Null));
     let msg = told(&base, accepted, &need, base_ref);
@@ -294,11 +285,11 @@ pub fn told(base: &str, accepted: &Obj, need: &Need, base_ref: &str) -> String {
         Need::Alone(_) => String::new(),
         Need::Conflict(files) => format!(
             "{landed}, and your branch conflicts with it in {}. At a good point, {onto}; {KEEP_BOTH}.",
-            files.join(", ")
+            listed(files)
         ),
         Need::Uncommitted(files) => format!(
             "{landed}, and it changed {}, where you have uncommitted changes. Commit them at a good point, then {onto}.",
-            files.join(", ")
+            listed(files)
         ),
     }
 }
@@ -379,10 +370,10 @@ fn keep_both_sides(wt: &str, path: &str) -> bool {
     if !(is_doc(path) || path.starts_with("tests/") || path.contains("/tests/") || name.starts_with("test_")) {
         return false;
     }
-    let Ok(staged) = git(wt, &["ls-files", "-u", "--", path], true) else {
+    let Ok(staged) = git(wt, &["ls-files", "-u", "-z", "--", path], true) else {
         return false;
     };
-    let stages: BTreeSet<String> = splitlines(&staged.stdout)
+    let stages: BTreeSet<String> = git_names::names_of(&staged.stdout)
         .iter()
         .filter_map(|row| split(row).get(2).map(|s| s.to_string()))
         .collect();
@@ -466,7 +457,7 @@ pub fn names_of(files: &[String]) -> String {
     if files.is_empty() {
         "some files".to_string()
     } else {
-        files.join(", ")
+        listed(files)
     }
 }
 
@@ -517,8 +508,7 @@ pub fn base_conflict(repo: &Repo, t: &Obj) -> Res<Option<(String, Vec<String>, S
         git(wt, &["reset", "-q", "--hard", &old], true)?; // only a trial: the branch stays as it was
         return Ok(None);
     }
-    let unmerged = git(wt, &["diff", "--name-only", "--diff-filter=U"], false)?.stdout;
-    let files: Vec<String> = split(&unmerged).into_iter().map(String::from).collect();
+    let files = unmerged(wt)?;
     let shown = git(wt, &["diff"], false)?.stdout;
     git(wt, &["rebase", "--abort"], false)?;
     Ok((!files.is_empty()).then_some((base_ref, files, shown)))
@@ -556,7 +546,7 @@ pub fn stale_line(t: &Obj, files: &[String]) -> String {
     let (id, base) = (s(t, "id"), py_str(t.get("base").unwrap_or(&Value::Null)));
     format!(
         "   rebase: no longer rebases onto {base}: conflicts in {}. `bullpen tell {id}` it to rebase and run ready again",
-        files.join(", ")
+        listed(files)
     )
 }
 

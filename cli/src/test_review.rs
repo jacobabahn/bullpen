@@ -1,5 +1,10 @@
 use super::*;
 
+/// The changed files of numstat rows written one to a line.
+fn rows(numstat: &str) -> Vec<Changed> {
+    crate::git_names::numstat_of(&numstat.replace('\n', "\0"))
+}
+
 #[test]
 fn own_lines_hash_each_files_lines_without_context() {
     let diff = "diff --git a/a.py b/a.py\nindex 1..2 100644\n--- a/a.py\n+++ b/a.py\n@@ -0,0 +1 @@\n+x = 1\n\
@@ -13,19 +18,35 @@ fn own_lines_hash_each_files_lines_without_context() {
 }
 
 #[test]
+fn own_lines_key_a_quoted_name_by_the_name_itself() {
+    let diff = "diff --git \"a/prompts/caf\\303\\251 \\\"q\\\".md\" \"b/prompts/caf\\303\\251 \\\"q\\\".md\"\n\
+                --- \"a/prompts/caf\\303\\251 \\\"q\\\".md\"\n+++ b/x\n@@ -1 +1 @@\n+hi\n\
+                diff --git a/docs/my notes.md b/docs/my notes.md\n+hi\n";
+    let own = own_lines_of(diff);
+    assert_eq!(
+        own.keys().collect::<Vec<_>>(),
+        vec!["prompts/café \"q\".md", "docs/my notes.md"]
+    );
+    assert_eq!(uncovered_reason(&own, &Obj::new()), Some("changes a prompt"));
+}
+
+#[test]
 fn own_lines_of_no_diff_is_empty() {
     assert!(own_lines_of("").is_empty());
 }
 
 #[test]
 fn change_size_counts_files_and_lines() {
-    assert_eq!(change_size_of("3\t1\tsrc/a.rs\n2\t0\tdocs/x.md\n"), (2, Some(6), false));
     assert_eq!(
-        change_size_of("3\t1\tdocs/a.md\n1\t1\tprompts/p.txt\n"),
+        change_size_of(&rows("3\t1\tsrc/a.rs\n2\t0\tdocs/x.md\n")),
+        (2, Some(6), false)
+    );
+    assert_eq!(
+        change_size_of(&rows("3\t1\tdocs/a.md\n1\t1\tprompts/p.txt\n")),
         (2, Some(6), true)
     );
-    assert_eq!(change_size_of("-\t-\timg.png\n1\t1\ta.rs\n"), (2, None, false));
-    assert_eq!(change_size_of(""), (0, Some(0), false));
+    assert_eq!(change_size_of(&rows("-\t-\timg.png\n1\t1\ta.rs\n")), (2, None, false));
+    assert_eq!(change_size_of(&rows("")), (0, Some(0), false));
 }
 
 #[test]
@@ -51,37 +72,40 @@ fn first_review_is_light_for_docs_or_a_small_change() {
 fn a_change_to_a_prompt_or_the_rules_gets_a_full_review_however_small() {
     let full = |why: &str| ("full".to_string(), Some(why.to_string()));
     assert_eq!(
-        kind_of_change("1\t1\tprompts/worker.md\n", 40),
+        kind_of_change(&rows("1\t1\tprompts/worker.md\n"), 40),
         full("changes a prompt")
     );
     assert_eq!(
-        kind_of_change("1\t0\t.bullpen/rules.md\n", 40),
+        kind_of_change(&rows("1\t0\t.bullpen/rules.md\n"), 40),
         full("changes the rules")
     );
     // among docs, and beside code that is small enough for a light review
     assert_eq!(
-        kind_of_change("3\t1\tdocs/a.md\n1\t1\tprompts/p.txt\n", 40),
+        kind_of_change(&rows("3\t1\tdocs/a.md\n1\t1\tprompts/p.txt\n"), 40),
         full("changes a prompt")
     );
     assert_eq!(
-        kind_of_change("1\t0\tcli/src/a.rs\n1\t0\t.bullpen/rules.md\n", 40),
+        kind_of_change(&rows("1\t0\tcli/src/a.rs\n1\t0\t.bullpen/rules.md\n"), 40),
         full("changes the rules")
     );
     // the first of the two, in the diff's order
     assert_eq!(
-        kind_of_change("1\t0\t.bullpen/rules.md\n1\t0\tprompts/p.md\n", 40),
+        kind_of_change(&rows("1\t0\t.bullpen/rules.md\n1\t0\tprompts/p.md\n"), 40),
         full("changes the rules")
     );
     // other docs, a prompts folder elsewhere and another rules.md go by size as before
     assert_eq!(
-        kind_of_change("300\t0\tdocs/a.md\n1\t0\tsrc/prompts/p.md\n1\t0\tdocs/rules.md\n", 40),
+        kind_of_change(
+            &rows("300\t0\tdocs/a.md\n1\t0\tsrc/prompts/p.md\n1\t0\tdocs/rules.md\n"),
+            40
+        ),
         ("light".into(), Some("docs only".into()))
     );
     assert_eq!(
-        kind_of_change("1\t0\ta.rs\n", 40),
+        kind_of_change(&rows("1\t0\ta.rs\n"), 40),
         ("light".into(), Some("1 line in 1 file".into()))
     );
-    assert_eq!(kind_of_change("41\t0\ta.rs\n", 40), ("full".into(), None));
+    assert_eq!(kind_of_change(&rows("41\t0\ta.rs\n"), 40), ("full".into(), None));
 }
 
 #[test]

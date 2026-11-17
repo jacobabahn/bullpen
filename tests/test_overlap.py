@@ -2,7 +2,7 @@
 
 import json
 
-from support import setUpModule, tearDownModule, BullpenTest  # a temp folder for each module
+from support import setUpModule, tearDownModule, odd_name, BullpenTest  # a temp folder for each module
 
 
 class OverlapTest(BullpenTest):
@@ -35,6 +35,15 @@ class OverlapTest(BullpenTest):
         self.assertEqual(len(self.overlap_news()), 1)  # once per pair, whoever checks
         self.assertIn("  overlap: BP-2 changed shared.txt too", self.show_text("BP-1"))
         self.assertIn("  overlap: BP-1 changed shared.txt too", self.show_text("BP-2"))
+
+    def test_a_file_whose_name_git_quotes_is_said_readably(self):
+        name = odd_name("shared") + ".txt"
+        self.commit_file("BP-1", name, "one\n")
+        self.commit_file("BP-2", name, "two\n")
+        self.end_turn("BP-2")
+        shown = name.replace("\t", "\\t").replace("\n", "\\n")
+        self.assertEqual(self.overlap_news(), [f"bullpen · BP-1 and BP-2 both changed {shown}"])
+        self.assertIn(f"  overlap: BP-2 changed {shown} too\n", self.show_text("BP-1"))
 
     def test_a_file_joining_adds_to_it(self):
         self.commit_file("BP-1", "shared.txt", "one\n")

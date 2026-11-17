@@ -41,6 +41,9 @@ Review costs only what it has to:
   `prompts/` or `.bullpen/rules.md` is never small: those are what agents are told
   to do, a wrong one changes behaviour, so it gets a full review however few lines
   it is ("full review (changes a prompt)", "full review (changes the rules)").
+  These checks, and the risk label's, read each file's name exactly as it is, an
+  accent, a space, a quote or a tab in it too; a renamed file counts as both its
+  old and its new path.
   `bullpen add --review full|light|auto` or `bullpen review-mode BP-3
   full|light|auto` overrides that for one task, a light one for a prompt too; auto,
   the default, goes by what the change touches and its size.

@@ -7,12 +7,17 @@ const SIZES: Sizes = Sizes {
     huge: 1200,
 };
 
+/// The changed files of numstat rows written one to a line.
+fn rows(numstat: &str) -> Vec<Changed> {
+    crate::git_names::numstat_of(&numstat.replace('\n', "\0"))
+}
+
 fn rules(numstat: &str) -> Part {
-    rules_of(numstat, false, None, SIZES)
+    rules_of(&rows(numstat), false, None, SIZES)
 }
 
 fn with(paths: &serde_json::Value, numstat: &str) -> Part {
-    rules_of(numstat, false, Some(paths), SIZES)
+    rules_of(&rows(numstat), false, Some(paths), SIZES)
 }
 
 #[test]
@@ -63,7 +68,10 @@ fn size_alone_makes_a_change_medium_and_high_only_far_past_the_line() {
     );
     // risk_huge_lines 0: size alone never makes it high
     let never = Sizes { huge: 0, ..SIZES };
-    assert_eq!(rules_of("9000\t0\tcli/src/x.rs\n", false, None, never).level, "medium");
+    assert_eq!(
+        rules_of(&rows("9000\t0\tcli/src/x.rs\n"), false, None, never).level,
+        "medium"
+    );
     assert_eq!(rules("-\t-\tcli/logo.png\n"), part("medium", "changes a binary file"));
     assert_eq!(rules(""), part("low", "no change"));
 }
@@ -183,13 +191,13 @@ fn a_medium_area_goes_by_how_much_of_it_is_touched() {
 #[test]
 fn a_new_dependency_is_high() {
     assert_eq!(
-        rules_of("1\t0\tCargo.toml\n", true, None, SIZES),
+        rules_of(&rows("1\t0\tCargo.toml\n"), true, None, SIZES),
         part("high", "adds a dependency")
     );
     // beside a medium area, it is the why
     let paths = json!({"Cargo.toml": {"level": "medium", "why": "changes the manifest"}});
     assert_eq!(
-        rules_of("20\t0\tCargo.toml\n", true, Some(&paths), SIZES),
+        rules_of(&rows("20\t0\tCargo.toml\n"), true, Some(&paths), SIZES),
         part("high", "adds a dependency")
     );
 }
@@ -259,11 +267,11 @@ fn the_higher_wins_and_a_tie_says_the_reviewers_why() {
 #[test]
 fn a_light_review_set_on_a_big_change_is_at_least_medium() {
     let r = |v: serde_json::Value| v.as_object().cloned().unwrap();
-    let big = "100\t0\tcli/src/x.rs\n";
+    let big = &rows("100\t0\tcli/src/x.rs\n");
     let set = r(json!({"kind": "light", "why": "set for BP-3"}));
     assert_eq!(light_floor(&set, big, 40).map(|p| p.level), Some("medium"));
-    assert_eq!(light_floor(&set, "3\t0\tcli/src/x.rs\n", 40), None); // its size calls for a light one anyway
-    let prompt = light_floor(&set, "1\t0\tprompts/worker.md\n", 40).unwrap(); // small, but a prompt
+    assert_eq!(light_floor(&set, &rows("3\t0\tcli/src/x.rs\n"), 40), None); // its size calls for a light one anyway
+    let prompt = light_floor(&set, &rows("1\t0\tprompts/worker.md\n"), 40).unwrap(); // small, but a prompt
     assert_eq!(
         (prompt.level, prompt.why.as_str()),
         ("medium", "a light review, though it changes a prompt")

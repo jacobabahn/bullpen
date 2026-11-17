@@ -23,6 +23,7 @@ mod copies;
 mod diff;
 mod doctor;
 mod events;
+mod git_names;
 mod go;
 mod guide;
 mod help;

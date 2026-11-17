@@ -3,7 +3,7 @@ where it shows (news, show, ls, stats, --json)."""
 
 import json
 
-from support import setUpModule, tearDownModule, sh, BullpenTest  # a temp folder for each module
+from support import setUpModule, tearDownModule, sh, odd_name, BullpenTest  # a temp folder for each module
 
 APPROVE_HIGH = "## Findings\n\nChecked it.\n\n## Risk\n\nhigh: couldn't run the GitHub path\n"
 APPROVE_LOW = "## Findings\n\nChecked it.\n\n## Risk\n\nlow: a rename\n"
@@ -58,6 +58,29 @@ class RiskTest(BullpenTest):
         self.verdict(tid, "approve")  # no Risk part: the rules alone
         r = self.show(tid)["risk"]
         self.assertEqual((r["level"], r["why"], r["review"]), ("low", "docs only", None))
+
+    def test_files_whose_names_git_quotes_count_where_they_belong(self):
+        self.bp("config", "--review", "off")
+        tid = self.start_task()
+        self.commit_file(tid, f"docs/{odd_name('usage')}.md", "How to.\n")
+        self.commit_file(tid, f"tests/{odd_name('test_x')}.py", "".join(f"x{i}\n" for i in range(90)))
+        self.ready(tid)
+        r = self.show(tid)["risk"]
+        self.assertEqual((r["level"], r["why"]), ("low", "docs and tests only"))
+        self.bp("tell", tid, "More.")
+        self.commit_file(tid, f"prompts/{odd_name('worker')}.md", "Be careful.\n")
+        self.ready(tid)
+        r = self.show(tid)["risk"]
+        self.assertEqual((r["level"], r["why"]), ("medium", "changes a prompt"))
+
+    def test_a_sensitive_path_whose_name_git_quotes_is_counted(self):
+        self.bp("config", "--review", "off")
+        self.config(risk_paths={"secret/": "changes the secrets"})
+        tid = self.start_task()
+        self.commit_file(tid, f"secret/{odd_name('key')}.txt", "k\n")
+        self.ready(tid)
+        r = self.show(tid)["risk"]
+        self.assertEqual((r["level"], r["why"]), ("high", "changes the secrets (1 line)"))
 
     def test_a_clean_rebase_keeps_the_label(self):
         tid = self.start_task()

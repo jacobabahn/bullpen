@@ -21,7 +21,6 @@ use crate::news::{news, tell_coordinator, Opts};
 use crate::saves::run_later;
 use crate::watcher::refresh_watcher;
 use bullpen_core::json::{obj, py_str, s, truthy, Obj};
-use bullpen_core::proc::git;
 use bullpen_core::repo::repo_root;
 use bullpen_core::task::{is_status, keeps_branch, pr_short};
 use bullpen_core::text::squash;
@@ -214,16 +213,10 @@ fn changed_files(repo: &Repo, t: &Obj) -> Res<Option<BTreeSet<String>>> {
         return Ok(None);
     }
     let range = format!("{}...HEAD", task_base_ref(repo, t)?);
-    let p = git(wt, &["diff", "-z", "--name-only", "--no-renames", &range], false)?;
-    if !p.ok() {
+    let Some(files) = crate::git_names::names(wt, &["diff", "--name-only", "--no-renames", &range])? else {
         return Ok(None);
-    }
-    let files: BTreeSet<String> = p
-        .stdout
-        .split('\0')
-        .filter(|f| !f.is_empty())
-        .map(String::from)
-        .collect();
+    };
+    let files: BTreeSet<String> = files.into_iter().collect();
     Ok((!files.is_empty()).then_some(files))
 }
 

@@ -46,6 +46,18 @@ def fakes_source_hash():
     return source_hash(("Cargo.toml", "Cargo.lock", "tests/fakes/Cargo.toml", "tests/fakes/src"))
 
 
+def odd_name(stem):
+    """A file name git quotes in its output, from stem: a non-ASCII letter, a space, a
+    quote and a tab and a newline, those last two only where the file system takes them."""
+    name = f'{stem} café "q"'
+    with tempfile.TemporaryDirectory() as d:
+        try:
+            (Path(d) / f"{name}\tx\ny").write_text("")
+            return f"{name}\tx\ny"
+        except OSError:
+            return name
+
+
 FAKES = ("fake-rex", "fake-gh")  # in target/, where tests/run.py puts them
 
 

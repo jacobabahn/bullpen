@@ -14,7 +14,6 @@ use crate::coordinators::sees_to;
 use crate::modes::task_base_ref;
 use crate::news::{news, Opts};
 use bullpen_core::json::{py_str, s, truthy, Obj};
-use bullpen_core::proc::git;
 use bullpen_core::task::is_closed;
 use bullpen_core::{Repo, Res};
 use serde_json::{json, Map, Value};
@@ -54,19 +53,11 @@ pub fn is_open(t: &Obj) -> bool {
 fn changed(repo: &Repo, t: &Obj) -> Res<BTreeSet<String>> {
     let base_ref = task_base_ref(repo, t)?;
     let range = format!("{base_ref}...HEAD");
-    let p = git(
-        s(t, "worktree"),
-        &["diff", "--name-only", "--no-renames", "-z", &range],
-        false,
-    )?;
-    if !p.ok() {
+    let Some(files) = crate::git_names::names(s(t, "worktree"), &["diff", "--name-only", "--no-renames", &range])?
+    else {
         return Ok(BTreeSet::new()); // no base to compare with (not fetched yet): nothing to say
-    }
-    Ok(p.stdout
-        .split('\0')
-        .filter(|f| !f.is_empty() && !ignored(f))
-        .map(String::from)
-        .collect())
+    };
+    Ok(files.into_iter().filter(|f| !ignored(f)).collect())
 }
 
 /// Task IDs in their order: BP-9 before BP-10.
@@ -107,7 +98,7 @@ fn write(repo: &Repo, pairs: &Pairs) -> Res<()> {
 /// "too" when it adds files to what was said before.
 pub fn overlap_line(key: &str, new: &[String], again: bool) -> String {
     let (a, b) = key.split_once(' ').unwrap_or((key, ""));
-    let first = new.first().map_or("", String::as_str);
+    let first = new.first().map_or(String::new(), |f| crate::git_names::shown(f));
     let too = if again { " too" } else { "" };
     let more = match new.len() {
         0 | 1 => String::new(),

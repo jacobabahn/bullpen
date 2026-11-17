@@ -300,7 +300,10 @@ pub fn cmd_show(argv: &[String]) -> Res<i32> {
         ));
     }
     for (other, files) in crate::overlap::overlaps_of(&repo, s(&t, "id"), &all) {
-        out.push(format!("  overlap: {other} changed {} too", files.join(", ")));
+        out.push(format!(
+            "  overlap: {other} changed {} too",
+            crate::git_names::listed(&files)
+        ));
     }
     if let Some(files) = crate::accept::rebase::stale_conflicts(&repo, &t)? {
         out.push(crate::accept::rebase::stale_line(&t, &files));

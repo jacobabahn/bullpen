@@ -16,6 +16,7 @@
 use crate::agents::{pane, running, whose_turn};
 use crate::args::{pos, Arg, Args, Nargs};
 use crate::coordinators::session_for;
+use crate::git_names::{unquote, Changed};
 use crate::jobs::{background, Job};
 use crate::modes::task_base_ref;
 use crate::news::ready_news;
@@ -178,10 +179,7 @@ pub fn own_lines_of(diff: &str) -> Obj {
     let mut at: Option<usize> = None;
     for line in diff.split('\n') {
         if let Some(pair) = line.strip_prefix("diff --git ") {
-            // "a/<path> b/<path>", the same path twice
-            let chars: Vec<char> = pair.chars().collect();
-            let n = chars.len().saturating_sub(5) / 2;
-            let path: String = chars.iter().skip(2).take(n).collect();
+            let path = header_path(pair);
             // a path seen again starts afresh, in its first place (a dict's key)
             at = Some(match files.iter().position(|(p, _)| *p == path) {
                 Some(i) => {
@@ -204,6 +202,18 @@ pub fn own_lines_of(diff: &str) -> Obj {
         .into_iter()
         .map(|(p, bytes)| (p, json!(bullpen_core::sha1::hex(&bytes))))
         .collect()
+}
+
+/// The path of a patch's `diff --git` header: "a/<path> b/<path>", the same path twice,
+/// or both quoted when git quotes the name (`"a/caf\303\251.md" "b/caf\303\251.md"`).
+fn header_path(pair: &str) -> String {
+    if pair.starts_with('"') {
+        let (a, _) = unquote(pair);
+        return a.strip_prefix("a/").unwrap_or(&a).to_string();
+    }
+    let chars: Vec<char> = pair.chars().collect();
+    let n = chars.len().saturating_sub(5) / 2;
+    chars.iter().skip(2).take(n).collect()
 }
 
 /// What the task's approval needs now.
@@ -298,11 +308,9 @@ fn full_reason(path: &str) -> Option<&'static str> {
     }
 }
 
-/// full_reason of the first such path in `git diff --numstat`'s rows.
-fn full_reason_of(numstat: &str) -> Option<&'static str> {
-    bullpen_core::text::splitlines(numstat)
-        .into_iter()
-        .find_map(|row| full_reason(row.splitn(3, '\t').nth(2).unwrap_or("")))
+/// full_reason of the first such path among the changed files.
+fn full_reason_of(files: &[Changed]) -> Option<&'static str> {
+    files.iter().find_map(|f| full_reason(&f.path))
 }
 
 /// Why a later round is a full review, or None: the first prompt or rules path in the
@@ -346,34 +354,23 @@ fn later_full_reason(t: &Obj, base_ref: &str, prev: &Obj) -> Res<Option<&'static
     Ok(uncovered_reason(&own_lines(s(t, "worktree"), base_ref)?, covered))
 }
 
-/// The first review's kind and why for a change, from `git diff --numstat`'s rows: full
-/// if it touches a prompt or the rules, else by its size.
-pub fn kind_of_change(numstat: &str, limit: i64) -> (String, Option<String>) {
-    if let Some(why) = full_reason_of(numstat) {
+/// The first review's kind and why for a change, from its changed files
+/// (git_names::numstat): full if it touches a prompt or the rules, else by its size.
+pub fn kind_of_change(changed: &[Changed], limit: i64) -> (String, Option<String>) {
+    if let Some(why) = full_reason_of(changed) {
         return ("full".into(), Some(why.into()));
     }
-    let (files, lines, docs) = change_size_of(numstat);
+    let (files, lines, docs) = change_size_of(changed);
     kind_by_size(files, lines, docs, limit)
 }
 
-/// change_size from `git diff --numstat`'s rows.
-pub fn change_size_of(numstat: &str) -> (i64, Option<i64>, bool) {
+/// change_size from the changed files (git_names::numstat).
+pub fn change_size_of(changed: &[Changed]) -> (i64, Option<i64>, bool) {
     let (mut files, mut lines, mut docs) = (0, Some(0), true);
-    for row in bullpen_core::text::splitlines(numstat) {
-        let mut parts = row.splitn(3, '\t');
-        let (added, deleted, path) = (
-            parts.next().unwrap_or(""),
-            parts.next().unwrap_or(""),
-            parts.next().unwrap_or(""),
-        );
+    for f in changed {
         files += 1;
-        lines = match lines {
-            Some(n) if added != "-" => {
-                Some(n + added.parse::<i64>().unwrap_or(0) + deleted.parse::<i64>().unwrap_or(0))
-            }
-            _ => None,
-        };
-        docs = docs && is_doc(path);
+        lines = lines.zip(f.lines).map(|(n, m)| n + m);
+        docs = docs && is_doc(&f.path);
     }
     (files, lines, docs && files > 0)
 }
@@ -389,9 +386,9 @@ fn first_kind(repo: &Repo, t: &Obj, base_ref: &str) -> Res<(String, Option<Strin
         return Ok((mode.into(), Some(format!("set for {}", s(t, "id")))));
     }
     let range = format!("{base_ref}...HEAD");
-    let numstat = git(s(t, "worktree"), &["diff", "--numstat", "--no-renames", &range], true)?.stdout;
+    let changed = crate::git_names::numstat(s(t, "worktree"), &range)?;
     let limit = repo.cfg.get("light_review_lines").and_then(Value::as_i64).unwrap_or(0);
-    Ok(kind_of_change(&numstat, limit))
+    Ok(kind_of_change(&changed, limit))
 }
 
 /// The first review's kind for a change of this size.
@@ -664,8 +661,11 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
         let mut args = vec!["diff", range.as_str(), "--"];
         args.extend(files.iter().map(String::as_str));
         let now = git(&wt, &args, false)?.stdout;
-        let cmd = format!("git -C {wt} diff {range} -- {}", files.join(" "));
-        let quoted: Vec<String> = files.iter().map(|f| format!("`{f}`")).collect();
+        let cmd = format!("git -C {wt} diff {range} -- {}", bullpen_core::text::shell_join(files));
+        let quoted: Vec<String> = files
+            .iter()
+            .map(|f| format!("`{}`", crate::git_names::shown(f)))
+            .collect();
         vals.extend([
             ("conflict_files", quoted.join(", ")),
             ("conflicts", conflict_text(s(&old, "conflict_diff"))?),

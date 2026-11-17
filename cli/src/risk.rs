@@ -19,12 +19,12 @@
 //! say the same for the same lines, and keeps the reviewer's part. A task made ready
 //! without one (by an older copy of bullpen) gets it from `check` (risk_late.rs).
 
+use crate::git_names::{numstat, Changed};
 use crate::review::kind_of_change;
 use crate::risk_paths::{area_of, entries, Entry};
 use bullpen_core::json::{get, obj, s, Obj};
 use bullpen_core::proc::{git, head};
 use bullpen_core::risk::rank;
-use bullpen_core::text::splitlines;
 use bullpen_core::{Repo, Res};
 use serde_json::{json, Value};
 
@@ -66,7 +66,7 @@ pub fn assess(repo: &Repo, t: &mut Obj, base_ref: &str, said: Said) -> Res<()> {
         return Ok(());
     }
     let range = format!("{base_ref}...HEAD");
-    let numstat = git(&wt, &["diff", "--numstat", "--no-renames", &range], true)?.stdout;
+    let changed = numstat(&wt, &range)?;
     let manifests = git(
         &wt,
         &["diff", "-U100000", "--no-renames", &range, "--", ":(glob)**/Cargo.toml"],
@@ -76,7 +76,7 @@ pub fn assess(repo: &Repo, t: &mut Obj, base_ref: &str, said: Said) -> Res<()> {
     let sizes = Sizes::of(&repo.cfg);
     let small = sizes.small;
     let rules = rules_of(
-        &numstat,
+        &changed,
         adds_dependency(&manifests),
         get(&repo.cfg, "risk_paths"),
         sizes,
@@ -98,7 +98,7 @@ pub fn assess(repo: &Repo, t: &mut Obj, base_ref: &str, said: Said) -> Res<()> {
     };
     let floor = match said {
         Said::Nothing => None,
-        _ => light_floor(r, &numstat, small),
+        _ => light_floor(r, &changed, small),
     };
     let mut out = Obj::new();
     let review_part = review.as_ref().and_then(part_of);
@@ -133,7 +133,7 @@ fn part_of(o: &Obj) -> Option<Part> {
 
 /// A light review set for the task (`--review light`) of a change that calls for a full
 /// one, by its size or because it changes a prompt or the rules: it looked at less than the change needs, so the label is at least medium.
-fn light_floor(r: &Obj, numstat: &str, small: i64) -> Option<Part> {
+fn light_floor(r: &Obj, changed: &[Changed], small: i64) -> Option<Part> {
     let set = r
         .get("why")
         .and_then(Value::as_str)
@@ -141,7 +141,7 @@ fn light_floor(r: &Obj, numstat: &str, small: i64) -> Option<Part> {
     if s(r, "kind") != "light" || !set {
         return None;
     }
-    let (kind, why) = kind_of_change(numstat, small);
+    let (kind, why) = kind_of_change(changed, small);
     (kind == "full").then(|| match why {
         Some(why) => part("medium", &format!("a light review, though it {why}")),
         None => part("medium", "a light review where its size calls for a full one"),
@@ -203,37 +203,17 @@ impl Sizes {
 /// At most this many lines in a medium area don't count as touching it.
 pub const TINY_LINES: i64 = 10;
 
-/// A row of `git diff --numstat`: its changed lines (None: a binary file) and its path.
-type Row = (Option<i64>, String);
-
-fn rows_of(numstat: &str) -> Vec<Row> {
-    splitlines(numstat)
-        .into_iter()
-        .filter_map(|row| {
-            let mut p = row.splitn(3, '\t');
-            let (added, deleted, path) = (p.next()?, p.next()?, p.next()?);
-            let lines = added
-                .parse::<i64>()
-                .ok()
-                .zip(deleted.parse::<i64>().ok())
-                .map(|(a, d)| a + d);
-            Some((lines, path.to_string()))
-        })
-        .collect()
-}
-
-/// The rules' part, from `git diff --numstat`'s rows. What the change touches comes
+/// The rules' part, from the changed files (git_names::numstat). What the change touches comes
 /// first, its size second; the highest of these, and on a tie the first:
 ///
 /// - the areas of the repo's risk_paths it touches (`by_areas`);
 /// - a new dependency: high;
 /// - what kind of change it is and its size (`by_size`).
-pub fn rules_of(numstat: &str, adds_dep: bool, risk_paths: Option<&Value>, sizes: Sizes) -> Part {
-    let rows = rows_of(numstat);
+pub fn rules_of(rows: &[Changed], adds_dep: bool, risk_paths: Option<&Value>, sizes: Sizes) -> Part {
     let parts = [
-        by_areas(&rows, &entries(risk_paths), sizes),
+        by_areas(rows, &entries(risk_paths), sizes),
         adds_dep.then(|| part("high", "adds a dependency")),
-        Some(by_size(&rows, sizes)),
+        Some(by_size(rows, sizes)),
     ];
     let mut top: Option<Part> = None;
     for p in parts.into_iter().flatten() {
@@ -250,10 +230,10 @@ pub fn rules_of(numstat: &str, adds_dep: bool, risk_paths: Option<&Value>, sizes
 /// area is high at any size). A test file in an area isn't counted, unless the pattern
 /// is itself a test's path (`tests/fakes/`). The why is the most sensitive area's (then
 /// the one most changed), with the lines changed there, and how many more are touched.
-fn by_areas(rows: &[Row], entries: &[Entry], sizes: Sizes) -> Option<Part> {
+fn by_areas(rows: &[Changed], entries: &[Entry], sizes: Sizes) -> Option<Part> {
     // (lines changed in the area, whether a binary file is among them), per entry
     let mut touched: Vec<Option<(i64, bool)>> = vec![None; entries.len()];
-    for (lines, path) in rows {
+    for Changed { lines, path } in rows {
         let Some(i) = area_of(entries, path) else { continue };
         if area(path) == Area::Tests && !names_tests(&entries[i].pattern) {
             continue; // a test beside an area's code isn't the area, unless the pattern names tests
@@ -301,16 +281,16 @@ fn names_tests(pattern: &str) -> bool {
 /// at least medium; other code (docs and tests left out) is low when small (at most
 /// `small` lines in at most 2 files), high only when very large (more than `huge`
 /// lines), else medium.
-fn by_size(rows: &[Row], sizes: Sizes) -> Part {
+fn by_size(rows: &[Changed], sizes: Sizes) -> Part {
     if rows.is_empty() {
         return part("low", "no change");
     }
-    let areas: Vec<Area> = rows.iter().map(|(_, p)| area(p)).collect();
+    let areas: Vec<Area> = rows.iter().map(|f| area(&f.path)).collect();
     let (docs, tests) = (areas.contains(&Area::Docs), areas.contains(&Area::Tests));
     let prompt = areas.contains(&Area::Prompt);
-    let code: Vec<&Row> = rows
+    let code: Vec<&Changed> = rows
         .iter()
-        .filter(|(_, p)| matches!(area(p), Area::Code | Area::Prompt))
+        .filter(|f| matches!(area(&f.path), Area::Code | Area::Prompt))
         .collect();
     if code.is_empty() {
         return part(
@@ -326,7 +306,7 @@ fn by_size(rows: &[Row], sizes: Sizes) -> Part {
         return part("medium", "changes a prompt");
     }
     let files = code.len() as i64;
-    let lines: Option<i64> = code.iter().map(|(n, _)| *n).sum();
+    let lines: Option<i64> = code.iter().map(|f| f.lines).sum();
     let Some(n) = lines else {
         return part("medium", "changes a binary file");
     };

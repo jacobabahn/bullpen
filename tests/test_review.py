@@ -5,7 +5,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from support import setUpModule, tearDownModule, sh, BullpenTest, BULLPEN  # a temp folder for each module
+from support import setUpModule, tearDownModule, sh, odd_name, BullpenTest, BULLPEN  # a temp folder for each module
 
 
 class ReviewTest(BullpenTest):
@@ -232,6 +232,33 @@ class ReviewTest(BullpenTest):
         r = self.show(tid)["review"]
         self.assertEqual((r["round"], r["kind"], r["why"]), (5, "full", "changes a prompt"))
         self.assertIn("Round 4 approved the change.", self.review_prompt(tid, 5).replace("\n", " "))
+
+    def test_a_prompt_whose_name_git_quotes_gets_a_full_review(self):
+        tid = self.start_task()
+        self.commit_file(tid, f"prompts/{odd_name('worker')}.md", "Be careful.\n")
+        self.ready(tid)
+        r = self.show(tid)["review"]
+        self.assertEqual((r["kind"], r["why"]), ("full", "changes a prompt"))
+
+    def test_docs_whose_names_git_quote_are_still_docs_only(self):
+        tid = self.start_task()
+        for stem in ("guide", "notes"):
+            self.commit_file(tid, f"docs/{odd_name(stem)}.txt", "line\n" * 300)
+        self.commit_file(tid, f"{odd_name('top')}.md", "line\n" * 300)
+        self.ready(tid)
+        r = self.show(tid)["review"]
+        self.assertEqual((r["kind"], r["why"]), ("light", "docs only"))
+
+    def test_a_prompt_whose_name_git_quotes_added_in_a_later_round_gets_a_full_review(self):
+        tid = self.start_task()
+        self.commit_file(tid, "fix.py", "x = 1\n")
+        self.ready(tid)
+        self.verdict(tid, "changes", "x should be 2.")
+        self.commit_file(tid, "fix.py", "x = 2\n")
+        self.commit_file(tid, f"prompts/{odd_name('worker')}.md", "Be careful.\n")
+        self.ready(tid)
+        r = self.show(tid)["review"]
+        self.assertEqual((r["round"], r["kind"], r["why"]), (2, "full", "changes a prompt"))
 
     def test_a_first_full_review_covers_its_prompt_change_in_later_rounds(self):
         self.set_commands(review_rounds=3)
