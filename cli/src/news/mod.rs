@@ -4,6 +4,7 @@
 //! read.rs, `news --recent` in recent.rs.
 
 pub mod hook;
+pub mod kind;
 pub mod read;
 pub mod recent;
 pub mod switch;
