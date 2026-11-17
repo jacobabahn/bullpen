@@ -28,7 +28,8 @@ risk high or medium, has its own flags, for one repository only: `bullpen config
 `--remove-risk-path PATTERN` drops one. `--risk-large-lines` (400) is how many changed
 lines in a medium path make it high, and `--risk-huge-lines` (1,200; `0` for never)
 how many lines of code make a change high whatever it touches
-([Review](review.md#the-risk-label)). `--light-review-lines` (40) is the most lines a
+([Review](review.md#the-risk-label)). `bullpen config --review off` skips review: a
+task is ready once its worker runs `ready` (on by default). `--light-review-lines` (40) is the most lines a
 change in at most 2 files can have for a light review ([Review](review.md)). `bullpen config --help` gives each flag's default; the defaults
 are in one table, `SETTINGS` in `core/src/settings.rs`, with each setting's kind and
 whether only a repository can hold it.

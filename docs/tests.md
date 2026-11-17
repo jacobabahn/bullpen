@@ -63,8 +63,8 @@ The command table (`cli/src/commands.rs`) and the settings table (`SETTINGS` in
 them: no name twice, every command in the help has a help line, a known one is there.
 So adding a command or a setting edits no shared test. `tests/test_docs.py` checks
 that every command is named in `docs/commands.md` (as `bullpen <name>`) and every
-setting in `docs/settings.md` (as its name or its flag, in code), so a new one needs its
-line there. Internal ones are exempt by a rule, not a list: a command in no group of the
+setting in `docs/settings.md` (its flag in code, or its name as a span of its own or a
+`config.json` key), so a new one needs its line there. Internal ones are exempt by a rule, not a list: a command in no group of the
 help, a setting `bullpen config` doesn't list.
 
 ## The Rust tests

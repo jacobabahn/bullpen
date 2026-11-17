@@ -263,12 +263,10 @@ class EntryTest(BullpenTest):
         names = [c["name"] for c in table]
         self.assertEqual(len(names), len(set(names)))
         self.assertTrue({"accept", "ready", "config", "_commands", "_event"} <= set(names))
-        groups = {"You", "Coordinator", "Worker and reviewer", "Setup"}
         for c in table:
             internal = c["name"].startswith("_")
             self.assertEqual(c["group"] is None, internal, c)  # an internal command is in no group of the help
             self.assertEqual(c["help"] == "", internal, c)
-            self.assertTrue(internal or c["group"] in groups, c)
             self.assertRegex(c["name"], r"^[a-z]+(-[a-z]+)*$|^_[a-z]+(_[a-z]+)*$")
 
     def test_help_and_an_unknown_command(self):

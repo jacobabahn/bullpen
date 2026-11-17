@@ -49,7 +49,7 @@ def code(text):
 
 def unnamed(page, names, forms):
     """The names the page doesn't name in its code (a span or a block) in any of
-    forms(name): `bullpen accept`, or `merge` / `--merge`."""
+    forms(name): `bullpen accept`, or `merge` (a span of its own) / `--merge`."""
     text = code((ROOT / page).read_text())
     named = lambda n: any(re.search(r"(?<![\w-])" + re.escape(f) + r"(?![\w-])", text) for f in forms(n))
     return [n for n in names if not named(n)]
@@ -126,12 +126,13 @@ class DocsTest(unittest.TestCase):
         listed = [k for k in table if k in board]
         self.assertEqual(listed, board)
 
-
     def test_a_name_missing_from_its_page_is_caught(self):
         self.assertEqual(unnamed("docs/commands.md", ["accept", "acept", "tour", "tour-c"],
                                  lambda n: [f"bullpen {n}"]), ["acept", "tour-c"])
         self.assertEqual(code("a `bullpen config\n--notify all` b\n```sh\nbullpen ls\n```\n"),
                          "```sh bullpen ls ``` `bullpen config --notify all`")
+        setting = lambda n: [f"`{n}`", f'"{n}"', "--" + n.replace("_", "-")]
+        self.assertEqual(unnamed("docs/settings.md", ["merge", "worker", "review"], setting), [])
 
 
 class DocsNamesTest(BullpenTest):
@@ -154,7 +155,9 @@ class DocsNamesTest(BullpenTest):
         (doctor's checks, say) is a row more."""
         return [
             ("docs/commands.md", self.commands(), lambda n: [f"bullpen {n}"]),
-            ("docs/settings.md", self.settings(), lambda n: [n, "--" + n.replace("_", "-")]),
+            # a bare name counts only as a span of its own or a config.json key: `review` is
+            # a command too, and `bullpen review BP-3` doesn't name the setting
+            ("docs/settings.md", self.settings(), lambda n: [f"`{n}`", f'"{n}"', "--" + n.replace("_", "-")]),
         ]
 
     def test_every_command_and_setting_is_named_in_its_page(self):
