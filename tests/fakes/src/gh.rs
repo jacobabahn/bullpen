@@ -1,5 +1,7 @@
 //! The tests' fake gh. It logs each call (and what it got on stdin, which must be
-//! nothing) to gh.log in $FAKE_DIR and answers from the files the tests put there:
+//! nothing) to gh.log in $FAKE_DIR and answers from the files the tests put there.
+//!
+//! The files:
 //!
 //!   gh_signed_out    `auth status` says it isn't signed in
 //!   gh_scopes        the token scopes `auth status` names (else gist, read:org and repo)

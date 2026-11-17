@@ -1,8 +1,9 @@
 //! A task's timeline: one line of JSON per event that matters, for `bullpen stats`,
 //! in <state>/repos/<repo>/timeline/<ID>.jsonl. Nearly every entry comes from
 //! `Repo::save_task`, which compares the task as it was with the task it saves
-//! (`changes`): nothing that only reads tasks (ls, the board) writes here. Each entry
-//! has `at` (an ISO stamp) and `event`:
+//! (`changes`): nothing that only reads tasks (ls, the board) writes here.
+//!
+//! Each entry has `at` (an ISO stamp) and `event`:
 //!
 //!   added            the task was added (status: its first status)
 //!   status           its status changed: from, to; stop (who stopped and how) and why

@@ -65,9 +65,11 @@ def main(argv):
     if any(a.startswith("-") for a in only):
         print(__doc__.strip(), file=sys.stderr)
         return 2
+    unmatched = set(only)
     for folder, mark in PLACES:
         ext = ".rs" if mark == "//!" else ".lua"
         shown = [f for f in modules(folder, ext) if wanted(str(f.relative_to(ROOT)), only)]
+        unmatched -= {o for o in only for f in shown if wanted(str(f.relative_to(ROOT)), [o])}
         if not shown:
             continue
         print(f"## {folder}/{crate_name(folder)}")
@@ -84,7 +86,9 @@ def main(argv):
             else:
                 print(f"{rel}: {first_paragraph(lines) or '(no header)'}")
         print()
-    return 0
+    for o in sorted(unmatched):
+        print(f"bin/code-map: no module under {o}", file=sys.stderr)
+    return 1 if unmatched else 0
 
 
 if __name__ == "__main__":

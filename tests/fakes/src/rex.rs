@@ -2,7 +2,9 @@
 //! layers and windows in reg.json there (blocks: {id: {label, layer, window}}; layers:
 //! {id: state}; windows: [id]; labels: {window: label}; session; sessions: the ones
 //! `new` made, [{session_id, label}], which `ls --json` lists), with a file in alive/
-//! for each block that's open, and answers from the files the tests put there:
+//! for each block that's open, and answers from the files the tests put there.
+//!
+//! The files:
 //!
 //!   send_fails_<block>      `send` and `send-key` to it fail
 //!   kills_tree_<block>      closing it kills the tree of the command that closed it

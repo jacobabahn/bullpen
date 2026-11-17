@@ -362,7 +362,7 @@ class CodeTest(unittest.TestCase):
         """Every module the code map lists: the crates' Rust but their tests, and the Lua."""
         rust = [f for d in ("core", "cli", "board", "tests/fakes") for f in (ROOT / d / "src").rglob("*.rs")
                 if not f.name.startswith("test_")]
-        return {str(f.relative_to(ROOT)) for f in [*rust, *(ROOT / "lua").glob("*.lua")]}
+        return {str(f.relative_to(ROOT)) for f in [*rust, *(ROOT / "lua").rglob("*.lua")]}
 
     def test_each_module_says_what_it_is_for_in_its_header(self):
         # the code map is made from these, so a new module edits no shared list
@@ -377,6 +377,8 @@ class CodeTest(unittest.TestCase):
         self.assertEqual(sorted(line.split(": ", 1)[0] for line in lines), sorted(self.modules()))
         self.assertIn("\ncli/src/news/mod.rs: News for the coordinators", p.stdout)
         self.assertEqual([line for line in lines if line.endswith(": (no header)")], [])
+        # a line is a whole thought, not the start of a list the line leaves out
+        self.assertEqual([line for line in lines if line.endswith(":")], [])
 
     def test_the_code_map_of_some_folders(self):
         p = subprocess.run([str(ROOT / "bin" / "code-map"), "cli/src/news/", "lua/watch.lua"], text=True,
@@ -387,6 +389,11 @@ class CodeTest(unittest.TestCase):
         full = subprocess.run([str(ROOT / "bin" / "code-map"), "--full", "cli/src/news/wake.rs"], text=True,
                               capture_output=True).stdout
         self.assertIn("\n    A pause (`news-<cid>.wait`", full)
+        # a path with no module under it (a typo) says so, rather than look like an empty folder
+        p = subprocess.run([str(ROOT / "bin" / "code-map"), "cli/src/new", "lua"], text=True, capture_output=True)
+        self.assertEqual(p.returncode, 1)
+        self.assertEqual(p.stderr, "bin/code-map: no module under cli/src/new\n")
+        self.assertIn("lua/watch.lua: ", p.stdout)
 
     def rust_calls(self, names):
         """(file, function called, its arguments' text) for each call of one of names in
