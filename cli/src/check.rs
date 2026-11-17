@@ -363,6 +363,9 @@ pub fn cmd_check(argv: &[String]) -> Res<i32> {
         }
         drift += check_repo(repo, &ids, fix, a.flag("--quiet"))?;
     }
+    if fix && a.flag("--all-repos") {
+        crate::build_watch::catch_up(&repos); // the watcher's check: its own copy's build too
+    }
     Ok(if drift > 0 && !fix { 1 } else { 0 })
 }
 

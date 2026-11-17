@@ -16,7 +16,9 @@ non-zero when anything fails. It checks:
 - bullpen's command line (`bullpen`) and the board (`board`) are each built from
   their source as it is now (by hash: see [Rebuilds](rebuilds.md)), or being rebuilt.
   Else it says why: the last build failed (with the log), the source has uncommitted
-  changes, or it just hasn't been rebuilt yet; `bullpen build` fixes each
+  changes, or it just hasn't been rebuilt yet; `bullpen build` fixes each. For the
+  copy the watcher runs, a build older than its committed source is caught up by the
+  watcher's next check (every 3 minutes: see [Rebuilds](rebuilds.md#the-watchers-check))
 - the keys are in your Rex config: Rex lists the `bullpen_next`, `bullpen_board`,
   `bullpen_coordinator`, `bullpen_jump` and `bullpen_mission` actions (`rex actions`). With some of them
   listed and one missing, the line is there but Rex loaded an older `keys.lua`: the

@@ -12,6 +12,7 @@ mod backlog;
 mod board;
 mod brief;
 mod build;
+mod build_watch;
 mod check;
 mod close;
 mod commands;

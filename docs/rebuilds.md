@@ -11,6 +11,8 @@ longer matches, as after accepting a task that changes it or a `git pull`, bullp
 builds that program again in the background:
 
 - `bullpen up` checks, in any repository.
+- The watcher checks its own copy, the one it runs, every 3 minutes (with its
+  `check --fix`): see [The watcher's check](#the-watchers-check).
 - `accept` checks only when the repository it merged into is a copy of bullpen that
   runs from its own build, right after the merge (before the other tasks are rebased
   and the queued ones start). Accepting a task elsewhere never builds anything. Which
@@ -51,6 +53,34 @@ builds that program again in the background:
 - Every build runs cargo through one lookup, `bin/bullpen-cargo` (see below), so a
   build finds the same working cargo whether it starts in your shell, an agent's pane,
   the watcher, a background job or a test's fixture.
+
+## The watcher's check
+
+A merge made by a copy of bullpen from before BP-165 (which doesn't rebuild the
+checkout it merged into), or a plain `git pull`, leaves a copy's build older than its
+source, and the watcher and the boards would run old code until the next `up`. So the
+watcher's periodic `check --fix --all-repos` also compares its own copy's source with
+its build (the test doctor's `bullpen` and `board` lines use) and, when the source is
+newer, starts the same background build an accept starts: the same lock, log and
+stamps, the watcher restarted and the boards reloaded when it's done. It never builds
+another copy, and a `check` you run yourself (without `--all-repos`, or without
+`--fix`) never builds.
+
+It builds only a settled tree. It skips, saying why in one news line (once, while the
+reason stands; its note is `target/watch-build.json`), when:
+
+- the checkout has uncommitted changes under `core/`, `cli/`, `board/` or `lua/`:
+  `` bullpen wasn't rebuilt: ~/dev/bullpen has uncommitted changes under core/, cli/,
+  board/, lua/ ... once they are committed or dropped, the watcher builds bullpen at
+  its next check (or `bullpen build`, as they are) ``
+- a merge or a rebase is in progress there: it builds once it's finished or aborted
+- a build is running: left alone, and said only when the same build is still running
+  a check later, with its pid, to stop it if it's stuck
+
+A build that fails is the usual news line, once: the same source isn't tried again (a
+new commit is). A build that works says nothing, unless the pull changed a
+coordinator's guide: the next check, on the new build, tells the coordinators what
+changed, as an accept does.
 
 ## Which cargo
 

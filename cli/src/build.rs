@@ -12,7 +12,7 @@
 //! running board sees its program replaced and execs the new one; a command runs the
 //! new build from its next call. A build that fails, or one skipped because the source
 //! has uncommitted changes, is one news line per source hash, and the old program keeps
-//! running.
+//! running. The watcher's periodic check does the same for its own copy (build_watch.rs).
 
 use crate::args::{usage_error, value, Arg, Args, SUPPRESS};
 use crate::jobs::{background, Job};
@@ -271,7 +271,7 @@ fn mark(lock: &File, pid: u32) -> Res<()> {
 }
 
 /// The pid in the lock file, when that process is running: the build that holds it.
-fn holder() -> Option<i32> {
+pub(crate) fn holder() -> Option<i32> {
     let pid: i32 = strip(&std::fs::read_to_string(build_lock()).ok()?).parse().ok()?;
     // SAFETY: signal 0 only asks whether the process is there
     (pid > 0 && unsafe { libc::kill(pid, 0) } == 0).then_some(pid)
@@ -368,7 +368,7 @@ pub fn rebuild_merged_into(repo: &Repo) -> Option<String> {
 
 /// Start the background build of the copy of bullpen at root (this one, or the checkout
 /// an accept merged into): root's own bullpen builds it, holding root's build lock.
-fn start_rebuild(repo: &Repo, root: &Path) -> Res<Option<String>> {
+pub(crate) fn start_rebuild(repo: &Repo, root: &Path) -> Res<Option<String>> {
     if no_build() {
         return Ok(None);
     }
@@ -435,7 +435,7 @@ fn start_rebuild(repo: &Repo, root: &Path) -> Res<Option<String>> {
 }
 
 /// A program's news: for every coordinator.
-fn say(repo: &Repo, p: &Program, text: &str) -> Res<()> {
+pub(crate) fn say(repo: &Repo, p: &Program, text: &str) -> Res<()> {
     let (tid, kind) = p.news_as;
     let task: Obj = json!({"id": tid}).as_object().cloned().unwrap_or_default();
     news(

@@ -153,7 +153,9 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
   command another copy ran noted for doctor, and doctor's `copy` check
 - `build.rs`: `build` and `_build_board` (the build lock passed by fd), the
   `rebuild_if_stale` of `up`, accept's `rebuild_merged_into` (the checkout merged into,
-  when it runs from its own build), and the catch-up (`catch_up`)
+  when it runs from its own build), and the catch-up (`catch_up`); `build_watch.rs`:
+  the watcher's check rebuilding its own copy when its source is newer than its build
+  (a pull), unless the tree isn't settled
 - `push_remote.rs`: the push remote's background push (`_push`, one at a time, under
   its lock), `up`'s catch-up push, and doctor's check of the push remote
 - `doctor/`: `mod.rs`: `doctor` (and `--json`) and `up`'s hint; `all_repos.rs`: `doctor --all-repos`; `checks.rs`: the checks; `news.rs`: the `news` check (the hook of `config --news wake`); `doctor --fix` (`fix` in `mod.rs`) makes the hook match the setting

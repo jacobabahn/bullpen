@@ -49,7 +49,9 @@ the person (see [Triage](triage.md)), and finds a ready task that has no risk la
 `bullpen check --fix` applies what the missed event would have done, news
 included, as if it had come; it never types into an agent or approves anything.
 The watcher runs it every 3 minutes, quietly, so drift fixes itself and you hear
-of it once, in the usual words.
+of it once, in the usual words. The watcher's run (`--fix --all-repos`) also rebuilds
+the watcher's own copy of bullpen when its source is newer than its build (see
+[Rebuilds](rebuilds.md#the-watchers-check)).
 
 An agent that ended its turn while a background shell of its own still runs
 (Claude Code's footer says `1 shell`) isn't finished: it takes another turn when
