@@ -110,7 +110,7 @@ Reference:
 
 - [Settings](docs/settings.md): `bullpen config`
 - [Where things live](docs/where-things-live.md)
-- [The code](docs/code.md): the entry, the Rust (`core/`, `cli/`) and the `bullpen/` package
+- [The code](docs/code.md): the entry, the crates, the code map (`bin/code-map`) and how the parts fit
 - [Tests](docs/tests.md): running them
 - [GLOSSARY.md](GLOSSARY.md): the words bullpen uses
 - [docs/prd/](docs/prd/): design notes

@@ -1,7 +1,8 @@
 //! bullpen's task board: a live list of a repo's tasks, grouped by what you do
 //! next, from which you open, accept, drop, tell or start them.
 //!
-//! It reads the repo's state directory (config.json and tasks/*.json) and redraws
+//! It reads the repo's state directory (config.json and tasks/*.json, through
+//! bullpen-core) and redraws
 //! when anything there changes. Everything it does goes through the `bullpen`
 //! command, so the board itself never changes a task. Slow commands (accept, drop,
 //! start, resume) run in the background: the board stays usable meanwhile.
