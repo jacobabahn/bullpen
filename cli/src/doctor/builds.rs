@@ -1,13 +1,15 @@
 //! doctor's checks of bullpen's own builds: the command line, the board, and the cargo
 //! that builds them.
 
-use super::Check;
+use super::{Check, DoctorCheck};
 use crate::build::{build_log, building, bullpen_cargo, programs, Program, BOARD, CLI};
 use bullpen_core::paths::{home, self_bin};
 use bullpen_core::proc::run_in;
 use bullpen_core::text::{splitlines, strip};
 use serde_json::Value;
 use std::path::Path;
+
+pub(super) const CHECKS: &[DoctorCheck] = &[BULLPEN, BOARD_CHECK, CARGO];
 
 /// os.access(path, X_OK): a folder counts too.
 pub(super) fn executable(path: &Path) -> bool {
@@ -18,6 +20,13 @@ pub(super) fn executable(path: &Path) -> bool {
     // SAFETY: c is a valid NUL-terminated path for the length of the call
     unsafe { libc::access(c.as_ptr(), libc::X_OK) == 0 }
 }
+
+const BOARD_CHECK: DoctorCheck = DoctorCheck {
+    name: "board",
+    shared: true,
+    run: |_| check_board(),
+    ..DoctorCheck::NEW
+};
 
 /// Built from the board's source as it is now (see build::Program).
 pub fn check_board() -> Check {
@@ -33,6 +42,13 @@ pub fn check_board() -> Check {
     }
     check_build(&BOARD, "running boards reload when it's done")
 }
+
+const BULLPEN: DoctorCheck = DoctorCheck {
+    name: "bullpen",
+    shared: true,
+    run: |_| check_cli(),
+    ..DoctorCheck::NEW
+};
 
 /// bin/bullpen's Rust build, built from its source as it is now.
 pub fn check_cli() -> Check {
@@ -84,6 +100,14 @@ fn check_build(prog: &Program, then: &str) -> Check {
         format!("older than {src}: `bullpen up` rebuilds it in the background, or {build}"),
     ))
 }
+
+const CARGO: DoctorCheck = DoctorCheck {
+    name: "cargo",
+    shared: true,
+    slow: true,
+    run: |_| check_cargo(),
+    ..DoctorCheck::NEW
+};
 
 /// The cargo bullpen's build would use (bin/bullpen-cargo), found the way a build
 /// started from here would find it: a background rebuild inherits this environment.

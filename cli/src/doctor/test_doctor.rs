@@ -161,3 +161,22 @@ fn gh_says_whether_the_token_in_use_has_the_repo_scope() {
     assert_eq!(repo_scope(&format!("{}{other}", said("'gist'"))), Some(false));
     assert_eq!(repo_scope(&format!("{}{other}", said("'repo'"))), Some(true));
 }
+
+#[test]
+fn each_check_has_a_name_of_its_own() {
+    let names: Vec<&str> = super::all().map(|c| c.name).collect();
+    for (i, n) in names.iter().enumerate() {
+        assert!(!n.is_empty() && !names[..i].contains(n), "{n}");
+        assert!(n.bytes().all(|b| b.is_ascii_lowercase()), "{n}");
+    }
+}
+
+#[test]
+fn fix_help_lists_the_fixes_that_run_anywhere_then_this_repositorys() {
+    assert_eq!(super::listed(&["a"]), "a");
+    assert_eq!(super::listed(&["a", "b"]), "a, and b");
+    assert_eq!(super::listed(&["a", "b", "c"]), "a, b, and c");
+    let help = super::fix_help();
+    assert!(help.starts_with("first fix what bullpen can by itself: the Claude scratch folders"));
+    assert!(help.contains("; and in this repository, the news hook"));
+}

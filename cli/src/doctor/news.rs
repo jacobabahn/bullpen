@@ -1,13 +1,15 @@
 //! doctor's `news`: with news by `wake`, the hook that parks the waiter is in place
 //! (news/hook.rs) and has what it needs; with any other news, none of it is left over.
 
-use super::Check;
+use super::{Check, DoctorCheck, Fix, Fixer};
 use crate::coordinators::{alive, coordinators};
 use crate::news::hook::{self, FILE};
 use crate::news::wake::{has_waiter, paused};
 use bullpen_core::json::s;
 use bullpen_core::proc::run;
 use bullpen_core::Repo;
+
+pub(super) const CHECKS: &[DoctorCheck] = &[NEWS];
 
 /// The Claude Code version the hook was checked on (asyncRewake on Stop and StopFailure).
 pub const CLAUDE_AT_LEAST: (u64, u64, u64) = (2, 1, 325);
@@ -67,6 +69,21 @@ fn unwatched(repo: &Repo) -> Vec<String> {
     }
     out
 }
+
+const NEWS: DoctorCheck = DoctorCheck {
+    name: "news",
+    slow: true,
+    run: |c| check_news(c.repo, c.why_not),
+    fix: Some(Fix {
+        help: "the news hook in .claude/settings.local.json (written with `config --news wake`, removed with \
+               any other news)",
+        run: Fixer::InRepo {
+            left: "the news hook",
+            run: |repo| Ok(hook::sync(repo)?.into_iter().collect()),
+        },
+    }),
+    ..DoctorCheck::NEW
+};
 
 pub fn check_news(repo: Option<&Repo>, why_not: Option<&str>) -> Check {
     let Some(repo) = repo else {

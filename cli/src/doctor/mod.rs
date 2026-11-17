@@ -1,13 +1,13 @@
 //! doctor: is everything bullpen needs in place?
 //!
-//! Each check (tools.rs, builds.rs, in_rex.rs, files.rs, hooks.rs, repo.rs, ...) returns (state, what it found): "ok", "fail" (with the fix in
-//! the text), "warn" (something to see to, that stops nothing) or "skip" (it doesn't
-//! apply, or can't be told). `doctor` runs them all; `up`
-//! runs the cheap ones (no network, nothing `up` itself just fixed) and only counts problems.
-//! `doctor --all-repos` (all_repos.rs) runs those about the setup once, then each repo's.
-//! `--json` prints the checks alone; `up`'s hint is `up_hint`; `doctor --fix` (`fix`)
-//! fixes what bullpen can by itself: the temp folder, the news hook (to match the
-//! setting) and the workers' Stop hooks.
+//! A check is a `DoctorCheck` value in the module for its kind (tools.rs, builds.rs,
+//! in_rex.rs, files.rs, hooks.rs, repo.rs, news.rs, workers.rs, remote.rs), which
+//! `MODULES` lists in doctor's order. Each returns (state, what it found): "ok", "fail"
+//! (with the fix in the text), "warn" (something to see to, that stops nothing) or
+//! "skip" (it doesn't apply, or can't be told). `doctor` runs them all; `up` runs those
+//! that aren't `slow` and only counts problems. `doctor --all-repos` (all_repos.rs) runs
+//! the `shared` ones once, then each repo's. `--json` prints the checks alone; `up`'s
+//! hint is `up_hint`; `doctor --fix` (`fix`) runs each check's own fix, if it has one.
 
 mod all_repos;
 mod builds;
@@ -15,26 +15,94 @@ mod files;
 mod hooks;
 mod in_rex;
 mod news;
+mod remote;
 mod repo;
 mod tools;
 mod workers;
 
 use crate::args::{flag, Arg, Args};
-use crate::push_remote::{check_push, check_push_seen};
-use builds::{check_board, check_cargo, check_cli};
 use bullpen_core::config::read_global_file;
 use bullpen_core::json::dumps;
 use bullpen_core::paths::{homes, safe, state};
 use bullpen_core::repo::repo_root;
 use bullpen_core::settings::defaults;
 use bullpen_core::{Obj, Repo, Res};
-use files::{check_config, check_global, check_state};
-use hooks::check_hook;
-use in_rex::{check_keys, check_watcher};
-use repo::check_coordinators;
 use serde_json::{json, Value};
-use std::path::PathBuf;
-use tools::{check_agents, check_gh, check_rex};
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+/// The modules of checks, in doctor's order: each lists its own, in order.
+const MODULES: &[&[DoctorCheck]] = &[
+    tools::CHECKS,
+    builds::CHECKS,
+    in_rex::CHECKS,
+    files::CHECKS,
+    hooks::CHECKS,
+    repo::CHECKS,
+    news::CHECKS,
+    workers::CHECKS,
+    remote::CHECKS,
+];
+
+/// Every check, in doctor's order.
+fn all() -> impl Iterator<Item = &'static DoctorCheck> {
+    MODULES.iter().flat_map(|m| m.iter())
+}
+
+/// One of doctor's checks: all doctor knows of it.
+struct DoctorCheck {
+    /// its line's name
+    name: &'static str,
+    /// about the setup rather than a repo, the same for every repo: `--all-repos` runs it once
+    shared: bool,
+    /// left out by `up`: it needs the network, sizes folders, or is something `up` sees to itself
+    slow: bool,
+    /// left out where there's no repository's state folder (outside a git repository)
+    needs_dir: bool,
+    run: fn(&Ctx) -> Check,
+    /// what `doctor --fix` does for it, if anything
+    fix: Option<Fix>,
+}
+
+impl DoctorCheck {
+    /// Each value starts from this: a repo's check, that `up` runs too, with no fix.
+    const NEW: DoctorCheck = DoctorCheck {
+        name: "",
+        shared: false,
+        slow: false,
+        needs_dir: false,
+        run: |_| Ok(("skip", String::new())),
+        fix: None,
+    };
+}
+
+/// What a check is asked about: the repo (None outside one, or when its config doesn't
+/// parse, then why_not says why), its state folder, its settings (the defaults outside a
+/// repository) and the run.
+struct Ctx<'a> {
+    repo: Option<&'a Repo>,
+    dir: Option<&'a Path>,
+    why_not: Option<&'static str>,
+    cfg: &'a Obj,
+    run: Run,
+}
+
+/// A check's fix for `doctor --fix`: its words in the flag's help, and the fix.
+struct Fix {
+    help: &'static str,
+    run: Fixer,
+}
+
+enum Fixer {
+    /// In any folder (outside a repository too), first: what it did, if anything.
+    Anywhere(fn() -> Option<String>),
+    /// In this repository: what it did, each in words. `left` is what an error leaves as
+    /// it was ("the news hook").
+    InRepo {
+        left: &'static str,
+        run: fn(&Repo) -> Res<Vec<String>>,
+    },
+}
 
 /// A check's result.
 pub type Check = Res<(&'static str, String)>;
@@ -95,115 +163,77 @@ pub type Line = (&'static str, &'static str, String);
 
 /// [(name, state, text)], in doctor's order.
 fn doctor_checks(place: &Place, run: Run) -> Vec<Line> {
-    let (repo, why_not) = (place.repo.as_ref(), place.why_not);
-    let cfg: Obj = repo.map_or_else(defaults, |r| r.cfg.clone());
-    type Do<'a> = Box<dyn Fn() -> Check + 'a>;
-    // (name, shared by every repo, left out by `up`, the check)
-    let all: Vec<(&'static str, bool, bool, Do)> = vec![
-        ("rex", true, false, Box::new(check_rex)),
-        ("gh", false, true, Box::new(|| check_gh(repo))),
-        ("agents", false, false, Box::new(|| check_agents(&cfg))),
-        ("bullpen", true, false, Box::new(check_cli)),
-        ("board", true, false, Box::new(check_board)),
-        ("cargo", true, true, Box::new(check_cargo)),
-        ("keys", true, false, Box::new(check_keys)),
-        ("watcher", true, true, Box::new(check_watcher)),
-        ("state", true, false, Box::new(check_state)),
-        ("temp", true, true, Box::new(|| Ok(crate::claude_tmp::check()))),
-        ("global", true, false, Box::new(check_global)),
-        (
-            "config",
-            false,
-            false,
-            Box::new(|| place.dir.as_deref().map_or_else(outside, check_config)),
-        ),
-        ("setup", false, false, Box::new(|| check_hook(repo, "setup", why_not))),
-        (
-            "teardown",
-            false,
-            false,
-            Box::new(|| check_hook(repo, "teardown", why_not)),
-        ),
-        (
-            "coordinators",
-            false,
-            true,
-            Box::new(|| check_coordinators(repo, why_not)),
-        ),
-        (
-            "copy",
-            false,
-            false,
-            Box::new(|| crate::copies::check_copy(repo, why_not)),
-        ),
-        (
-            "risk",
-            false,
-            true,
-            Box::new(|| crate::risk_paths::check_risk(repo, why_not)),
-        ),
-        ("news", false, true, Box::new(|| news::check_news(repo, why_not))),
-        (
-            "workers",
-            false,
-            true,
-            Box::new(|| workers::check_workers(repo, why_not)),
-        ),
-        (
-            "push",
-            false,
-            true,
-            Box::new(|| match run {
-                Run::EachRepo => check_push_seen(repo, why_not),
-                _ => check_push(repo, why_not),
-            }),
-        ),
-    ];
-    all.into_iter()
-        .filter(|(name, ..)| *name != "config" || place.dir.is_some()) // outside a repository
-        .filter(|(_, shared, slow, _)| match run {
+    let cfg: Obj = place.repo.as_ref().map_or_else(defaults, |r| r.cfg.clone());
+    let ctx = Ctx {
+        repo: place.repo.as_ref(),
+        dir: place.dir.as_deref(),
+        why_not: place.why_not,
+        cfg: &cfg,
+        run,
+    };
+    all()
+        .filter(|c| !c.needs_dir || place.dir.is_some())
+        .filter(|c| match run {
             Run::Doctor => true,
-            Run::Up => !slow,
-            Run::Shared => *shared,
-            Run::EachRepo => !shared,
+            Run::Up => !c.slow,
+            Run::Shared => c.shared,
+            Run::EachRepo => !c.shared,
         })
-        .map(|(name, _, _, f)| match f() {
-            Ok((st, text)) => (name, st, text),
-            Err(e) => (name, "skip", format!("can't tell: {e}")),
+        .map(|c| match (c.run)(&ctx) {
+            Ok((st, text)) => (c.name, st, text),
+            Err(e) => (c.name, "skip", format!("can't tell: {e}")),
         })
         .collect()
-}
-
-/// A repo's own check outside a repository.
-fn outside() -> Check {
-    Ok(("skip", "not in a git repository".into()))
 }
 
 fn problems_phrase(n: usize) -> String {
     format!("{n} problem{}", if n != 1 { "s" } else { "" })
 }
 
-const DOCTOR: &[Arg] = &[
-    flag(
-        "--all-repos",
-        "every repository bullpen knows: the checks about the setup once, then each repo's \
-         (its push remote as last fetched or pushed, without the network)",
-    ),
-    flag(
-        "--json",
-        "the checks as JSON: {name, state, text} each, and the problems' names",
-    ),
-    flag(
-        "--fix",
-        "first fix what bullpen can by itself: the Claude scratch folders closed tasks of any repository left in \
-         the temp folder; and in this repository, the news hook in .claude/settings.local.json (written with \
-         `config --news wake`, removed with any other news), and a running worker's Stop hook",
-    ),
-];
+/// doctor's flags, `--fix`'s help from the checks' fixes.
+fn doctor_args() -> [Arg; 3] {
+    static FIX_HELP: OnceLock<String> = OnceLock::new();
+    [
+        flag(
+            "--all-repos",
+            "every repository bullpen knows: the checks about the setup once, then each repo's \
+             (its push remote as last fetched or pushed, without the network)",
+        ),
+        flag(
+            "--json",
+            "the checks as JSON: {name, state, text} each, and the problems' names",
+        ),
+        flag("--fix", FIX_HELP.get_or_init(fix_help)),
+    ]
+}
+
+/// "first fix what bullpen can by itself: <each fix that runs anywhere>; and in this
+/// repository, <each of this repository's>".
+fn fix_help() -> String {
+    let (anywhere, here): (Vec<&Fix>, Vec<&Fix>) = all()
+        .filter_map(|c| c.fix.as_ref())
+        .partition(|f| matches!(f.run, Fixer::Anywhere(_)));
+    let mut parts: Vec<String> = anywhere.iter().map(|f| f.help.to_string()).collect();
+    let here: Vec<&str> = here.iter().map(|f| f.help).collect();
+    if !here.is_empty() {
+        let and = if parts.is_empty() { "" } else { "and " };
+        parts.push(format!("{and}in this repository, {}", listed(&here)));
+    }
+    format!("first fix what bullpen can by itself: {}", parts.join("; "))
+}
+
+/// "a", "a, and b", "a, b, and c".
+fn listed(items: &[&str]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.to_string(),
+        [rest @ .., last] => format!("{}, and {last}", rest.join(", ")),
+    }
+}
 
 /// `doctor`: one line per check, with the fix for what's wrong.
 pub fn cmd_doctor(argv: &[String]) -> Res<i32> {
-    let a = Args::parse("doctor", argv, DOCTOR);
+    let a = Args::parse("doctor", argv, &doctor_args());
     if a.flag("--all-repos") {
         if a.flag("--fix") {
             return bullpen_core::fail("--fix is for one repository: run `bullpen doctor --fix` in it");
@@ -234,23 +264,32 @@ fn fix(place: &Place, json: bool) -> Res<()> {
         true => eprintln!("fixed  {name}: {did}"),
         false => println!("fixed  {name}: {did}"),
     };
-    if let Some(did) = crate::claude_tmp::fix() {
-        said("temp", &did);
+    for c in all() {
+        if let Some(Fix {
+            run: Fixer::Anywhere(run),
+            ..
+        }) = &c.fix
+        {
+            run().iter().for_each(|did| said(c.name, did));
+        }
     }
     let Some(repo) = place.repo.as_ref() else {
         return match place.why_not {
             Some(why) => bullpen_core::fail(format!("--fix can't tell this repository's settings: {why}")),
-            None => Ok(()), // outside a repository: the temp folder alone
+            None => Ok(()), // outside a repository: the fixes that run anywhere alone
         };
     };
-    match crate::news::hook::sync(repo) {
-        Ok(None) => {}
-        Ok(Some(did)) => said("news", &did),
-        Err(e) => eprintln!("bullpen: --fix left the news hook as it was: {}", e.0),
-    }
-    match workers::fix_workers(repo) {
-        Ok(did) => did.iter().for_each(|d| said("workers", d)),
-        Err(e) => eprintln!("bullpen: --fix left the workers' Stop hooks as they were: {}", e.0),
+    for c in all() {
+        if let Some(Fix {
+            run: Fixer::InRepo { left, run },
+            ..
+        }) = &c.fix
+        {
+            match run(repo) {
+                Ok(did) => did.iter().for_each(|d| said(c.name, d)),
+                Err(e) => eprintln!("bullpen: --fix left {left} as it was: {}", e.0),
+            }
+        }
     }
     Ok(())
 }

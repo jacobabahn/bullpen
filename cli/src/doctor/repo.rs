@@ -1,15 +1,39 @@
 //! doctor's checks of this repository's coordinators.
 
-use super::Check;
+use super::{Check, DoctorCheck};
 use crate::board::old_board;
 use crate::coordinators::{alive, coordinators};
 use bullpen_core::json::{obj, py_str, truthy, Obj};
 use bullpen_core::Repo;
 
+pub(super) const CHECKS: &[DoctorCheck] = &[COORDINATORS, COPY, RISK];
+
+/// The copy of bullpen this repo's coordinator uses (copies.rs).
+const COPY: DoctorCheck = DoctorCheck {
+    name: "copy",
+    run: |c| crate::copies::check_copy(c.repo, c.why_not),
+    ..DoctorCheck::NEW
+};
+
+/// The repository's sensitive paths (risk_paths.rs).
+const RISK: DoctorCheck = DoctorCheck {
+    name: "risk",
+    slow: true,
+    run: |c| crate::risk_paths::check_risk(c.repo, c.why_not),
+    ..DoctorCheck::NEW
+};
+
 /// f"{d.get(key)}": the value as Python prints it, None when it isn't there.
 fn shown(o: &Obj, key: &str) -> String {
     o.get(key).map_or_else(|| "None".into(), py_str)
 }
+
+const COORDINATORS: DoctorCheck = DoctorCheck {
+    name: "coordinators",
+    slow: true,
+    run: |c| check_coordinators(c.repo, c.why_not),
+    ..DoctorCheck::NEW
+};
 
 /// The coordinators config.json lists still have their panes (and boards).
 pub fn check_coordinators(repo: Option<&Repo>, why_not: Option<&str>) -> Check {

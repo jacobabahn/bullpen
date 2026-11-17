@@ -1,13 +1,27 @@
 //! doctor's checks of the setup and teardown hooks a new task would get.
 
 use super::builds::executable;
-use super::Check;
+use super::{Check, DoctorCheck};
 use crate::modes::repo_base_ref;
 use bullpen_core::json::{py_str, truthy};
 use bullpen_core::proc::{git, run, run_in, run_input, which};
 use bullpen_core::text::{split, splitlines, strip};
 use bullpen_core::{Repo, Res};
 use std::path::Path;
+
+pub(super) const CHECKS: &[DoctorCheck] = &[SETUP, TEARDOWN];
+
+const SETUP: DoctorCheck = DoctorCheck {
+    name: "setup",
+    run: |c| check_hook(c.repo, "setup", c.why_not),
+    ..DoctorCheck::NEW
+};
+
+const TEARDOWN: DoctorCheck = DoctorCheck {
+    name: "teardown",
+    run: |c| check_hook(c.repo, "teardown", c.why_not),
+    ..DoctorCheck::NEW
+};
 
 /// The program a #! line runs: its first word, or for env, the first word after
 /// env's options (-S splits its string) and NAME=value settings.

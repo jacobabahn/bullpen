@@ -1,11 +1,13 @@
 //! doctor's checks of bullpen's parts in Rex: its keys, and the watcher.
 
-use super::Check;
+use super::{Check, DoctorCheck};
 use crate::watcher::{watcher_copy, watcher_record, watcher_stamp_of};
 use bullpen_core::json::{get, py_str, truthy, Obj};
 use bullpen_core::paths::{home, rex};
 use bullpen_core::proc::{run, which};
 use serde_json::Value;
+
+pub(super) const CHECKS: &[DoctorCheck] = &[KEYS, WATCHER];
 
 const KEY_ACTIONS: [&str; 5] = [
     "bullpen_next",
@@ -14,6 +16,13 @@ const KEY_ACTIONS: [&str; 5] = [
     "bullpen_jump",
     "bullpen_mission",
 ];
+
+const KEYS: DoctorCheck = DoctorCheck {
+    name: "keys",
+    shared: true,
+    run: |_| check_keys(),
+    ..DoctorCheck::NEW
+};
 
 /// Rex lists the actions its config defines: bullpen's keys define four.
 pub fn check_keys() -> Check {
@@ -69,6 +78,14 @@ pub fn check_keys() -> Check {
         },
     ))
 }
+
+const WATCHER: DoctorCheck = DoctorCheck {
+    name: "watcher",
+    shared: true,
+    slow: true,
+    run: |_| check_watcher(),
+    ..DoctorCheck::NEW
+};
 
 pub fn check_watcher() -> Check {
     let w = watcher_record()?;

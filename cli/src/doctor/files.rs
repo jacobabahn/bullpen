@@ -1,13 +1,15 @@
 //! doctor's checks of bullpen's files: the state folder, the global config.json and
 //! this repository's.
 
-use super::Check;
+use super::{Check, DoctorCheck, Fix, Fixer};
 use bullpen_core::config::{global_config_path, read_global_file};
 use bullpen_core::paths::state;
 use bullpen_core::settings::{is_internal, is_repo_only};
 use bullpen_core::Fail;
 use serde_json::Value;
 use std::path::Path;
+
+pub(super) const CHECKS: &[DoctorCheck] = &[STATE, TEMP, GLOBAL, CONFIG];
 
 /// The OS's words for an error (Python's strerror), without Rust's " (os error N)".
 fn strerror(e: &std::io::Error) -> String {
@@ -33,6 +35,27 @@ fn write_in_state(dir: &Path) -> std::io::Result<()> {
     std::fs::OpenOptions::new().write(true).create_new(true).open(&path)?;
     std::fs::remove_file(&path)
 }
+
+const STATE: DoctorCheck = DoctorCheck {
+    name: "state",
+    shared: true,
+    run: |_| check_state(),
+    ..DoctorCheck::NEW
+};
+
+/// The temp folder (claude_tmp.rs): how full it is, and the Claude scratch folders closed
+/// tasks left in it, which its fix removes.
+const TEMP: DoctorCheck = DoctorCheck {
+    name: "temp",
+    shared: true,
+    slow: true,
+    run: |_| Ok(crate::claude_tmp::check()),
+    fix: Some(Fix {
+        help: "the Claude scratch folders closed tasks of any repository left in the temp folder",
+        run: Fixer::Anywhere(crate::claude_tmp::fix),
+    }),
+    ..DoctorCheck::NEW
+};
 
 pub fn check_state() -> Check {
     let st = state();
@@ -117,6 +140,16 @@ pub fn json_error(text: &str, e: &serde_json::Error) -> String {
     format!("{what}: line {line} column {col} (char {pos})")
 }
 
+const CONFIG: DoctorCheck = DoctorCheck {
+    name: "config",
+    needs_dir: true,
+    run: |c| {
+        c.dir
+            .map_or_else(|| Ok(("skip", "not in a git repository".into())), check_config)
+    },
+    ..DoctorCheck::NEW
+};
+
 pub fn check_config(d: &Path) -> Check {
     let path = d.join("config.json");
     if !path.exists() {
@@ -140,6 +173,13 @@ pub fn check_config(d: &Path) -> Check {
     }
     Ok(("ok", format!("{} parses", path.display())))
 }
+
+const GLOBAL: DoctorCheck = DoctorCheck {
+    name: "global",
+    shared: true,
+    run: |_| check_global(),
+    ..DoctorCheck::NEW
+};
 
 /// The global config.json, if there is one, parses and holds no repository's own keys.
 pub fn check_global() -> Check {

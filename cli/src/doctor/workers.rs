@@ -2,12 +2,14 @@
 //! which says what it waits on when its turn ends. A task started before workers had
 //! one isn't a problem: its worker does without, until it starts again.
 
-use super::Check;
+use super::{Check, DoctorCheck, Fix, Fixer};
 use crate::rex::alive;
 use crate::stop_hook::{missing, rewrite};
 use bullpen_core::json::{s, truthy, Obj};
 use bullpen_core::task::is_closed;
 use bullpen_core::{Repo, Res};
+
+pub(super) const CHECKS: &[DoctorCheck] = &[WORKERS];
 
 /// The tasks whose worker's pane is alive.
 fn running(repo: &Repo) -> Res<Vec<Obj>> {
@@ -19,6 +21,20 @@ fn running(repo: &Repo) -> Res<Vec<Obj>> {
     }
     Ok(out)
 }
+
+const WORKERS: DoctorCheck = DoctorCheck {
+    name: "workers",
+    slow: true,
+    run: |c| check_workers(c.repo, c.why_not),
+    fix: Some(Fix {
+        help: "a running worker's Stop hook",
+        run: Fixer::InRepo {
+            left: "the workers' Stop hooks",
+            run: fix_workers,
+        },
+    }),
+    ..DoctorCheck::NEW
+};
 
 pub fn check_workers(repo: Option<&Repo>, why_not: Option<&str>) -> Check {
     let Some(repo) = repo else {

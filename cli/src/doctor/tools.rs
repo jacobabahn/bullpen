@@ -1,7 +1,7 @@
 //! doctor's checks of the programs bullpen runs: Rex (its server and version), gh, and
 //! the agents' programs.
 
-use super::Check;
+use super::{Check, DoctorCheck};
 use bullpen_core::json::{py_str, strs, truthy, Obj};
 use bullpen_core::paths::rex;
 use bullpen_core::proc::{run, which};
@@ -9,6 +9,8 @@ use bullpen_core::text::{splitlines, strip};
 use bullpen_core::Repo;
 use serde_json::Value;
 use std::path::Path;
+
+pub(super) const CHECKS: &[DoctorCheck] = &[REX, GH, AGENTS];
 
 /// preview.13: minimized floating panes. A release sorts after its previews (u64::MAX).
 pub const REX_MIN: (u64, u64, u64, u64) = (0, 1, 0, 13);
@@ -37,6 +39,13 @@ pub fn rex_version_key(text: &str) -> Option<(u64, u64, u64, u64)> {
     };
     Some((num(a)?, num(b)?, num(c)?, pre))
 }
+
+const REX: DoctorCheck = DoctorCheck {
+    name: "rex",
+    shared: true,
+    run: |_| check_rex(),
+    ..DoctorCheck::NEW
+};
 
 pub fn check_rex() -> Check {
     let r = rex();
@@ -74,6 +83,13 @@ pub fn check_rex() -> Check {
     }
     Ok(("ok", format!("server {version}, {exe}")))
 }
+
+const GH: DoctorCheck = DoctorCheck {
+    name: "gh",
+    slow: true,
+    run: |c| check_gh(c.repo),
+    ..DoctorCheck::NEW
+};
 
 /// gh: installed and signed in, for a repo with a remote (pull requests). With `issues`
 /// on it is checked in local mode too, and for the `repo` scope, which reading a
@@ -139,6 +155,12 @@ pub fn repo_scope(said: &str) -> Option<bool> {
     }
     found
 }
+
+const AGENTS: DoctorCheck = DoctorCheck {
+    name: "agents",
+    run: |c| check_agents(c.cfg),
+    ..DoctorCheck::NEW
+};
 
 /// The programs the coordinator, workers and reviewers run (claude, unless changed).
 pub fn check_agents(cfg: &Obj) -> Check {
