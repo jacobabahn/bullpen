@@ -25,7 +25,7 @@ pub const BOARD_KEYS: &[(&str, &[(&str, &str)])] = &[
         ("d", "drop it"),
         ("i", "answer its question"),
         ("t", "tell its worker something"),
-        ("p", "peek at its worker's screen"),
+        ("p", "peek at its worker's screen (in review, its reviewer's)"),
         ("v", "view its diff"),
         ("g", "guided tour of its change"),
         ("s", "start it"),

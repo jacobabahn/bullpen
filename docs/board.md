@@ -98,7 +98,7 @@ in the order `?` lists them:
 | `d` | drop it; asks y/n first |
 | `i` | answer its question, on a task that needs you (see [Answering from the board](#answering-from-the-board)) |
 | `t` | tell its worker something |
-| `p` | peek at its worker's screen, in its colours, updating until `esc` or `q`; `t` `⏎` `i` `a` `d` `v` in a peek go back to the board and act on that task |
+| `p` | peek at its worker's screen (in review, its reviewer's, as `⏎` opens), in its colours, updating until `esc` or `q`; `t` `⏎` `i` `a` `d` `v` in a peek go back to the board and act on that task |
 | `v` | view its diff |
 | `g` | its guided tour (see [Guided review tours](tours.md), with the keys inside a tour) |
 | `s` | start it |

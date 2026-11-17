@@ -402,7 +402,9 @@ fn switch_to(session: &str, block: &str, name: &str) -> Res<()> {
     let window = find_pane(view.as_ref(), block, "").and_then(|w| w.window);
     match rex_select(session, window.as_deref())? {
         None => Ok(()),
-        Some(why) => fail(format!("{name}'s pane is up in its own session, but Rex didn't show it: {why}")),
+        Some(why) => fail(format!(
+            "{name}'s pane is up in its own session, but Rex didn't show it: {why}"
+        )),
     }
 }
 

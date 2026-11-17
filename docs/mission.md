@@ -12,8 +12,11 @@ Rex restarted), it opens a new tab in the `mission` session rather than a second
 session. `bullpen mission --here` runs the screen in the terminal you're in, which is
 what its pane runs. Where it runs is kept in `mission.json` in the state folder.
 
-To get back to a repository from it, `⏎` goes to the selected task's pane; `cmd+;`
-`m` brings you back.
+To look at a task without leaving, `p` peeks at the end of its agent's screen, over
+mission control. To work in its pane, `⏎` takes you there: the Rex app switches to
+the task's repository's session, with its pane shown and focused; `cmd+;` `m` brings
+you back. The pane stays where it lives (Rex can't show a pane in another session, so
+it doesn't come to you), and its agent isn't touched.
 
 ## What it shows
 
@@ -37,7 +40,7 @@ To get back to a repository from it, `⏎` goes to the selected task's pane; `cm
 │ jj-evolved   c1 ○ idle                    2 open ││                                                │
 │ ⠋ BP-13   Evolve across merges               48m ││                                                │
 └──────────────────────────────────────────────────┘└────────────────────────────────────────────────┘
- i answer  ⏎ open  t tell  n next  / find  q quit
+ i answer  ⏎ open  t tell  p peek  n next  / find  q quit
 ```
 
 - **The top line**: what needs you (needs you or stopped), what's ready (ready to
@@ -73,7 +76,8 @@ coordinators are marks, and the selected task's detail is under it in the list.
 | --- | --- |
 | `j` `k` (`↑` `↓`) | select a task; `PgUp` `PgDn`, `ctrl+u` `ctrl+d`, `Home` `End` (`G`) as on the board |
 | `n` | the next task that needs you, in any repository (again: the one after); once nothing does, the next that's ready |
-| `⏎` | go to its pane (its reviewer's, in review), as `bullpen go` does |
+| `p` | peek at its worker's screen (its reviewer's, in review), over mission control and updating, as the board's `p` does; `esc` or `q` returns, and `t` `⏎` `i` `a` `d` `v` act on that task from it |
+| `⏎` | go to its pane (its reviewer's, in review): the Rex app shows that repository's session, focused on the pane (`bullpen go --switch`); a task with no pane says so and does nothing |
 | `i` | answer it: its agent's prompt, or its coordinator's question |
 | `a` then `y` | accept it, or close a finished one |
 | `d` then `y` | drop it |
@@ -82,6 +86,9 @@ coordinators are marks, and the selected task's detail is under it in the list.
 | `g`, `v` | its tour, its diff, in a floating pane over mission control |
 | `/` | the picker, over mission control: any open task, in any repository |
 | `q` then `y` | quit (`cmd+;` `m` starts it again) |
+
+The last line is the selected task's keys, as on the board, then mission control's
+own (`n` `/` `q`); keys drop from the task's end when the screen is narrow.
 
 Each key on a task runs the `bullpen` command in that task's repository, as that
 repository's board does, with the same questions (`y / n` on its row, red when risky),
@@ -98,5 +105,5 @@ Whether each coordinator's pane is alive is Rex's to say: `bullpen repos --json`
 it every 5 seconds, in the background. When its program is rebuilt it reloads itself,
 keeping the selection, as the board does.
 
-Still to come: a live look at the selected task's pane, a panel for the coordinators,
+Still to come: a panel for the coordinators,
 news and health panels, zoom, and a repository's whole board as a drill-in.
