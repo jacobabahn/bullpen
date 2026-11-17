@@ -258,16 +258,18 @@ class EntryTest(BullpenTest):
         return subprocess.run([str(BULLPEN), *args], cwd=self.repo, env=self.env, text=True, capture_output=True)
 
     def test_the_table_lists_every_command(self):
+        # facts about the table, not a copy of it: a new command needs no edit here
         table = json.loads(self.bp("_commands").stdout)
-        self.assertEqual({c["name"] for c in table},
-                         {"_nop", "_commands", "go", "hide", "adopt", "board", "ls", "show", "diff", "add", "after",
-                          "model", "review-mode", "peek", "ask", "ok", "note", "news", "guide", "up", "build",
-                          "_build_board", "doctor", "_flush", "start", "resume", "tell", "say", "rules", "pick",
-                          "config", "ready", "review", "verdict", "close", "drop", "finish", "_push", "answer",
-                          "reply", "prompt", "check", "_event", "_stuck", "_limit", "_gone", "_coordinator_gone",
-                          "_tour", "tour-comment", "accept", "_auto_accept", "keys", "_prs", "tour", "stats",
-                          "repos", "later", "_pickup", "_issues", "mission", "_wake_check", "_worker_stop", "brief", "issues",
-                          "issue", "revert"})
+        names = [c["name"] for c in table]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertTrue({"accept", "ready", "config", "_commands", "_event"} <= set(names))
+        groups = {"You", "Coordinator", "Worker and reviewer", "Setup"}
+        for c in table:
+            internal = c["name"].startswith("_")
+            self.assertEqual(c["group"] is None, internal, c)  # an internal command is in no group of the help
+            self.assertEqual(c["help"] == "", internal, c)
+            self.assertTrue(internal or c["group"] in groups, c)
+            self.assertRegex(c["name"], r"^[a-z]+(-[a-z]+)*$|^_[a-z]+(_[a-z]+)*$")
 
     def test_help_and_an_unknown_command(self):
         p = self.call("--help")
