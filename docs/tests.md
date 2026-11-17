@@ -55,6 +55,18 @@ its module (below). Each test removes its temp folder when it ends.
 Each module runs inside a temp folder of its own and fails if anything is left in it
 afterwards.
 
+## The tables
+
+The command table (`cli/src/commands.rs`) and the settings table (`SETTINGS` in
+`core/src/settings.rs`) have no copy in the tests. A test reads them from the program
+(`bullpen _commands`, `bullpen config --json`, `config`'s groups) and checks facts about
+them: no name twice, every command in the help has a help line, a known one is there.
+So adding a command or a setting edits no shared test. `tests/test_docs.py` checks
+that every command is named in `docs/commands.md` (as `bullpen <name>`) and every
+setting in `docs/settings.md` (as its name or its flag, in code), so a new one needs its
+line there. Internal ones are exempt by a rule, not a list: a command in no group of the
+help, a setting `bullpen config` doesn't list.
+
 ## The Rust tests
 
 `core` and `cli` keep their tests the board's way, below: beside each module, as

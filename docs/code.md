@@ -48,7 +48,9 @@ internal commands, the watcher's and bullpen's own, named `_...`, have none) and
 function `cmd_...(argv)` in its module, which reads its arguments (`args.rs`, by
 argparse's rules: prefixes, `--x=y`, `--`, the last of a repeated option) and calls
 plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::accept`
-(cli/src/accept/mod.rs).
+(cli/src/accept/mod.rs). Its docs are a line in `docs/commands.md` at least (see
+[Tests](tests.md#the-tables)); a setting is a row in `SETTINGS` (`core/src/settings.rs`)
+and its words in `docs/settings.md`.
 
 ## Where things are
 
