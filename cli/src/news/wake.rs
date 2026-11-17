@@ -14,6 +14,7 @@
 //! A pause (`news-<cid>.wait`, `{"paused": <stamp>}`) quiets the backstop for that
 //! coordinator until `news --resume` or its next `bullpen up`; news is still logged.
 
+use super::kind::Kind;
 use super::read::{news_cursor, news_for, news_records, news_size, set_news_cursor};
 use super::{has_draft, touch, LINE_BREAK, NEWS_MARK};
 use crate::coordinators::{alive, coordinators};
@@ -26,31 +27,15 @@ use serde_json::{json, Value};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 
-/// News of these events rides along with the next wake (or `bullpen news`) and doesn't
-/// wake a coordinator by itself: bookkeeping, nothing to act on. Any other event wakes,
-/// so a new event can't go unheard.
-pub const RIDES_ALONG: &[&str] = &[
-    "started",
-    "rebased",
-    "accepted",
-    "closed",
-    "queue",
-    "pickup",
-    "kept",
-    "dropped",
-    "later",
-    "tour-sent",
-    "keys",
-];
-
 /// Seconds wake-worthy news waits for a reader before the backstop types it.
 pub const UNREAD_FOR: f64 = 60.0;
 /// Seconds the backstop waits behind a draft before it tells the person.
 pub const DRAFT_FOR: f64 = 600.0;
 
-/// Is news of this event worth waking a coordinator for?
+/// Is news of this event worth waking a coordinator for? Its kind says (kind.rs); an
+/// event no kind has wakes, so a new kind of line can't go unheard.
 pub fn wakes(event: &str) -> bool {
-    !RIDES_ALONG.contains(&event)
+    Kind::of_event(event).is_none_or(Kind::wakes)
 }
 
 /// Is news typed into the coordinators' panes? (As news() decides it.) Then the backstop

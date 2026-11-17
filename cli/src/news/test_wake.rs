@@ -16,28 +16,27 @@ fn a_records_stamp_task_and_event() {
 }
 
 #[test]
-fn bookkeeping_rides_along_and_anything_else_wakes() {
+fn an_events_kind_says_whether_it_wakes_and_an_unknown_one_wakes() {
     for event in [
         "started",
         "rebased",
         "accepted",
         "closed",
         "pickup",
+        "queue",
         "tour-sent",
-        "keys",
+        "not-auto-accepted",
     ] {
         assert!(!wakes(event), "{event}");
     }
     for event in [
         "ready",
         "quiet",
-        "stuck",
         "needs-you",
-        "pr-feedback",
-        "guide",
-        "working",
-        "risk",
-        "issues",
+        "keys",
+        "pickup-ask",
+        "queue-failed",
+        "not-rebased",
         "a-new-one",
     ] {
         assert!(wakes(event), "{event}");
