@@ -52,6 +52,13 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 [Tests](tests.md#the-tables)); a setting is a row in `SETTINGS` (`core/src/settings.rs`)
 and its words in `docs/settings.md`.
 
+A doctor check is a `DoctorCheck` value in the module of `cli/src/doctor/` for its kind
+(`tools.rs`, `builds.rs`, `files.rs`, ...), in that module's `CHECKS`: its name, whether
+it is about the setup rather than a repo (`shared`: `--all-repos` runs it once), whether
+`up` leaves it out (`slow`), how it runs, and its `--fix`, with the fix's words in the
+flag's help, if it has one. `doctor/mod.rs` lists the modules in doctor's order and
+knows nothing of any one check. Its docs are a line in `docs/doctor.md` naming it.
+
 ## Where things are
 
 Each module says what it's for in its own header: the opening `//!` comment of a Rust
