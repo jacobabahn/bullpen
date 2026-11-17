@@ -29,7 +29,7 @@ const WORKERS: DoctorCheck = DoctorCheck {
     fix: Some(Fix {
         help: "a running worker's Stop hook",
         run: Fixer::InRepo {
-            left: "the workers' Stop hooks",
+            left: "the workers' Stop hooks as they were",
             run: fix_workers,
         },
     }),

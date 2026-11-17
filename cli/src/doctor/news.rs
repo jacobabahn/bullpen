@@ -78,7 +78,7 @@ const NEWS: DoctorCheck = DoctorCheck {
         help: "the news hook in .claude/settings.local.json (written with `config --news wake`, removed with \
                any other news)",
         run: Fixer::InRepo {
-            left: "the news hook",
+            left: "the news hook as it was",
             run: |repo| Ok(hook::sync(repo)?.into_iter().collect()),
         },
     }),

@@ -180,3 +180,23 @@ fn fix_help_lists_the_fixes_that_run_anywhere_then_this_repositorys() {
     assert!(help.starts_with("first fix what bullpen can by itself: the Claude scratch folders"));
     assert!(help.contains("; and in this repository, the news hook"));
 }
+
+#[test]
+fn a_fix_that_fails_says_what_it_left_in_a_whole_phrase() {
+    // "--fix left {left}: ...": the phrase carries its own "as it was" / "as they were"
+    let left = |name: &str| {
+        super::all()
+            .find(|c| c.name == name)
+            .and_then(|c| match c.fix.as_ref()?.run {
+                super::Fixer::InRepo { left, .. } => Some(left),
+                super::Fixer::Anywhere(_) => None,
+            })
+    };
+    for c in super::all() {
+        if let Some(l) = left(c.name) {
+            assert!(l.ends_with(" as it was") || l.ends_with(" as they were"), "{l}");
+        }
+    }
+    assert_eq!(left("workers"), Some("the workers' Stop hooks as they were"));
+    assert_eq!(left("news"), Some("the news hook as it was"));
+}

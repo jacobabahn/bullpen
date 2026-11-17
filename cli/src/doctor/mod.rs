@@ -96,8 +96,8 @@ struct Fix {
 enum Fixer {
     /// In any folder (outside a repository too), first: what it did, if anything.
     Anywhere(fn() -> Option<String>),
-    /// In this repository: what it did, each in words. `left` is what an error leaves as
-    /// it was ("the news hook").
+    /// In this repository: what it did, each in words. `left` is how an error ends
+    /// "--fix left ...": "the news hook as it was".
     InRepo {
         left: &'static str,
         run: fn(&Repo) -> Res<Vec<String>>,
@@ -287,7 +287,7 @@ fn fix(place: &Place, json: bool) -> Res<()> {
         {
             match run(repo) {
                 Ok(did) => did.iter().for_each(|d| said(c.name, d)),
-                Err(e) => eprintln!("bullpen: --fix left {left} as it was: {}", e.0),
+                Err(e) => eprintln!("bullpen: --fix left {left}: {}", e.0),
             }
         }
     }
