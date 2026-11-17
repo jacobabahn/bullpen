@@ -63,8 +63,10 @@ class FlowTest(BullpenTest):
         sh("git", "--git-dir", str(self.tmp / "origin.git"), "rev-parse", "refs/heads/" + t["branch"])
         gh = [json.loads(l) for l in (self.fake / "gh.log").read_text().splitlines()]
         self.assertEqual(gh[0]["argv"][:2], ["pr", "create"])
-        self.assertIn("Fix the thing (BP-1)", gh[0]["argv"])
-        self.assertIn("Fixed the thing.", gh[0]["body"])
+        argv = gh[0]["argv"]
+        self.assertEqual(argv[argv.index("--title") + 1], "Fix the thing")  # the title alone, with no ID
+        self.assertFalse([a for a in argv if "BP-1" in a and not a.startswith("bullpen/")], argv)
+        self.assertEqual(gh[0]["body"], "Fixed the thing. Checked by hand.\n\nBullpen task BP-1.\n")
         self.assertNotIn("Claude", gh[0]["body"])
         block, line = self.typed()[-1]
         self.assertEqual(block, "blk1")

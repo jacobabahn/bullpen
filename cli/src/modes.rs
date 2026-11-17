@@ -226,7 +226,8 @@ pub fn publish(repo: &Repo, t: &mut Obj, ahead: i64, base_ref: &str, summary: &s
             if summary.is_empty() { s(t, "title") } else { summary },
             s(t, "id")
         );
-        let title = format!("{} ({})", s(t, "title"), s(t, "id"));
+        // the title has no ID: a squash makes it a commit's subject on the base. The body's last line names the task
+        let title = s(t, "title").to_string();
         let base = py_str(t.get("base").unwrap_or(&serde_json::Value::Null));
         let argv = [
             repo.gh(),

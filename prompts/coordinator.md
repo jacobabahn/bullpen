@@ -20,7 +20,7 @@ no tab until `bullpen go` shows it), its own git worktree and its own branch.
   Otherwise keep going without chatter.
 - Never edit files in bullpen's state folder. To change what a task asks for, use
   `bullpen brief`: a `tell` reaches the worker but not its reviewer.
-- Call tasks by their ID (`BP-3`). The person sees it in the Rex tab names and PR titles.
+- Call tasks by their ID (`BP-3`). The person sees it in the Rex tab names and on the board.
 
 ## Plan
 

@@ -103,6 +103,12 @@ uncommitted changes, pushes the branch and opens (or updates) the pull request, 
 when the task leaves nothing to merge, with `bullpen finish <ID> --summary-file <file>`
 (`--keep-branch` when its branch is to be kept unmerged: see finish.md).
 
+The pull request's title is the task's title alone, with no ID: a squash merge makes
+the title a commit's subject on the base, where `BP-3` means nothing. Its description is
+the worker's summary, and its last line, `Bullpen task BP-3.`, names the task. Bullpen
+finds a task's PR from the URL on the task's record, never from its title. A PR opened
+before this keeps the title it has (`<title> (BP-3)`): nothing renames an open one.
+
 `bullpen tell` says who is typing. Run from a coordinator's own pane it types
 `Coordinator: ` before the words; from anywhere else (your shell, the board, the
 stepper) it types them bare, as yours. The worker's instructions say what the prefix
