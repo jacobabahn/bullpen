@@ -64,9 +64,11 @@ fn the_defaults_are_the_tables_in_its_order() {
 
 #[test]
 fn repo_only_is_the_tables() {
-    let from_table: Vec<&str> = SETTINGS.iter().filter(|s| s.repo_only).map(|s| s.name).collect();
-    assert_eq!(from_table, REPO_ONLY);
-    assert!(is_repo_only("prefix") && !is_repo_only("merge"));
+    for s in SETTINGS.iter() {
+        assert_eq!(is_repo_only(s.name), s.repo_only, "{}", s.name);
+    }
+    assert!(is_repo_only("prefix") && is_repo_only("coordinators") && !is_repo_only("merge"));
+    assert!(!is_repo_only("layered") && !is_repo_only("nope"));
     assert!(is_internal("layered") && !is_internal("prefix"));
 }
 

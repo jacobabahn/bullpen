@@ -488,9 +488,11 @@ class SettingsCopiesTest(unittest.TestCase):
                 return consts[arg[1:]] if arg.startswith("&") and arg[1:] in consts else re.findall(r'"([^"]*)"', arg)
             return {"Null": lambda: None, "Bool": lambda: arg == "true", "Int": lambda: int(arg),
                     "Str": lambda: json.loads(arg)}[kind]()
-        rows = re.findall(r'base\("(\w+)", (Null|Bool\(\w+\)|Int\(\d+\)|Str\("[^"]*"\)|List\([^)]*\))', src)
+        table = src[src.index("pub static SETTINGS"):]
+        table = table[:table.index("\n];\n")]
+        rows = re.findall(r'base\("(\w+)", (Null|Bool\(\w+\)|Int\(\d+\)|Str\("[^"]*"\)|List\([^)]*\))', table)
         cls.DEFAULT_CONFIG = {k: val(v) for k, v in rows}
-        assert len(cls.DEFAULT_CONFIG) == int(re.search(r"SETTINGS: \[Setting; (\d+)\]", src).group(1))
+        assert len(cls.DEFAULT_CONFIG) == table.count("base(\"")  # every row read
 
     def test_the_watchers_stuck_after_agrees(self):
         src = (ROOT / "lua" / "watch.lua").read_text()

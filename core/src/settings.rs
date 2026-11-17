@@ -25,17 +25,6 @@ pub const WAITING: [&str; 2] = ["needs", "triage"];
 /// A task with a stop: waiting, or "stopped" (its worker's pane is gone).
 pub const STOPPED: [&str; 3] = ["needs", "triage", "stopped"];
 
-/// Settings that belong to one repository: the global config.json can't hold them.
-pub const REPO_ONLY: [&str; 8] = [
-    "prefix",
-    "next",
-    "base",
-    "push_remote",
-    "news",
-    "issues_repo",
-    "coordinators",
-    "next_coordinator",
-];
 /// What bullpen notes for itself in a repo's config.json.
 pub const INTERNAL: [&str; 4] = ["root", "triage_migrated", "stops_migrated", "layered"];
 
@@ -102,6 +91,7 @@ pub struct Setting {
     pub group: Option<&'static str>,
     pub kind: Kind,
     pub help: &'static str,
+    /// It belongs to one repository: the global config.json can't hold it.
     pub repo_only: bool,
     pub choices: Option<&'static [&'static str]>,
     pub least: Option<i64>,
@@ -135,7 +125,7 @@ use Kind::*;
 use Val::{Bool, Int, List, Null, Str};
 
 /// Every setting, in the order `config` lists them.
-pub static SETTINGS: [Setting; 45] = [
+pub static SETTINGS: &[Setting] = &[
     Setting { help: "the letters new task IDs start with (2 to 5 capitals)", repo_only: true, says: Some("2 to 5 capital letters"), pattern: Some("[A-Z]{2,5}"), ..base("prefix", Str("BP"), Some("Tasks"), Text) },
     Setting { repo_only: true, ..base("next", Int(1), None, File) },
     Setting { help: "the branch tasks start from and open PRs against", repo_only: true, none: Some("the repo's default branch"), ..base("base", Null, Some("Tasks"), Text) },
@@ -230,8 +220,10 @@ pub fn defaults() -> Obj {
         .collect()
 }
 
+/// Does the setting belong to one repository (its repo_only), so the global config.json
+/// can't hold it?
 pub fn is_repo_only(key: &str) -> bool {
-    REPO_ONLY.contains(&key)
+    setting(key).is_some_and(|s| s.repo_only)
 }
 
 pub fn is_internal(key: &str) -> bool {
