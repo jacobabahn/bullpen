@@ -142,6 +142,8 @@ impl Mission {
         });
         let mut app = App::for_repo(dir.to_path_buf(), root.to_path_buf(), self.bullpen.clone(), tx);
         app.pane_session = self.session.clone();
+        // the pane can't come over to mission control's session: ⏎ goes to its own
+        app.go_switch = true;
         app
     }
 
@@ -299,7 +301,7 @@ impl Mission {
             (_, Some('n')) => self.next(i),
             (_, Some('/')) => self.pick(),
             (KeyCode::Esc, _) => self.msg.clear(),
-            (KeyCode::Enter, _) | (_, Some('i' | 'a' | 'd' | 't' | 's' | 'r' | 'g' | 'v')) => self.to_board(k),
+            (KeyCode::Enter, _) | (_, Some('i' | 'a' | 'd' | 't' | 's' | 'r' | 'g' | 'v' | 'p')) => self.to_board(k),
             _ => {}
         }
         true

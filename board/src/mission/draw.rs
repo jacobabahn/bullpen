@@ -11,7 +11,7 @@ use super::Mission;
 use crate::app::{App, Kind, Mode};
 use crate::model::{self, fit, pad, width, Task};
 use crate::ui::bottom::{input_line, key_line, message, pending_keys};
-use crate::ui::overlay::{draw_answer, draw_ask};
+use crate::ui::overlay::{draw_answer, draw_ask, draw_overlay};
 use crate::ui::{bold, dim, frame_at, mark_style, put, rev, risk_style, span, AMBER, REVIEW, SPINNER, TINT, WORKING};
 use bullpen_core::fleet::TaskState;
 use ratatui::buffer::Buffer;
@@ -66,6 +66,10 @@ pub fn draw(f: &mut Frame, m: &mut Mission) {
     let (w, h) = (area.width as usize, area.height as usize);
     // a prompt being answered, or a coordinator's question, takes the whole screen
     if let Some(app) = m.active() {
+        if let Mode::Overlay { title, lines, peek } = &app.mode {
+            draw_overlay(f.buffer_mut(), area, h, title, lines, peek.is_some(), app.peek_failed);
+            return;
+        }
         if let Mode::Answer { title, prompt, .. } = &app.mode {
             draw_answer(f.buffer_mut(), area, h, title, prompt.as_ref());
             return;
@@ -470,11 +474,10 @@ fn bottom(buf: &mut Buffer, area: Rect, m: &Mission, msg: Vec<Span<'static>>) ->
     None
 }
 
-/// The selected task's keys (the board's, but p: the look is a later screen), then n
-/// and / and q. Keys drop from the task's end until the row fits.
+/// The selected task's keys (the board's), then n and / and q. Keys drop from the
+/// task's end until the row fits.
 fn key_row(m: &Mission, w: usize) -> Line<'static> {
     let mut keys: Vec<(&str, &str)> = m.current_task().map_or(Vec::new(), |(_, t, _)| model::task_keys(Some(t)));
-    keys.retain(|(k, _)| *k != "p");
     let own = [("n", "next"), ("/", "find"), ("q", "quit")];
     loop {
         let all: Vec<(&str, &str)> = keys.iter().chain(own.iter()).copied().collect();

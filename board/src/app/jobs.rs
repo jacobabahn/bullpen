@@ -178,7 +178,10 @@ impl App {
             return;
         }
         let lines = self.height.saturating_sub(4).max(1).to_string();
-        let args = vec!["peek".into(), id.clone(), "--lines".into(), lines, "--vt".into()];
+        let mut args = vec!["peek".into(), id.clone(), "--lines".into(), lines, "--vt".into()];
+        if self.peek_review {
+            args.push("--review".into());
+        }
         std::thread::spawn(move || {
             let (ok, text) = run(&bullpen, &root, &args);
             // a screen that can't be read: why, in the board's words

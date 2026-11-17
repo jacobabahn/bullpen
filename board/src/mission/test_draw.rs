@@ -43,7 +43,7 @@ fn wide_two_frames_and_a_line_of_detail_under_every_task() {
     // the selected task's detail, beside
     assert!(line_with(&s, "NEEDS YOU").contains("BP-12  Split the rebase planner"), "beside the list");
     assert!(has(&s, "● needs you · 14m"));
-    assert!(s[s.len() - 1].starts_with(" i answer  ⏎ open  t tell  n next  / find  q quit"), "{}", s[s.len() - 1]);
+    assert!(s[s.len() - 1].starts_with(" i answer  ⏎ open  t tell  p peek  n next  / find  q quit"), "{}", s[s.len() - 1]);
 }
 
 #[test]

@@ -133,11 +133,16 @@ pub struct App {
     pub peek_failed: bool,
     /// when the peek reads the screen again
     peek_due: Instant,
+    /// the peek shows the task's reviewer, not its worker (a task in review)
+    pub peek_review: bool,
     /// the board's own program, as it was when it started: replaced, the board reloads
     pub exe: Option<(PathBuf, ExeId)>,
     /// the Rex session `v` opens a diff over (`diff --session`); None: the command's own
     /// choice, the coordinator's. Mission control sets its own, so the diff opens over it.
     pub pane_session: Option<String>,
+    /// ⏎ also has the Rex app show the pane's session (`go --switch`): mission control
+    /// sets it, since it lives in a session of its own and the pane can't come to it
+    pub go_switch: bool,
 }
 
 pub enum Msg {
@@ -182,8 +187,10 @@ impl App {
             peeking: false,
             peek_failed: false,
             peek_due: Instant::now(),
+            peek_review: false,
             exe: exe.and_then(|p| ExeId::of(&p).map(|id| (p, id))),
             pane_session: None,
+            go_switch: false,
         }
     }
 

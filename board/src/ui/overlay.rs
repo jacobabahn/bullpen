@@ -13,7 +13,7 @@ use ratatui::text::Line;
 
 /// A full-screen text, or a peek at a worker's screen (`peek`): its title, its lines,
 /// and a foot. A peek that can't read the screen (`failed`) says why, in bold.
-pub(super) fn draw_overlay(buf: &mut Buffer, area: Rect, h: usize, title: &str, lines: &[String], peek: bool, failed: bool) {
+pub(crate) fn draw_overlay(buf: &mut Buffer, area: Rect, h: usize, title: &str, lines: &[String], peek: bool, failed: bool) {
     let w = area.width as usize;
     put(buf, area, 0, 1, span(fit(title, w.saturating_sub(2)), bold()));
     let failed = peek && failed;

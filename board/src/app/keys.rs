@@ -50,7 +50,7 @@ impl App {
             KeyCode::Esc | KeyCode::Char('q') => self.mode = Mode::Normal,
             KeyCode::Enter => {
                 self.mode = Mode::Normal;
-                let (ok, out) = if reviewer { self.bp(&["go", &id, "--review"]) } else { self.bp(&["go", &id]) };
+                let (ok, out) = self.go(&id, reviewer);
                 self.msg = Note::of(ok, format!("Opened {id}."), out);
             }
             KeyCode::Char(c) => {
@@ -88,6 +88,19 @@ impl App {
             }
         }
         self.open_tour(&t.id, false);
+    }
+
+    /// `bullpen go <id>`: the task's pane (its reviewer's), and with go_switch the Rex
+    /// app goes to its session.
+    fn go(&self, id: &str, reviewer: bool) -> (bool, String) {
+        let mut args = vec!["go", id];
+        if reviewer {
+            args.push("--review");
+        }
+        if self.go_switch {
+            args.push("--switch");
+        }
+        self.bp(&args)
     }
 
     /// `bullpen tour <id> --pane`: open the stepper, or start writing a tour (new) that opens when written.
@@ -323,10 +336,10 @@ impl App {
                 let reviewer = cur.status == "review" || cur.on_reviewer();
                 // a pane that opens in another tab shows nothing here: say it worked
                 self.msg = if reviewer {
-                    let (ok, out) = self.bp(&["go", sel, "--review"]);
+                    let (ok, out) = self.go(sel, true);
                     Note::of(ok, format!("Opened {sel}'s reviewer."), out)
                 } else if cur.block.is_some() {
-                    let (ok, out) = self.bp(&["go", sel]);
+                    let (ok, out) = self.go(sel, false);
                     Note::of(ok, format!("Opened {sel}."), out)
                 } else {
                     Note::info(match cur.status.as_str() {
@@ -357,8 +370,11 @@ impl App {
             (_, Some('s')) => self.spawn(sel, Job::Start),
             (_, Some('r')) => self.spawn(sel, Job::Resume),
             (_, Some('p')) => {
+                // in review, the reviewer's screen: what ⏎ opens
+                self.peek_review = cur.status == "review" || cur.on_reviewer();
+                let whose = if self.peek_review { " · its reviewer" } else { "" };
                 self.mode = Mode::Overlay {
-                    title: format!("{sel}  {}", cur.title),
+                    title: format!("{sel}  {}{whose}", cur.title),
                     lines: vec!["…".into()],
                     peek: Some(sel.into()),
                 };

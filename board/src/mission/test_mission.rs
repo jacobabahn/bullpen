@@ -186,3 +186,101 @@ fn no_repos_and_nothing_to_act_on() {
     key(&mut m, KeyCode::Enter);
     assert_eq!(m.msg, "Nothing open in any repository.");
 }
+
+/// Mission control on these tasks in one repo, `shop`, whose boards run a bullpen that
+/// logs its arguments: the log's path, and the scratch folder that holds both.
+fn logging(name: &str, tasks: &[Value]) -> (State, Mission, PathBuf) {
+    let st = State::new(name);
+    st.repo("shop", json!([]), tasks);
+    let (exe, log) = (st.0.join("bullpen"), st.0.join("log"));
+    crate::app::testing::program(&exe, &format!("#!/bin/sh\n[ \"$1\" = --ready ] && exit 0\necho \"$*\" >> {}\n", log.display()));
+    let mut m = st.mission();
+    for app in m.boards.values_mut() {
+        app.bullpen = exe.clone();
+    }
+    (st, m, log)
+}
+
+/// What the logging bullpen was asked, waiting a little for one run in the background.
+fn calls(log: &Path, want: usize) -> Vec<String> {
+    for _ in 0..200 {
+        let got: Vec<String> = std::fs::read_to_string(log).unwrap_or_default().lines().map(String::from).collect();
+        if got.len() >= want {
+            return got;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    std::fs::read_to_string(log).unwrap_or_default().lines().map(String::from).collect()
+}
+
+fn with_pane(id: &str, status: &str, title: &str) -> Value {
+    let mut v = t(id, status, title, 3);
+    v["block"] = json!(format!("blk-{id}"));
+    v["session"] = json!("session:shop");
+    v
+}
+
+#[test]
+fn p_peeks_at_the_workers_screen_over_mission_control_and_esc_closes_it() {
+    let (_st, mut m, log) = logging("peek", &[with_pane("BP-1", "working", "Build")]);
+    press(&mut m, 'p');
+    let app = m.active().unwrap();
+    assert!(matches!(&app.mode, Mode::Overlay { peek: Some(id), .. } if id == "BP-1"));
+    let s = screen(&mut m, 100, 20);
+    assert_eq!(s[0], " BP-1  Build");
+    assert!(s[19].contains("esc returns"), "{}", s[19]);
+    m.peek(); // what the loop does before each draw: read the screen
+    let got = calls(&log, 1);
+    assert!(got[0].starts_with("peek BP-1 --lines ") && got[0].ends_with(" --vt"), "{got:?}");
+    // keys stay in the peek: j isn't a move
+    press(&mut m, 'j');
+    assert!(matches!(m.active().unwrap().mode, Mode::Overlay { .. }));
+    key(&mut m, KeyCode::Esc);
+    assert!(matches!(m.active().unwrap().mode, Mode::Normal));
+    assert!(screen(&mut m, 100, 20)[0].starts_with(" MISSION CONTROL"));
+}
+
+#[test]
+fn p_on_a_task_in_review_peeks_at_its_reviewer() {
+    let (_st, mut m, log) = logging("peek-review", &[with_pane("BP-1", "review", "Build")]);
+    press(&mut m, 'p');
+    assert_eq!(screen(&mut m, 100, 20)[0], " BP-1  Build · its reviewer");
+    m.peek();
+    let got = calls(&log, 1);
+    assert!(got[0].starts_with("peek BP-1 --lines ") && got[0].ends_with(" --vt --review"), "{got:?}");
+    press(&mut m, 'q');
+    assert!(matches!(m.active().unwrap().mode, Mode::Normal));
+    assert!(!m.quitting, "q left the peek; it didn't ask to quit");
+}
+
+#[test]
+fn enter_goes_to_the_tasks_pane_and_has_rex_show_its_session() {
+    let (_st, mut m, log) =
+        logging("enter-go", &[with_pane("BP-1", "working", "Build"), with_pane("BP-2", "review", "Check")]);
+    assert_eq!(selected(&m), "shop BP-2"); // in review, listed first
+    key(&mut m, KeyCode::Enter);
+    assert_eq!(m.msg, "Opened BP-2's reviewer.");
+    press(&mut m, 'j');
+    key(&mut m, KeyCode::Enter);
+    assert_eq!(m.msg, "Opened BP-1.");
+    // from a peek, ⏎ does the same
+    press(&mut m, 'p');
+    key(&mut m, KeyCode::Enter);
+    assert!(matches!(m.active().unwrap().mode, Mode::Normal));
+    let got: Vec<String> = calls(&log, 4).into_iter().filter(|c| c.starts_with("go ")).collect();
+    assert_eq!(got, ["go BP-2 --review --switch", "go BP-1 --switch", "go BP-1 --switch"]);
+}
+
+#[test]
+fn enter_on_a_task_with_no_pane_says_so_and_runs_nothing() {
+    let (_st, mut m, log) = logging("enter-none", &[t("BP-1", "todo", "Later", 1), t("BP-2", "finished", "Done", 1)]);
+    // the finished one is listed first (ready), the queued one last
+    assert_eq!(selected(&m), "shop BP-2");
+    key(&mut m, KeyCode::Enter);
+    assert_eq!(m.msg, "BP-2 has no pane open.");
+    press(&mut m, 'G');
+    assert_eq!(selected(&m), "shop BP-1");
+    key(&mut m, KeyCode::Enter);
+    assert_eq!(m.msg, "Not started yet: s starts it.");
+    assert!(!log.exists(), "{:?}", std::fs::read_to_string(&log));
+}
