@@ -141,6 +141,10 @@ lines come as a turn of their own once it is done.
 - Triage's line about a task ("ended its turn without `ready` 22 / 25 / 28 min
   ago") wakes once in 15 minutes for that task; its repeats ride along with the
   next wake.
+- A worker waiting on its own background job isn't news at all until the wait
+  outlasts `stuck_after`: workers have a Stop hook of their own, in their
+  worktrees, which says what they wait on (see [Triage](triage.md#a-worker-that-ended-its-turn)).
+  It is a different hook from this one, and needs nothing from you.
 - It ends by itself a minute before the hook's timeout, since a hook killed at
   its timeout loses its exit 2. News that waits then is handed over at once; with
   none, the session has no waiter until its next turn ends, and the backstop

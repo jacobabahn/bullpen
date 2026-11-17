@@ -113,10 +113,17 @@ isn't a failure). It checks:
   With any other news it is `--`, unless the file still has bullpen's entries:
   `bullpen doctor --fix` removes them.
 
+- the workers' Stop hook (`workers`; see [Triage](triage.md#a-worker-that-ended-its-turn)):
+  each running Claude Code worker has bullpen's Stop hook in its worktree's
+  `.claude/settings.local.json`. A worker started before workers had one isn't a
+  problem: the line counts it, and it gets one when it next starts. `--` with no
+  worker running.
+
 `bullpen doctor --fix` first fixes what bullpen can by itself, and then runs the
 checks. That is the Claude scratch folders the `temp` line counts, which it removes
-(it works outside a repository too); and in this repository, the news hook: written
-when news is `wake`, removed when it isn't. It says what it did ("fixed  temp: removed
+(it works outside a repository too); and in this repository, the news hook (written
+when news is `wake`, removed when it isn't) and a running worker's missing Stop hook
+(written again). It says what it did ("fixed  temp: removed
 132 Claude scratch folders of closed tasks (9.8 GB)", "fixed  news: removed bullpen's
 news hook from .claude/settings.local.json"), on stderr with `--json`, and it
 doesn't go with `--all-repos`.
@@ -133,7 +140,7 @@ names ("2 problems: keys, watcher."), and writes paths in your home folder with 
 gone). The checks about the setup, which are the same for every repo (`rex`,
 `bullpen`, `board`, `cargo`, `keys`, `watcher`, `state`, `temp`, `global`), run once, under
 "Setup, for every repo". Then each repo gets its own (`gh`, `agents`, `config`,
-`setup`, `teardown`, `coordinators`, `copy`, `risk`, `news`, `push`) under its name and folder. A repo whose
+`setup`, `teardown`, `coordinators`, `copy`, `risk`, `news`, `workers`, `push`) under its name and folder. A repo whose
 board runs an older build shows up on its `coordinators` line, and one whose
 `config.json` doesn't parse is named by its state folder. The last line names each
 problem, a repo's as `repo/check`: "2 problems: keys, shop/coordinators." Two repos

@@ -235,6 +235,11 @@ plain functions. No other code calls a `cmd_...`. Auto-accept calls `accept::acc
 - `events/`: what the watcher (lua/watch.lua) reports: `mod.rs`: an agent's events
   (`_event`) and a pane that closed (`_gone`); `stuck.rs`: an agent that shows no
   progress (`_stuck`) and the usage limit's reset (`_limit`)
+- `stop_hook/`: the worker's Stop hook (docs/triage.md): `mod.rs`: the hook in a
+  Claude Code worker's worktree (`.claude/settings.local.json`, written by `launch`),
+  and what doctor checks of it; `turn.rs`: `_worker_stop`, which the hook runs to
+  write the task's turn record (`turns/<ID>.json`: its running background jobs and
+  its last reply), and the triage line from it (a job it waits on, a question)
 - `stats/`: `stats` (docs/stats.md): `mod.rs`: the command, one task's stats and the
   totals across tasks, in words or JSON; `totals.rs`: the time in each phase and the
   counts, from a timeline; `old.rs`: a task's news, for one from before timelines

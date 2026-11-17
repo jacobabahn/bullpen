@@ -54,7 +54,8 @@ the watcher's own copy of bullpen when its source is newer than its build (see
 [Rebuilds](rebuilds.md#the-watchers-check)).
 
 An agent that ended its turn while a background shell of its own still runs
-(Claude Code's footer says `1 shell`) isn't finished: it takes another turn when
+(Claude Code's footer says `1 shell`, or a worker's Stop hook said so: see
+[Triage](triage.md#a-worker-that-ended-its-turn)) isn't finished: it takes another turn when
 the shell ends. Bullpen counts it as busy, and holds back the "ended its turn
 without `ready`" news for that turn. A shell it left running for good (a server, a
 watch) would hide it, so once it has been idle that way for `--stuck-after` minutes
