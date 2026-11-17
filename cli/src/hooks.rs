@@ -148,6 +148,7 @@ pub fn remove_worktree(repo: &Repo, t: &Obj, force: bool) -> Res<()> {
         git(&repo.root, &args, true)?;
     }
     crate::claude_tmp::forget(&scratch);
+    crate::stop_hook::forget(repo, s(t, "id")); // its worker's turn record goes with its worktree
     let branch = s(t, "branch");
     if !branch.is_empty() && !truthy(t.get("kept")) {
         // a task closed with --keep-branch keeps it (close::keep_branch)

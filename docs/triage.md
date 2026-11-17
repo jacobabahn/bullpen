@@ -32,8 +32,10 @@ Bullpen reads that record when the worker's turn ends:
   `stuck_after` (20 minutes by default): "BP-3 ended its turn without `ready` 25
   min ago, and still waits on its job (npm run dev)"; or if the job is gone and
   the worker hasn't taken a turn since: "BP-3 waited on its job (sleep 240),
-  which has ended, but hasn't taken a turn since". Claude Code's footer (`1
-  shell`) counts as a job too, for a worker without the hook.
+  which has ended, but hasn't taken a turn since". A job is a background shell or a
+  Monitor (Claude Code's footer says `1 shell`, `1 monitor`; that counts too, for
+  a worker without the hook). A background subagent isn't one: a worker that ends
+  its turn with only that running is triage, as before.
 - **Ended with a question**: the triage line carries it, on one line, without
   control characters or backticks, in quotes: `BP-3 ended its turn with a
   question: "Which config file?": bullpen peek BP-3`. They are the worker's

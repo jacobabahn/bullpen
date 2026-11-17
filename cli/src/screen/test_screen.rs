@@ -18,6 +18,15 @@ fn shells_as_the_regex_finds_them() {
 #[test]
 fn only_the_footer_says_a_shell_runs() {
     assert!(shell_running("❯ \n  2 background shells · ↓ to manage\n"));
+    // a Monitor counts too (Claude Code 2.1.326's footer), a subagent doesn't
+    assert!(shell_running(
+        "❯ \n  ⏵⏵ auto mode on · 1 monitor · ← 1 agent · ↓ to manage\n"
+    ));
+    assert!(shell_running("done · 2 monitors still running\n"));
+    assert!(!shell_running(
+        "❯ \n  ⏵⏵ auto mode on · /tasks to see subagents · ← 1 agent\n"
+    ));
+    assert!(!shell_running("❯ \n  12 monitoring\n"));
     assert!(!shell_running(&format!(
         "1 shell still running\n{}",
         "line\n".repeat(6)

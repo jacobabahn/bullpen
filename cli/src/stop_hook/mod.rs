@@ -36,6 +36,11 @@ pub fn record_path(repo: &Repo, id: &str) -> PathBuf {
     repo.dir.join("turns").join(format!("{id}.json"))
 }
 
+/// Remove the task's turn record (its worktree is going: the task is closed).
+pub fn forget(repo: &Repo, id: &str) {
+    let _ = std::fs::remove_file(record_path(repo, id));
+}
+
 /// The settings file in the task's worktree.
 pub fn path(t: &Obj) -> PathBuf {
     Path::new(s(t, "worktree")).join(FILE)

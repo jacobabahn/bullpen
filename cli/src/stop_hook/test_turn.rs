@@ -18,6 +18,8 @@ fn the_record_keeps_the_running_jobs_and_the_end_of_what_it_said() {
     let jobs = json!([
         {"id": "b1", "type": "shell", "status": "running", "description": "Run the tests", "command": "cargo test"},
         {"id": "b2", "type": "shell", "status": "completed", "description": "ls", "command": "ls"},
+        {"id": "a1", "type": "subagent", "status": "running", "description": "Look", "agent_type": "general-purpose"},
+        {"id": "d1", "type": "dream", "status": "running", "description": "x"},
     ]);
     let rec = record(&input("Waiting for the tests.", jobs));
     assert_eq!(rec["session"], "6047dc6f");

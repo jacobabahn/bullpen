@@ -30,20 +30,28 @@ fn ends_word(c: &[char], i: usize) -> bool {
     i >= c.len() || !is_word(c[i])
 }
 
-/// `shells?\b` at j, ignoring case.
-fn shells_at(c: &[char], j: usize) -> bool {
-    if !word_at(c, j, "shell") {
+/// What the footer counts that a turn waits on: a background shell, and a Monitor
+/// (Claude Code 2.1.326: "1 shell", "2 monitors", "1 monitor still running").
+const JOBS: [&str; 2] = ["shell", "monitor"];
+
+/// `<noun>s?\b` at j, ignoring case.
+fn noun_at(c: &[char], j: usize, noun: &str) -> bool {
+    if !word_at(c, j, noun) {
         return false;
     }
-    let k = j + 5;
+    let k = j + noun.len();
     (k < c.len() && c[k].eq_ignore_ascii_case(&'s') && ends_word(c, k + 1)) || ends_word(c, k)
 }
 
-/// SHELL_RE.search: `\b\d+ (?:background )?shells?\b|shells? still running`, ignoring case.
+/// SHELL_RE.search, for each of JOBS: `\b\d+ (?:background )?shells?\b|shells? still
+/// running`, ignoring case.
 pub fn shell_re_search(line: &str) -> bool {
     let c: Vec<char> = line.chars().collect();
     for i in 0..c.len() {
-        if word_at(&c, i, "shell still running") || word_at(&c, i, "shells still running") {
+        if JOBS
+            .iter()
+            .any(|n| word_at(&c, i, &format!("{n} still running")) || word_at(&c, i, &format!("{n}s still running")))
+        {
             return true;
         }
         if !c[i].is_ascii_digit() || (i > 0 && is_word(c[i - 1])) {
@@ -57,7 +65,8 @@ pub fn shell_re_search(line: &str) -> bool {
             continue;
         }
         j += 1;
-        if (word_at(&c, j, "background ") && shells_at(&c, j + 11)) || shells_at(&c, j) {
+        let at = |j: usize| JOBS.iter().any(|n| noun_at(&c, j, n));
+        if (word_at(&c, j, "background ") && at(j + 11)) || at(j) {
             return true;
         }
     }

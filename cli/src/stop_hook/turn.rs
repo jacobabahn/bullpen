@@ -3,8 +3,11 @@
 //!
 //! Claude Code 2.1.326 gives a Stop hook, on its stdin, JSON with `session_id`,
 //! `last_assistant_message` (the text of the turn's last reply) and `background_tasks`:
-//! each `{"id", "type": "shell", "status": "running", "description", "command"}`, for a
-//! `run_in_background` Bash job or a Monitor still running. The record keeps
+//! each `{"id", "type", "status", "description", ...}`. A `run_in_background` Bash job
+//! and a Monitor are `"type": "shell"` with a `command` (both seen in a scratch session;
+//! the footer says "1 shell", "1 monitor"). A background subagent is `"type":
+//! "subagent"`, and Claude Code lists kinds of its own there too: only shells count, the
+//! ones the worker started and the footer counts (screen/). The record keeps
 //! `{"at", "session", "jobs": [{"command", "description"}], "said"}`.
 
 use bullpen_core::json::{obj, s, write_obj, Obj};
@@ -47,6 +50,7 @@ pub fn record(input: &Obj) -> Obj {
         .flatten()
         .filter_map(Value::as_object)
         .filter(|j| j.get("status").and_then(Value::as_str).is_none_or(|st| st == "running"))
+        .filter(|j| j.get("type").and_then(Value::as_str) == Some("shell"))
         .map(|j| json!({"command": s(j, "command"), "description": s(j, "description")}))
         .collect();
     let said = s(input, "last_assistant_message");

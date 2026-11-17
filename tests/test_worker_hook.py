@@ -64,6 +64,7 @@ class WorkerHookTest(BullpenTest):
         f.write_text("Answered it\n\nNothing to merge.")
         self.bp("finish", tid, "--summary-file", str(f), cwd=wt_)
         self.bp("close", tid)
+        self.assertFalse(list((self.tmp / "state").rglob(f"turns/{tid}.json")))  # its turn record goes too
         self.assertFalse((wt / SETTINGS).exists())
         self.assertFalse(wt.exists())
 
@@ -132,6 +133,33 @@ class WorkerHookTest(BullpenTest):
         self.assertNotIn("job", t)
         self.assertIn("BP-1 ended its turn without `ready` 25 min ago, and still waits on its job (npm run dev): "
                       "read it with `bullpen peek BP-1`", self.ended()[-1])
+
+    def test_a_monitor_is_waited_on_until_stuck_after(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.turn(tid, jobs=["tail -f build.log"])  # a Monitor is a shell in the hook's input
+        (self.fake / f"screen_{blk}").write_text("❯ \n  ⏵⏵ auto mode on · 1 monitor · ← 1 agent · ↓ to manage\n")
+        self.agent(blk, "idle", ago=10 * 60)
+        self.assertEqual(self.check(), [])
+        self.check("--fix", "--quiet")
+        self.assertEqual(self.show(tid)["status"], "working")
+        self.assertEqual(self.ended(), [])
+        self.agent(blk, "idle", ago=25 * 60)
+        self.check("--fix", "--quiet")
+        self.assertEqual(self.show(tid)["status"], "triage")
+        self.assertIn("still waits on its job (tail -f build.log)", self.ended()[-1])
+
+    def test_a_background_subagent_isnt_a_job(self):
+        tid = self.start_task()
+        bg = [{"id": "a1", "type": "subagent", "status": "running", "description": "Look around",
+               "agent_type": "general-purpose"}]
+        raw = json.dumps({"session_id": "s1", "last_assistant_message": "Stopping.", "background_tasks": bg})
+        blk = self.block(tid)
+        self.bp("_event", blk, "working", "", "Reading")
+        self.stop(tid, raw=raw)
+        self.bp("_event", blk, "idle", "", "")
+        self.assertEqual(self.record(tid)[1]["jobs"], [])
+        self.assertEqual(self.show(tid)["status"], "triage")
 
     def test_a_job_gone_without_a_new_turn_is_triage(self):
         tid = self.start_task()
