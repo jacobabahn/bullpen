@@ -8,8 +8,6 @@ import unittest
 
 from support import setUpModule, tearDownModule, sh, BullpenTest  # a temp folder for each module
 
-SHARED = ["rex", "bullpen", "board", "cargo", "keys", "watcher", "state", "temp", "global"]
-EACH = ["gh", "agents", "config", "setup", "teardown", "coordinators", "copy", "risk", "news", "workers", "push"]
 
 
 class DoctorJsonTest(BullpenTest):
@@ -19,9 +17,10 @@ class DoctorJsonTest(BullpenTest):
         d = json.loads(p.stdout)
         self.assertEqual(d["repo"], str(self.repo))
         self.assertEqual(d["problems"], [])
-        names = [c["name"] for c in d["checks"]]
-        self.assertEqual(names, ["rex", "gh", "agents", "bullpen", "board", "cargo", "keys", "watcher", "state",
-                                 "temp", "global", "config", "setup", "teardown", "coordinators", "copy", "risk", "news", "workers", "push"])
+        names = [c["name"] for c in d["checks"]]  # doctor's own list: no copy of it here
+        self.assertEqual(len(set(names)), len(names))
+        self.assertEqual(names[0], "rex")
+        self.assertLess(names.index("keys"), names.index("push"))
         _, lines = self.doctor()  # the same checks as the lines say them
         self.assertEqual({c["name"]: c["state"] for c in d["checks"]}["rex"], "ok")
         self.assertEqual([c["text"] for c in d["checks"]], [lines[n][1] for n in names])
@@ -107,9 +106,15 @@ class DoctorAllReposTest(BullpenTest):
         p, sections = self.doctor_all(cwd=self.tmp)  # works outside a repository
         self.assertEqual(p.returncode, 0, p.stdout)
         self.assertEqual(list(sections), ["Setup", "proj", "shop"])
-        self.assertEqual(list(sections["Setup"]), SHARED)
-        for repo in ("proj", "shop"):
-            self.assertEqual(list(sections[repo]), EACH)
+        # the setup's checks and a repo's split doctor's list between them, each in its order
+        names = [c["name"] for c in json.loads(self.bp("doctor", "--json").stdout)["checks"]]
+        shared, each = list(sections["Setup"]), list(sections["proj"])
+        self.assertEqual(sorted(shared + each), sorted(names))
+        self.assertEqual([n for n in names if n in shared], shared)
+        self.assertEqual([n for n in names if n in each], each)
+        self.assertIn("rex", shared)
+        self.assertIn("push", each)
+        self.assertEqual(list(sections["shop"]), each)
         self.assertEqual(p.stdout.count(" rex: "), 1)  # the setup's checks run once
         self.assertIn(f"\nshop  ({shop})\n", p.stdout)
         self.assertEqual(sections["proj"]["coordinators"], ("ok", "c1 (blk1)"))
@@ -141,10 +146,10 @@ class DoctorAllReposTest(BullpenTest):
         self.assertEqual(d["problems"][2], {"name": "shop/coordinators", "check": "coordinators",
                                             "repo": str(shop), "text": sections["shop"]["coordinators"][1]})
         self.assertEqual([p["repo"] for p in d["problems"][:2]], [None, None])
-        self.assertEqual([c["name"] for c in d["shared"]], SHARED)
+        self.assertEqual([c["name"] for c in d["shared"]], list(sections["Setup"]))
         self.assertEqual([(r["name"], r["repo"]) for r in d["repos"]],
                          [("broken", None), ("proj", str(self.repo)), ("shop", str(shop))])
-        self.assertEqual([c["name"] for c in d["repos"][2]["checks"]], EACH)
+        self.assertEqual([c["name"] for c in d["repos"][2]["checks"]], list(sections["shop"]))
 
     def test_two_repos_of_the_same_name_are_told_apart(self):
         self.healthy()

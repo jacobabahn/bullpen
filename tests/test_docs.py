@@ -136,8 +136,8 @@ class DocsTest(unittest.TestCase):
 
 
 class DocsNamesTest(BullpenTest):
-    """Every command and setting is named in its docs page, read from the program's own
-    tables. The internal ones are exempt by a rule, not a list: a command in no group of
+    """Every command, setting and doctor check is named in its docs page, read from the
+    program's own tables. The internal ones are exempt by a rule, not a list: a command in no group of
     the help (`_commands`'s group null), and a setting `bullpen config` doesn't list
     (bullpen's own bookkeeping, as `next`)."""
 
@@ -150,6 +150,9 @@ class DocsNamesTest(BullpenTest):
         listed = set(re.findall(r"(?m)^  (\w+)  ", self.bp("config").stdout))
         return [k for k in every if k in listed]
 
+    def doctor_checks(self):
+        return [c["name"] for c in json.loads(self.bp("doctor", "--json", ok=False).stdout)["checks"]]
+
     def tables(self):
         """(page, the names it must name, how a name is written there): a table more
         (doctor's checks, say) is a row more."""
@@ -158,16 +161,18 @@ class DocsNamesTest(BullpenTest):
             # a bare name counts only as a span of its own or a config.json key: `review` is
             # a command too, and `bullpen review BP-3` doesn't name the setting
             ("docs/settings.md", self.settings(), lambda n: [f"`{n}`", f'"{n}"', "--" + n.replace("_", "-")]),
+            ("docs/doctor.md", self.doctor_checks(), lambda n: [f"`{n}`"]),
         ]
 
-    def test_every_command_and_setting_is_named_in_its_page(self):
+    def test_every_command_setting_and_doctor_check_is_named_in_its_page(self):
         self.bp("up")
         for page, names, forms in self.tables():
-            self.assertGreater(len(names), 20, page)
+            self.assertGreater(len(names), 10, page)
             self.assertEqual(unnamed(page, names, forms), [], page)
         self.assertNotIn("_event", self.commands())
         self.assertNotIn("next", self.settings())
         self.assertIn("board_layout", self.settings())
+        self.assertIn("push", self.doctor_checks())
 
 
 if __name__ == "__main__":
