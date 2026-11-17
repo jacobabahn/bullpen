@@ -96,13 +96,22 @@ fn unsettled(h: &Path) -> Res<Option<Unsettled>> {
     const KEEPS: &str = "Commands and boards keep running the old build";
     let at = h.display();
     if building()? {
-        let pid = holder().unwrap_or(0);
+        // the lock's pid isn't running when it's held by what that pid started (cargo, after
+        // the build was killed): name none, never `kill 0`
+        let (key, who, stop) = match holder() {
+            Some(pid) => (
+                format!("building {pid}"),
+                format!(" (pid {pid})"),
+                format!("stop it (`kill {pid}`)"),
+            ),
+            None => ("building".into(), String::new(), "stop it".into()),
+        };
         return Ok(Some(Unsettled {
-            key: format!("building {pid}"),
+            key,
             text: format!(
-                "bullpen's source in {at} is newer than its build, and a build (pid {pid}) has been running since \
-                 the check before this one. {KEEPS}. Tell the person: if it's stuck, stop it (`kill {pid}`) and the \
-                 watcher builds bullpen at its next check (log: {}).",
+                "bullpen's source in {at} is newer than its build, and a build{who} has been running since the \
+                 check before this one. {KEEPS}. Tell the person: if it's stuck, {stop} and the watcher builds \
+                 bullpen at its next check (log: {}).",
                 build_log().display()
             ),
             patient: true,

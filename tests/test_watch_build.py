@@ -3,6 +3,8 @@ when its source is newer than its build: after a `git pull`, or a merge by a cop
 bullpen that didn't rebuild the checkout it merged into."""
 
 import json
+import subprocess
+import sys
 import unittest
 
 import test_board_build  # its setup, not its tests: a bare import keeps them out of this module
@@ -93,7 +95,6 @@ class WatchBuildTest(unittest.TestCase):
         p = self.B.bp(self, "build")  # main as it is: current
         self.assertEqual(self.builds(), 2, p.stdout)
         self.pull()
-        import subprocess
         merge = subprocess.run(["git", "-C", str(self.home), "merge", "-q", "theirs"], capture_output=True, text=True)
         self.assertNotEqual(merge.returncode, 0)  # a conflict: the merge is left open
         self.check()
@@ -124,6 +125,33 @@ class WatchBuildTest(unittest.TestCase):
         self.assertEqual(self.builds(), 2)
         self.assertEqual(len(self.build_lines()), 1)
         self.assertFalse((self.target / "watch-build.json").exists())
+
+    def test_a_running_build_whose_pid_is_gone_is_said_without_a_pid(self):
+        # cargo holding the lock after its build was killed: the pid in the file isn't running
+        gone = subprocess.Popen(["true"])
+        gone.wait()
+        hold = subprocess.Popen([sys.executable, "-c", (
+            "import fcntl, sys, time\n"
+            f"f = open({str(self.target / 'build.lock')!r}, 'a+')\n"
+            "fcntl.flock(f, fcntl.LOCK_EX)\n"
+            f"f.truncate(0); f.write('{gone.pid}\\n'); f.flush()\n"
+            "print('held', flush=True)\n"
+            "sys.stdin.read()\n")], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        self.addCleanup(hold.wait)
+        self.addCleanup(hold.stdin.close)
+        self.assertEqual(hold.stdout.readline().strip(), "held")
+        self.pull()
+        for _ in range(3):
+            self.bp("check", "--fix", "--quiet", "--all-repos")
+        lines = self.build_lines()
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn("a build has been running since the check before this one", lines[0])
+        self.assertIn("if it's stuck, stop it and the watcher builds bullpen", lines[0])
+        self.assertNotIn("kill", lines[0])
+        hold.stdin.close()
+        hold.wait()
+        self.check()
+        self.assertEqual(self.builds(), 2)
 
     def test_a_build_that_failed_isnt_tried_again_for_the_same_source(self):
         (self.fake / "cargo_fails").write_text("")
