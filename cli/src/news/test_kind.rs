@@ -39,7 +39,9 @@ fn every_kind_is_listed() {
             | Kind::NotAutoAccepted
             | Kind::Finished
             | Kind::Accepted
+            | Kind::AutoAccepted
             | Kind::Closed
+            | Kind::AutoClosed
             | Kind::Kept
             | Kind::Dropped
             | Kind::Started
@@ -79,7 +81,7 @@ fn every_kind_is_listed() {
             | Kind::Board => k,
         }
     }
-    assert_eq!(ALL.len(), 42);
+    assert_eq!(ALL.len(), 44);
     assert!(ALL.iter().all(|&k| named(k) == k));
 }
 

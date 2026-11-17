@@ -6,6 +6,7 @@ use crate::agents::pane;
 use crate::args::{flag, pos, value, Arg, Args, Nargs};
 use crate::hooks::remove_worktree;
 use crate::modes::withdraw;
+use crate::news::kind::Kind;
 use crate::news::{news, tell_coordinator, Opts};
 use crate::review::close_reviewer;
 use crate::rex::close_last;
@@ -103,7 +104,7 @@ pub fn close_task(repo: &Repo, t: &mut Obj, auto: bool, first: &str) -> Res<()> 
         let id = s(t, "id");
         if auto {
             let line = format!("{id} finished (nothing to merge) and was closed by auto-accept: {first}");
-            news(repo, t, "closed", &line, Opts::default())
+            news(repo, t, Kind::AutoClosed.into(), &line, Opts::default())
         } else {
             println!("{id} closed");
             tell_coordinator(repo, t, "closed", &format!("{id} closed (finished, nothing to merge)"))

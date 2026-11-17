@@ -17,10 +17,14 @@ pub enum Kind {
     NotAutoAccepted,
     /// `BP-3 finished (...)`
     Finished,
-    /// `BP-3 accepted (...)`, and auto-accept's `approved by review and auto-accepted`
+    /// `BP-3 accepted (...)`
     Accepted,
-    /// `BP-3 closed (...)`, and auto-accept's `finished (nothing to merge) and was closed`
+    /// auto-accept's `BP-3 approved by review and auto-accepted (...)`
+    AutoAccepted,
+    /// `BP-3 closed (...)`
     Closed,
+    /// auto-accept's `BP-3 finished (nothing to merge) and was closed by auto-accept: ...`
+    AutoClosed,
     /// `BP-3 closed without merging. ...` (its branch kept)
     Kept,
     /// `BP-3 dropped`
@@ -136,7 +140,9 @@ pub const ALL: &[Kind] = &[
     Kind::NotAutoAccepted,
     Kind::Finished,
     Kind::Accepted,
+    Kind::AutoAccepted,
     Kind::Closed,
+    Kind::AutoClosed,
     Kind::Kept,
     Kind::Dropped,
     Kind::Started,
@@ -186,7 +192,9 @@ impl Kind {
             Kind::NotAutoAccepted => "not-auto-accepted",
             Kind::Finished => "finished",
             Kind::Accepted => "accepted",
+            Kind::AutoAccepted => "auto-accepted",
             Kind::Closed => "closed",
+            Kind::AutoClosed => "auto-closed",
             Kind::Kept => "kept",
             Kind::Dropped => "dropped",
             Kind::Started => "started",
@@ -235,7 +243,7 @@ impl Kind {
     /// Its row in the guide's news table.
     pub fn row(self) -> Row {
         match self {
-            Kind::Ready | Kind::Finished => Row::Report,
+            Kind::Ready | Kind::Finished | Kind::AutoAccepted | Kind::AutoClosed => Row::Report,
             Kind::Accepted
             | Kind::Closed
             | Kind::Kept
@@ -289,6 +297,8 @@ impl Kind {
             | Kind::Later => false,
             Kind::Ready
             | Kind::Finished
+            | Kind::AutoAccepted
+            | Kind::AutoClosed
             | Kind::Working
             | Kind::NotRebased
             | Kind::RebaseSent

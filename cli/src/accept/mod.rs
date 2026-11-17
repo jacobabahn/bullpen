@@ -18,6 +18,7 @@ use crate::close::{close, close_task};
 use crate::guide::tell_guide_changes;
 use crate::keys::{keys_hash, KEYS_CHANGED};
 use crate::modes::{after_merge, merge, task_base_ref};
+use crate::news::kind::Kind;
 use crate::news::{news, tell_coordinator, Opts};
 use crate::saves::run_later;
 use crate::watcher::refresh_watcher;
@@ -107,7 +108,7 @@ fn accepted(
                 if auto {
                     let notes = crate::notes::with_notes(t);
                     let line = format!("{id} approved by review{notes} and auto-accepted ({how})");
-                    news(repo, t, "accepted", &line, Opts::default())
+                    news(repo, t, Kind::AutoAccepted.into(), &line, Opts::default())
                 } else {
                     tell_coordinator(repo, t, "accepted", &format!("{id} accepted ({how})"))
                 }

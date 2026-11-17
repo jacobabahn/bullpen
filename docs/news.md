@@ -84,9 +84,11 @@ do ...)`; pickup's "started its 4 for today, nothing to do" (`pickup`); the queu
 "can start, but the usage limit is reached" and revert's "isn't started" (`queue`);
 and a worker's backlog item (`later`). Everything else wakes, a line of a kind
 bullpen doesn't know too: among them the keys-changed line (`keys`), pickup's
-asks (`pickup-ask`), the queue's "couldn't start" (`queue-failed`), and an `After`
+asks (`pickup-ask`), the queue's "couldn't start" (`queue-failed`), an `After`
 line with a task not rebased, whose push failed or that a message didn't reach
-(`not-rebased`). Two kinds still wake though their row needs nothing: `working
+(`not-rebased`), and auto-accept's "approved by review and auto-accepted" and
+"closed by auto-accept" lines, which the coordinator reports (`auto-accepted`,
+`auto-closed`). Two kinds still wake though their row needs nothing: `working
 again` lines, and auto-accept's "sent back to its worker to rebase". The line for
 new [GitHub issues](issues.md#on-a-timer) wakes: each of them asks you.
 

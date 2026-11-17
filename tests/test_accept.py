@@ -102,6 +102,7 @@ class AcceptTest(BullpenTest):
         self.assertEqual(len(self.merges()), 1)
         self.assertIn("bullpen · BP-1 approved by review and auto-accepted (merged PR #7, rebase)",
                       self.news_lines())
+        self.assertIn(" auto-accepted: bullpen · BP-1 approved by review", self.news_log())  # reported: it wakes
 
     def test_auto_accept_says_the_reviewers_notes(self):
         self.bp("up")

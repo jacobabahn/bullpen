@@ -361,8 +361,15 @@ fn news_nobody_reads_stays_unread() {
 #[test]
 fn lines_that_ask_wake_it_and_one_that_needs_nothing_rides_along() {
     // the keys line, pickup's asks, the queue's "couldn't start", an After line with a
-    // task not rebased: each wakes it by itself
-    for event in ["keys", "pickup-ask", "queue-failed", "not-rebased"] {
+    // task not rebased, auto-accept's accepts and closes: each wakes it by itself
+    for event in [
+        "keys",
+        "pickup-ask",
+        "queue-failed",
+        "not-rebased",
+        "auto-accepted",
+        "auto-closed",
+    ] {
         let h = Home::new();
         let mut w = h.waiter("Stop", 0).unwrap();
         h.log(1, "BP-2", event);

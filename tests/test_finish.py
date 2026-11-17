@@ -111,6 +111,8 @@ class FinishTest(BullpenTest):
         self.assertFalse((self.fake / "alive" / t["block"]).exists())
         self.assertEqual(self.news()[-1], "bullpen · BP-1 finished (nothing to merge) and was closed "
                          "by auto-accept: Recorded the demo video")
+        log = next((self.tmp / "state").rglob("news.log")).read_text()
+        self.assertIn(" auto-closed: bullpen · BP-1 finished (nothing to merge) and was closed", log)  # it wakes
 
     def test_a_tasks_own_auto_accept_closes_it_and_no_auto_accept_keeps_it(self):
         self.bp("up")
