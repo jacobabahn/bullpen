@@ -96,14 +96,14 @@ fn age(stamp: &str, at: Stamp) -> f64 {
     seconds_since(stamp, Some(at))
 }
 
-/// Does a live waiter own coordinator's wait (w: its wait file)? Its process runs and
-/// it hasn't expired.
-pub fn live(w: &Obj) -> bool {
+/// Does a live waiter own coordinator's wait (w: its wait file) at time `at`? Its
+/// process runs and it hasn't expired.
+pub fn live(w: &Obj, at: Stamp) -> bool {
     let waiter = part(w, "waiter");
     let Some(pid) = waiter.get("pid").and_then(Value::as_i64).filter(|p| *p > 0) else {
         return false;
     };
-    let expired = seconds_since(s(waiter, "until"), None) > 0.0;
+    let expired = seconds_since(s(waiter, "until"), Some(at)) > 0.0;
     !expired && running(pid as libc::pid_t)
 }
 

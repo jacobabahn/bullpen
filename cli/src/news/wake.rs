@@ -20,7 +20,7 @@ use crate::coordinators::{alive, coordinators};
 use crate::rex;
 use bullpen_core::json::{self, s, Obj};
 use bullpen_core::paths::{safe, state};
-use bullpen_core::timeutil::{iso_now, seconds_since};
+use bullpen_core::timeutil::{iso_now, now, seconds_since};
 use bullpen_core::{Repo, Res};
 use serde_json::{json, Value};
 use std::io::{Read, Seek, SeekFrom};
@@ -71,7 +71,7 @@ pub fn by_waiter(repo: &Repo) -> bool {
 
 /// Does a live waiter own coordinator cid's wait?
 pub fn has_waiter(repo: &Repo, cid: &str) -> bool {
-    super::waiter::live(&wait_file(repo, cid))
+    super::waiter::live(&wait_file(repo, cid), now())
 }
 
 /// End the waiter that owns coordinator cid's wait: it goes at its next look.
@@ -246,7 +246,7 @@ pub fn resume(repo: &Repo, cid: &str) -> Res<bool> {
 /// a waiter (`news --wake`, parked by the coordinator's Stop hook) is named in its wait
 /// file, and wakes the coordinator itself within its batch window.
 fn live_reader(repo: &Repo, cid: &str, w: &Obj) -> Res<bool> {
-    Ok(super::waiter::live(w) || bullpen_core::lock::try_lock(&lock_path(repo, cid))?.is_none())
+    Ok(super::waiter::live(w, now()) || bullpen_core::lock::try_lock(&lock_path(repo, cid))?.is_none())
 }
 
 pub(super) fn lock_path(repo: &Repo, cid: &str) -> PathBuf {

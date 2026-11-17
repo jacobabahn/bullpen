@@ -281,7 +281,7 @@ fn it_ends_a_minute_before_its_timeout() {
 fn a_pause_ends_it_and_none_starts_while_paused() {
     let h = Home::new();
     let mut w = h.waiter("Stop", 0).unwrap();
-    assert!(live(&h.wait()));
+    assert!(live(&h.wait(), t(0)));
     h.set_wait(|w| {
         w.insert("paused".into(), json!(iso_seconds(&t(1))));
     });
@@ -338,14 +338,11 @@ fn a_waiter_is_live_while_its_process_runs_and_it_hasnt_expired() {
         let w = json!({"waiter": {"pid": pid, "started": "x", "until": iso_seconds(&until)}});
         w.as_object().unwrap().clone()
     };
-    let soon = now() + chrono::Duration::seconds(60);
-    assert!(live(&waiter(std::process::id().into(), soon)));
-    assert!(!live(&waiter(
-        std::process::id().into(),
-        now() - chrono::Duration::seconds(60)
-    )));
-    assert!(!live(&waiter(i32::MAX.into(), soon))); // no such process
-    assert!(!live(&Obj::new()));
+    let soon = t(60);
+    assert!(live(&waiter(std::process::id().into(), soon), t(0)));
+    assert!(!live(&waiter(std::process::id().into(), t(-60)), t(0)));
+    assert!(!live(&waiter(i32::MAX.into(), soon), t(0))); // no such process
+    assert!(!live(&Obj::new(), t(0)));
 }
 
 #[test]
