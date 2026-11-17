@@ -74,11 +74,21 @@ and `bullpen news` won't print it again. It waits behind a draft in the input,
 as typed news does; if a draft holds it for 10 minutes, you get one
 notification for that batch ("Your coordinator (c1) has news it hasn't seen").
 
-Bookkeeping doesn't wake a coordinator by itself: lines for `started`,
-`rebased`, `accepted`, `closed`, `queue`, `pickup`, `kept`, `dropped`, `later`,
-`tour-sent` and `keys` ride along with the next line that does (or wait for
-`bullpen news`). Every other line wakes, a new kind of line too. The line for new
-[GitHub issues](issues.md#on-a-timer) wakes: each of them asks you.
+A line that asks the coordinator to do something wakes it; one that needs nothing
+rides along with the next line that does (or waits for `bullpen news`). Each kind of
+line is in one table (`cli/src/news/kind.rs`), with the row of the guide's news
+table it belongs to, and that row decides. What rides along: `accepted`, `closed`,
+`kept`, `dropped`, `started` and `sent back` lines; an `After BP-3: ...` line where
+every task was brought up to date (event `rebased`); `not auto-accepted (nothing to
+do ...)`; pickup's "started its 4 for today, nothing to do" (`pickup`); the queue's
+"can start, but the usage limit is reached" and revert's "isn't started" (`queue`);
+and a worker's backlog item (`later`). Everything else wakes, a line of a kind
+bullpen doesn't know too: among them the keys-changed line (`keys`), pickup's
+asks (`pickup-ask`), the queue's "couldn't start" (`queue-failed`), and an `After`
+line with a task not rebased, whose push failed or that a message didn't reach
+(`not-rebased`). Two kinds still wake though their row needs nothing: `working
+again` lines, and auto-accept's "sent back to its worker to rebase". The line for
+new [GitHub issues](issues.md#on-a-timer) wakes: each of them asks you.
 
 ## The waiter (`config --news wake`)
 
