@@ -2,6 +2,8 @@
 //! its own (`Revert BP-N: <title>`, with `reverts: BP-N` on it), whose brief names the
 //! commits to revert (commits.rs), and starts it within max_running, so the revert gets
 //! a branch, a review and an accept like any other change. Nothing is reverted here.
+//! Also the refusals, the brief from `prompts/revert.md`, and `show`'s lines (`reverted`,
+//! `show_lines`).
 
 pub mod commits;
 

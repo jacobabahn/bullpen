@@ -1,7 +1,7 @@
 //! Every repo bullpen knows, in one snapshot: its root, settings and coordinators, its
 //! open tasks with the board's words for each, and its counts (what needs you, what's
 //! ready, what's running). `bullpen repos`, `ls --all-repos` and the board's top line
-//! read it, and so will mission control. `repos` is its list of repos alone (`news
+//! read it, and so does mission control. `repos` is its list of repos alone (`news
 //! --recent --all-repos`), and `unread` those it leaves out (`doctor --all-repos`).
 //!
 //! Only files are read, and only these: <state>/repos/*/config.json, each repo's tasks,

@@ -8,6 +8,8 @@
 //! and touches nothing else. It keeps the keys' order, writes by rename, and removes
 //! only the lists (and the file) it emptied itself. The file is added to the
 //! checkout's `.git/info/exclude`: it holds one person's path to bullpen.
+//!
+//! `put` and `take` change the settings as read; `install`, `remove` and `sync` the file.
 
 use bullpen_core::json::{s, strs, Obj};
 use bullpen_core::proc::git;

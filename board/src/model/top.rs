@@ -1,4 +1,5 @@
-//! The top line's counts: this repo's and the other repositories'.
+//! The top line's counts: this repo's and the other repositories' (from core's fleet.rs
+//! snapshot).
 
 use bullpen_core::fleet::Reader;
 use std::path::Path;

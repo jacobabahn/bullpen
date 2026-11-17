@@ -1,5 +1,6 @@
-//! Closing a task: the one close step that accept, close, drop and
-//! finish's auto-accept share, and the `close` and `drop` commands.
+//! Closing a task: the one close step (`close`) that accept, close, drop and
+//! finish's auto-accept share, `close_task`, and the `close` and `drop` commands
+//! (docs/code.md, "Closing a task").
 
 use crate::agents::pane;
 use crate::args::{flag, pos, value, Arg, Args, Nargs};

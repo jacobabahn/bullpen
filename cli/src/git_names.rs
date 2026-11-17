@@ -7,7 +7,8 @@
 //! Renames are read with `--no-renames`: a renamed file is its old path deleted and its
 //! new one added, so each check sees both.
 //!
-//! A name shown to people goes through `shown`, which escapes what isn't printable.
+//! A diff's changed files are `numstat`, a listing `names`. A name shown to people goes
+//! through `shown`, which escapes what isn't printable (`listed` for several).
 
 use bullpen_core::proc::git;
 use bullpen_core::text::is_printable;

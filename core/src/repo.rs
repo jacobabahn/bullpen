@@ -1,4 +1,6 @@
-//! A repo bullpen runs in (core.Repo): its state folder, its settings and its tasks;
+//! A repo bullpen runs in (core.Repo, `Repo`): its state folder, its settings and its tasks
+//! (`save_task` writes one and returns the task as it was: the cli runs what a save sets
+//! off, cli/src/saves.rs);
 //! finding the repo a command is about; and the panes bullpen knows (<state>/blocks).
 
 use crate::config::{self, inherited_config, load_config, read_own};

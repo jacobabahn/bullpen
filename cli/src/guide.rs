@@ -1,5 +1,4 @@
-//! The coordinator's guide, and telling running coordinators when it changed
-//!.
+//! The coordinator's guide, and telling running coordinators when it changed.
 //!
 //! The guide is `prompts/coordinator.md` with the sections that apply to the repo put
 //! in at its `{{sections}}` line, each from a file of its own in `prompts/coordinator/`
@@ -12,7 +11,7 @@
 //! folder for every repo. `up`, `accept` and `config` compare each running coordinator's
 //! hash, in every repo, with its repo's guide now. A coordinator whose guide is out of
 //! date gets one news line, only it: with the new section after the line when a section
-//! came or went, else with the diff when it is short. Its hash moves on, so each change
+//! came or went, else with the diff (difflib's, ported) when it is short. Its hash moves on, so each change
 //! is told once. One from before hashes, or whose old text is gone, is told to read the
 //! guide again.
 

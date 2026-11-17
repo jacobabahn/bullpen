@@ -3,6 +3,7 @@
 //! once a second. When news worth a wake (wake.rs) is logged for its coordinator, it
 //! lets the batch settle, prints every line since the cursor to stderr, moves the
 //! cursor and exits 2, which starts a turn in the idle session with those lines.
+//! `Waiter::step` is one look, given its time, so its tests bring their own clock.
 //!
 //! - Who: the coordinator whose pane runs it (`REX_BLOCK`, by the pane index). In any
 //!   other pane, unless news is `wake` (hook.rs installs it then), or while paused, it

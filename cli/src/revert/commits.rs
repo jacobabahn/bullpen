@@ -1,8 +1,9 @@
 //! Which commits an accepted task left on its base, from its record alone (never from
-//! commit messages). An accept records `merged` (the base's head after it), and since
+//! commit messages: `commits_of`, by `shape`). An accept records `merged` (the base's head after it), and since
 //! `revert` came, `merged_how` (rebase, squash or merge) and in local mode `merged_from`
 //! (the base's head before it) or, with a PR, `merged_commits` (how many commits gh says
-//! the PR had when it was merged); `ready` records `commits` (how many the branch had
+//! the PR had when it was merged, with the merge's commit: `pr_merge_commit`, which
+//! accept's `merge` records); `ready` records `commits` (how many the branch had
 //! then, which a later push to the PR can leave behind).
 //!
 //!   rebase   the commits from `merged_from` to `merged`; a PR's: the last

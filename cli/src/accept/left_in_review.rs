@@ -1,8 +1,8 @@
 //! A task an accept left in review (rebase.rs: a reviewer was on it) is checked against
 //! its base when that review ends with an approval. It goes by `show`'s test, a trial
-//! merge: a task that conflicts gets what a ready task that conflicts gets after an
+//! merge (`conflicts_with`): a task that conflicts gets what a ready task that conflicts gets after an
 //! accept (rebased keeping both sides of a trivial conflict, else sent back to its
-//! worker to rebase), with the same news; one that doesn't is left as it is and is ready
+//! worker to rebase: `rebase_task`), with the same news; one that doesn't is left as it is and is ready
 //! as usual. Findings leave it to its worker, as always.
 
 use super::rebase::{conflicts_with, rebase_task};

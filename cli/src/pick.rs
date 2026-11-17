@@ -1,4 +1,5 @@
-//! `pick`: jump to any open task by typing part of it.
+//! `pick`: jump to any open task by typing part of it. `--filter` prints the matches,
+//! best first; `--pane` opens the picker in a floating pane (the jump key).
 
 use crate::args::{flag, value, Arg, Args};
 use crate::line_edit::{read_keys, term_size, Decoder, LineEdit, Raw, PASTE_OFF, PASTE_ON};

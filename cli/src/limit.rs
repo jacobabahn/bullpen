@@ -1,6 +1,8 @@
 //! The usage limit: is one in force and when it resets (for `start`
 //! and the run queue), and reading one off an agent's turn or screen, what the task
 //! and <state>/limit.json then hold until it resets (for the watcher's events).
+//! In force: `limit_active`, `limit_phrase`; read off a turn or screen: `limit_hit`,
+//! `limit_over`, `limit_reset`.
 //!
 //! Every agent shares one subscription. An agent that reaches its usage limit stops
 //! with a line like "You've hit your 5-hour limit · resets 3pm": Claude Code reports

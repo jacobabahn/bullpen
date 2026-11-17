@@ -18,6 +18,10 @@
 //! the code: a kept approval (only the base moved) works the rules out again, which
 //! say the same for the same lines, and keeps the reviewer's part. A task made ready
 //! without one (by an older copy of bullpen) gets it from `check` (risk_late.rs).
+//!
+//! `assess` is what each step that makes a task ready calls. The rules are `rules_of`
+//! (the areas, `by_areas`; a new dependency, `adds_dependency`; kind and size, `by_size`,
+//! with the line counts in `Sizes`), the review `reviewer_of`.
 
 use crate::git_names::{numstat, Changed};
 use crate::review::kind_of_change;

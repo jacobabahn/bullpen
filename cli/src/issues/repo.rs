@@ -1,5 +1,6 @@
-//! Which GitHub repository a repo's issues are read from, and the one way gh is asked
-//! about them: always with `-R <repo>`, so gh's own guess among remotes never matters.
+//! Which GitHub repository a repo's issues are read from (`issues_repo`, `slug`), and the
+//! one way gh is asked about them (`gh_json`): always with `-R <repo>`, so gh's own guess
+//! among remotes never matters.
 
 use bullpen_core::proc::{git, run_in};
 use bullpen_core::task::clip;

@@ -1,5 +1,6 @@
 //! Guided review tours: a tour's files, the diff it is written
-//! on, its state, and the person's draft comments on its steps. The tour agent that
+//! on (`diff_files`, `covers`), its state (`tour_state`, `tour_stale`), a step's patch
+//! (`step_diff`), and the person's draft comments on its steps. The tour agent that
 //! writes one is in write.rs, `tour-comment` in comments.rs. The stepper (`tour`, which
 //! starts `_tour`, and reads and sends a tour) is in stepper/.
 //!

@@ -1,4 +1,4 @@
-//! The worker's Stop hook: what a worker that ended its turn is waiting on.
+//! The worker's Stop hook: what a worker that ended its turn is waiting on (docs/triage.md).
 //!
 //! When a Claude Code worker starts (`launch`), bullpen writes a Stop hook to its
 //! worktree's `.claude/settings.local.json` (git-ignored through `.git/info/exclude`, as

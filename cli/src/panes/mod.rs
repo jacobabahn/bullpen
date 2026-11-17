@@ -1,6 +1,10 @@
 //! Where a worker's, reviewer's or diff's pane lives: one placement
 //! each, with the same steps (place, show, hide, find), so the code that makes, shows,
-//! hides or finds a pane again never asks which one it is.
+//! hides or finds a pane again never asks which one it is (docs/code.md, "Where a pane
+//! lives"). Here: `place`, `show`, `hide`, `find`, `gather` (keeping each pane home),
+//! where a pane is now (`placement_at`) and where a new one goes (`for_new`). A
+//! placement that does more than focus has a file of its own: float.rs, tab.rs,
+//! background.rs.
 //!
 //! A view is the session's, as `rex_view` gives it (None when Rex can't say). Finding a
 //! background pane notes the session's detached blocks in it ("detached"), and making a

@@ -1,5 +1,6 @@
 //! One task line, as the board says it, for `ls` and `show` (its
-//! words are core's words.rs): its mark, ID, title, age and the board's sentence.
+//! words are core's words.rs): its mark, ID, title, age and the board's sentence (or its
+//! rows, `task_rows`, on a narrow terminal), cut to the terminal's width and coloured there.
 
 use bullpen_core::json::{s, Obj};
 use bullpen_core::risk::level_sgr;

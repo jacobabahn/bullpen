@@ -1,6 +1,7 @@
 //! A task's risk label, as `ls`, `show`, the news and the board say it. The command
 //! line works it out when the task is ready (cli/src/risk.rs) and keeps it on the task
-//! (`risk`: level, why, and its two parts, rules and review); this only reads it.
+//! (`risk`: level, why, and its two parts, rules and review); this only reads it
+//! (`stored`, `shown`) and says it (`label`).
 
 use crate::json::{obj, s, Obj};
 

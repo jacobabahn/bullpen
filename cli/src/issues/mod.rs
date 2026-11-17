@@ -1,5 +1,5 @@
 //! GitHub issues, read into the backlog (docs/issues.md). `bullpen issues --now` asks gh
-//! for the repository's open issues once and compares them with `issues.json`: one not
+//! for the repository's open issues once and compares them with `issues.json` (`sync`): one not
 //! seen before becomes a backlog item that asks for a yes, an undecided one that was
 //! edited is read again, a closed one's item is done. `bullpen issues` lists what's
 //! recorded, and `bullpen issue N` (view.rs) prints one for reading. Nothing is written

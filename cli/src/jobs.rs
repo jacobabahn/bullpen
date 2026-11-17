@@ -1,6 +1,7 @@
 //! bullpen's background jobs: the push, the build, an auto-accept, a
 //! tour, a gone coordinator's look. Each is started so that it outlives the command and
-//! the pane it runs in, with its output in a log and its failure in the news.
+//! the pane it runs in, with its output in a log (the repo's jobs.log) and its failure
+//! in the news.
 //!
 //! A command often runs in an agent's pane (Claude Code's Bash tool), and may close that
 //! pane last. When a pane's program ends, it kills the whole tree of the command it ran,

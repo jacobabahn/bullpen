@@ -1,4 +1,4 @@
-//! The run queue: when a task frees a slot or closes, the queue
+//! The run queue (`start_queued`): when a task frees a slot or closes, the queue
 //! starts each todo task that has dependencies, all done, within max_running. Only
 //! working tasks take a slot: a reviewer is short and cheap. A task sent back from
 //! review works, and counts, again, even if that puts the count over max_running: it's

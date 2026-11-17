@@ -1,6 +1,7 @@
 //! The backlog as the board shows it (docs/backlog.md): the items still on the list,
 //! in order, as one line under Queued (Later) or, expanded with `L`, a row each, and
-//! the keys and words each item gets. The list itself is bullpen-core's.
+//! the keys and words each item gets (its mark and line). The list itself is
+//! bullpen-core's: `load_later` reads it with `backlog::read`.
 
 use bullpen_core::backlog;
 use bullpen_core::json::{s, truthy, Obj};

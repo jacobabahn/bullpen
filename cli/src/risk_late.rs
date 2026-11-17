@@ -3,7 +3,8 @@
 //! `ready` and `verdict` label a task as they make it ready (risk.rs). One made ready by
 //! a copy of bullpen from before the label (a task's brief names the `bin/bullpen` of
 //! the copy that started it, and its reviewer's too) has no `risk` in its record at
-//! all, and its ready news said none. `check` finds it, and `check --fix` (the watcher,
+//! all, and its ready news said none. `check` finds it (`unlabelled`), and `check --fix`
+//! (`label_late`, with risk.rs's `assess`; the watcher,
 //! every few minutes, from the copy the coordinator uses) labels it as risk.rs would
 //! have, says the label in one news line, and notes the copy the task's brief names for
 //! doctor's `copy` check (that copy is too old to note itself). A record that has `risk`, a label or null

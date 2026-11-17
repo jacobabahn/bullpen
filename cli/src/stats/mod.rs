@@ -1,6 +1,7 @@
 //! `stats`: where tasks' time went, from their timelines (bullpen_core::timeline). With
 //! an ID, one task's timeline and totals; without, the totals across closed tasks, with
-//! medians, the slowest tasks in each phase and how often tasks went back.
+//! medians, the slowest tasks in each phase and how often tasks went back. In words, or
+//! with `--json` as JSON (docs/stats.md).
 
 mod old;
 pub mod totals;

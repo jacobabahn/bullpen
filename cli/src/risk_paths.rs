@@ -5,6 +5,9 @@
 //!
 //! In config.json: `{"pattern": {"level": "medium", "why": "changes how review runs"}}`.
 //! The older forms still read, as high: `{"pattern": "why"}` and a list of patterns.
+//!
+//! Each form read into a level and a why: `entries`; the area a path is in: `area_of`,
+//! `path_matches`; `config`'s flags: `changed`; doctor's `risk` line: `check_risk`.
 
 use crate::args::Args;
 use bullpen_core::json::get;

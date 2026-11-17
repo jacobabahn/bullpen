@@ -1,5 +1,6 @@
 //! The settings the board reads, as bullpen-core layers them: the repo's config.json
-//! over the global one, over the defaults.
+//! over the global one, over the defaults (core's `load_config`), with the board's typed
+//! view (`Config`). A setting of the wrong shape counts as its default.
 
 use bullpen_core::config::{load_config, read_own};
 use bullpen_core::json::Obj;

@@ -1,5 +1,6 @@
-//! Starting the Rex watcher (lua/watch.lua), and replacing it when watch.lua or
-//! bullpen's build changes.
+//! Starting the Rex watcher (lua/watch.lua) from the copy of bullpen the repo's
+//! coordinator uses, and replacing it when that copy's watch.lua or build changes (its
+//! stamp: their hashes): after a merge (`refresh_watcher`) or a build.
 
 use crate::rex::{alive, rex_api, rex_close, with_state};
 use bullpen_core::json::{read_obj, s, write_obj, Obj};

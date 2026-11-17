@@ -1,10 +1,10 @@
 //! `tour` (stepper.py and tours.py's command half): a tour of a task's change. On a
 //! terminal a written tour opens in the stepper; off one (an agent, --path) its path is
-//! printed; with none, the tour agent (`_tour`, tours/write.rs) starts writing one.
-//! `--show`/`--step` print it for the board, `--send` sends the person's draft comments
-//! back to the worker.
+//! printed; with none, the tour agent (`_tour`, tours/write.rs) starts writing one, in
+//! the background or waited for with `--wait`. `--show`/`--step` print it for the board,
+//! `--send` sends the person's draft comments back to the worker (`send_comments`).
 //!
-//! The board's g runs `tour <ID> --pane`: with a current tour (or a stale one, once the
+//! The board's g runs `tour <ID> --pane` (`open_stepper`): with a current tour (or a stale one, once the
 //! person chose it), it opens the stepper in a large floating pane in the middle of the
 //! window, the way the jump picker opens; with none, it starts the agent and the stepper
 //! opens once the tour is written. The stepper (`tour <ID> --view`, view.rs) shows one

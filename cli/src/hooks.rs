@@ -1,6 +1,6 @@
 //! A worktree's hooks: the repo's config.json `setup` or `teardown`,
 //! else .bullpen/<name>.sh as committed on the task's base, run in the worktree: setup
-//! in a new one, teardown before it goes (remove_worktree, close's).
+//! in a new one (`set_up`), teardown before it goes (`remove_worktree`, close's).
 
 use crate::modes::task_base_ref;
 use crate::stops::stop;

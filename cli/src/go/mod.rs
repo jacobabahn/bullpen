@@ -1,5 +1,6 @@
 //! Getting around: `go`, `hide` and `adopt`, and putting a repo's panes
-//! where they belong (relink.rs).
+//! where they belong (relink.rs). `repo_or_here` is the repo a `--repo` names (`say`'s
+//! too).
 
 pub mod relink;
 

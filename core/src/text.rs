@@ -1,6 +1,8 @@
 //! Text as bullpen measures and cuts it: its width on screen (unicode-width's, which
 //! the board and ratatui use too), fit and wrap (Python's textwrap), and str's strip,
-//! split and splitlines, whose whitespace and line breaks are Python's, not Rust's.
+//! split and splitlines, whose whitespace and line breaks are Python's, not Rust's. One
+//! width for `ls` and the board, cuts as Python's, `isprintable` (from printable.rs) and
+//! `shlex.join` (`shell_join`).
 
 use crate::printable::NOT_PRINTABLE;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};

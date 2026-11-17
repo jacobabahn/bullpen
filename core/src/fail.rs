@@ -1,4 +1,5 @@
-//! A command's error (core.Fail): what main prints as "bullpen: …" before it exits 1.
+//! A command's error (core.Fail): `Fail`, what main prints as "bullpen: …" before it exits 1,
+//! and `Res`, a result whose error is one.
 
 use std::fmt;
 

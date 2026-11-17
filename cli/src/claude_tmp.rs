@@ -2,8 +2,9 @@
 //! directory's path, each character but a letter or digit turned into ->` (as the folders
 //! on a machine show it: /home/me/.cache/x is `-home-me--cache-x`). A task's worker and
 //! reviewer run in its worktree, so the worktree's folder is theirs. It goes with the
-//! worktree (`forget`, from hooks.rs's remove_worktree); doctor's `temp` line counts
-//! those of closed tasks left from before, and `doctor --fix` removes them (`leftovers`).
+//! worktree (`names`, `forget`, from hooks.rs's remove_worktree); doctor's `temp` line
+//! (`check`) counts those of closed tasks left from before, and `doctor --fix` removes
+//! them (`fix`, `leftovers`).
 //!
 //! Only a folder named for the exact path, right in `<temp>/claude-<uid>/`, is ever
 //! removed, and never through a symlink: neither `claude-<uid>` nor the folder may be one,

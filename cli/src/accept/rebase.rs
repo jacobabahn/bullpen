@@ -1,7 +1,10 @@
 //! After an accept: bringing the other open tasks on the same base up to date
-//!. A working agent is told to rebase when the
+//! (`rebase_others`; `rebase_task` for one task). A working agent is told to rebase when the
 //! accepted change meets its work, one between turns is rebased, and a running review
 //! is left be. One news line sums it up. Off with `config --rebase-others off`.
+//! A trivial conflict in a doc or test file is resolved keeping both sides. What a
+//! worker is told is `told`; `show`'s line for a ready task that no longer rebases is
+//! `stale_conflicts`, by `conflicts_with`.
 
 use crate::git_names::{self, listed};
 use crate::modes::{is_local, quiet_git, refresh, task_base_ref};

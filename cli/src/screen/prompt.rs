@@ -1,4 +1,4 @@
-//! The prompt Claude Code's screen ends with: its
+//! The prompt Claude Code's screen ends with (`read_prompt`): its
 //! question, its options and an ID for it. A numbered menu with its ❯ on an option is
 //! answered by its number; a "(y/n)" question by y or n. The Python's regexes are matched
 //! by hand (`\d` as an ASCII digit).

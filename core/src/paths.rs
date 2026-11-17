@@ -1,5 +1,6 @@
-//! Where bullpen's things are (its checkout, the state folder, Rex, the entry, the prompts, the watcher),
-//! and paths in words for people: $HOME as ~.
+//! Where bullpen's things are (its checkout, from the program's own resolved path; the
+//! state folder, Rex, the entry, the prompts, the watcher), and paths in words for
+//! people: $HOME as ~.
 
 use std::path::{Path, PathBuf};
 

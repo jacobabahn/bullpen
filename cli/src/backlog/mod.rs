@@ -1,5 +1,6 @@
 //! `bullpen later`: the backlog, where ideas go before they're tasks (docs/backlog.md).
-//! The list itself is core's (bullpen_core::backlog); here are its command, who is
+//! The list itself is core's (bullpen_core::backlog); here are its command (adding,
+//! keep, drop, skip and the moves), who is
 //! calling (the person, a coordinator, or a worker, whose items ask for a yes), and
 //! the line `show` says about a task that came from it. The list's lines are in
 //! list.rs, making an item a task in start.rs.

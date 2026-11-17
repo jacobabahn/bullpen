@@ -1,5 +1,5 @@
-//! What the watcher (lua/watch.lua) reports: an agent's events, and a
-//! pane that closed. An agent that shows no progress and the usage limit's reset are in
+//! What the watcher (lua/watch.lua) reports: an agent's events (`_event`, `event`), and a
+//! pane that closed (`_gone`, `gone`). An agent that shows no progress and the usage limit's reset are in
 //! stuck.rs. `check --fix` applies the events the watcher missed through the same paths.
 
 pub mod stuck;

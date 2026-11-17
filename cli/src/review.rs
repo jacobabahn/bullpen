@@ -1,6 +1,8 @@
 //! Reviews: what a review covers, starting a reviewer, what `ready`
 //! does with review on, and the coordinator's `review` (a new reviewer in place of one
-//! that stopped without a verdict).
+//! that stopped without a verdict). What a review covers: `patch_id`, `own_lines`,
+//! `rebase_check`, `keep_approval`; the kind of a first review; `start_review` and
+//! `close_reviewer`; what `ready` does: `review_at_ready`.
 //!
 //! A review records what it looked at: the commit, the base it was on (merge-base), a
 //! patch-id of the task's diff against that base, and the task's own lines (own_lines:

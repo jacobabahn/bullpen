@@ -1,5 +1,6 @@
 //! The rules every worker and reviewer gets: the repo's
-//! .bullpen/rules.md as committed, then the person's own, and the `rules` command.
+//! .bullpen/rules.md as committed, then the person's own (`task_rules`), and the `rules`
+//! command.
 
 use crate::args::{flag, Args};
 use bullpen_core::proc::git;

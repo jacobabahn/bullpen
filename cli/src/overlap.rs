@@ -1,7 +1,7 @@
 //! Overlap: two open tasks whose branches change the same file. Only news, once per
 //! pair of tasks (again when new files join): nothing waits on it, no worker is told,
 //! and no order is forced. It's checked when a worker ends a turn and on `ready`, for
-//! the task that did; `show` lists a task's overlaps.
+//! the task that did (`check`); `show` lists a task's overlaps (`overlaps_of`).
 //!
 //! What was said is kept in `overlaps.json` in the repo's state folder, by pair
 //! ("BP-3 BP-5": the files said so far). A pair with a task that's no longer open

@@ -1,7 +1,8 @@
 //! The backlog: work that isn't a task yet (docs/backlog.md). One list per repo,
 //! `backlog.json` in its state folder, in list order (first is next), its items `L1`,
 //! `L2`, ... Read and written under its lock (`backlog.lock`), so two commands adding at
-//! once both land. Shared by the command line (`bullpen later`) and the board.
+//! once both land (`change`); an item moves in the list with `move_item`. Shared by the
+//! command line (`bullpen later`) and the board.
 
 use crate::fail::{fail, Res};
 use crate::json::{self, s, Obj};

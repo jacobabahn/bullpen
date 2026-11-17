@@ -5,6 +5,9 @@
 //! apply, or can't be told). `doctor` runs them all; `up`
 //! runs the cheap ones (no network, nothing `up` itself just fixed) and only counts problems.
 //! `doctor --all-repos` (all_repos.rs) runs those about the setup once, then each repo's.
+//! `--json` prints the checks alone; `up`'s hint is `up_hint`; `doctor --fix` (`fix`)
+//! fixes what bullpen can by itself: the temp folder, the news hook (to match the
+//! setting) and the workers' Stop hooks.
 
 mod all_repos;
 mod checks;

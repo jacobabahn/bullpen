@@ -1,5 +1,6 @@
 //! Accepting a ready task: merging it, closing it, then what follows
-//! the merge, each step on its own (a failed one is said, and the rest still run).
+//! the merge, each step on its own (`run_steps`: a failed one is said, and the rest
+//! still run).
 //! Rebasing the other tasks onto the moved base is rebase.rs.
 //!
 //! An accept in a checkout of bullpen that runs from its own build (this copy's, or one

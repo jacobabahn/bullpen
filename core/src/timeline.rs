@@ -16,7 +16,9 @@
 //!   review_finished  a reviewer gave its verdict: round, kind, verdict
 //!   accept_refused   an auto-accept didn't merge it: reason (conflict, checks, comments, other), why
 //!
-//! accept_refused changes nothing a save sees, so the auto-accept records it itself.
+//! accept_refused changes nothing a save sees, so the auto-accept records it itself:
+//! `record` is for an event no save shows. A step that sends a task back sets its
+//! trip-back mark with `send_back` (the cli's `hand_back` takes its reason).
 
 use crate::json::{obj, s, truthy, Obj};
 use crate::task::clip;

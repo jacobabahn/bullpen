@@ -1,9 +1,11 @@
 //! Local mode and remote mode: the steps that differ between them.
 //! A task's mode is the one recorded when it was published (`local`), else the repo's
-//! (an origin remote: remote mode). Here: what a task's branch is compared with,
-//! publishing it (`ready`), merging it and what follows (`accept`), pushing it again
-//! after a rebase (refresh), withdrawing it (close and drop), and the one way to push
-//! (quiet_git, push_base).
+//! (an origin remote: remote mode; `is_local`). Here: what a task's branch is compared
+//! with (the task's and the repo's base ref), publishing it (`publish`, at `ready`),
+//! merging it (`merge`: the PR on GitHub, or the branch into the local base branch) and
+//! what follows (`after_merge`, at `accept`), pushing it again after a rebase
+//! (`refresh`), withdrawing it (`withdraw`, close and drop), and the one way to push
+//! (`quiet_git`, `push_base`).
 
 use crate::jobs::{background, Job};
 use bullpen_core::json::{get, obj, py_str, s, truthy, Obj};

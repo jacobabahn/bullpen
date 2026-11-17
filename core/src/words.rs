@@ -1,6 +1,9 @@
 //! What the board says about a task, for `ls`, `show` and the board: its mark, the board's order, its
 //! age, and the board's sentence for where it stands. The board (board/src/model/detail.rs)
 //! says these too, and keeps its own words only where they differ on purpose.
+//!
+//! A backlog task's `↻` (`from_mark`, `from_detail`); the board's sentence is `board_detail`,
+//! made of `status_detail`, `with_gh`, `auto_detail`, `model_detail` and `doing_said`.
 
 use crate::json::{self, get, obj, py_str, s, truthy, Obj};
 use crate::paths::{safe, state};

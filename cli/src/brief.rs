@@ -3,7 +3,8 @@
 //! worker reads briefs/<ID>.full.md, written again here. Each change is kept
 //! (briefs/<ID>.brief-<n>.md: the added section, or the diff) and listed on the task
 //! (`brief_changes`), so a worker is told only what changed and a reviewer's follow-up
-//! round is told the brief changed since the last one (`changed_since`).
+//! round is told the brief changed since the last one (`changed_since`). What the
+//! worker is told is `message`, typed by `tell`.
 
 use crate::agents::whose_turn;
 use crate::args::{pos, value, Arg, Args, Nargs};

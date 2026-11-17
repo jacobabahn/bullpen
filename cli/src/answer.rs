@@ -1,5 +1,5 @@
-//! Answering a task's prompt from the board, and replying to what the coordinator asked
-//!: `prompt`, `answer` and `reply`.
+//! Answering a task's prompt from the board, and replying to what the coordinator asked:
+//! `prompt`, `answer` and `reply`.
 //!
 //! A task whose agent is at a prompt can be answered from the board: `prompt` reads the
 //! question and its options off the pane's screen (screen/prompt.rs), and `answer`

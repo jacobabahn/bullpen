@@ -1,6 +1,8 @@
 //! A repo's coordinators, and who sees to a task: which one a
 //! pane is, which are alive, and whose a task is; adding one, and dropping those whose
-//! panes are gone (`up`), or whose pane the watcher said closed (`_coordinator_gone`).
+//! panes are gone (`up`), or whose pane the watcher said closed (`_coordinator_gone`,
+//! which looks at the gone pane later, as a job: `coordinator_gone`). Whose board shows a
+//! task (`on_board`), and the session to work in (`session_for`).
 //!
 //! cfg["coordinators"] lists them, oldest (the primary) first: {"id": "c1", "block",
 //! "session", "board": {"block", "session"}, "board_others", "bullpen": the copy of

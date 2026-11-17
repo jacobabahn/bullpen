@@ -1,5 +1,6 @@
-//! Rex: running its commands, and finding, typing into and closing
-//! panes. A session or block that Python has as None is "" here: Rex is given `-s` only
+//! Rex: running its commands, and finding (`find_pane`, by ID or label), typing into,
+//! focusing and closing panes; a pane's terminal and program, and the end of its screen
+//! (`screen_end`). A session or block that Python has as None is "" here: Rex is given `-s` only
 //! for a session there is.
 
 use bullpen_core::fail::Res;

@@ -1,7 +1,7 @@
 //! Building bullpen's two programs from its own checkout: the command line and the
 //! board. `build` (install.sh runs it), `_build_board` (the background build `up` and
-//! accept start), their rebuild_if_stale, and the catch-up of an internal command this
-//! build doesn't have yet (catch_up).
+//! accept start, given the build lock by fd), their rebuild_if_stale, and the catch-up
+//! of an internal command this build doesn't have yet (catch_up).
 //!
 //! bullpen's own checkout (HOME) is one cargo workspace (Cargo.toml): core/, cli/ (the
 //! command line, bin/bullpen runs it) and board/. Each program's source has a hash, and

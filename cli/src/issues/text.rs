@@ -1,6 +1,7 @@
 //! An issue's text made safe to print: it is written by whoever filed the issue, so
 //! control characters go, a title is one clipped line, and the body is shown only
-//! inside a fence that says what it is (docs/issues.md, "Issue text can't steer").
+//! inside a fence that says what it is (docs/issues.md, "Issue text can't steer"). The
+//! backlog item's title, the fence, the cut, and the news line for new issues.
 
 use bullpen_core::json::{obj, s, Obj};
 use bullpen_core::task::clip;

@@ -1,6 +1,6 @@
 //! Starting a task's worker: its worktree, setup and brief, the
 //! agent's pane, and handing a worker a message: `start`, `resume` and `tell`, with
-//! `launch` and `hand_back`.
+//! `start_task`, the worker's brief (`write_full`), its pane (`launch`) and `hand_back`.
 
 use super::by_id;
 use crate::args::{flag, pos, value, Arg, Args, Nargs};

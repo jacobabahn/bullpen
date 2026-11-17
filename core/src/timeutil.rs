@@ -1,4 +1,4 @@
-//! Time as bullpen writes it: ISO stamps with the local offset, ages, and the clock.
+//! Time as bullpen writes it: ISO stamps with the local offset (as Python's `isoformat`), ages, and the clock.
 
 use chrono::{DateTime, FixedOffset, Local, NaiveDateTime, TimeZone, Timelike};
 

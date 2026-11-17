@@ -1,4 +1,5 @@
-//! `peek`: the end of a worker's screen (start.py's cmd_peek), or of its reviewer's.
+//! `peek`: the end of a worker's screen (start.py's cmd_peek), or of its reviewer's
+//! (`peek --review`).
 
 use crate::args::{flag, pos, usage_error, value, Arg, Args, Nargs};
 use crate::rex::screen_end;

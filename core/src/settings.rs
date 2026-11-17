@@ -1,5 +1,6 @@
 //! Every setting bullpen has (core.SETTINGS), in the order `config` lists them, and
-//! the constants that go with them.
+//! the constants that go with them. watch.lua's copies of some defaults are held to
+//! these by tests/test_config.py.
 
 use crate::json::{py_str, Obj};
 use serde_json::Value;

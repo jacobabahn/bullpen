@@ -1,5 +1,8 @@
 //! Tasks as bullpen-core reads them, with the board's typed view of each, what a
-//! task is waiting on, and loading a repo's tasks.
+//! task is waiting on, and loading a repo's tasks. A `Task` is the object core read
+//! (`obj()`, which core's sentences read) and the board's typed view of the fields it
+//! reads itself; `load_tasks` (core's `task_files`); what a queued task waits on and
+//! what its agent is doing.
 
 use bullpen_core::json::{self, Obj};
 use bullpen_core::{config, paths, task as core, words};

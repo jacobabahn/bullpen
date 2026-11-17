@@ -1,5 +1,6 @@
-//! News for the coordinators: a news line, logged, and the outboxes
-//! the watcher types into their panes. `bullpen news` (one-off and `--follow`) is in
+//! News for the coordinators: a news line, logged (`news`, `tell_coordinator`,
+//! `ready_news`), and the outboxes the watcher types into their panes (`deliver`,
+//! waiting behind a draft: `has_draft`). `bullpen news` (one-off and `--follow`) is in
 //! read.rs, `news --recent` in recent.rs.
 
 pub mod hook;

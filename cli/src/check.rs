@@ -4,7 +4,8 @@
 //! A task's status follows its agent's events; a missed one (a watcher or Rex restart, a
 //! bug) leaves it out of step. `check` compares each task that has an agent in a pane
 //! with what Rex says that agent is doing right now, and `--fix` applies the event that
-//! was missed, through the same paths (and news) as the watcher (events/). It also
+//! was missed, through the same paths (and news) as the watcher (`events::event`,
+//! `events::gone`). It also
 //! labels a ready task that has no risk label (risk_late.rs).
 
 use crate::agents::waited_on;

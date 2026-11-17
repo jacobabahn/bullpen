@@ -4,6 +4,12 @@
 //! advance that an approval is enough. A task's own "auto_accept" (`add`/`start
 //! --no-auto-accept`, or `--auto-accept`) wins over the config's. In remote mode it
 //! waits for the PR's checks ("auto_wait"), which the PR follow-up (prs.rs) looks at.
+//!
+//! An approval with auto-accept runs `_auto_accept` as a job and waits for it, before the
+//! verdict closes the reviewer's pane; `_auto_accept` accepts, or waits for the PR's
+//! checks (`checks`, `pr_view`). A merge refused for a conflict sends the task back to
+//! rebase (`base_conflict`, `send_back_conflict` in accept/rebase.rs), at most
+//! `CONFLICT_SENDS` times.
 
 use crate::accept::accept;
 use crate::accept::left_in_review;
