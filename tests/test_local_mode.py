@@ -495,6 +495,8 @@ class LocalModeTest(unittest.TestCase):
         self.assertEqual(self.show("BP-2")["status"], "ready")
         self.assertEqual(self.news_lines()[-1],
                          "bullpen · After BP-1: BP-2 has uncommitted changes, not rebased.")
+        log = next((self.tmp / "state").rglob("news.log")).read_text()
+        self.assertIn(" not-rebased: bullpen · After BP-1: BP-2 has uncommitted", log)  # it asks: it wakes
 
     def test_after_accept_several_tasks_in_one_line(self):
         tid, _ = self.ready_task()

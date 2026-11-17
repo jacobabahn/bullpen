@@ -121,3 +121,29 @@ fn a_line_with_wide_characters_is_no_marker() {
     let file = "| 日本語 |\n<<<<<<< HEAD\n> 引用\n||||||| base\n=======\n| 表 |\n>>>>>>> t\n";
     assert_eq!(both_sides(file).as_deref(), Some("| 日本語 |\n> 引用\n| 表 |\n"));
 }
+
+#[test]
+fn an_after_line_wakes_when_a_task_in_it_needs_seeing_to() {
+    use crate::news::kind::Kind;
+    let kind = |said: &[&str]| after_kind(&said.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+    assert_eq!(
+        kind(&["BP-5 rebased", "BP-7 left alone (no overlap)", "BP-6 left in review"]),
+        Kind::Rebased
+    );
+    assert_eq!(
+        kind(&[
+            "BP-5 told to rebase (conflicts in a.rs)",
+            "BP-6 conflicts in b.rs, sent back"
+        ]),
+        Kind::Rebased
+    );
+    for asks in [
+        "BP-5 not rebased (git failed)",
+        "BP-5 waiting on the person, not rebased",
+        "BP-5 has uncommitted changes, not rebased",
+        "BP-5 rebased, but the push failed: rejected",
+        "BP-5 conflicts in a.rs, but the message didn't reach its worker (gone): `bullpen tell BP-5` it",
+    ] {
+        assert_eq!(kind(&["BP-6 rebased", asks]), Kind::NotRebased, "{asks}");
+    }
+}

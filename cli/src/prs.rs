@@ -5,6 +5,7 @@
 
 use crate::args::Args;
 use crate::auto_accept::{checks, first_of, pr_view, run_auto_accept};
+use crate::news::kind::Kind;
 use crate::news::{news, Opts};
 use crate::review::close_reviewer;
 use crate::rex::alive;
@@ -190,7 +191,7 @@ fn follow_pr(repo: &Repo, t: &Obj) -> Res<()> {
         news(
             repo,
             &t,
-            "ready",
+            Kind::NotAutoAccepted.into(),
             &format!("{id} not auto-accepted: {why} (nothing to do: the news about that follows)"),
             Opts::default(),
         )?;

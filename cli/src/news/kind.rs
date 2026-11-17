@@ -2,7 +2,7 @@
 //! row of the coordinator guide's news table it belongs to (or that it says what to do
 //! itself), and whether it wakes a coordinator (wake.rs). A line whose row asks the
 //! coordinator to act wakes it; one that needs nothing rides along with the next line
-//! that does (test_kind.rs holds that, but for NOT_YET).
+//! that does (test_kind.rs holds that, but for the few its NOT_YET names).
 //!
 //! Call sites still pass the event as a word (`Kind::Keys.into()` gives it); an event
 //! no kind has (an old log's, or a new line's) wakes, so a new kind of line can't go
@@ -175,11 +175,6 @@ pub const ALL: &[Kind] = &[
     Kind::Build,
     Kind::Board,
 ];
-
-/// Kinds that wake though their row needs nothing, left so until it is decided whether
-/// they should ride along: "working again" lines, and auto-accept's "sent back to
-/// rebase".
-pub const NOT_YET: &[Kind] = &[Kind::Working, Kind::RebaseSent];
 
 impl Kind {
     /// The word news.log keeps for it (`<stamp>[ [to]] <task> <event>: <line>`). An

@@ -357,3 +357,30 @@ fn news_nobody_reads_stays_unread() {
     assert_eq!(h.cursor(), 0);
     assert!(h.wait().is_empty()); // no wake noted, and the wait given up
 }
+
+#[test]
+fn lines_that_ask_wake_it_and_one_that_needs_nothing_rides_along() {
+    // the keys line, pickup's asks, the queue's "couldn't start", an After line with a
+    // task not rebased: each wakes it by itself
+    for event in ["keys", "pickup-ask", "queue-failed", "not-rebased"] {
+        let h = Home::new();
+        let mut w = h.waiter("Stop", 0).unwrap();
+        h.log(1, "BP-2", event);
+        let (at, said) = woke(&mut w, 1, 60).unwrap_or_else(|| panic!("{event} didn't wake it"));
+        assert_eq!((at, said), (4, format!("{NEWS_MARK}BP-2 {event}")), "{event}");
+    }
+    // "not auto-accepted (nothing to do ...)", and old logs' lines of the split events
+    for event in ["not-auto-accepted", "pickup", "queue", "rebased"] {
+        let h = Home::new();
+        let mut w = h.waiter("Stop", 0).unwrap();
+        h.log(1, "BP-2", event);
+        assert_eq!(woke(&mut w, 1, 120), None, "{event}");
+        h.log(200, "BP-3", "ready");
+        let (_, said) = woke(&mut w, 200, 260).unwrap();
+        assert_eq!(
+            said,
+            format!("{NEWS_MARK}BP-2 {event}\n{NEWS_MARK}BP-3 ready"),
+            "{event}"
+        );
+    }
+}

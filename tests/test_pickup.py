@@ -97,6 +97,7 @@ class PickupTest(BullpenTest):
         paused = [l for l in self.news() if "Pickup paused" in l]
         self.assertEqual(paused, ["bullpen · Pickup paused: BP-1 and BP-2 wait for a look. Tell the person: "
                                   "it goes on once they have looked"])  # the coordinator's line
+        self.assertIn(" pickup-ask: bullpen · Pickup paused: ", self.news_log())  # it asks: it wakes
         log = next((self.tmp / "state").rglob("notify.log")).read_text()
         self.assertIn("Pickup paused: BP-1 and BP-2 wait for you", log)
         self.assertIn("Pickup paused: BP-1 and BP-2 wait for you", self.later().stdout)
@@ -149,6 +150,7 @@ class PickupTest(BullpenTest):
         spent = [l for l in self.news() if "for today" in l]
         self.assertEqual(spent, ["bullpen · Pickup started its 1 for today (pickup_per_day): "
                                  "the backlog waits for tomorrow, nothing to do"])
+        self.assertIn(" pickup: bullpen · Pickup started its 1 for today", self.news_log())  # rides along
         self.assertIn("Pickup done for today (1 of 1 started)", self.later().stdout)
         # yesterday's don't count; the usage limit stops it too
         f = next((self.tmp / "state").rglob("tasks/BP-1.json"))

@@ -13,6 +13,7 @@
 
 use crate::coordinators::{sees_to, session_for};
 use crate::limit::limit_active;
+use crate::news::kind::Kind;
 use crate::news::{news, touch, Opts};
 use bullpen_core::backlog::{self, Backlog};
 use bullpen_core::json::{self, s, truthy, Obj};
@@ -202,7 +203,7 @@ fn run(repo: &Repo, st: &mut Obj, items: &[Obj]) -> Res<()> {
                 "Pickup paused: {} wait for a look. Tell the person: it goes on once they have looked",
                 and_list(ids)
             );
-            say(repo, &first, "pickup", &told)?;
+            say(repo, &first, Kind::PickupAsk.into(), &told)?;
             crate::notifications::tell_person(repo, &first, &text);
         }
         // Needed is checked first: the pause ends with the pile, not when something else holds it
@@ -217,7 +218,7 @@ fn run(repo: &Repo, st: &mut Obj, items: &[Obj]) -> Res<()> {
             "Pickup started its {} for today (pickup_per_day): the backlog waits for tomorrow, nothing to do",
             num(repo, "pickup_per_day")
         );
-        say(repo, &item_as_task(&items[0]), "pickup", &text)?;
+        say(repo, &item_as_task(&items[0]), Kind::Pickup.into(), &text)?;
     }
     if held == Some(Held::NoRoom) {
         forget_asks(st); // the room was taken: the next one asks again
@@ -245,7 +246,7 @@ fn run(repo: &Repo, st: &mut Obj, items: &[Obj]) -> Res<()> {
                  `bullpen later {id} --skip \"why\"`",
                 s(item, "title")
             );
-            say(repo, &about, "pickup", &text)?;
+            say(repo, &about, Kind::PickupAsk.into(), &text)?;
         }
         if !sees_to(repo, &about)?.is_empty() {
             st.insert("waits".into(), json!(id));
@@ -292,7 +293,7 @@ fn unanswered(repo: &Repo, st: &mut Obj, item: &Obj) -> Res<()> {
          `bullpen later {id} --brief-file <f>`, or `bullpen later {id} --skip \"why\"` to pass over it"
     );
     let about = item_as_task(item);
-    say(repo, &about, "pickup", &text)?;
+    say(repo, &about, Kind::PickupAsk.into(), &text)?;
     crate::notifications::tell_person(repo, &about, &text);
     Ok(())
 }
@@ -354,7 +355,7 @@ fn start(repo: &Repo, item: &Obj, session: &str) -> Res<()> {
         Err(Fail(e)) => say(
             repo,
             &t,
-            "pickup",
+            Kind::PickupAsk.into(),
             &format!(
                 "{id} is {tid} now, but it didn't start: {}. `bullpen start {tid}` tries again",
                 clip(&e, 200)

@@ -148,6 +148,7 @@ class AcceptTest(BullpenTest):
         self.assertNotIn("auto_wait", t)
         self.assertIn("bullpen · BP-1 not auto-accepted: its PR's checks failed "
                       "(nothing to do: the news about that follows)", self.news_lines())
+        self.assertIn(" not-auto-accepted: bullpen · BP-1 not auto-accepted", self.news_log())  # rides along
         self.assertFalse(any(a[:2] == ["pr", "merge"] for a in self.merges()))
         timeline = next((self.tmp / "state").rglob(f"timeline/{tid}.jsonl")).read_text().splitlines()
         refused = [json.loads(l) for l in timeline if '"accept_refused"' in l]
@@ -442,6 +443,7 @@ class AcceptTest(BullpenTest):
         sh("git", "-C", t["worktree"], "merge-base", "--is-ancestor", main, pushed)
         self.assertEqual(t["rebased"], "main")  # the board says "Rebased onto main."
         self.assertEqual(self.news_lines()[-1], "bullpen · After BP-1: BP-2 rebased.")
+        self.assertIn(" rebased: bullpen · After BP-1: BP-2 rebased.", self.news_log())  # rides along
 
     def test_after_accept_a_conflict_in_a_doc_whose_name_git_quotes_keeps_both_sides(self):
         name = odd_name("notes") + ".md"

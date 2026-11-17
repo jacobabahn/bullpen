@@ -11,6 +11,7 @@ use super::by_id;
 use super::launch::start_task;
 use crate::coordinators::session_for;
 use crate::limit::{limit_active, limit_phrase};
+use crate::news::kind::Kind;
 use crate::news::{news, say, Opts};
 use bullpen_core::json::{s, truthy, Obj};
 use bullpen_core::task::{clip, task_num};
@@ -88,7 +89,7 @@ pub fn start_queued(repo: &Repo, by: &Obj, how: &str) -> Res<()> {
             Err(Fail(e)) => say(
                 repo,
                 &t,
-                "queue",
+                Kind::QueueFailed.into(),
                 &format!(
                     "{id} couldn't start ({why}): {}. `bullpen start {id}` tries again",
                     clip(&e, 200)

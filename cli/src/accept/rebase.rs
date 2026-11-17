@@ -8,6 +8,7 @@
 
 use crate::git_names::{self, listed};
 use crate::modes::{is_local, quiet_git, refresh, task_base_ref};
+use crate::news::kind::Kind;
 use crate::news::{news, Opts};
 use crate::review::{is_doc, keep_approval, rebase_check, shortstat, start_review, Check};
 use crate::rex::{alive, rex_type};
@@ -61,10 +62,26 @@ pub fn rebase_others(repo: &Repo, accepted: &Obj, touched: Option<&BTreeSet<Stri
     news(
         repo,
         accepted,
-        "rebased",
+        after_kind(&said).into(),
         &format!("After {aid}: {}.", said.join("; ")),
         everyone,
     )
+}
+
+/// The kind of an `After BP-3: ...` line, from what it says of each task: NotRebased
+/// when one needs seeing to (not rebased, its push failed, or the message to rebase
+/// didn't reach its worker), else Rebased.
+pub fn after_kind(said: &[String]) -> Kind {
+    let asks = |l: &String| {
+        ["not rebased", "the push failed", "didn't reach its worker"]
+            .iter()
+            .any(|p| l.contains(p))
+    };
+    if said.iter().any(asks) {
+        Kind::NotRebased
+    } else {
+        Kind::Rebased
+    }
 }
 
 /// Bring one task up to date with its base; say how in a few words, or None when there

@@ -5,7 +5,7 @@
 //! worker to rebase: `rebase_task`), with the same news; one that doesn't is left as it is and is ready
 //! as usual. Findings leave it to its worker, as always.
 
-use super::rebase::{conflicts_with, rebase_task};
+use super::rebase::{after_kind, conflicts_with, rebase_task};
 use crate::modes::{is_local, quiet_git, task_base_ref};
 use crate::news::{news, Opts};
 use bullpen_core::json::{obj, py_str, s, truthy, write_obj, Obj};
@@ -83,7 +83,8 @@ pub fn after_approval(repo: &Repo, t: &mut Obj, by: &[String]) -> Res<bool> {
         everyone: true,
         ..Opts::default()
     };
-    news(repo, t, "rebased", &format!("After {words}: {line}."), everyone)?;
+    let kind = after_kind(std::slice::from_ref(&line));
+    news(repo, t, kind.into(), &format!("After {words}: {line}."), everyone)?;
     Ok(s(t, "status") == "ready")
 }
 
