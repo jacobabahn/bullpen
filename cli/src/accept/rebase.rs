@@ -71,11 +71,10 @@ fn rebase_other(repo: &Repo, t: &mut Obj, accepted: &Obj, touched: Option<&BTree
     if git(&wt, &["merge-base", "--is-ancestor", &base_ref, "HEAD"], false)?.ok() {
         return Ok(None); // already on top of it
     }
-    let r = obj(t, "review");
     let status = s(t, "status");
-    if status == "review" || (truthy(r.get("block")) && !truthy(r.get("verdict"))) {
+    if super::left_in_review::in_review(t) {
         // a reviewer is on it: its approval checks it against the base (left_in_review.rs)
-        super::left_in_review::mark(repo, t, s(accepted, "id"))?;
+        super::left_in_review::mark(repo, &id, s(accepted, "id"))?;
         return Ok(Some(format!("{id} left in review")));
     }
     if status == "working" && alive(s(t, "session"), s(t, "block"))? {

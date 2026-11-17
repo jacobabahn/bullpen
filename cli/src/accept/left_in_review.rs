@@ -8,7 +8,7 @@
 use super::rebase::{conflicts_with, rebase_task};
 use crate::modes::{is_local, quiet_git, task_base_ref};
 use crate::news::{news, Opts};
-use bullpen_core::json::{py_str, s, truthy, write_obj, Obj};
+use bullpen_core::json::{obj, py_str, s, truthy, write_obj, Obj};
 use bullpen_core::proc::git;
 use bullpen_core::text::strip;
 use bullpen_core::{Repo, Res};
@@ -18,16 +18,29 @@ use std::path::Path;
 /// The task's key for the accepts that left it in review, in order.
 const KEY: &str = "left_in_review";
 
-/// Note on the task that the accept of aid left it in review (not a save: the status
-/// doesn't change). Each accept during one review adds itself.
-pub fn mark(repo: &Repo, t: &mut Obj, aid: &str) -> Res<()> {
-    let mut by = ids(t);
+/// Note on task id that the accept of aid left it in review (not a save: the status
+/// doesn't change). Each accept during one review adds itself. The task is read afresh
+/// here, not taken from the accept's list of tasks: its reviewer may have saved a
+/// verdict since, and then it's no longer in review and gets nothing.
+pub fn mark(repo: &Repo, id: &str, aid: &str) -> Res<()> {
+    let mut t = repo.task(id)?;
+    if !in_review(&t) {
+        return Ok(());
+    }
+    let mut by = ids(&t);
     if !by.iter().any(|b| b == aid) {
         by.push(aid.to_string());
     }
     t.insert(KEY.into(), json!(by));
-    write_obj(&repo.task_path(s(t, "id")), t)?;
+    write_obj(&repo.task_path(id), &t)?;
     Ok(())
+}
+
+/// Whether a reviewer is on the task: in review, or its reviewer stopped or waiting on
+/// the person without a verdict.
+pub fn in_review(t: &Obj) -> bool {
+    let r = obj(t, "review");
+    s(t, "status") == "review" || (truthy(r.get("block")) && !truthy(r.get("verdict")))
 }
 
 /// The accepts that left the task in review, taken off it: a verdict ends that review.
