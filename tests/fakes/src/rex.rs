@@ -10,6 +10,7 @@
 //!   pid_<block>, prog_<block>  the process, and program, a pane runs (`process`)
 //!   status_<block>.json     the record `program_status` gives (else an older Rex)
 //!   server_down, server_version, reload_fails, actions.json, focused
+//!   select_fails            `do session.select` fails (no app to show a session)
 //!
 //! It stops early (exit 1, reg.json left as it was) where the Python it replaces raised.
 
@@ -243,6 +244,8 @@ impl Rex {
             if acts.exists() {
                 print(&read_text(&acts)?);
             }
+        } else if two("do", "session.select") && self.file("select_fails").exists() {
+            return Err(exit_msg("rex: no app client is connected")); // the app can't be asked
         } else if two("api", "call") {
             self.api(&a[2..])?;
         }

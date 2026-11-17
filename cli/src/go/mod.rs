@@ -10,7 +10,7 @@ use crate::coordinators::{
     alive, calling_coordinator, coordinator_at, coordinators, home_of, on_board, owner, primary, session_for,
 };
 use crate::panes::{gather, hide, show};
-use crate::rex::rex_focus;
+use crate::rex::{find_pane, rex_focus, rex_select, rex_view};
 use crate::saves::save;
 use bullpen_core::json::{self, dumps_line, obj, py_str, s, truthy, Obj};
 use bullpen_core::paths::{safe, state};
@@ -44,6 +44,10 @@ const GO: &[Arg] = &[
         "the repository the task is in (default: the pane's, else this folder's)",
     ),
     flag("--json", "print the target instead of focusing it"),
+    flag(
+        "--switch",
+        "and have the Rex app show the pane's session (mission control's ⏎)",
+    ),
 ];
 
 const HIDE: &[Arg] = &[
@@ -64,6 +68,7 @@ struct Go {
     session: String,
     repo: String,
     json: bool,
+    switch: bool,
 }
 
 /// A value as text ("" for none).
@@ -325,6 +330,7 @@ pub fn cmd_go(argv: &[String]) -> Res<i32> {
         session: a.opt("--session").unwrap_or("").into(),
         repo: a.opt("--repo").unwrap_or("").into(),
         json: a.flag("--json"),
+        switch: a.flag("--switch"),
     };
     if g.all_repos && !g.next {
         return fail("--all-repos goes with --next");
@@ -382,8 +388,22 @@ pub fn cmd_go(argv: &[String]) -> Res<i32> {
             select_on_board(&repo, &g.id)?;
         }
         show(&repo, &session, &block)?;
+        if g.switch {
+            switch_to(&session, &block, &name)?;
+        }
     }
     Ok(0)
+}
+
+/// `go --switch`: the pane is shown and focused in its own session; have the app show
+/// that session, on the pane's window. The pane itself doesn't move.
+fn switch_to(session: &str, block: &str, name: &str) -> Res<()> {
+    let view = rex_view(session)?;
+    let window = find_pane(view.as_ref(), block, "").and_then(|w| w.window);
+    match rex_select(session, window.as_deref())? {
+        None => Ok(()),
+        Some(why) => fail(format!("{name}'s pane is up in its own session, but Rex didn't show it: {why}")),
+    }
 }
 
 /// `go --board`: when the board it would show isn't running, start the pane's

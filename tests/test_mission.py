@@ -44,3 +44,32 @@ class MissionTest(BullpenTest):
         self.assertEqual(args[3], "--bullpen")
         self.env["BULLPEN_BOARD"] = str(self.tmp / "missing")
         self.assertIn("isn't built", self.bp("mission", "--here", ok=False).stderr)
+
+    def test_go_switch_shows_the_pane_then_has_the_app_show_its_session(self):
+        tid = self.start_task()
+        blk = self.block(tid)
+        before = len(self.rex_calls())
+        self.bp("go", tid, "--switch")
+        calls = self.rex_calls()[before:]
+        session = self.show(tid)["session"]
+        select = [a for a in calls if a[:2] == ["do", "session.select"]]
+        self.assertEqual(len(select), 1)
+        self.assertEqual(select[0][2], f"session_id={session}")
+        window = self.reg()["blocks"][blk]["window"]
+        self.assertEqual(select[0][3:], [f"window_id={window}"])
+        # the pane stays where it is, running
+        self.assertNotIn(["block", "close", blk], calls)
+        self.assertTrue((self.fake / "alive" / blk).exists())
+        # plain go doesn't switch
+        before = len(self.rex_calls())
+        self.bp("go", tid)
+        self.assertNotIn("do", [a[0] for a in self.rex_calls()[before:]])
+
+    def test_go_switch_says_when_the_app_cant_be_asked(self):
+        tid = self.start_task()
+        (self.fake / "select_fails").write_text("")
+        p = self.bp("go", tid, "--switch", ok=False)
+        self.assertIn(f"{tid}'s pane is up in its own session, but Rex didn't show it: rex: no app client", p.stderr)
+
+    def reg(self):
+        return json.loads((self.fake / "reg.json").read_text())

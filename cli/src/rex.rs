@@ -178,6 +178,22 @@ pub fn rex_focus(session: &str, block: &str) -> Res<()> {
     Ok(())
 }
 
+/// Have the Rex app show a session (on this window, when given): `rex do session.select`.
+/// Focusing a pane changes only its own session, not the session the app is showing.
+/// The app is REX_CLIENT's, else the one connected. None if it went, else why not.
+pub fn rex_select(session: &str, window: Option<&str>) -> Res<Option<String>> {
+    let mut argv = vec![rex(), "do".into(), "session.select".into(), format!("session_id={session}")];
+    if let Some(w) = window.filter(|w| !w.is_empty()) {
+        argv.push(format!("window_id={w}"));
+    }
+    let p = run(&argv, false)?;
+    if p.ok() {
+        return Ok(None);
+    }
+    let said = bullpen_core::text::squash(if p.stderr.is_empty() { &p.stdout } else { &p.stderr });
+    Ok(Some(if said.is_empty() { "Rex didn't say why".into() } else { said }))
+}
+
 /// Close a pane this command may run in: last, after the work it set off (run_later),
 /// since closing it may end this process.
 pub fn close_last(session: &str, block: &str) -> Res<()> {
