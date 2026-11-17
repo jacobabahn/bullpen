@@ -28,7 +28,8 @@ risk high or medium, has its own flags, for one repository only: `bullpen config
 `--remove-risk-path PATTERN` drops one. `--risk-large-lines` (400) is how many changed
 lines in a medium path make it high, and `--risk-huge-lines` (1,200; `0` for never)
 how many lines of code make a change high whatever it touches
-([Review](review.md#the-risk-label)). `bullpen config --help` gives each flag's default; the defaults
+([Review](review.md#the-risk-label)). `--light-review-lines` (40) is the most lines a
+change in at most 2 files can have for a light review ([Review](review.md)). `bullpen config --help` gives each flag's default; the defaults
 are in one table, `SETTINGS` in `core/src/settings.rs`, with each setting's kind and
 whether only a repository can hold it.
 
@@ -49,14 +50,19 @@ too, and `off` none (`needs`, when a task needs you, by default; see
 [Notifications](notifications.md)). `bullpen config
 --board-bottom-gap 0` lets the board use its bottom row, and a number leaves that many
 rows empty. Unset, it's 1 row while workers or reviewers float (Rex draws their
-capsules there), else none. `bullpen config --board-others on --coordinator c1` makes c1's
+capsules there), else none. `bullpen config --board-layout compact` starts the board in
+its compact layout, one line a task (`grouped` by default; its `l` switches, see
+[The board](board.md)). `bullpen config --board-others on --coordinator c1` makes c1's
 board show the other coordinators' tasks too (see [Several
 coordinators](several-coordinators.md); the board's `o`). `bullpen config --board-repos off`
 takes the other repositories off the board's top line (on by default; see [Several
 repositories](several-repositories.md)). `bullpen config --prefix XY --base develop` changes the task prefix (default `BP`)
 and the base branch (default: origin's default branch). `bullpen config --push-remote
 github` pushes the base branch to the `github` remote after each accept, in local mode
-only (see [Local mode](local-mode.md)). The worker and coordinator
+only (see [Local mode](local-mode.md)). `bullpen config --setup "npm ci"` runs that
+command in each new worktree before its worker starts, and `--teardown CMD` one in a
+worktree before it's removed, over `.bullpen/setup.sh` and `.bullpen/teardown.sh` (see
+[Worktree setup](worktree-setup.md)). The worker and coordinator
 commands are in that folder's `config.json` (`worker`, `coordinator_cmd`). `bullpen config
 --rebase-others off` stops `accept` rebasing the other open tasks (see [After
 accept](accept.md#after-accept)), and `--gh PATH` runs that gh instead of the one on PATH

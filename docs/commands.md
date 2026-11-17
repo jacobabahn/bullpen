@@ -33,6 +33,8 @@ bullpen mission       # mission control: every repository on one screen, in its 
 bullpen go BP-1 --repo ~/shop   # a task of another repository
 bullpen go BP-1 --board         # its board, with BP-1 selected
 bullpen go BP-1 --switch        # and have the Rex app show its session (mission control's ⏎)
+bullpen hide          # put the worker pane you're in away (into its capsule, or the background)
+bullpen board         # the task board, a live list of tasks to switch between (see board.md)
 bullpen guide                       # the coordinator's guide for this repository: only the sections its settings bring (--all: every section)
 bullpen news --recent --all-repos   # the last 20 news lines of every repository (N: the last N); moves no cursor
 bullpen pick          # type part of any open task, in any repository, and go to it (the cmd+; j picker)
@@ -42,6 +44,7 @@ bullpen brief BP-1   # print its brief; --add "..." adds a dated section, --file
 bullpen resume BP-1   # restart a stopped worker, continuing its conversation
 bullpen ask BP-1 "..."   # (coordinator) BP-1 needs you: the question shows on the board
 bullpen ok BP-1       # (coordinator) a task in triage is seen to: back to work, nothing typed
+bullpen adopt BP-1 BP-2   # (coordinator) make tasks yours: their news comes to this pane
 bullpen review BP-1   # (coordinator) a new reviewer for one that stopped without a verdict
 bullpen note BP-1 "..."   # an informational line on the board
 bullpen accept BP-1   # merge its PR (or local branch; rebase), close its pane, remove its worktree;
@@ -52,10 +55,17 @@ bullpen drop BP-1     # close its PR, pane and worktree without merging
 bullpen revert BP-1 --why "It broke login"   # take an accepted task back: a new task reverts its commits,
                       #   reviewed and accepted like any other (see accept.md)
 bullpen build         # build bullpen's command line and the board now (see Rebuilds)
+bullpen up            # start (or register) this repository's coordinator and the watcher
+bullpen config        # this repository's settings, and where each comes from (see settings.md)
+bullpen rules         # the rules every worker and reviewer gets, and where they're from (--edit: yours)
+bullpen keys          # the Rex config line for bullpen's key bindings (--install adds it)
+bullpen doctor        # check the setup: a line per check, with the fix for what's wrong (see doctor.md)
 bullpen later "Tidy the errors"  # an idea for later, on the backlog (see backlog.md)
 bullpen issues --now  # read the open GitHub issues into the backlog, each asking for a yes (see issues.md)
 bullpen issue 12      # one issue for reading, its text in a fence
 bullpen stats BP-1    # where its time went: its timeline and totals (no ID: across closed tasks; see stats.md)
+bullpen tour BP-1     # a guided tour of a ready task's change, step by step (see tours.md)
+bullpen tour-comment BP-1 2 "Say why."   # a draft comment on its step 2 (no STEP: list them; --remove N)
 ```
 
 A command that can't act on a task says its status in the board's words, with the
@@ -102,7 +112,9 @@ takes you back to the board.
 A worker finishes with `bullpen ready <ID> --summary-file <file>`, which refuses
 uncommitted changes, pushes the branch and opens (or updates) the pull request, or,
 when the task leaves nothing to merge, with `bullpen finish <ID> --summary-file <file>`
-(`--keep-branch` when its branch is to be kept unmerged: see finish.md).
+(`--keep-branch` when its branch is to be kept unmerged: see finish.md). A reviewer
+ends with `bullpen verdict <ID> approve --summary-file <file>`, or `changes` to send the
+task back with its findings (see review.md).
 
 The pull request's title is the task's title alone, with no ID: a squash merge makes
 the title a commit's subject on the base, where `BP-3` means nothing. Its description is

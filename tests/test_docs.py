@@ -1,11 +1,12 @@
-"""The docs: every relative link in README.md, GLOSSARY.md and docs/ leads somewhere, and
-the board's tables say what the board does."""
+"""The docs: every relative link in README.md, GLOSSARY.md and docs/ leads somewhere, the
+board's tables say what the board does, and every command and setting is named in its page."""
 
+import json
 import re
 import subprocess
 import unittest
 
-from support import setUpModule, tearDownModule, ROOT  # a temp folder for each module
+from support import setUpModule, tearDownModule, ROOT, BullpenTest  # a temp folder for each module
 
 
 def slug(heading):
@@ -36,6 +37,22 @@ def rules_paths(text):
                 continue
             if "/" in word or re.fullmatch(r"[\w.-]+\.(md|rs|py|lua|toml|sh|json)", word):
                 yield word
+
+
+def code(text):
+    """The text of a page's code: its blocks and its spans (``a `b` c`` too), a span's line
+    breaks as spaces."""
+    blocks = re.findall(r"^```.*?^```", text, flags=re.M | re.S)
+    spans = re.findall(r"(?s:``.+?``)|`[^`]+`", re.sub(r"^```.*?^```", "", text, flags=re.M | re.S))
+    return re.sub(r"\s+", " ", " ".join(blocks + spans))
+
+
+def unnamed(page, names, forms):
+    """The names the page doesn't name in its code (a span or a block) in any of
+    forms(name): `bullpen accept`, or `merge` / `--merge`."""
+    text = code((ROOT / page).read_text())
+    named = lambda n: any(re.search(r"(?<![\w-])" + re.escape(f) + r"(?![\w-])", text) for f in forms(n))
+    return [n for n in names if not named(n)]
 
 
 class DocsTest(unittest.TestCase):
@@ -108,6 +125,46 @@ class DocsTest(unittest.TestCase):
         table = [re.match(r"`([^`]+)`", c).group(1) for c in cells.values() if re.match(r"`[^`]+`", c)]
         listed = [k for k in table if k in board]
         self.assertEqual(listed, board)
+
+
+    def test_a_name_missing_from_its_page_is_caught(self):
+        self.assertEqual(unnamed("docs/commands.md", ["accept", "acept", "tour", "tour-c"],
+                                 lambda n: [f"bullpen {n}"]), ["acept", "tour-c"])
+        self.assertEqual(code("a `bullpen config\n--notify all` b\n```sh\nbullpen ls\n```\n"),
+                         "```sh bullpen ls ``` `bullpen config --notify all`")
+
+
+class DocsNamesTest(BullpenTest):
+    """Every command and setting is named in its docs page, read from the program's own
+    tables. The internal ones are exempt by a rule, not a list: a command in no group of
+    the help (`_commands`'s group null), and a setting `bullpen config` doesn't list
+    (bullpen's own bookkeeping, as `next`)."""
+
+    def commands(self):
+        table = json.loads(self.bp("_commands").stdout)
+        return [c["name"] for c in table if c["group"] is not None]
+
+    def settings(self):
+        every = json.loads(self.bp("config", "--json").stdout)["sources"]
+        listed = set(re.findall(r"(?m)^  (\w+)  ", self.bp("config").stdout))
+        return [k for k in every if k in listed]
+
+    def tables(self):
+        """(page, the names it must name, how a name is written there): a table more
+        (doctor's checks, say) is a row more."""
+        return [
+            ("docs/commands.md", self.commands(), lambda n: [f"bullpen {n}"]),
+            ("docs/settings.md", self.settings(), lambda n: [n, "--" + n.replace("_", "-")]),
+        ]
+
+    def test_every_command_and_setting_is_named_in_its_page(self):
+        self.bp("up")
+        for page, names, forms in self.tables():
+            self.assertGreater(len(names), 20, page)
+            self.assertEqual(unnamed(page, names, forms), [], page)
+        self.assertNotIn("_event", self.commands())
+        self.assertNotIn("next", self.settings())
+        self.assertIn("board_layout", self.settings())
 
 
 if __name__ == "__main__":
