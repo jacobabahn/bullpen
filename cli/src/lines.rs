@@ -2,8 +2,22 @@
 //! eprintln! and writeln! write each piece of their format apart ("bullpen: `", the
 //! name, the rest), so in a log several processes append to at once (jobs.log: a job's
 //! output, another job's, their supervisors' lines) one line could land in the middle of
-//! another (BP-198). This module comes first in main.rs: its eprintln! and println! are
-//! the ones the whole crate uses, and a line to a log is written with line_to!.
+//! another (BP-198). This module comes first in main.rs: its eprint!, eprintln!, print! and
+//! println! are the ones the whole crate uses, and a line to a log is written with line_to!.
+
+/// eprint!, its text formatted first and written in one go.
+macro_rules! eprint {
+    ($($arg:tt)*) => {
+        std::eprint!("{}", format!($($arg)*))
+    };
+}
+
+/// print!, the same.
+macro_rules! print {
+    ($($arg:tt)*) => {
+        std::print!("{}", format!($($arg)*))
+    };
+}
 
 /// eprintln!, its line formatted first and written in one go.
 macro_rules! eprintln {

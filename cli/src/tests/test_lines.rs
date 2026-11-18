@@ -32,11 +32,13 @@ fn a_line_to_a_log_is_one_write() {
 }
 
 #[test]
-fn eprintln_and_println_print_what_stds_do() {
-    // what they print, the test harness takes: here, that each form builds
+fn each_form_of_the_print_macros_builds() {
+    // what they print, the test harness takes: nothing to check but that they build
     let name = "x";
     eprintln!();
     eprintln!("bullpen: `{name}` and {}", 1);
     println!();
     println!("{name} {}", 2);
+    eprint!("{name} {}\n", 3);
+    print!("{name} {}\n", 4);
 }

@@ -106,7 +106,7 @@ sessions too: a job still the command's child died with it (BP-118). A job's out
 goes to `jobs.log` in the repo's state folder, and a job that fails without saying so
 itself (killed, or a traceback) is one news line: `Pushing main to backup failed:
 ... Log: .../jobs.log`. Jobs often run at once (an accept's push and its rebuild), all
-appending to that log, so bullpen writes each of its lines in one go (`cli/src/lines.rs`):
+appending to that log, so bullpen writes each line it prints there in one go (`cli/src/lines.rs`):
 one job's line never lands in the middle of another's.
 
 A verdict's auto-accept is a job too (`_auto_accept`, its output in `jobs.log`), but the
