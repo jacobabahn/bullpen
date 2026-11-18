@@ -150,7 +150,7 @@ impl Draw<'_> {
         let px = self.px();
         let s = self.fonts.fit(s, weight, px, max.max(0.0));
         let base = self.baseline(y);
-        self.fonts.draw(self.pm, &s, weight, px, x, base, color)
+        self.fonts.draw(self.pm, &s, weight, px, (x, base), color)
     }
 
     fn fill(&mut self, path: &Path, color: [u8; 4]) {

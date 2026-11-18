@@ -117,9 +117,9 @@ impl Fonts {
         if room <= 0.0 { String::new() } else { out + "…" }
     }
 
-    /// Draw text with its baseline at (x, y), in colour; returns where the pen ends.
-    pub fn draw(&mut self, pm: &mut Pixmap, text: &str, weight: Weight, px: f32, x: f32, y: f32, color: [u8; 4]) -> f32 {
-        let mut pen = x;
+    /// Draw text from `at`, the start of its baseline, in colour; returns where the pen ends.
+    pub fn draw(&mut self, pm: &mut Pixmap, text: &str, weight: Weight, px: f32, at: (f32, f32), color: [u8; 4]) -> f32 {
+        let (mut pen, y) = at;
         for c in text.chars() {
             let (fallback, _, gid) = self.glyph_of(weight, c);
             // a quarter pixel's steps, so a glyph is drawn where it falls
