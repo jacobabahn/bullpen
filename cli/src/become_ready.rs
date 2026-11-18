@@ -1,7 +1,9 @@
 //! The step into `ready` (`make_ready`): what every path into it does, the way the
 //! task became ready (`How`) deciding the parts that differ. The risk label, the
-//! status, the save, then auto-accept or the news that it is ready. Its callers keep
-//! only what is theirs: publishing the branch, the review record.
+//! status, the save, then auto-accept or the news that it is ready. A branch with no
+//! commits is recorded here as nothing to merge ("nothing_to_merge", which core's
+//! `nothing_to_merge` reads). Its callers keep only what is theirs: publishing the
+//! branch, the review record.
 
 use crate::auto_accept::start_auto_accept;
 use crate::news::ready_news;
@@ -10,7 +12,7 @@ use crate::saves::save;
 use bullpen_core::json::{s, Obj};
 use bullpen_core::task::{auto_accepts, commits, set_status, where_};
 use bullpen_core::{Repo, Res};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 /// How a task became ready.
 pub enum How<'a> {
@@ -34,8 +36,13 @@ pub fn make_ready(repo: &Repo, t: &mut Obj, base_ref: &str, how: How) -> Res<()>
             t.insert("risk".into(), Value::Null);
         }
     }
-    let why = matches!(how, How::Nothing).then_some("Nothing to merge (no commits)");
-    set_status(t, "ready", why, None);
+    let nothing = matches!(how, How::Nothing);
+    set_status(t, "ready", nothing.then_some("Nothing to merge (no commits)"), None);
+    if nothing {
+        t.insert("nothing_to_merge".into(), json!(true)); // what core's nothing_to_merge reads
+    } else {
+        t.shift_remove("nothing_to_merge");
+    }
     save(repo, t)?;
     if matches!(how, How::Kept(_)) && auto_accepts(repo, t) {
         // not waited for: a `ready` runs in the worker's pane, which accepting closes

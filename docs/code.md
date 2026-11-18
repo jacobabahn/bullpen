@@ -84,6 +84,17 @@ the other tasks), and the worker's pane last, since the step may run in it. Each
 caller says only what to tell and how to merge. Nothing calls the run queue: the save
 moves it.
 
+## Making a task ready
+
+`ready` (review off, or a branch with no commits) and an approval kept at `ready` make
+the task ready through one step, `make_ready` in `cli/src/become_ready.rs`, told how it
+became ready (`How`): the risk label, the status, the save, then auto-accept (only for
+an approval, as a job started one way, `start_auto_accept`) or the ready news. A branch
+with no commits is recorded there as `nothing_to_merge`, the field core's
+`nothing_to_merge` reads; a task made ready before that field is read by its why. The
+verdict, a worker's turn that leaves a ready task's code as approved, and a rebase that
+keeps an approval still make it ready on their own.
+
 ## Where a pane lives
 
 A worker's, reviewer's or diff's pane goes where its placement in `cli/src/panes/` puts it:

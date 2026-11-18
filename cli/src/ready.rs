@@ -109,6 +109,7 @@ fn ready(repo: &Repo, t: &mut Obj, a: &Args) -> Res<()> {
     }
     t.shift_remove("from_ready");
     t.shift_remove("keep_branch"); // an earlier `finish --keep-branch`: it is to merge now
+    t.shift_remove("nothing_to_merge"); // an earlier ready's with no commits: this one says again
     let local = is_local(repo, t)?;
     t.insert("local".into(), json!(local)); // its mode, fixed now: every later step goes by it
     let review = truthy(repo.cfg.get("review"));

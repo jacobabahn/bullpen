@@ -210,12 +210,19 @@ fn what_needs_you_and_what_waits_on_your_accept() {
         .filter(|st| awaits_accept(st))
         .collect();
     assert_eq!(accept, ["ready", "finished"]);
-    let nothing = json!({"status": "ready", "why": "Nothing to merge (no commits)"});
+    let nothing = json!({"status": "ready", "why": "Nothing to merge (no commits)", "nothing_to_merge": true});
     assert!(nothing_to_merge(&task(nothing)));
+    let reworded = json!({"status": "ready", "why": "No commits", "nothing_to_merge": true});
+    assert!(nothing_to_merge(&task(reworded))); // the field says it, not the wording
+    let cleared = json!({"status": "ready", "why": "Nothing to merge here", "nothing_to_merge": false});
+    assert!(!nothing_to_merge(&task(cleared)));
     assert!(!nothing_to_merge(&task(json!({"status": "ready", "why": "Approved"}))));
     assert!(!nothing_to_merge(&task(json!({"status": "ready"}))));
-    let review = json!({"status": "review", "why": "Nothing to merge (no commits)"});
+    let review = json!({"status": "review", "why": "Nothing to merge (no commits)", "nothing_to_merge": true});
     assert!(!nothing_to_merge(&task(review)));
+    // a task made ready before the field: its why says it
+    let old = json!({"status": "ready", "why": "Nothing to merge (no commits)"});
+    assert!(nothing_to_merge(&task(old)));
 }
 
 #[test]

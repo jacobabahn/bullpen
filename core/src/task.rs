@@ -13,8 +13,8 @@
 //!   limit      it couldn't be continued after the usage limit
 //!   setup      its worktree's setup failed, so its worker never started
 //!   other      a stop from before stops were recorded, of no known kind
-//! why is the stop in words, for people and the board: nothing goes by its wording but
-//! a ready task's "Nothing to merge" (`nothing_to_merge`).
+//! why is the stop in words, for people and the board: nothing goes by its wording.
+//! A ready task with nothing to merge says so in a field of its own (`nothing_to_merge`).
 //! ask and ok are said of the status they were set in, and end with it.
 
 use crate::json::{get, obj, s, truthy, Obj};
@@ -178,13 +178,20 @@ pub fn awaits_accept(status: &str) -> bool {
 }
 
 /// Is the task ready with nothing to merge (its branch had no commits at `ready`)?
-/// It needs no review, no tour and no merge: accepting it only cleans up.
+/// It needs no review, no tour and no merge: accepting it only cleans up. The step
+/// into ready records it ("nothing_to_merge"); a task made ready before that field
+/// has none, and its why says it instead (OLD_NOTHING_TO_MERGE).
 pub fn nothing_to_merge(t: &Obj) -> bool {
-    s(t, "status") == "ready" && s(t, "why").starts_with(NOTHING_TO_MERGE)
+    s(t, "status") == "ready"
+        && match t.get("nothing_to_merge") {
+            Some(v) => truthy(Some(v)),
+            None => s(t, "why").starts_with(OLD_NOTHING_TO_MERGE),
+        }
 }
 
-/// How a ready task's why starts when its branch has no commits.
-pub const NOTHING_TO_MERGE: &str = "Nothing to merge";
+/// How a ready task's why starts when its branch has no commits, read only for a task
+/// from before the "nothing_to_merge" field.
+const OLD_NOTHING_TO_MERGE: &str = "Nothing to merge";
 
 /// A task's number: 3 for BP-3 (0 when its ID has none).
 pub fn task_num(t: &Obj) -> i64 {

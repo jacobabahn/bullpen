@@ -11,7 +11,7 @@ fn only_a_ready_task_with_a_change_and_no_word_of_risk_is_unlabelled() {
     assert!(!unlabelled(&task(json!({"status": "ready", "risk": {"level": "low"}}))));
     assert!(!unlabelled(&task(json!({"status": "ready", "risk": null})))); // said: it has none
     assert!(!unlabelled(&task(
-        json!({"status": "ready", "why": "Nothing to merge (no commits)"})
+        json!({"status": "ready", "why": "Nothing to merge (no commits)", "nothing_to_merge": true})
     )));
     assert!(!unlabelled(&task(json!({"status": "review"}))));
     assert!(!unlabelled(&task(json!({"status": "finished"}))));

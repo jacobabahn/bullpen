@@ -34,7 +34,7 @@ fn confirm_names_the_merge() {
     assert!(!confirm_risky(Action::Accept, &t, &merge("squash")));
     assert_eq!(confirm_text(Action::Drop, &t, &merge("rebase")), "Drop it and close PR #7?");
     assert!(confirm_risky(Action::Drop, &t, &merge("rebase")), "a drop is always red");
-    let nothing = task("BP-1", "ready").with(json!({"why": "Nothing to merge (no commits)"}));
+    let nothing = task("BP-1", "ready").with(json!({"why": "Nothing to merge (no commits)", "nothing_to_merge": true}));
     assert_eq!(confirm_text(Action::Accept, &nothing, &merge("rebase")), "Accept and clean up?");
     assert!(!confirm_risky(Action::Accept, &nothing, &merge("rebase")), "nothing to review");
     let fin = task("BP-1", "finished");

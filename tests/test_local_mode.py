@@ -132,7 +132,14 @@ class LocalModeTest(unittest.TestCase):
         self.assertIn("uncommitted", self.bp("ready", tid, cwd=wt, ok=False).stderr)
         (Path(wt) / "dirty.txt").unlink()
         self.bp("ready", tid, cwd=wt)
-        self.assertEqual(self.show(tid)["why"], "Nothing to merge (no commits)")
+        t = self.show(tid)
+        self.assertEqual((t["why"], t["nothing_to_merge"], t["risk"]), ("Nothing to merge (no commits)", True, None))
+        # a later ready with commits has something to merge (and goes to review): the field goes
+        self.commit(wt, "a.txt", "a\n", "Add a")
+        self.bp("ready", tid, cwd=wt)
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("review", None))
+        self.assertNotIn("nothing_to_merge", t)
 
     def test_rules_from_the_local_base(self):
         (self.repo / ".bullpen").mkdir()
