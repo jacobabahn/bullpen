@@ -11,6 +11,7 @@ pub mod start;
 
 use crate::args::{flag, pos, value, Arg, Args, Nargs};
 use crate::coordinators::calling_coordinator;
+use crate::issues::Decision;
 use crate::news::kind::Kind;
 use bullpen_core::backlog::{self, is_item_id, is_open, Move};
 use bullpen_core::json::{s, Obj};
@@ -247,11 +248,11 @@ fn change(repo: &Repo, id: &str, a: &Args, who: &Caller) -> Res<i32> {
         Ok(said)
     })?;
     println!("{}", said.join("\n"));
-    if matches!(act, Some("--keep" | "--drop")) {
-        crate::issues::decided(repo, id)?; // an issue's item: the yes or no is remembered
-    }
-    if act == Some("--drop") {
-        crate::issues::write::declined(repo, backlog::load(repo)?.item(id)?, a.arg("why"))?;
+    // an issue's item: the yes or no is remembered, and a no is written back to the issue
+    match act {
+        Some("--keep") => crate::issues::decided(repo, id, Decision::Yes)?,
+        Some("--drop") => crate::issues::decided(repo, id, Decision::No(a.arg("why")))?,
+        _ => {}
     }
     if act == Some("--keep") && matches!(who, Caller::Person) {
         crate::issues::judge::yes_needs_brief(repo, backlog::load(repo)?.item(id)?)?;

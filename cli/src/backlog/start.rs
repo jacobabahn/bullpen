@@ -84,6 +84,6 @@ pub fn make_task(repo: &Repo, id: &str, brief: Option<&str>, started_by: &str, f
         it.shift_remove("skipped");
         Ok(tid)
     })?;
-    crate::issues::decided(repo, id)?; // an issue's item started is a yes
+    crate::issues::decided(repo, id, crate::issues::Decision::Yes)?; // an issue's item started is a yes
     Ok(tid)
 }

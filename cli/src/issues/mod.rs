@@ -212,9 +212,17 @@ fn close_gone(seen: &mut Obj, b: &mut Backlog, open: &[&Obj]) -> Vec<Change> {
     said
 }
 
+/// What was said to an issue's item: a yes (`later --keep`, a start, a judgement's
+/// keep), or the person's no (`later --drop`), with their reason if they gave one.
+pub enum Decision<'a> {
+    Yes,
+    No(Option<&'a str>),
+}
+
 /// `later` kept, dropped or started item id: if it is an issue's, its record says so
-/// from now on, and the issue is never asked about again.
-pub fn decided(repo: &Repo, id: &str) -> Res<()> {
+/// from now on, and the issue is never asked about again. A no is written back to the
+/// issue too (write.rs's `declined`).
+pub fn decided(repo: &Repo, id: &str, said: Decision) -> Res<()> {
     let b = backlog::load(repo)?;
     let Some(item) = b.item(id).ok().filter(|i| s(i, "by") == "issue") else {
         return Ok(());
@@ -225,7 +233,11 @@ pub fn decided(repo: &Repo, id: &str) -> Res<()> {
             store::settle(rec, item);
         }
         Ok(())
-    })
+    })?;
+    match said {
+        Decision::No(why) => write::declined(repo, item, why),
+        Decision::Yes => Ok(()),
+    }
 }
 
 /// An issue's item that a judgement took back off the list: its record is undecided

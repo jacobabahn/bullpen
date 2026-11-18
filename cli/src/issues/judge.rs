@@ -212,7 +212,7 @@ pub fn judge(repo: &Repo, n: u32, a: &Args) -> Res<i32> {
         }
     }
     println!("{}", out.join("\n"));
-    super::decided(repo, &id)?; // kept by itself is a yes: never asked again
+    super::decided(repo, &id, super::Decision::Yes)?; // kept by itself is a yes: never asked again
     if by_itself && asks.is_some() {
         super::undecided(repo, &id)?; // taken back: it asks again
     }

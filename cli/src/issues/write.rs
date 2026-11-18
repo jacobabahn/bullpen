@@ -252,8 +252,8 @@ pub fn started(repo: &Repo, t: &mut Obj) -> Res<()> {
     Ok(())
 }
 
-/// The person said no to an issue's item (`later L --drop`): `bullpen: declined` on the
-/// issue, and with comments, a comment with their reason if they gave one.
+/// The person said no to an issue's item (`later L --drop`, through `decided`):
+/// `bullpen: declined` on the issue, and with comments, a comment with their reason if they gave one.
 pub fn declined(repo: &Repo, item: &Obj, why: Option<&str>) -> Res<()> {
     let Some(n) = number_of_item(item).filter(|_| writes(repo)) else {
         return Ok(());
@@ -263,14 +263,8 @@ pub fn declined(repo: &Repo, item: &Obj, why: Option<&str>) -> Res<()> {
         None => "Declined.".to_string(),
     };
     if let Err(e) = mark(repo, slug(repo), n, DECLINED, None, &comment, &mut false) {
-        let id = s(item, "id");
-        let about: Obj = json!({"id": id}).as_object().cloned().unwrap_or_default();
-        told(
-            repo,
-            &about,
-            true,
-            &failed_line(n, id, &format!("mark it `{DECLINED}`"), &e),
-        )?;
+        let line = failed_line(n, s(item, "id"), &format!("mark it `{DECLINED}`"), &e);
+        told(repo, item, true, &line)?; // news about an item: to everyone, logged under its ID
     }
     Ok(())
 }
