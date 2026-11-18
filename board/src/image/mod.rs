@@ -24,6 +24,7 @@
 //! terminal doesn't draw images, the font can't be loaded or drawing fails, the list
 //! is text again and the message line says why.
 
+mod chip;
 mod font;
 mod frame;
 mod kitty;
@@ -31,6 +32,7 @@ mod list;
 mod pieces;
 mod png;
 mod render;
+mod shape;
 mod shown;
 mod sprite;
 pub mod term;

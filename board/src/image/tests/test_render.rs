@@ -291,3 +291,77 @@ fn a_groups_name_is_a_little_dim_so_its_titles_lead() {
     assert!(!has(&px, theme.fg));
     assert!(px.iter().any(|p| p[3] == theme.heading()[3]));
 }
+
+/// The box around what's drawn in an image: its first and last columns and rows.
+fn drawn_box(s: &Sheet) -> (u32, u32, u32, u32) {
+    let (w, h) = (s.pixmap.width(), s.pixmap.height());
+    let on: Vec<(u32, u32)> = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).filter(|&(x, y)| px_at(s, x, y)[3] > 0).collect();
+    let xs = on.iter().map(|p| p.0);
+    let ys = on.iter().map(|p| p.1);
+    (xs.clone().min().unwrap(), xs.max().unwrap(), ys.clone().min().unwrap(), ys.max().unwrap())
+}
+
+/// A faint pixel is the colour asked for: its alpha exactly, its colour within what
+/// storing it premultiplied rounds off.
+fn faintly(px: [u8; 4], c: [u8; 4]) -> bool {
+    px[3] == c[3] && (0..3).all(|k| px[k].abs_diff(c[k]) <= 8)
+}
+
+fn flagged(flag: Flag, selected: bool) -> Rows {
+    let d = DetailRow { text: "what it asks".into(), loud: true, lead: 0, selected, stale: false, flag: Some(flag) };
+    rows(vec![Row::Task(TaskRow { flag: Some(flag), selected, ..task("BP-1", "needs") }), Row::Detail(d)])
+}
+
+#[test]
+fn a_task_that_needs_you_is_washed_in_its_colour_over_the_cards_rectangle_with_a_round_bar() {
+    let theme = Theme::default();
+    for size in [TextSize::Small, TextSize::Medium, TextSize::Large] {
+        let (_, washed) = draw_in(&flagged(Flag::Needs, false), size);
+        let (_, card) = draw_in(&flagged(Flag::Needs, true), size);
+        // the wash covers what the card would
+        assert_eq!(drawn_box(&washed), drawn_box(&card), "{size:?}");
+        // in the flag's colour, faintly, where there's no type
+        let (_, x1, _, y1) = drawn_box(&washed);
+        let wash = px_at(&washed, x1 - 4, y1 / 2);
+        assert!(faintly(wash, theme.wash(Flag::Needs)), "{size:?}: {wash:?}");
+        let (_, _, top, _) = drawn_box(&washed);
+        // the bar: 3 pixels of amber across (a quarter of a cell in, two of them whole), its ends round
+        let mid = y1 / 2;
+        assert!((3..5).all(|x| px_at(&washed, x, mid) == solid(theme.yellow)) && px_at(&washed, 2, mid)[3] > 100, "{size:?}");
+        assert!(px_at(&washed, 4, top)[3] < 255, "{size:?}: the bar's end is round");
+    }
+    let (_, stopped) = draw_in(&flagged(Flag::Stopped, false), TextSize::Medium);
+    let (_, x1, _, y1) = drawn_box(&stopped);
+    assert!(faintly(px_at(&stopped, x1 - 4, y1 / 2), theme.wash(Flag::Stopped)));
+}
+
+#[test]
+fn the_selected_card_replaces_the_wash_and_the_bar_stays() {
+    let theme = Theme::default();
+    let (_, s) = draw_in(&flagged(Flag::Needs, true), TextSize::Medium);
+    let (_, x1, _, y1) = drawn_box(&s);
+    assert!(faintly(px_at(&s, x1 - 4, y1 / 2), theme.tint()));
+    assert_eq!(px_at(&s, 4, y1 / 2), solid(theme.yellow));
+}
+
+#[test]
+fn a_risk_is_a_chip_its_colour_on_its_colour_faintly() {
+    let theme = Theme::default();
+    let c = canvas(TextSize::Medium);
+    let r = rows(vec![Row::Task(TaskRow { risk: Some("high".into()), ..task("BP-1", "ready") })]);
+    let (_, s) = draw_in(&r, TextSize::Medium);
+    let fill = [theme.red.0, theme.red.1, theme.red.2, 46];
+    let (w, h) = (s.pixmap.width(), s.pixmap.height());
+    let filled: Vec<(u32, u32)> = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).filter(|&(x, y)| faintly(px_at(&s, x, y), fill)).collect();
+    let ys = filled.iter().map(|p| p.1);
+    let tall = ys.clone().max().unwrap() - ys.min().unwrap() + 1;
+    // a word and a half high (less its round ends' smoothed rows), its word in its colour
+    assert!(tall as f32 >= 1.5 * c.m.label - 2.0 && tall as f32 <= 1.5 * c.m.label, "{tall}");
+    assert!(has(&row_px(&draw(&r), 0), theme.red));
+    // the title makes room for it: the chip's width and the age's
+    let g = Geo { c, idw: 0.0 };
+    let fonts = Fonts::builtin();
+    let t = TaskRow { risk: Some("high".into()), ..task("BP-1", "ready") };
+    let want = fonts.width("3m", Weight::Bold, c.m.detail) + 0.5 * c.m.detail + chip::width(&fonts, "high", c.m.label);
+    assert_eq!(g.right_side(&t, &fonts), want);
+}

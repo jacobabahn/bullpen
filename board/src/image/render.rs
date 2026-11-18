@@ -3,21 +3,24 @@
 //! small type, more for medium and large), so a row needn't be a whole cell; the image
 //! itself is the list's block of cells. The type is real (font.rs), the marks are drawn
 //! shapes in the status colours (rings, a check, a diamond), the selected task sits on
-//! a card (a faint fill and edge, its mark inside) with its whole title, and a task
-//! that needs you has a bar at its left. The title is the loudest thing on a row: the
-//! ID, the age and the group's name are a detail's size. The marks that move are left
+//! a card (a faint fill and edge, its mark inside) with its whole title, a task that
+//! needs you on a wash of its colour with a round bar at its left, and a risk is a
+//! chip (chip.rs). The title is the loudest thing on a row: the ID, the age and the
+//! group's name are a detail's size. The marks that move are left
 //! out when the image look places them over the list (sprite.rs draws their frames with
 //! `Draw`). The list's last column has the scroll marks. Nothing here touches the
 //! terminal: given rows and a size in pixels, it lays them out and returns an image, or
 //! a window of pixels of them (pieces.rs), drawn as that part of the whole would be.
 
+use super::chip;
 use super::font::{Fonts, Weight};
+use super::shape::{arc_path, diamond, half, paint, rounded};
 use super::theme::{solid, Theme};
 use crate::model::TextSize;
 use crate::ui::rows::{Flag, ItemRow, Mark, Row, Rows, TaskRow};
 use std::f32::consts::PI;
 use std::ops::Range;
-use tiny_skia::{FillRule, LineCap, Paint, Path, PathBuilder, Pixmap, Rect, Stroke, Transform};
+use tiny_skia::{FillRule, LineCap, Path, PathBuilder, Pixmap, Stroke, Transform};
 
 /// An image's place on the terminal: its columns, and a cell's size in pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -38,8 +41,10 @@ impl Grid {
 pub struct Metrics {
     /// a task's title, the top line
     pub title: f32,
-    /// a detail line, a task's ID and age, a group's name, the message and the keys
+    /// a detail line, a task's ID and age, a group's name and the message
     pub detail: f32,
+    /// a label: a chip's word (a task's risk, the header's counts) and a key in its cap
+    pub label: f32,
     /// a title line's height, and a detail line's
     pub line: f32,
     pub detail_line: f32,
@@ -60,23 +65,24 @@ impl Metrics {
     /// set the type larger than a cell holds and give the rows the height it needs, a
     /// detail smaller than a title, and room: about three quarters of a title's size
     /// above each task, a little between its title and its lines, and the selected card
-    /// a quarter of it clear of the type.
+    /// a quarter of it clear of the type. A label is smaller than a detail at every size.
     pub fn of(size: TextSize, cell_h: u32) -> Metrics {
         let ch = cell_h as f32;
-        let (t, d) = match size {
-            TextSize::Small => (0.62, 0.62),
+        let (t, d, l) = match size {
+            TextSize::Small => (0.62, 0.62, 0.50),
             // a terminal's own type is about 0.8 of its cell's height
-            TextSize::Medium => (0.80, 0.70),
-            TextSize::Large => (0.92, 0.80),
+            TextSize::Medium => (0.80, 0.70, 0.60),
+            TextSize::Large => (0.92, 0.80, 0.69),
         };
-        let (title, detail) = ((t * ch).max(6.0), (d * ch).max(6.0));
+        let (title, detail, label) = ((t * ch).max(6.0), (d * ch).max(6.0), (l * ch).max(5.0));
         if size == TextSize::Small {
             let (line, detail_line, gap) = (ch, ch, ch);
-            return Metrics { title, detail, line, detail_line, pad: 0.0, head_pad: 0.0, gap, title_gap: 0.0, inset: -1.0 };
+            return Metrics { title, detail, label, line, detail_line, pad: 0.0, head_pad: 0.0, gap, title_gap: 0.0, inset: -1.0 };
         }
         Metrics {
             title,
             detail,
+            label,
             line: (1.40 * title).round(),
             detail_line: (1.42 * detail).round(),
             pad: (0.74 * title).round(),
@@ -275,42 +281,60 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
     // the window: the rows are drawn where they are in the layout, moved up by its top
     // (whole pixels), so a row's edges fall on the same fractions of a pixel in any image
     d.shift = cut.y as f32 - EDGE as f32;
-    let at = |p: &Place| p.y as f32;
-    // the selected task's block (its row and its details) sits on one card
-    let mut block: Option<(f32, f32)> = None;
-    for p in &places {
-        let row = &rows.rows[p.row];
-        let (y, bottom) = (at(p), at(p) + p.h as f32);
-        let tinted = match row {
-            Row::Task(t) => t.selected,
-            Row::Detail(dr) => dr.selected,
-            Row::Item(it) => it.selected,
-            Row::ItemDetail(_) => true,
-            _ => false,
-        };
-        block = match (block, tinted) {
-            (Some((top, _)), true) if !row.is_entry() => Some((top, bottom)),
-            (b, true) => {
-                d.tint(b);
-                Some((if row.is_entry() { y + c.m.pad } else { y }, bottom))
-            }
-            (b, false) => {
-                d.tint(b);
-                None
-            }
-        };
+    // behind each task's block (its row and its lines): the selected one's card, or the
+    // wash of one that needs you, and that one's bar
+    for b in blocks(rows, &places, c.m.pad) {
+        match (b.selected, b.flag) {
+            (true, _) => d.card(b.top, b.bottom),
+            (false, Some(f)) => d.wash(b.top, b.bottom, f),
+            _ => {}
+        }
+        if let Some(f) = b.flag {
+            d.bar(b.top, b.bottom, f);
+        }
     }
-    d.tint(block);
+    let at = |p: &Place| p.y as f32;
     for p in &places {
         let (y, h) = (at(p), p.h as f32);
-        // a row outside the window draws nothing (its tint and bar may reach in, above)
+        // a row outside the window draws nothing (its card, wash and bar may reach in, above)
         if y + h + c.m.pad + EDGE as f32 >= cut.y as f32 && y <= (cut.y + height + EDGE) as f32 {
-            d.row(&rows.rows[p.row], &laid.titles[p.row], y, h, (cut.bare)(p.row));
+            d.row(&rows.rows[p.row], &laid.titles[p.row], y, (cut.bare)(p.row));
         }
     }
     let mut pm = pm.clone_rect(tiny_skia::IntRect::from_xywh(0, EDGE as i32, width, height).ok_or_else(made)?).ok_or_else(made)?;
     Draw::new(&mut pm, fonts, c, laid.idw).scroll_marks(cut.marks, height as f32);
     Ok(Sheet { pixmap: pm, places })
+}
+
+/// A task's (or an item's) block: from its first line's top to its last line's bottom,
+/// whether it's selected, and its flag.
+struct Block {
+    top: f32,
+    bottom: f32,
+    selected: bool,
+    flag: Option<Flag>,
+}
+
+/// The blocks of the rows placed: each task's or item's row with the lines under it (a
+/// window's first lines, under a row above it, a block of their own).
+fn blocks(rows: &Rows, places: &[Place], pad: f32) -> Vec<Block> {
+    let mut out: Vec<Block> = Vec::new();
+    let mut open = false;
+    for p in places {
+        let row = &rows.rows[p.row];
+        let (y, bottom) = (p.y as f32, (p.y + p.h) as f32);
+        let block = |top: f32, selected: bool, flag: Option<Flag>| Block { top, bottom, selected, flag };
+        match row {
+            Row::Task(t) => out.push(block(y + pad, t.selected, t.flag)),
+            Row::Item(i) => out.push(block(y + pad, i.selected, None)),
+            Row::Detail(_) | Row::ItemDetail(_) if open => out.last_mut().expect("a block is open").bottom = bottom,
+            Row::Detail(dr) => out.push(block(y, dr.selected, dr.flag)),
+            Row::ItemDetail(_) => out.push(block(y, true, None)),
+            _ => {}
+        }
+        open = row.is_entry() || row.is_detail();
+    }
+    out
 }
 
 /// The ID column's width in pixels: the widest ID in the list, so titles line up as it scrolls.
@@ -375,18 +399,19 @@ impl Geo {
 
     /// The width a task's age (and risk) take at the right, as `task` draws them.
     fn right_side(&self, t: &TaskRow, fonts: &Fonts) -> f32 {
-        let px = self.c.m.title;
         let mut w = fonts.width(&t.age, Weight::Bold, self.c.m.detail);
         if let Some(level) = &t.risk {
             let gap = if t.age.is_empty() { 0.0 } else { 0.5 * self.c.m.detail };
-            w += gap + fonts.width(level, Weight::Bold, px);
+            w += gap + chip::width(fonts, level, self.c.m.label);
         }
         w
     }
 
-    /// Where a task's title's first line must end: short of its risk and age.
+    /// Where a task's title's first line must end: short of its risk and age, by less
+    /// before a chip, whose own room around its word is a gap too.
     fn task_right(&self, t: &TaskRow, fonts: &Fonts) -> f32 {
-        self.c.right() - self.right_side(t, fonts) - 0.8 * self.c.m.title
+        let gap = if t.risk.is_some() { 0.65 } else { 0.8 };
+        self.c.right() - self.right_side(t, fonts) - gap * self.c.m.title
     }
 
     /// A row's height in whole pixels, with its title on `lines` lines.
@@ -491,33 +516,73 @@ impl<'a> Draw<'a> {
         self.pm.stroke_path(path, &paint(color), &stroke, t, None);
     }
 
-    /// The selected task's (or item's) block, from its first line's top to its last
-    /// line's bottom: a card, a faint fill with a faint edge, from a quarter of a cell in
+    /// What a block from `top` to `bottom` sits on (Block): from a quarter of a cell in
     /// (its mark inside it) to half a cell past where text ends, clear of the type above
-    /// and below by `inset`, its last into the space above the next task.
-    fn tint(&mut self, block: Option<(f32, f32)>) {
-        let Some((top, bottom)) = block else { return };
-        let m = self.m();
-        let (top, bottom) = (top - m.inset, bottom + m.inset);
-        let (x, w) = (0.25 * self.c(), self.right() + 0.25 * self.c());
-        let r = 0.35 * m.title;
-        if let Some(p) = rounded(x, top, w, bottom - top, r) {
-            let fill = self.theme.tint();
-            self.fill(&p, fill);
-        }
-        // the edge, drawn inside the card's own rectangle
-        let lw = 1.5;
-        if let Some(p) = rounded(x + lw / 2.0, top + lw / 2.0, w - lw, bottom - top - lw, r - lw / 2.0) {
-            let edge = self.theme.edge();
-            let t = Transform::from_translate(0.0, -self.shift);
-            let stroke = Stroke { width: lw, ..Stroke::default() };
-            self.pm.stroke_path(&p, &paint(edge), &stroke, t, None);
+    /// and below by `inset`, the last into the space above the next task. As x, y, w, h.
+    fn panel(&self, top: f32, bottom: f32) -> (f32, f32, f32, f32) {
+        let inset = self.m().inset;
+        (0.25 * self.c(), top - inset, self.right() + 0.25 * self.c(), bottom - top + 2.0 * inset)
+    }
+
+    /// The selected task's (or item's) card: a faint fill with a faint edge.
+    fn card(&mut self, top: f32, bottom: f32) {
+        let (x, y, w, h) = self.panel(top, bottom);
+        let r = 0.35 * self.m().title;
+        let (fill, edge) = (self.theme.tint(), self.theme.edge());
+        self.rounded_fill(x, y, w, h, r, fill);
+        self.rounded_edge(x, y, w, h, r, 1.5, edge);
+    }
+
+    /// Behind a task that needs you (amber) or whose agent stopped (red): its colour,
+    /// faintly, over the card's rectangle.
+    fn wash(&mut self, top: f32, bottom: f32, flag: Flag) {
+        let (x, y, w, h) = self.panel(top, bottom);
+        let color = self.theme.wash(flag);
+        self.rounded_fill(x, y, w, h, 0.35 * self.m().title, color);
+    }
+
+    /// The bar at the left of a task that needs you or stopped, in its colour, as tall
+    /// as its wash (or its card), with round ends.
+    fn bar(&mut self, top: f32, bottom: f32, flag: Flag) {
+        let (x, y, _, h) = self.panel(top, bottom);
+        let w = (0.26 * self.c()).max(3.0);
+        let color = solid(self.theme.flag(flag));
+        self.rounded_fill(x, y, w, h, w / 2.0, color);
+    }
+
+    /// A rectangle with rounded corners, filled.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn rounded_fill(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, color: [u8; 4]) {
+        if let Some(p) = rounded(x, y, w, h, r) {
+            self.fill(&p, color);
         }
     }
 
-    /// A row whose top is y and height h; a task's or item's title on `lines`; its mark
-    /// left out when `bare`.
-    fn row(&mut self, row: &Row, lines: &[String], y: f32, h: f32, bare: bool) {
+    /// A rounded rectangle's edge, `lw` wide, drawn inside it.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn rounded_edge(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, lw: f32, color: [u8; 4]) {
+        if let Some(p) = rounded(x + lw / 2.0, y + lw / 2.0, w - lw, h - lw, r - lw / 2.0) {
+            let t = Transform::from_translate(0.0, -self.shift);
+            let stroke = Stroke { width: lw, ..Stroke::default() };
+            self.pm.stroke_path(&p, &paint(color), &stroke, t, None);
+        }
+    }
+
+    /// Text in type `px`, centred in a box `h` high whose top is y (a chip's or a
+    /// keycap's), from x; returns where it ends.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn boxed(&mut self, px: f32, s: &str, weight: Weight, x: f32, y: f32, h: f32, color: [u8; 4]) -> f32 {
+        let base = y + ((h + self.fonts.cap_height(px)) / 2.0).round() - self.shift;
+        self.fonts.draw(self.pm, s, weight, px, (x, base), color)
+    }
+
+    pub(super) fn fonts(&self) -> &Fonts {
+        self.fonts
+    }
+
+    /// A row whose top is y; a task's or item's title on `lines`; its mark left out
+    /// when `bare`.
+    fn row(&mut self, row: &Row, lines: &[String], y: f32, bare: bool) {
         let m = self.m();
         let (fg, dim) = (self.theme.text(), self.theme.dim());
         let left = self.c();
@@ -536,9 +601,8 @@ impl<'a> Draw<'a> {
                 let gap = 0.5 * self.px();
                 self.text(&count.to_string(), Weight::Regular, end + gap, y, self.right() - end - gap, dim);
             }
-            Row::Task(t) => self.task(t, lines, y, h, bare),
+            Row::Task(t) => self.task(t, lines, y, bare),
             Row::Detail(d) => {
-                self.flag(d.flag, y, h);
                 let color = if d.selected || d.loud { fg } else { dim };
                 let (age, rest) = crate::model::split_at_width(&d.text, d.lead);
                 let x = self.text_x();
@@ -570,23 +634,10 @@ impl<'a> Draw<'a> {
         }
     }
 
-    /// The bar beside a task that needs you (amber) or whose agent stopped (red), from y
-    /// for h: its rows' bars meet, so it runs down the task's block.
-    fn flag(&mut self, flag: Option<Flag>, y: f32, h: f32) {
-        let Some(f) = flag else { return };
-        let color = if f == Flag::Stopped { self.theme.red } else { self.theme.yellow };
-        let w = (0.22 * self.c()).max(2.0);
-        let rect = Rect::from_xywh(0.2 * self.c(), y, w, h);
-        if let Some(p) = rect.map(PathBuilder::from_rect) {
-            self.fill(&p, solid(color));
-        }
-    }
-
-    /// A task's row, whose top is y and height h: the space above it, then its first
+    /// A task's row, whose top is y: the space above it, then its first
     /// line (the mark, ID, title, risk and age), then the rest of its title's lines.
-    fn task(&mut self, t: &TaskRow, lines: &[String], y: f32, h: f32, bare: bool) {
+    fn task(&mut self, t: &TaskRow, lines: &[String], y: f32, bare: bool) {
         let y = y + self.m().pad;
-        self.flag(t.flag, y, h - self.m().pad);
         let (cx, cy) = (1.5 * self.c(), y + self.h() / 2.0);
         if !bare {
             self.mark(&t.mark, cx, cy, 0.0);
@@ -597,7 +648,7 @@ impl<'a> Draw<'a> {
             let r = 0.2 * self.px();
             self.backlog_mark(id_end + 0.25 * self.px() + r, cy, r);
         }
-        // the right side: the risk, a coloured word, then the age at a detail's size
+        // the right side: the risk as a chip, then the age at a detail's size
         let small = self.m().detail;
         let mut right = self.right();
         let age_w = self.fonts.width(&t.age, Weight::Bold, small);
@@ -612,9 +663,8 @@ impl<'a> Draw<'a> {
         right -= age_w;
         if let Some(level) = &t.risk {
             let gap = if t.age.is_empty() { 0.0 } else { 0.5 * small };
-            let w = self.width(level, Weight::Bold);
             let color = self.theme.risk(level);
-            self.text(level, Weight::Bold, right - gap - w, y, w + 1.0, color);
+            chip::chip(self, level, self.m().label, right - gap, cy, color);
         }
         let color = match tone {
             Some(c) => c,
@@ -840,74 +890,6 @@ impl Theme {
     fn tint_strong(&self) -> [u8; 4] {
         super::theme::faint(self.fg, 0.25)
     }
-}
-
-fn paint(color: [u8; 4]) -> Paint<'static> {
-    let mut p = Paint::default();
-    p.set_color_rgba8(color[0], color[1], color[2], color[3]);
-    p.anti_alias = true;
-    p
-}
-
-/// An arc as cubic curves, a quarter turn at most each.
-fn arc_path(cx: f32, cy: f32, r: f32, a0: f32, sweep: f32) -> Option<Path> {
-    let mut pb = PathBuilder::new();
-    let n = (sweep.abs() / (PI / 2.0)).ceil().max(1.0) as usize;
-    let step = sweep / n as f32;
-    let k = 4.0 / 3.0 * (step / 4.0).tan();
-    pb.move_to(cx + r * a0.cos(), cy + r * a0.sin());
-    for i in 0..n {
-        let (s, e) = (a0 + step * i as f32, a0 + step * (i + 1) as f32);
-        let (x0, y0, x3, y3) = (cx + r * s.cos(), cy + r * s.sin(), cx + r * e.cos(), cy + r * e.sin());
-        pb.cubic_to(x0 - k * r * s.sin(), y0 + k * r * s.cos(), x3 + k * r * e.sin(), y3 - k * r * e.cos(), x3, y3);
-    }
-    pb.finish()
-}
-
-/// Half a disc, from angle a0 half way round (clockwise on screen): from the bottom
-/// (a0 = π/2) it's the left half, the review mark's ◐.
-fn half(cx: f32, cy: f32, r: f32, a0: f32) -> Option<Path> {
-    let mut pb = PathBuilder::new();
-    let k = 4.0 / 3.0 * (PI / 8.0).tan();
-    pb.move_to(cx + r * a0.cos(), cy + r * a0.sin());
-    for i in 0..2 {
-        let (s, e) = (a0 + PI / 2.0 * i as f32, a0 + PI / 2.0 * (i + 1) as f32);
-        let (x0, y0, x3, y3) = (cx + r * s.cos(), cy + r * s.sin(), cx + r * e.cos(), cy + r * e.sin());
-        pb.cubic_to(x0 - k * r * s.sin(), y0 + k * r * s.cos(), x3 + k * r * e.sin(), y3 - k * r * e.cos(), x3, y3);
-    }
-    pb.close();
-    pb.finish()
-}
-
-fn diamond(cx: f32, cy: f32, r: f32) -> Option<Path> {
-    let mut pb = PathBuilder::new();
-    pb.move_to(cx, cy - r);
-    pb.line_to(cx + r, cy);
-    pb.line_to(cx, cy + r);
-    pb.line_to(cx - r, cy);
-    pb.close();
-    pb.finish()
-}
-
-/// A rectangle with rounded corners.
-fn rounded(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<Path> {
-    if w <= 0.0 || h <= 0.0 {
-        return None;
-    }
-    let r = r.min(w / 2.0).min(h / 2.0);
-    let k = 0.5523 * r;
-    let mut pb = PathBuilder::new();
-    pb.move_to(x + r, y);
-    pb.line_to(x + w - r, y);
-    pb.cubic_to(x + w - r + k, y, x + w, y + r - k, x + w, y + r);
-    pb.line_to(x + w, y + h - r);
-    pb.cubic_to(x + w, y + h - r + k, x + w - r + k, y + h, x + w - r, y + h);
-    pb.line_to(x + r, y + h);
-    pb.cubic_to(x + r - k, y + h, x, y + h - r + k, x, y + h - r);
-    pb.line_to(x, y + r);
-    pb.cubic_to(x, y + r - k, x + r - k, y, x + r, y);
-    pb.close();
-    pb.finish()
 }
 
 #[cfg(test)]

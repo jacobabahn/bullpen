@@ -56,3 +56,16 @@ fn a_theme_is_named_light_or_dark() {
     assert_eq!(Theme::named("dark"), Some(Theme::default()));
     assert_eq!(Theme::named("blue"), None);
 }
+
+#[test]
+fn dim_text_reads_on_the_wash_behind_a_task_that_needs_you() {
+    use crate::ui::rows::Flag;
+    for t in [Theme::light(), Theme::default()] {
+        for flag in [Flag::Needs, Flag::Stopped] {
+            let w = t.wash(flag);
+            let over = |f: u8, b: u8| ((f as f32 * w[3] as f32 + b as f32 * (255 - w[3]) as f32) / 255.0).round() as u8;
+            let bg = Rgb(over(w[0], t.bg.0), over(w[1], t.bg.1), over(w[2], t.bg.2));
+            assert!(contrast(t.dim(), bg) >= 4.5, "{flag:?} on {t:?}: {}", contrast(t.dim(), bg));
+        }
+    }
+}

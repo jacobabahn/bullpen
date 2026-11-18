@@ -4,7 +4,9 @@
 //! colour means is the text board's (ui/mod.rs): amber needs you, red stopped or high
 //! risk, green ready or low risk, blue in review. The image's background is clear, so
 //! the pane's own shows through; dim text and the selected card are the foreground,
-//! faint.
+//! faint, and a task that needs you is washed with its colour.
+
+use crate::ui::rows::Flag;
 
 /// A colour as the terminal says it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -106,6 +108,20 @@ impl Theme {
     /// The selected card's edge: the foreground, a little stronger than its fill.
     pub fn edge(&self) -> [u8; 4] {
         faint(self.fg, 0.22)
+    }
+
+    /// A flag's colour: amber for a task that needs you, red for one whose agent stopped.
+    pub fn flag(&self, flag: Flag) -> Rgb {
+        match flag {
+            Flag::Needs => self.yellow,
+            Flag::Stopped => self.red,
+        }
+    }
+
+    /// Behind a task that needs you or stopped: its flag's colour, faintly, so dim text
+    /// on it still reads at 4.5:1 on a light theme's white.
+    pub fn wash(&self, flag: Flag) -> [u8; 4] {
+        faint(self.flag(flag), 0.075)
     }
 
     /// A status's colour, as ui::mark_style gives it; None for the dim ones.
