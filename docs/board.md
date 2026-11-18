@@ -147,32 +147,32 @@ check, a diamond) in the status colours, the selected task on a card (a faint fi
 with a faint edge, its mark inside it, clear of its type on every side) with its ID
 in the foreground and its whole title (wrapped to three lines at most; another task's
 is cut to its line), and the amber or red bar beside a task that needs you. The title
-is the loudest thing on a row: a task's ID (dim, on the title's baseline) and age, and
-the groups' names (a little dim), are a detail line's size. The
-list says everything the text list does, row for row: each task's ID, title, mark,
-risk, age and lines, the groups and the Later group. The marks move as the text
-board's do, at the same pace: a working task's is a faint ring with a short arc going
-round it, a task in review's a blue ring with a filled half that turns, and a running
-command's (or a tour being written) half a ring turning faster. When a task's status
-changes, its new mark settles in: it grows a little past its size and back, in 160
-ms. `bullpen config --board-motion off` stills them all (the working, review and
-running marks stand as their first frame), and the board then sends nothing while
-nothing changes. The top line (the repository and its counts) and the bottom rows
-(the message and the keys) are drawn too, in the list's type and colours, and the
-scroll marks are small chevrons at the list's right edge. What you type into stays
-text: while a tell, a y/n question (an accept's, a drop's, `q`'s) or the stale
-tour's question is open, the bottom rows are text, cursor and all, and are drawn
-again after. `?`, peeks, answers and mission control stay text, and so does the
-compact layout (`l`): with it the board is text whatever the look.
+is the loudest thing on a row: a task's ID (dim, on the title's baseline) and age,
+and the groups' names (a little dim), are a detail line's size. The list says
+everything the text list does, row for row: each task's ID, title, mark, risk, age
+and lines, the groups and the Later group. The marks move as the text board's do, at
+the same pace: a working task's is a faint ring with a short arc going round it, a
+task in review's a blue ring with a filled half that turns, and a running command's
+(or a tour being written) half a ring turning faster. When a task's status changes,
+its new mark settles in: it grows a little past its size and back, in 160 ms.
+`bullpen config --board-motion off` stills them all (the working, review and running
+marks stand as their first frame), and the board then sends nothing while nothing
+changes. The top line (the repository and its counts) and the bottom rows (the
+message and the keys) are drawn too, in the list's type and colours, and the scroll
+marks are small chevrons at the list's right edge. What you type into stays text:
+while a tell, a y/n question (an accept's, a drop's, `q`'s) or the stale tour's
+question is open, the bottom rows are text, cursor and all, and are drawn again
+after. `?`, peeks, answers and mission control stay text, and so does the compact
+layout (`l`): with it the board is text whatever the look.
 
 `bullpen config --board-text-size` sets the type: `medium` (the default) is the
 terminal's own text size, with a detail line smaller and dim under each title, a
 little space between them and about three quarters of a line between the tasks, so a
-row is a little more than a cell; `large` is larger
-still, for a pane read from further away, and cuts titles sooner; `small` is a
-cell a row, as the text list. The list scrolls by its rows' own heights, keeping the
-selected task and its lines in view and showing only whole rows, so a page (`PgDn`)
-has fewer tasks than the text list's.
+row is a little more than a cell; `large` is larger still, for a pane read from
+further away, and cuts titles sooner; `small` is a cell a row, as the text list. The
+list scrolls by its rows' own heights, keeping the selected task and its lines in
+view and showing only whole rows, so a page (`PgDn`) has fewer tasks than the text
+list's.
 
 It needs a terminal that draws kitty graphics, as Rex does. The board asks the
 terminal first and draws text until it answers; when it doesn't draw images (or
@@ -198,16 +198,16 @@ The board is images: the top line, the list's rows shown and the bottom rows, ea
 drawn at the terminal's cell size and sent only when what it shows changes (a task's
 status or age on screen, the message), so a change to the list doesn't send the top
 line again. The list is drawn with nothing selected, and the selected task's block
-(its card, its whole title and all its lines) is a small image of its
-own over the cells it takes: the rows under it move down by whole cells to make room,
-by placing the list's image again lower, not sending it. So `j` and `k` send that
-small image and a few placements, a fraction of the list; the list is sent again only
-when what it shows changes or it scrolls. The marks that move and the
-scroll marks are small images too, sent once: a tick only places another frame of a
-mark (a few dozen bytes a mark), never the list. The kitty protocol's own animation
-(the terminal turning the frames itself) would send nothing at all, but Rex's support
-for it isn't reliable yet, so the board doesn't use it. Each image is pinned to its
-block of cells, so a client with other cell sizes (Rex on a phone) scales it to fit.
+(its card, its whole title and all its lines) is a small image of its own over the
+cells it takes: the rows under it move down by whole cells to make room, by placing
+the list's image again lower, not sending it. So `j` and `k` send that small image
+and a few placements, a fraction of the list; the list is sent again only when what
+it shows changes or it scrolls. The marks that move and the scroll marks are small
+images too, sent once: a tick only places another frame of a mark (a few dozen bytes
+a mark), never the list. The kitty protocol's own animation (the terminal turning the
+frames itself) would send nothing at all, but Rex's support for it isn't reliable
+yet, so the board doesn't use it. Each image is pinned to its block of cells, so a
+client with other cell sizes (Rex on a phone) scales it to fit.
 
 `bullpen-board --dir <state dir> --root <repo> --bullpen <program> --render FILE
 --cols N` writes the board as the image look draws it to FILE: its top line, its whole

@@ -1,12 +1,12 @@
 //! The list as pieces, so moving the selection sends a small image, not the list. The
 //! list's rows are drawn once with nothing selected (the base image, ui/rows.rs's
 //! `unselected`), and the selected task's block (its card, its whole title and all its
-//! lines) is an image of its own over the cells it takes. The base
-//! image is placed twice, as crops: the cells above the selected block, and the cells
-//! under it, moved down by the whole cells the block grew by (the rows under it start
-//! that many cells lower; the space left over is under the block). So the base image is
-//! sent only when what it shows changes or the list scrolls, and a j or k sends the
-//! selected block's image and moves the two crops.
+//! lines) is an image of its own over the cells it takes. The base image is placed
+//! twice, as crops: the cells above the selected block, and the cells under it, moved
+//! down by the whole cells the block grew by (the rows under it start that many cells
+//! lower; the space left over is under the block). So the base image is sent only when
+//! what it shows changes or the list scrolls, and a j or k sends the selected block's
+//! image and moves the two crops.
 //!
 //! The list shows only whole rows: when the block pushes rows under it past the list's
 //! end, the cell where the last whole row ends is an image of its own too (the tail),

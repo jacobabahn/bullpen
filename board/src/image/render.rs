@@ -1,15 +1,15 @@
 //! Drawing the board's list as an image: the rows rows.rs describes (the same the text
-//! list draws), one under the other, each as tall as the type size makes it (a cell
-//! for small type, more for medium and large), so a row needn't be a whole cell; the
-//! image itself is the list's block of cells. The type is real (font.rs), the marks
-//! are drawn shapes in the status colours (rings, a check, a diamond), the selected
-//! task sits on a card (a faint fill and edge, its mark inside) with its whole title,
-//! and a task that needs you has a bar at its left. The title is the loudest thing on
-//! a row: the ID, the age and the group's name are a detail's size. The marks that move are left out when the
-//! image look places them over the list (sprite.rs draws their frames with `Draw`). The
-//! list's last column has the scroll marks. Nothing here touches the terminal: given
-//! rows and a size in pixels, it lays them out and returns an image, or a window of
-//! pixels of them (pieces.rs), drawn as that part of the whole would be.
+//! list draws), one under the other, each as tall as the type size makes it (a cell for
+//! small type, more for medium and large), so a row needn't be a whole cell; the image
+//! itself is the list's block of cells. The type is real (font.rs), the marks are drawn
+//! shapes in the status colours (rings, a check, a diamond), the selected task sits on
+//! a card (a faint fill and edge, its mark inside) with its whole title, and a task
+//! that needs you has a bar at its left. The title is the loudest thing on a row: the
+//! ID, the age and the group's name are a detail's size. The marks that move are left
+//! out when the image look places them over the list (sprite.rs draws their frames with
+//! `Draw`). The list's last column has the scroll marks. Nothing here touches the
+//! terminal: given rows and a size in pixels, it lays them out and returns an image, or
+//! a window of pixels of them (pieces.rs), drawn as that part of the whole would be.
 
 use super::font::{Fonts, Weight};
 use super::theme::{solid, Theme};
