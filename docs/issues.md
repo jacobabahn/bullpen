@@ -140,7 +140,10 @@ why, and why it asks, so the coordinator can ask you in a line:
 bullpen · L11 Support fish shell (#15, bob): vague, medium, low, a new shell to support. It asks the person (bob isn't trusted): ask them in a line whether they want it. `bullpen later L11 --keep` is yes, `bullpen later L11 --drop "why"` no
 ```
 
-A judgement of an item you already said yes to only records it. `bullpen issue 12
+A judgement of an item you already said yes to only records it. One that went on the
+list by an earlier judgement is judged afresh: if it no longer passes (the coordinator
+found it touches credentials, say), it comes off the list, asks you again (undecided in
+`issues.json`), and the coordinators get the line above. `bullpen issue 12
 --brief-file b.md` alone gives the item a brief without judging it again.
 
 ## Who is trusted
@@ -274,7 +277,7 @@ lock (`issues.lock`). One record per issue number:
 decided; `updated` is the issue's `updatedAt` as last read; `closed`, when there, is when
 bullpen saw the issue gone from the open ones. The item carries `by: "issue"`,
 `issue: {number, url, author, updated}` and, once judged, `judged: {score, area, why,
-trusted, trust, at}`; a task made from it, `issue_trusted`.
+trusted, trust, at}` (and `kept: true` when the judgement put it on the list); a task made from it, `issue_trusted`.
 
 `issues-timer.json` beside it (with `issues-timer.lock`) is the timer's: when the last
 read started (`at`) and, while reads fail, what the last one failed with (`failed`).

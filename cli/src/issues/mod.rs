@@ -227,6 +227,19 @@ pub fn decided(repo: &Repo, id: &str) -> Res<()> {
     })
 }
 
+/// An issue's item that a judgement took back off the list: its record is undecided
+/// again, so the issue asks the person.
+pub fn undecided(repo: &Repo, id: &str) -> Res<()> {
+    store::change(repo, |seen| {
+        let rec = seen.values_mut().find(|r| store::item_of(r) == id);
+        if let Some(rec) = rec.and_then(Value::as_object_mut) {
+            rec.insert("decided".into(), Value::Null);
+            rec.insert("at".into(), json!(iso_now()));
+        }
+        Ok(())
+    })
+}
+
 /// `issues` alone: every issue recorded, by number, with its item and what was decided.
 fn listed(repo: &Repo) -> Res<i32> {
     let seen = store::load(repo)?;

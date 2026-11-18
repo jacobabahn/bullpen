@@ -134,24 +134,31 @@ pub fn judge(repo: &Repo, n: u32, a: &Args) -> Res<i32> {
         .as_ref()
         .zip(trust.as_ref())
         .and_then(|(sc, t)| why_it_asks(sc, &start, t));
-    let (item, was) = backlog::change(repo, |b| {
+    let (item, was, by_itself) = backlog::change(repo, |b| {
         let item = b.item(&id)?;
         if !is_open(item) {
             return fail(crate::backlog::not_open(item));
         }
         let was = s(item, "state").to_string();
+        // kept by an earlier judgement, not the person: a new one can take it back
+        let by_itself = was == "kept" && truthy(obj(item, "judged").get("kept"));
         if let Some(text) = &brief {
             let name = crate::backlog::write_brief(repo, &id, text)?;
             b.item_mut(&id)?.insert("brief".into(), json!(name));
         }
         let it = b.item_mut(&id)?;
         if let Some(j) = &judged {
-            it.insert("judged".into(), j.clone());
-            if was == "asks" && asks.is_none() {
-                it.insert("state".into(), json!("kept"));
+            let mut j = j.clone();
+            if was == "asks" || by_itself {
+                let kept = asks.is_none();
+                it.insert("state".into(), json!(if kept { "kept" } else { "asks" }));
+                if kept {
+                    j["kept"] = json!(true);
+                }
             }
+            it.insert("judged".into(), j);
         }
-        Ok((it.clone(), was))
+        Ok((it.clone(), was, by_itself))
     })?;
     let mut out = Vec::new();
     if brief.is_some() {
@@ -163,8 +170,8 @@ pub fn judge(repo: &Repo, n: u32, a: &Args) -> Res<i32> {
     }
     if let (Some(sc), Some(t)) = (&score, &trust) {
         out.push(format!("{id}: {}; {}", sc.said(), t.why));
-        out.push(outcome(repo, &item, &was, &asks, n)?);
-        if was == "asks" && asks.is_some() {
+        out.push(outcome(repo, &item, &was, by_itself, &asks, n)?);
+        if (was == "asks" || by_itself) && asks.is_some() {
             tell(
                 repo,
                 &item,
@@ -176,6 +183,9 @@ pub fn judge(repo: &Repo, n: u32, a: &Args) -> Res<i32> {
     }
     println!("{}", out.join("\n"));
     super::decided(repo, &id)?; // kept by itself is a yes: never asked again
+    if by_itself && asks.is_some() {
+        super::undecided(repo, &id)?; // taken back: it asks again
+    }
     pickup::soon(repo);
     Ok(0)
 }
@@ -192,15 +202,19 @@ fn item_of(repo: &Repo, n: u32) -> Res<String> {
 }
 
 /// What became of the item, in words.
-fn outcome(repo: &Repo, item: &Obj, was: &str, asks: &Option<String>, n: u32) -> Res<String> {
+fn outcome(repo: &Repo, item: &Obj, was: &str, by_itself: bool, asks: &Option<String>, n: u32) -> Res<String> {
     let id = s(item, "id");
-    if was != "asks" {
+    if was != "asks" && !by_itself {
         return Ok(format!("{id} is on the list already: the person said yes"));
     }
     if let Some(why) = asks {
+        let what = if by_itself {
+            "is off the list and asks the person again"
+        } else {
+            "still asks the person"
+        };
         return Ok(format!(
-            "{id} still asks the person ({why}): tell them in a line, with its score and why, and ask whether they \
-             want it"
+            "{id} {what} ({why}): tell them in a line, with its score and why, and ask whether they want it"
         ));
     }
     let brief = if truthy(item.get("brief")) {
@@ -213,8 +227,9 @@ fn outcome(repo: &Repo, item: &Obj, was: &str, asks: &Option<String>, n: u32) ->
     } else {
         "pickup is off, so nothing starts it by itself: `bullpen later ID --start` does"
     };
+    let what = if by_itself { "stays" } else { "is" };
     Ok(format!(
-        "{id} is on the list, trusted and within issues_start: {}{brief}",
+        "{id} {what} on the list, trusted and within issues_start: {}{brief}",
         how.replace("ID", id)
     ))
 }

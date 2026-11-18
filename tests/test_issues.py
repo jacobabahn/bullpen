@@ -567,6 +567,24 @@ class IssuesJudgeTest(IssuesBase):
         self.assertEqual(json.loads(self.bp("config", "--json").stdout)["sources"]["issues_start"], "repo")
         self.assertIn("off, small, medium", self.bp("config", "--issues-start", "large", ok=False).stderr)
 
+    def test_a_new_judgement_takes_back_a_keep_of_its_own_but_not_the_persons(self):
+        self.read(issue(12, "Board flickers", author="me"), issue(15, "Fish shell"))
+        self.judge(12, "clear,small,low")
+        self.assertEqual((self.states()[0], self.seen()["12"]["decided"]), ("kept", "yes"))
+        out = self.judge(12, "clear,small,high").stdout
+        self.assertIn("L1 is off the list and asks the person again (issues_start is small: only clear, small, "
+                      "low-risk issues start by themselves)", out)
+        self.assertNotIn("the person said yes", out)
+        self.assertEqual((self.states()[0], self.seen()["12"]["decided"]), ("asks", None))
+        self.assertIn("bullpen · L1 Board flickers (#12, me): clear, small, high, a timer redraws twice. It asks the "
+                      "person (issues_start is small", self.news_log())
+        self.assertIn("L1 is on the list, trusted", self.judge(12, "clear,small,low").stdout)
+        self.assertIn("L1 stays on the list, trusted", self.judge(12, "clear,small,low").stdout)
+        # the person's own yes stands, whatever a judgement says
+        self.bp("later", "L2", "--keep")
+        self.assertIn("L2 is on the list already: the person said yes", self.judge(15, "vague,large,high").stdout)
+        self.assertEqual((self.states(), self.seen()["15"]["decided"]), (["kept", "kept"], "yes"))
+
     def test_with_pickup_off_nothing_starts_by_itself(self):
         self.bp("up")
         self.read(issue(12, "Board flickers", author="me"))
