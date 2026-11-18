@@ -96,8 +96,11 @@ with no commits is recorded there as `nothing_to_merge`, the field core's
 or runs `ready` again; a task made ready before that field is read by its why. A
 verdict's approval is checked against its base first when accepts left it in review
 (`left_in_review::after_approval`), before auto-accept or the news; the verdict waits
-for its auto-accept, the others don't. A rebase that keeps an approval still makes it
-ready on its own.
+for its auto-accept, the others don't. A ready task rebased after an accept with its
+approval kept (`rebase_task`) goes through it too, as `Rebased`: labelled for its code
+now, with neither auto-accept nor ready news (the accept's `After BP-3: ...` line says
+it). No other code sets a task ready (`test_become_ready.rs` holds that); `answer`
+only puts back the status a question interrupted.
 
 ## Where a pane lives
 

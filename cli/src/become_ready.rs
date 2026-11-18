@@ -1,6 +1,7 @@
 //! The step into `ready` (`make_ready`): what every path into it does, the way the
 //! task became ready (`How`) deciding the parts that differ. The risk label, the
-//! status, the save, then auto-accept or the news that it is ready. A branch with no
+//! status, the save, then auto-accept or the news that it is ready. Every path into
+//! `ready` comes through here (`test_become_ready.rs` holds it). A branch with no
 //! commits is recorded here as nothing to merge ("nothing_to_merge", which core's
 //! `nothing_to_merge` reads). Its callers keep only what is theirs: publishing the
 //! branch, the review record, the findings file. An approval by a verdict is checked
@@ -114,3 +115,7 @@ fn auto_accept_wait(how: &How) -> Option<bool> {
         How::Plain | How::Nothing | How::OutOfRounds { .. } | How::Rebased => None,
     }
 }
+
+#[cfg(test)]
+#[path = "test_become_ready.rs"]
+mod tests;
