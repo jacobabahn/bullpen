@@ -194,6 +194,7 @@ pub fn start_task(repo: &Repo, t: &mut Obj, session: &str, model: Option<&str>) 
         t.insert("worker_model".into(), json!(m)); // this task's own, over the config's
     }
     launch(repo, t, session, &first, false)?;
+    crate::issues::write::started(repo, t)?; // an issue's task: `bullpen: started` on it
     Ok(true)
 }
 

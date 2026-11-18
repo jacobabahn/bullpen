@@ -99,6 +99,9 @@ pub enum Kind {
     /// a judged issue that asks the person (`... It asks the person (...): ask them ...`),
     /// or the person's yes to one with no brief (`... it needs a brief ...`)
     IssueAsk,
+    /// a write to a GitHub issue that failed (`#12 (BP-3): bullpen couldn't ...`, `BP-3 was
+    /// accepted, but #12 wasn't closed ...`), or a revert that leaves its issue closed
+    IssueWrite,
     /// `BP-5 waits on BP-3, which was dropped, so it stays queued. Ask the person ...`
     DroppedDependency,
     /// `bullpen wasn't rebuilt: ...`
@@ -209,6 +212,7 @@ pub const ALL: &[Kind] = &[
     Kind::Guide,
     Kind::Issues,
     Kind::IssueAsk,
+    Kind::IssueWrite,
     Kind::DroppedDependency,
     Kind::Build,
     Kind::Board,
@@ -262,6 +266,7 @@ impl Kind {
             Kind::Guide => "guide",
             Kind::Issues => "issues",
             Kind::IssueAsk => "issue-ask",
+            Kind::IssueWrite => "issue-write",
             Kind::DroppedDependency => "dropped-dependency",
             Kind::Build => "build",
             Kind::Board => "board",
@@ -310,6 +315,7 @@ impl Kind {
             | Kind::Guide
             | Kind::Issues
             | Kind::IssueAsk
+            | Kind::IssueWrite
             | Kind::DroppedDependency
             | Kind::Build
             | Kind::Board => Row::Own { asks: true },
@@ -361,6 +367,7 @@ impl Kind {
             | Kind::Guide
             | Kind::Issues
             | Kind::IssueAsk
+            | Kind::IssueWrite
             | Kind::DroppedDependency
             | Kind::Build
             | Kind::Board => true,

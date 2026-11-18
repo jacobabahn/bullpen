@@ -30,3 +30,7 @@ the base branch when it has commits the remote didn't get (as far as this checko
 last saw the remote), so things catch up after an offline spell. `bullpen config
 --push-remote ""` or `--unset push_remote` turns it off. With an `origin` remote
 (remote mode), the setting does nothing: merges happen on GitHub.
+
+With [GitHub issues](issues.md) on, an accepted issue's task closes its issue once that
+push is over, with a comment naming the commit (or "not pushed yet" without a push
+remote, or when the push failed): see [What's written back](issues.md#whats-written-back).

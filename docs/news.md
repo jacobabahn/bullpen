@@ -94,7 +94,8 @@ again` lines, auto-accept's "sent back to its worker to rebase", and PR feedback
 to do). The line for
 new [GitHub issues](issues.md#on-a-timer) wakes: the coordinator judges each; so does the
 line for a judged issue that asks you, or one you said yes to that needs a brief
-(`issue-ask`), each of which says what to do.
+(`issue-ask`), each of which says what to do. So does a write to an issue that failed,
+or a revert that leaves an issue closed (`issue-write`).
 
 ## The waiter (`config --news wake`)
 

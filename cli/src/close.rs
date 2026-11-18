@@ -116,7 +116,8 @@ pub fn close_task(repo: &Repo, t: &mut Obj, auto: bool, first: &str) -> Res<()> 
         }
     };
     let fields = [("closed", json!(true)), ("auto_accepted", json!(auto))];
-    close(repo, t, "done", said, true, true, &fields)
+    close(repo, t, "done", said, true, true, &fields)?;
+    crate::issues::write::unstarted(repo, t) // nothing merged: its issue stays open
 }
 
 // ---------- drop ----------
@@ -139,6 +140,7 @@ pub fn cmd_drop(argv: &[String]) -> Res<i32> {
         let id = s(t, "id");
         println!("{id} dropped");
         tell_coordinator(&repo, t, Kind::Dropped, &format!("{id} dropped"))?;
+        crate::issues::write::unstarted(&repo, t)?; // its issue stays open
         dropped_dep(&repo, t)
     };
     close(&repo, &mut t, "dropped", said, true, force, &[])?;

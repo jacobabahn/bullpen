@@ -47,6 +47,7 @@ yes to one with no brief, you hear that it needs one: write it and give it with
   credentials or CI, or reach outside the repository makes it high risk, and
   you ask the person.
 - `bullpen later L11 --keep` (yes) and `bullpen later L11 --drop "why"` (no)
-  only on the person's word.
+  only on the person's word. The why may be posted on the issue (with
+  `issues_write comments`): give only the person's own reason, or none.
 - A task made from an issue always gets a full review, and one from an
   untrusted author never auto-accepts.

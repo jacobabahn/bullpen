@@ -8,7 +8,7 @@
 //! one news line. `up` catches up a push it missed, and doctor checks the remote.
 
 use crate::args::{pos, value, Arg, Args, Nargs, SUPPRESS};
-use crate::modes::{push_base, push_remote, quiet_git};
+use crate::modes::{close_issue, push_base, push_remote, quiet_git};
 use crate::news::kind::Kind;
 use crate::news::{news, Opts};
 use bullpen_core::json::Obj;
@@ -26,7 +26,14 @@ const PUSH: &[Arg] = &[pos("base", Nargs::One, ""), value("--task", "TASK", SUPP
 pub fn cmd_push(argv: &[String]) -> Res<i32> {
     let a = Args::parse("_push", argv, PUSH);
     let repo = Repo::new(repo_root()?)?;
+    let task = a
+        .opt("--task")
+        .filter(|t| !t.is_empty())
+        .and_then(|t| repo.task(t).ok());
     let Some(remote) = push_remote(&repo)? else {
+        if let Some(t) = &task {
+            close_issue(&repo, t, false)?;
+        }
         return Ok(0);
     };
     let base = a.arg("base").unwrap_or("");
@@ -39,13 +46,12 @@ pub fn cmd_push(argv: &[String]) -> Res<i32> {
         let refspec = format!("refs/heads/{base}:refs/heads/{base}");
         quiet_git(&repo, &["push", "-q", &remote, &refspec], 60)?
     };
+    if let Some(t) = &task {
+        close_issue(&repo, t, p.ok())?; // an accepted issue's task: after the push, pushed or not
+    }
     if p.ok() {
         return Ok(0);
     }
-    let task = a
-        .opt("--task")
-        .filter(|t| !t.is_empty())
-        .and_then(|t| repo.task(t).ok());
     let out = if p.stderr.is_empty() { &p.stdout } else { &p.stderr };
     let why = push_reason(out, &remote, base);
     let (after, counts) = match &task {

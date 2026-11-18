@@ -4,9 +4,9 @@
 //! edited is read again, a closed one's item is done. `bullpen issues` lists what's
 //! recorded, and `bullpen issue N` (view.rs) prints one for reading. The coordinator
 //! judges each (`issue N --score`, judge.rs): a trusted (trust.rs), clear, small,
-//! low-risk one goes on the list by itself, and the rest ask the person. Nothing is
-//! written to GitHub. A keep or drop of an issue's item is remembered (`decided`), so it
-//! is never asked again.
+//! low-risk one goes on the list by itself, and the rest ask the person. A keep or drop
+//! of an issue's item is remembered (`decided`), so it is never asked again. What bullpen
+//! writes back to the issue (labels, comments, the close on accept) is write.rs.
 //!
 //! The watcher reads them too, on a timer, and tells the coordinators of new ones in
 //! one news line (timer.rs).
@@ -21,6 +21,7 @@ pub mod text;
 pub mod timer;
 pub mod trust;
 pub mod view;
+pub mod write;
 
 use crate::args::{flag, Arg, Args};
 use bullpen_core::backlog::{self, is_open, Backlog};

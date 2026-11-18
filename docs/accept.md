@@ -82,7 +82,8 @@ the other really conflicts.
 
 Once the task is merged and saved as done, `accept` (and auto-accept) goes on in this
 order: the news line, the merge's follow-up (the branch deleted on origin, or the push
-to the push remote in local mode), bullpen and the board rebuilt (in bullpen's own
+to the push remote in local mode, after which a task made from a GitHub issue closes
+the issue: [What's written back](issues.md#whats-written-back)), bullpen and the board rebuilt (in bullpen's own
 repository: docs/rebuilds.md), the other tasks rebased, the run queue, telling the
 coordinators their guide changed, the watcher refreshed, and the news that the keys
 changed. Each step runs whatever

@@ -14,6 +14,9 @@
 //!   gh_user          the login `api user` says gh is signed in as (else me)
 //!   events.json      what `api .../issues/N/events` answers, by issue number: {"12": [...]}
 //!                    (else none)
+//!   write_refused    a write to an issue (`issue edit`, `comment`, `close`) or a `label
+//!                    create` fails, saying this file's text. Writes change nothing here:
+//!                    the tests read them in gh.log
 
 use std::io::Read;
 use std::path::Path;
@@ -49,6 +52,16 @@ fn run(argv: &[String]) -> Res<()> {
             "github.com\n  ✓ Logged in to github.com account me (keyring)\n  - Active account: true\n  - Token scopes: {}",
             scopes.trim()
         ));
+        return Ok(());
+    }
+    let writes = ["edit", "comment", "close", "reopen"];
+    if two("label", "create")
+        || (argv.first().is_some_and(|a| a == "issue") && argv.get(1).is_some_and(|w| writes.contains(&w.as_str())))
+    {
+        let refused = d.join("write_refused");
+        if refused.exists() {
+            return Err(exit_msg(&read_text(&refused)?));
+        }
         return Ok(());
     }
     if argv.first().is_some_and(|a| a == "issue") {

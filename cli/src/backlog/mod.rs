@@ -250,6 +250,9 @@ fn change(repo: &Repo, id: &str, a: &Args, who: &Caller) -> Res<i32> {
     if matches!(act, Some("--keep" | "--drop")) {
         crate::issues::decided(repo, id)?; // an issue's item: the yes or no is remembered
     }
+    if act == Some("--drop") {
+        crate::issues::write::declined(repo, backlog::load(repo)?.item(id)?, a.arg("why"))?;
+    }
     if act == Some("--keep") && matches!(who, Caller::Person) {
         crate::issues::judge::yes_needs_brief(repo, backlog::load(repo)?.item(id)?)?;
     }

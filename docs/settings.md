@@ -80,7 +80,10 @@ so start through pickup: only with `--pickup on`, whatever `issues_start` says. 
 trusted issue does: its author is the gh account's login or in `--issues-trusted
 "ann,bob"` (nobody else by default), or that login added the label `--issues-label`
 (`bullpen`), and only one the coordinator scored worth doing (see [GitHub
-issues](issues.md)).
+issues](issues.md)). `--issues-write labels|comments|off` (`labels`) says what bullpen
+writes back to an issue: the labels `bullpen: started` and `bullpen: declined`, those
+and a comment at start and at a no (`comments`), or nothing (`off`); unless off, an
+accepted issue's task closes its issue (see [GitHub issues](issues.md#whats-written-back)).
 
 ## Where panes live
 

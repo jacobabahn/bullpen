@@ -3,9 +3,11 @@
 watcher's timer (`_issues`), with its news; doctor's gh check while issues are on."""
 
 import json
+import re
 import time
 import unittest
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from support import setUpModule, tearDownModule, sh, BullpenTest  # a temp folder for each module
 
@@ -660,6 +662,241 @@ class IssuesJudgeTest(IssuesBase):
         self.assertTrue(brief.startswith("Make the board redraw once on resize.\n\n## The issue as filed (by ann;"))
         self.assertEqual(self.states(), ["kept"])  # a brief alone judges nothing
 
+
+WRITE_KINDS = ("edit", "comment", "close", "reopen")
+LABELS = [["label", "create", "bullpen: started", "--color", "1D76DB", "--description", "bullpen is working on it",
+           "--force", "-R", "me/proj"],
+          ["label", "create", "bullpen: declined", "--color", "BFBFBF", "--description", "bullpen won't take it on",
+           "--force", "-R", "me/proj"]]
+STARTED = ["issue", "edit", "12", "--add-label", "bullpen: started", "--remove-label", "bullpen: declined",
+           "-R", "me/proj"]
+
+
+class IssuesWriteBase(IssuesBase):
+    """What bullpen writes back to an issue (`issues_write`). The fake gh records each
+    write in gh.log and changes nothing."""
+
+    def setUp(self):
+        super().setUp()
+        self.brief = self.tmp / "b.md"
+        self.brief.write_text("Make the board redraw once on resize.\n")
+        self.bp("up")
+
+    def writes(self):
+        return [c for c in self.gh_calls()
+                if c[:2] == ["label", "create"] or (c[0] == "issue" and c[1] in WRITE_KINDS)]
+
+    def start_issue(self, n=12, title="Board flickers"):
+        """An issue read and started as a task (BP-1, from L1)."""
+        self.github_issues(issue(n, title, author="me"))
+        self.now()
+        self.bp("later", "L1", "--start", "--brief-file", str(self.brief))
+        return "BP-1"
+
+    def commit(self, tid):
+        wt = self.show(tid)["worktree"]
+        (Path(wt) / "fix.txt").write_text("fixed\n")
+        sh("git", "-C", wt, "add", ".")
+        sh("git", "-C", wt, "commit", "-qm", "Fix it")
+        return wt
+
+
+class IssuesWriteTest(IssuesWriteBase):
+    """Remote mode: origin's URL names me/proj on GitHub, and pushes go to the local
+    origin (its pushurl)."""
+
+    def setUp(self):
+        super().setUp()
+        sh("git", "-C", str(self.repo), "config", "remote.origin.pushurl", str(self.tmp / "origin.git"))
+
+    def test_labels_by_default_made_once_at_start_and_at_a_no(self):
+        self.github_issues(issue(12, "Board flickers", author="me"), issue(15, "Fish shell"), issue(16, "Logo"))
+        self.now()
+        self.bp("later", "L1", "--start", "--brief-file", str(self.brief))
+        self.bp("later", "L2", "--drop", "not now")
+        self.bp("later", "L3", "--drop")
+        self.assertEqual(self.writes(), [
+            *LABELS, STARTED,
+            ["issue", "edit", "15", "--add-label", "bullpen: declined", "-R", "me/proj"],
+            ["issue", "edit", "16", "--add-label", "bullpen: declined", "-R", "me/proj"]])
+        self.assertTrue(self.show("BP-1")["issue_started"])
+        self.bp("later", "Mine")
+        self.bp("later", "L4", "--drop")  # not an issue's: nothing
+        self.assertEqual(len(self.writes()), 5)
+
+    def test_comments_at_start_and_at_a_no_with_its_reason(self):
+        self.bp("config", "--issues-write", "comments")
+        self.github_issues(issue(12, "Board flickers", author="me"), issue(15, "Fish shell"), issue(16, "Logo"))
+        self.now()
+        self.bp("later", "L1", "--start", "--brief-file", str(self.brief))
+        self.bp("later", "L2", "--drop", "not now")
+        self.bp("later", "L3", "--drop")
+        comments = [c for c in self.writes() if c[1] == "comment"]
+        self.assertEqual(comments, [["issue", "comment", "12", "--body", "Being worked on as BP-1.", "-R", "me/proj"],
+                                    ["issue", "comment", "15", "--body", "Declined: not now", "-R", "me/proj"],
+                                    ["issue", "comment", "16", "--body", "Declined.", "-R", "me/proj"]])
+        self.assertEqual(len(self.writes()), 2 + 3 + 3)  # the labels once, and a label and a comment each
+
+    def test_off_writes_nothing_at_all(self):
+        self.bp("config", "--issues-write", "off")
+        tid = self.start_issue()
+        self.github_issues(issue(12, "Board flickers", author="me"), issue(15, "Fish shell"))
+        self.now()
+        self.bp("later", "L2", "--drop", "not now")
+        self.bp("config", "--review", "off")
+        wt = self.commit(tid)
+        self.bp("ready", tid, "--summary", "Did it.", cwd=wt)
+        self.verdict(tid, "approve")  # an issue's task is reviewed, review or not
+        self.bp("accept", tid)
+        self.assertEqual(self.show(tid)["status"], "done")
+        self.assertEqual(self.writes(), [])
+        body = next(json.loads(l)["body"] for l in (self.fake / "gh.log").read_text().splitlines()
+                    if json.loads(l)["argv"][:2] == ["pr", "create"])
+        self.assertNotIn("Closes", body)
+
+    def test_accept_in_remote_mode_closes_by_the_prs_body(self):
+        tid = self.start_issue()
+        self.bp("config", "--review", "off")
+        wt = self.commit(tid)
+        self.bp("ready", tid, "--summary", "Did it.", cwd=wt)
+        body = next(json.loads(l)["body"] for l in (self.fake / "gh.log").read_text().splitlines()
+                    if json.loads(l)["argv"][:2] == ["pr", "create"])
+        self.assertEqual(body, "Did it.\n\nBullpen task BP-1.\n\nCloses #12\n")
+        self.verdict(tid, "approve")
+        self.bp("accept", tid)
+        self.assertEqual(self.writes(), [*LABELS, STARTED])  # GitHub closes it at the merge, not bullpen
+
+    def test_issues_from_another_repository_are_closed_by_its_name(self):
+        self.bp("config", "--issues-repo", "other/place")
+        self.github_issues(issue(12, "Board flickers", author="me"))
+        self.now()
+        self.bp("later", "L1", "--start", "--brief-file", str(self.brief))
+        self.bp("config", "--review", "off")
+        wt = self.commit("BP-1")
+        self.bp("ready", "BP-1", "--summary", "Did it.", cwd=wt)
+        self.assertIn("\nCloses other/place#12\n", (self.fake / "gh.log").read_text().replace("\\n", "\n"))
+
+    def test_drop_and_close_leave_the_issue_open_and_take_the_label_off(self):
+        tid = self.start_issue()
+        self.bp("drop", tid, "--force")
+        unlabel = ["issue", "edit", "12", "--remove-label", "bullpen: started", "-R", "me/proj"]
+        self.assertEqual(self.writes(), [*LABELS, STARTED, unlabel])
+        # a finished one, closed
+        self.github_issues(issue(12, "Board flickers", author="me"), issue(20, "Docs", author="me"))
+        self.now()
+        self.bp("later", "L2", "--start", "--brief-file", str(self.brief))
+        self.bp("finish", "BP-2", "--summary", "Answered.")
+        self.bp("close", "BP-2")
+        self.assertEqual(self.writes()[-1], ["issue", "edit", "20", "--remove-label", "bullpen: started",
+                                             "-R", "me/proj"])
+        self.assertNotIn("close", [c[1] for c in self.writes()])
+
+    def test_a_failed_write_is_one_news_line_and_stops_nothing(self):
+        (self.fake / "write_refused").write_text("HTTP 403: Resource not accessible by integration")
+        tid = self.start_issue()
+        self.assertEqual(self.show(tid)["status"], "working")
+        self.assertEqual(len(self.writes()), 1)  # the first label refused: nothing more is tried
+        self.assertIn("bullpen · #12 (BP-1): bullpen couldn't mark it `bullpen: started` on GitHub: HTTP 403: "
+                      "Resource not accessible by integration. Nothing to do for the work; if it keeps failing, tell "
+                      "the person (`bullpen config --issues-write off` stops the writes)", self.news_log())
+        self.assertFalse(self.state_file("issue-labels").exists())  # made next time
+
+    def test_config_issues_on_says_once_what_bullpen_writes(self):
+        self.bp("config", "--issues", "off")
+        out = self.bp("config", "--issues", "on").stdout
+        self.assertIn("bullpen will write to me/proj's issues on GitHub: the label `bullpen: started` when an issue's "
+                      "task starts, `bullpen: declined` when you say no to one, and it closes an issue when its task "
+                      "is accepted. `bullpen config --issues-write off` turns that off\n", out)
+        self.assertNotIn("bullpen will write", self.bp("config", "--issues", "on").stdout)  # once
+        self.bp("config", "--issues", "off", "--issues-write", "off")
+        self.assertIn("bullpen reads me/proj's issues and writes nothing to them (issues_write is off)",
+                      self.bp("config", "--issues", "on").stdout)
+
+    def test_no_other_code_writes_to_an_issue(self):
+        """Every write goes through issues/write.rs's gh_write: no other source names a
+        write to an issue or a label, or a gh api call that changes something."""
+        src = Path(__file__).resolve().parent.parent
+        write = re.compile(r'"(issue|label)"(\.into\(\)|\.to_string\(\))?\s*,\s*"(edit|comment|close|reopen|create|'
+                           r'delete|lock|unlock|transfer|pin|unpin|develop)"|"--(add|remove)-label"|"--method"|"-X"|'
+                           r'"--(raw-)?field"')
+        found = [str(f.relative_to(src)) for root in ("cli/src", "core/src") for f in (src / root).rglob("*.rs")
+                 if "tests" not in f.parts and f.name != "write.rs" and write.search(f.read_text())]
+        self.assertEqual(found, [])
+        self.assertTrue(write.search((src / "cli/src/issues/write.rs").read_text()))
+
+
+class IssuesWriteLocalTest(IssuesWriteBase):
+    """Local mode: no origin; issues are read from me/proj, and the base branch is pushed
+    to the push remote `backup` (accept waits for its push)."""
+
+    def setUp(self):
+        super().setUp()
+        sh("git", "-C", str(self.repo), "remote", "remove", "origin")
+        self.backup = self.tmp / "backup.git"
+        sh("git", "init", "-q", "--bare", "-b", "main", str(self.backup))
+        sh("git", "-C", str(self.repo), "remote", "add", "backup", str(self.backup))
+        sh("git", "-C", str(self.repo), "push", "-q", "backup", "main")
+        self.bp("config", "--issues-repo", "me/proj", "--push-remote", "backup", "--review", "off")
+        self.env["BULLPEN_PUSH_WAIT"] = "1"
+
+    def accept(self):
+        tid = self.start_issue()
+        wt = self.commit(tid)
+        self.bp("ready", tid, "--summary", "Did it.", cwd=wt)
+        self.verdict(tid, "approve")  # an issue's task is reviewed, review or not
+        self.bp("accept", tid)
+        self.assertEqual(self.show(tid)["status"], "done")
+        return tid
+
+    def closed(self, comment):
+        return ["issue", "close", "12", "--comment", comment, "-R", "me/proj"]
+
+    def test_accept_closes_the_issue_after_the_push_naming_the_commit(self):
+        self.accept()
+        main = sh("git", "-C", str(self.repo), "rev-parse", "main").strip()
+        self.assertEqual(sh("git", "-C", str(self.backup), "rev-parse", "main").strip(), main)
+        self.assertEqual(self.writes(), [*LABELS, STARTED, self.closed(f"Fixed in {main[:7]}")])
+
+    def test_a_failed_push_closes_it_as_not_pushed_yet(self):
+        other = self.tmp / "other"
+        sh("git", "clone", "-q", str(self.backup), str(other))
+        (other / "theirs.txt").write_text("x\n")
+        sh("git", "-C", str(other), "add", ".")
+        sh("git", "-C", str(other), "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-qm", "Theirs")
+        sh("git", "-C", str(other), "push", "-q", "origin", "main")
+        self.accept()
+        self.assertEqual(self.writes()[-1], self.closed("Fixed in BP-1 (not pushed yet)"))
+        self.assertIn(" wasn't pushed to backup: rejected", self.news_log())
+
+    def test_no_push_remote_closes_it_as_not_pushed_yet(self):
+        self.bp("config", "--push-remote", "")
+        self.accept()
+        self.assertEqual(self.writes()[-1], self.closed("Fixed in BP-1 (not pushed yet)"))
+
+    def test_a_failed_close_is_one_news_line_and_the_accept_stands(self):
+        tid = self.start_issue()
+        wt = self.commit(tid)
+        self.bp("ready", tid, "--summary", "Did it.", cwd=wt)
+        self.verdict(tid, "approve")
+        (self.fake / "write_refused").write_text("HTTP 502: Bad Gateway")
+        self.assertEqual(self.bp("accept", tid).returncode, 0)
+        self.assertEqual(self.show(tid)["status"], "done")
+        self.assertIn("bullpen · BP-1 was accepted, but #12 wasn't closed on GitHub: HTTP 502: Bad Gateway. The accept "
+                      "still counts: tell the person (`gh issue close 12 -R me/proj` closes it)", self.news_log())
+
+    def test_off_closes_nothing(self):
+        self.bp("config", "--issues-write", "off")
+        self.accept()
+        self.assertEqual(self.writes(), [])
+
+    def test_revert_leaves_the_issue_closed_and_says_so(self):
+        tid = self.accept()
+        out = self.bp("revert", tid).stdout
+        line = ("BP-1 closed #12 on GitHub when it was accepted, and the revert leaves #12 closed: tell the person, in "
+                "case it should be open again (`gh issue reopen 12 -R me/proj` reopens it)")
+        self.assertIn(line, out)
+        self.assertIn(line, self.news_log())
+        self.assertNotIn("reopen", [c[1] for c in self.writes()])
 
 if __name__ == "__main__":
     unittest.main()

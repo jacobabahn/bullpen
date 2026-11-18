@@ -102,6 +102,12 @@ pub fn quiet_git_in(repo: &Repo, cwd: &Path, args: &[&str], timeout: u64) -> Res
     let mut cmd = Command::new("git");
     cmd.arg("-C").arg(cwd).args(args);
     push_env(repo, &mut cmd)?;
+    quiet(cmd, timeout)
+}
+
+/// Run cmd away from any terminal (stdin from /dev/null, in a session of its own), so
+/// nothing it runs can prompt the person; after timeout seconds it is killed and says so.
+pub fn quiet(mut cmd: Command, timeout: u64) -> Res<Done> {
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     // SAFETY: only setsid between fork and exec
     unsafe {
@@ -223,11 +229,14 @@ pub fn publish(repo: &Repo, t: &mut Obj, ahead: i64, base_ref: &str, summary: &s
     }
     if !truthy(t.get("pr")) {
         let summary = bullpen_core::text::strip(summary);
-        let body = format!(
+        let mut body = format!(
             "{}\n\nBullpen task {}.\n",
             if summary.is_empty() { s(t, "title") } else { summary },
             s(t, "id")
         );
+        if let Some(closes) = crate::issues::write::closes_line(repo, t) {
+            body += &format!("\n{closes}\n"); // an issue's task: GitHub closes the issue at the merge
+        }
         // the title has no ID: a squash makes it a commit's subject on the base. The body's last line names the task
         let title = s(t, "title").to_string();
         let base = py_str(t.get("base").unwrap_or(&serde_json::Value::Null));
@@ -292,20 +301,32 @@ pub fn merge(repo: &Repo, t: &mut Obj) -> Res<()> {
 
 /// What follows a merge: in remote mode the merged branch is deleted on origin and
 /// the base it moved is fetched; in local mode the base branch is backed up to the
-/// push remote. Says what it started, or None.
+/// push remote, and an issue's task closes its issue (`close_issue`). Says what it
+/// started, or None.
 pub fn after_merge(repo: &Repo, t: &Obj) -> Res<Option<String>> {
     let base = py_str(t.get("base").unwrap_or(&Value::Null));
     if !remote(repo, t)? {
         if !truthy(t.get("merged")) {
             return Ok(None);
         }
-        return push_base(repo, &base, Some(s(t, "id")));
+        let pushing = push_base(repo, &base, Some(s(t, "id")))?;
+        if pushing.is_none() {
+            close_issue(repo, t, false)?; // no push remote: nothing to wait for
+        }
+        return Ok(pushing);
     }
     if truthy(t.get("pr")) && truthy(t.get("branch")) {
         quiet_git(repo, &["push", "-q", "origin", "--delete", s(t, "branch")], 60)?;
     }
     quiet_git(repo, &["fetch", "-q", "origin", &base], 60)?;
     Ok(None)
+}
+
+/// Local mode: close the issue an accepted task was made from, once the push to the push
+/// remote is over (pushed: it went; `_push` calls this after it), or at once with no push
+/// remote. Remote mode needs none: the PR's `Closes #N` closes it at the merge.
+pub fn close_issue(repo: &Repo, t: &Obj, pushed: bool) -> Res<()> {
+    crate::issues::write::close_fixed(repo, t, pushed)
 }
 
 /// After bullpen rebased the task's branch: push it to its PR (remote mode). Says why

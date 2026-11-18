@@ -222,6 +222,7 @@ pub fn cmd_config(argv: &[String]) -> Res<i32> {
     check_unset(&unset, Some(&repo))?;
     let risk = risk_paths::changed(&repo, &a)?;
     let news_was = repo.cfg_str("news").to_string();
+    let issues_was = bullpen_core::json::truthy(repo.cfg.get("issues"));
     let changed = !ch.is_empty() || !unset.is_empty() || risk.is_some();
     for k in unset {
         repo.unset(k)?;
@@ -257,6 +258,9 @@ pub fn cmd_config(argv: &[String]) -> Res<i32> {
     }
     repo.save()?;
     issues_soon(&a)?;
+    if !issues_was && bullpen_core::json::truthy(repo.cfg.get("issues")) {
+        println!("{}", crate::issues::write::what_it_writes(&repo)); // once: when they come on
+    }
     reindex(&repo)?;
     if changed {
         crate::guide::tell_guide_changes_quietly(&mut repo); // a setting may have brought its guide a section

@@ -3,8 +3,9 @@
 bullpen can read a repository's open GitHub issues into [the backlog](backlog.md). Each
 one becomes an item that asks, and the coordinator judges it: a small, clear, low-risk
 one worth doing, from someone bullpen trusts, goes on the list and starts by itself (with
-[pickup](backlog.md#pickup) on); every other one asks you. bullpen only reads: it
-writes nothing to GitHub (no labels, no comments, no closing).
+[pickup](backlog.md#pickup) on); every other one asks you. What bullpen writes back to
+an issue (a label when its task starts or you say no, and the close when its task is
+accepted) is `issues_write`'s to say: see [What's written back](#whats-written-back).
 
 It is off by default:
 
@@ -266,7 +267,58 @@ An issue is written by whoever filed it, and agents read what bullpen prints. So
 - Nothing else of an issue goes into news. The news line for a judged issue has the
   coordinator's score and why, not the issue's text.
 - Only a trusted issue starts by itself, and only a clear, small (or medium), low-risk
-  one the coordinator scored worth doing; its task gets a full review. Nothing is written to GitHub.
+  one the coordinator scored worth doing; its task gets a full review.
+- What bullpen writes to an issue is never from the issue, a brief, a diff or an agent:
+  see [What's written back](#whats-written-back).
+
+## What's written back
+
+`issues_write` says what bullpen writes to the repository's issues:
+
+- `labels` (the default): the label `bullpen: started` when an issue's task starts (and
+  `bullpen: declined` off it, from an earlier no), and `bullpen: declined` when you say
+  no (`bullpen later L11 --drop`, or `n` on the board). bullpen makes both labels in the
+  repository the first time it needs one (`gh label create --force`), and notes that in
+  `issue-labels` in the state folder. Labels send the issue's author no notification.
+- `comments`: the labels, and a comment at each: "Being worked on as BP-3." when the
+  task starts, "Declined: <your reason>" (or "Declined.") when you say no.
+- `off`: nothing at all, not even the close below.
+
+Unless it is `off`, an accepted issue's task closes the issue:
+
+- **remote mode**: the PR's description ends `Closes #12` (`Closes owner/repo#12` when
+  issues are read from another repository than origin's), so GitHub closes the issue
+  when the PR is merged. It is written when `ready` opens the PR.
+- **[local mode](local-mode.md)**: after the merge, once the push to the push remote is
+  over (`_push`, in the background), bullpen closes the issue with a comment naming the
+  commit: "Fixed in 4f2a1c0". With no push remote, or when the push failed, the comment
+  is "Fixed in BP-3 (not pushed yet)".
+
+A task closed or dropped without merging (`close`, `close --keep-branch`, `drop`) leaves
+its issue open and takes `bullpen: started` off it. `bullpen revert` of an accepted
+issue's task leaves the issue closed: whoever runs it, and the task's coordinator,
+get a line with the `gh issue reopen` command in case it should be open again.
+
+What bullpen writes is only its own fixed words, the task's ID, the commit and your
+reason for a no: never a name, a brief, a diff or anything a worker or reviewer wrote.
+Every write is one call, `gh ... -R <repo>`, away from any terminal so gh can never
+prompt (`GH_PROMPT_DISABLED`), and none is made while issues or `issues_write` are off.
+A write that fails is one news line (`issue-write`) and changes nothing else: a task
+starts, a no is recorded, an accept stands. `bullpen config --issues on` says once what
+bullpen will write to which repository, and how to turn it off.
+
+These are the gh commands, with `-R <repo>` at the end of each:
+
+```sh
+gh label create "bullpen: started" --color 1D76DB --description "bullpen is working on it" --force
+gh label create "bullpen: declined" --color BFBFBF --description "bullpen won't take it on" --force
+gh issue edit 12 --add-label "bullpen: started" --remove-label "bullpen: declined"   # its task starts
+gh issue edit 12 --add-label "bullpen: declined"                                     # you say no
+gh issue comment 12 --body "Being worked on as BP-3."                                # comments: start
+gh issue comment 12 --body "Declined: <your reason>"                                 # comments: a no
+gh issue edit 12 --remove-label "bullpen: started"                                   # close, drop
+gh issue close 12 --comment "Fixed in 4f2a1c0"                                       # local mode: accept
+```
 
 ## Where it lives
 
@@ -288,7 +340,8 @@ lock (`issues.lock`). One record per issue number:
 decided; `updated` is the issue's `updatedAt` as last read; `closed`, when there, is when
 bullpen saw the issue gone from the open ones. The item carries `by: "issue"`,
 `issue: {number, url, author, updated}` and, once judged, `judged: {score, worth, area,
-why, trusted, trust, at}` (and `kept: true` when the judgement put it on the list); a task made from it, `issue_trusted`.
+why, trusted, trust, at}` (and `kept: true` when the judgement put it on the list); a task made from it, `issue_trusted`,
+and `issue_started` once bullpen labelled the issue for it.
 
 `issues-timer.json` beside it (with `issues-timer.lock`) is the timer's: when the last
 read started (`at`) and, while reads fail, what the last one failed with (`failed`).
@@ -297,5 +350,6 @@ The code is `cli/src/issues/`: `mod.rs` (`issues`, the comparison, the decision
 remembered), `repo.rs` (which repository, and the one call to gh), `store.rs`
 (`issues.json`), `text.rs` (the title, the fence, the cut, the brief's quote, the news
 line), `view.rs` (`issue N`), `judge.rs` (`--score`, the threshold, the brief),
-`trust.rs` (who is trusted) and `timer.rs` (`_issues`, the watcher's call, and the read's job). The
+`trust.rs` (who is trusted), `write.rs` (what's written back, through its one call to
+gh) and `timer.rs` (`_issues`, the watcher's call, and the read's job). The
 watcher's side is in `lua/watch.lua`.

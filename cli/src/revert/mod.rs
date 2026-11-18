@@ -214,6 +214,7 @@ pub fn cmd_revert(argv: &[String]) -> Res<i32> {
         "{tid} added: {title} ({} to revert)",
         bullpen_core::task::commits(taken.commits.len() as i64)
     );
+    crate::issues::write::reverted(&repo, &t)?; // its issue, closed at the accept, stays closed
     let stays = |why: &str| -> Res<()> {
         println!("{tid} stays todo ({why}): `bullpen start {tid}` starts it");
         let line = format!("{tid} was added to revert {id} but isn't started ({why}): `bullpen start {tid}` starts it");
