@@ -14,7 +14,8 @@
 //! reader keeps reading (`drain`), passing keys on as they come, until the device
 //! attributes come: the terminal's last answer, however late, so no answer reaches
 //! crossterm. An esc with nothing after it for `QUIET` is a key there (one typed while
-//! the answers are late), as crossterm takes it. A terminal that never sends its device
+//! the answers are late), as crossterm takes it; when what comes next is an answer's
+//! rest after all, it's dropped as the answer, so only that esc was taken. A terminal that never sends its device
 //! attributes has the board's keys read here for the rest of the run, and isn't asked
 //! again.
 
@@ -183,8 +184,10 @@ pub fn read_answers(input: &mut impl Input, graphics: Option<u32>) -> (Answers, 
 /// After answers that didn't all come in time: read on until the device attributes
 /// come (the terminal's last answer), passing the keys typed meanwhile to `typed` and
 /// dropping the answers. `left` is the cut-off answer read already. A lone esc with
-/// nothing after it for `QUIET` is a key. `tick` is called each `QUIET` or so, so the
-/// reader can look for what it can't read here (the window's size).
+/// nothing after it for `QUIET` is a key; but when what comes next goes on the way an
+/// answer does (`goes_on`), the esc was that answer's start, and the rest is dropped
+/// with it, not read as keys. `tick` is called each `QUIET` or so, so the reader can
+/// look for what it can't read here (the window's size).
 pub fn drain(
     input: &mut impl Input,
     left: Vec<u8>,
@@ -193,22 +196,46 @@ pub fn drain(
     mut tick: impl FnMut(),
 ) {
     let mut buf = left;
+    // a lone esc was passed on as a key last time round
+    let mut esc_passed = false;
     loop {
         let before = buf.len();
-        let a = read_until(input, &mut buf, graphics, Instant::now() + QUIET);
+        let mut a = read_until(input, &mut buf, graphics, Instant::now() + QUIET);
         let quiet = buf.len() == before;
+        if esc_passed && !quiet {
+            esc_passed = false;
+            if goes_on(&buf) {
+                buf.insert(0, 0x1b);
+                a = parse(&buf, graphics);
+            }
+        }
         keys(&a.rest).into_iter().for_each(&mut typed);
         let mut left = buf.split_off(a.whole);
-        if a.done || (quiet && left == b"\x1b") {
+        if a.done {
+            keys(&left).into_iter().for_each(&mut typed);
+            return;
+        }
+        if quiet && left == b"\x1b" {
             keys(&left).into_iter().for_each(&mut typed);
             left.clear();
-        }
-        if a.done {
-            return;
+            esc_passed = true;
         }
         tick();
         buf = left;
     }
+}
+
+/// Do these bytes, after an esc, go on the way one of the terminal's answers does (or
+/// begin to)? OSC `]N;`, the graphics APC `_G`, and CSI `[?` (device attributes) or
+/// `[6;` (cell size).
+fn goes_on(b: &[u8]) -> bool {
+    if b.first() == Some(&b']') {
+        return b.get(1).is_none_or(u8::is_ascii_digit);
+    }
+    [&b"_G"[..], b"[?", b"[6;"].iter().any(|p| {
+        let n = p.len().min(b.len());
+        n > 0 && b[..n] == p[..n]
+    })
 }
 
 /// Read input into buf until the device attributes come or `deadline`; the answers in it.

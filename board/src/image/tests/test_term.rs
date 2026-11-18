@@ -103,13 +103,14 @@ fn answers_however_late_are_read_to_their_end() {
 fn an_esc_typed_while_the_answers_are_late_is_passed_on_once_nothing_follows_it() {
     let esc = || Typed::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     // typed alone: passed on after a quiet while, not held until the answers come
-    let mut late = Script(vec![b"\x1b", b"", b"\x1b]10;rgb:ff/ff/ff\x1b\\", DA]);
+    // (the first empty piece ends the read the esc came in, the second is the quiet)
+    let mut late = Script(vec![b"\x1b", b"", b"", b"\x1b]10;rgb:ff/ff/ff\x1b\\", DA]);
     let typed = std::cell::RefCell::new(Vec::new());
     drain(&mut late, Vec::new(), Some(5), |t| typed.borrow_mut().push(t), || {
         typed.borrow_mut().push(Typed::Paste("tick".into()));
     });
     let typed = typed.into_inner();
-    assert_eq!(typed[..2], [Typed::Paste("tick".into()), esc()]);
+    assert_eq!(typed[..3], [Typed::Paste("tick".into()), esc(), Typed::Paste("tick".into())]);
     assert_eq!(typed.iter().filter(|t| **t == esc()).count(), 1);
     // left over from the wait, the same
     let mut late = Script(vec![b"", DA]);
@@ -260,4 +261,36 @@ fn the_board_saying_asked_when_the_reader_isnt_parked_changes_nothing() {
     assert!(gate.want());
     gate.asked(); // wanted, not yet parked
     assert_eq!(gate.get(), Stage::Wanted);
+}
+
+#[test]
+fn a_late_answer_whose_rest_comes_long_after_its_esc_gives_no_keys_but_that_esc() {
+    let esc = || Typed::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    let rests: [&'static [u8]; 4] = [b"]11;rgb:1e1e/1e1e/2e2e\x1b\\", b"_Gi=5;OK\x1b\\", b"[6;34;16t", b"[?62;22c"];
+    for rest in rests {
+        let mut late = Script(vec![b"\x1b", b"", b"", rest, b"j", DA]);
+        let mut typed = Vec::new();
+        drain(&mut late, Vec::new(), Some(5), |t| typed.push(t), || {});
+        assert_eq!(typed, [vec![esc()], keys(b"j")].concat(), "{}", String::from_utf8_lossy(rest));
+    }
+    // cut again: the rest of the rest comes later still
+    let mut late = Script(vec![b"\x1b", b"", b"", b"]1", b"1;rgb:00/00/00\x07", DA]);
+    let mut typed = Vec::new();
+    drain(&mut late, Vec::new(), Some(5), |t| typed.push(t), || {});
+    assert_eq!(typed, [esc()]);
+    // keys typed after the esc are keys
+    let mut late = Script(vec![b"\x1b", b"", b"", b"g", DA]);
+    let mut typed = Vec::new();
+    drain(&mut late, Vec::new(), Some(5), |t| typed.push(t), || {});
+    assert_eq!(typed, [vec![esc()], keys(b"g")].concat());
+}
+
+#[test]
+fn what_goes_on_like_an_answer() {
+    for b in [&b"]"[..], b"]1", b"]11;rgb", b"_", b"_G", b"[", b"[?", b"[6", b"[6;34;16t", b"[?62c"] {
+        assert!(goes_on(b), "{}", String::from_utf8_lossy(b));
+    }
+    for b in [&b"g"[..], b"]a", b"_a", b"[A", b"[1;3D", b"[3~", b"[60", b"\x1b"] {
+        assert!(!goes_on(b), "{}", String::from_utf8_lossy(b));
+    }
 }

@@ -168,7 +168,8 @@ a change of theme, `I` twice redraws in the new colours. It never asks on a time
 While the board waits for those answers it reads the keys itself and passes them on;
 an answer that comes late (after two seconds), however late, is read to its end and
 never taken for keys, and an `esc` typed meanwhile counts once nothing follows it for a
-tenth of a second. The type is Inter (built into the board, SIL Open Font
+tenth of a second (an answer that was cut right after its own esc gives the board that
+`esc`, never the rest as keys). The type is Inter (built into the board, SIL Open Font
 License); `bullpen config --board-font PATH` draws with another font file (TTF or
 OTF) instead, with Inter for the characters it lacks.
 
