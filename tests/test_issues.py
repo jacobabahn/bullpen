@@ -829,6 +829,28 @@ class IssuesWriteTest(IssuesWriteBase):
         self.bp("drop", tid, "--force")  # the label never went on: nothing to take off
         self.assertEqual(len(self.writes()), 1)
 
+    def test_the_labels_made_are_noted_each_and_one_deleted_on_github_is_made_again(self):
+        # a repository that has one of the labels (one added to bullpen later): only the other is made
+        self.state_file("issue-labels").write_text("me/proj\tbullpen: started\n")
+        self.start_issue()
+        self.assertEqual(self.writes(), [LABELS[1], STARTED])
+        made = "me/proj\tbullpen: started\nme/proj\tbullpen: declined\n"
+        self.assertEqual(self.state_file("issue-labels").read_text(), made)
+        # someone deletes `bullpen: declined` on GitHub: the next edit naming it fails, and it is forgotten
+        (self.fake / "labels_gone").write_text("bullpen: declined\n")
+        self.github_issues(issue(12, "Board flickers", author="me"), issue(15, "Fish shell"), issue(16, "Logo"))
+        self.now()
+        self.bp("later", "L2", "--drop")
+        self.assertIn("bullpen · #15 (L2): bullpen couldn't mark it `bullpen: declined` on GitHub: 'bullpen: "
+                      "declined' not found. Nothing to do for the work", self.news_log())
+        self.assertEqual(self.state_file("issue-labels").read_text(), "me/proj\tbullpen: started\n")
+        self.bp("later", "L3", "--drop")  # made again, then the edit goes through
+        self.assertEqual(self.writes()[-3:], [
+            ["issue", "edit", "15", "--add-label", "bullpen: declined", "-R", "me/proj"],
+            LABELS[1], ["issue", "edit", "16", "--add-label", "bullpen: declined", "-R", "me/proj"]])
+        self.assertEqual(self.state_file("issue-labels").read_text(), made)
+        self.assertEqual((self.fake / "labels_gone").read_text(), "")
+
     def test_config_issues_on_says_once_what_bullpen_writes(self):
         self.bp("config", "--issues", "off")
         out = self.bp("config", "--issues", "on").stdout

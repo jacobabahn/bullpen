@@ -17,6 +17,9 @@
 //!   write_refused    a write to an issue (`issue edit`, `comment`, `close`) or a `label
 //!                    create` fails, saying this file's text. Writes change nothing here:
 //!                    the tests read them in gh.log
+//!   labels_gone      labels deleted on GitHub, a line each: an `issue edit` that names
+//!                    one fails as gh does (`'<label>' not found`), until a `label
+//!                    create` makes it again
 
 use std::io::Read;
 use std::path::Path;
@@ -28,6 +31,31 @@ use serde_json::{json, Value};
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     finish(run(&argv))
+}
+
+/// A write's labels against `labels_gone`: a `label create` makes one again, and an
+/// `issue edit` naming one that is gone fails.
+fn labels_gone(d: &Path, argv: &[String]) -> Res<()> {
+    let path = d.join("labels_gone");
+    if !path.exists() {
+        return Ok(());
+    }
+    let gone: Vec<String> = read_text(&path)?.lines().map(str::to_string).collect();
+    if argv[0] == "label" {
+        let name = argv.get(2).cloned().unwrap_or_default();
+        let left: String = gone.iter().filter(|l| **l != name).map(|l| format!("{l}\n")).collect();
+        return std::fs::write(&path, left).map_err(|e| broke(&format!("labels_gone: {e}")));
+    }
+    let named = argv
+        .windows(2)
+        .filter(|w| w[0] == "--add-label" || w[0] == "--remove-label")
+        .map(|w| &w[1]);
+    for name in named {
+        if gone.contains(name) {
+            return Err(exit_msg(&format!("'{name}' not found")));
+        }
+    }
+    Ok(())
 }
 
 fn run(argv: &[String]) -> Res<()> {
@@ -62,7 +90,7 @@ fn run(argv: &[String]) -> Res<()> {
         if refused.exists() {
             return Err(exit_msg(&read_text(&refused)?));
         }
-        return Ok(());
+        return labels_gone(&d, argv);
     }
     if argv.first().is_some_and(|a| a == "issue") {
         return issue(&d, argv);

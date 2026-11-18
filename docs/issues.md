@@ -277,9 +277,11 @@ An issue is written by whoever filed it, and agents read what bullpen prints. So
 
 - `labels` (the default): the label `bullpen: started` when an issue's task starts (and
   `bullpen: declined` off it, from an earlier no), and `bullpen: declined` when you say
-  no (`bullpen later L11 --drop`, or `n` on the board). bullpen makes both labels in the
-  repository the first time it needs one (`gh label create --force`), and notes that in
-  `issue-labels` in the state folder. Labels send the issue's author no notification.
+  no (`bullpen later L11 --drop`, or `n` on the board). bullpen makes each label in the
+  repository the first time it needs it (`gh label create --force`), and notes it, by
+  repository, in `issue-labels` in the state folder. If someone deletes one on GitHub,
+  the next edit that names it fails (one news line) and bullpen forgets it, so the write
+  after that makes it again. Labels send the issue's author no notification.
 - `comments`: the labels, and a comment at each: "Being worked on as BP-3." when the
   task starts, "Declined: <your reason>" (or "Declined.") when you say no.
 - `off`: nothing at all, not even the close below.

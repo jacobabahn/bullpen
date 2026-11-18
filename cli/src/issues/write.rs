@@ -8,6 +8,9 @@
 //! calls). A task made from an issue records the issue's number and repository (`issue`),
 //! and its writes go there.
 //!
+//! The labels made are noted in `issue-labels`, by repository and label, and one is
+//! forgotten when gh says it isn't there (deleted on GitHub), so the next write makes it.
+//!
 //! Every write goes through `gh_write`: always with `-R`, never with a prompt, and not at
 //! all while issues are off or `issues_write` is off. What it writes is bullpen's fixed
 //! words, the task's ID, the commit and the person's own reason for a no: never a name,
@@ -23,8 +26,8 @@ use serde_json::{json, Value};
 pub const STARTED: &str = "bullpen: started";
 pub const DECLINED: &str = "bullpen: declined";
 
-/// The labels bullpen makes in a repository once (`label create --force`: made, or set
-/// to these if they were there): name, colour and description.
+/// The labels bullpen makes in a repository once each (`label create --force`: made, or
+/// set to these if they were there): name, colour and description.
 const LABELS: [(&str, &str, &str); 2] = [
     (STARTED, "1D76DB", "bullpen is working on it"),
     (DECLINED, "BFBFBF", "bullpen won't take it on"),
@@ -81,15 +84,34 @@ fn gh_write(repo: &Repo, slug: &str, args: &[&str]) -> Result<(), String> {
     Err(super::text::line(said.unwrap_or("gh failed"), 200))
 }
 
-/// Make bullpen's labels in the repository, once (`issue-labels` lists the repositories
-/// that have them).
+/// `issue-labels` in the state folder: each label bullpen made, by repository
+/// (`owner/repo<tab>label`, a line each).
+fn made_path(repo: &Repo) -> std::path::PathBuf {
+    repo.dir.join("issue-labels")
+}
+
+fn made(repo: &Repo) -> Vec<String> {
+    let text = std::fs::read_to_string(made_path(repo)).unwrap_or_default();
+    text.lines().map(str::to_string).collect()
+}
+
+fn made_line(slug: &str, label: &str) -> String {
+    format!("{slug}\t{label}")
+}
+
+fn note_made(repo: &Repo, lines: &[String]) {
+    let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
+    let _ = std::fs::write(made_path(repo), text);
+}
+
+/// Make each of bullpen's labels the repository doesn't have yet, by `issue-labels`:
+/// one added to `LABELS` later is made too.
 fn labels(repo: &Repo, slug: &str) -> Result<(), String> {
-    let stamp = repo.dir.join("issue-labels");
-    let made = std::fs::read_to_string(&stamp).unwrap_or_default();
-    if made.lines().any(|l| l == slug) {
-        return Ok(());
-    }
     for (name, color, about) in LABELS {
+        let mut have = made(repo);
+        if have.contains(&made_line(slug, name)) {
+            continue;
+        }
         let args = [
             "label",
             "create",
@@ -101,9 +123,29 @@ fn labels(repo: &Repo, slug: &str) -> Result<(), String> {
             "--force",
         ];
         gh_write(repo, slug, &args)?;
+        have.push(made_line(slug, name));
+        note_made(repo, &have);
     }
-    let _ = std::fs::write(&stamp, format!("{made}{slug}\n"));
     Ok(())
+}
+
+/// An issue edit that names labels. When gh says one of bullpen's isn't there (someone
+/// deleted it on GitHub: `'bullpen: started' not found`), it is no longer noted as made,
+/// so the next write makes it again.
+fn edit(repo: &Repo, slug: &str, args: &[&str]) -> Result<(), String> {
+    let res = gh_write(repo, slug, args);
+    if let Err(why) = &res {
+        let gone = |l: &String| {
+            LABELS
+                .iter()
+                .any(|(name, _, _)| *l == made_line(slug, name) && why.contains(&format!("'{name}' not found")))
+        };
+        let have = made(repo);
+        if have.iter().any(gone) {
+            note_made(repo, &have.iter().filter(|l| !gone(l)).cloned().collect::<Vec<_>>());
+        }
+    }
+    res
 }
 
 /// The issue's repository, or why there isn't one.
@@ -129,7 +171,7 @@ fn mark(
     if let Some(r) = remove {
         args.extend(["--remove-label", r]);
     }
-    gh_write(repo, &slug, &args)?;
+    edit(repo, &slug, &args)?;
     *labelled = true;
     if comments(repo) {
         gh_write(repo, &slug, &["issue", "comment", &num, "--body", comment])?;
@@ -241,7 +283,7 @@ pub fn unstarted(repo: &Repo, t: &Obj) -> Res<()> {
     }
     let Some((n, slug)) = issue_of(t) else { return Ok(()) };
     let num = n.to_string();
-    let res = slug.and_then(|slug| gh_write(repo, &slug, &["issue", "edit", &num, "--remove-label", STARTED]));
+    let res = slug.and_then(|slug| edit(repo, &slug, &["issue", "edit", &num, "--remove-label", STARTED]));
     if let Err(why) = res {
         let line = failed_line(n, s(t, "id"), &format!("take `{STARTED}` off it"), &why);
         told(repo, t, false, &line)?;
