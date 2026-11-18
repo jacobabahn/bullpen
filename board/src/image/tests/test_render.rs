@@ -19,6 +19,7 @@ fn task(id: &str, status: &str) -> TaskRow {
         asked: None,
         quiet: false,
         yours: false,
+        key: None,
     }
 }
 
@@ -413,4 +414,53 @@ fn a_risk_is_a_chip_its_colour_on_its_colour_faintly() {
     let t = TaskRow { risk: Some("high".into()), ..task("BP-1", "ready") };
     let want = fonts.width("3m", Weight::Bold, c.m.detail) + 0.5 * c.m.detail + chip::width(&fonts, "high", c.m.label);
     assert_eq!(g.right_side(&t, &fonts), want);
+}
+
+/// Do two images differ in columns [x0, x1) of rows [y0, y1)?
+fn differ(a: &Sheet, b: &Sheet, (x0, x1): (u32, u32), (y0, y1): (u32, u32)) -> bool {
+    (y0..y1).any(|y| (x0..x1).any(|x| px_at(a, x, y) != px_at(b, x, y)))
+}
+
+#[test]
+fn the_selected_tasks_key_is_in_a_cap_at_its_cards_lower_right_and_its_last_line_makes_room() {
+    let long = "a detail long enough to run to the right edge of the card and on to a second line of it";
+    let block = |key: Option<(String, String)>| {
+        let t = TaskRow { selected: true, key, ..task("BP-1", "ready") };
+        rows(vec![Row::Task(t), Row::Detail(DetailRow { lines: 3, selected: true, ..detail_row(long) }), Row::Task(task("BP-2", "todo"))])
+    };
+    for size in [TextSize::Small, TextSize::Medium, TextSize::Large] {
+        let (c, fonts) = (canvas(size), Fonts::builtin());
+        let (laid, s) = draw_in(&block(Some(("a".into(), "accept".into()))), size);
+        let (bare_laid, bare) = draw_in(&block(None), size);
+        let g = Geo { c, idw: laid.idw };
+        let key_w = g.key_width("a", "accept", &fonts);
+        let last = laid.lines[1].last().unwrap();
+        assert!(fonts.width(last, Weight::Regular, c.m.detail) <= g.detail_room() - key_w, "{size:?}: {last}");
+        // without a key the line had the whole width
+        assert!(fonts.width(&bare_laid.lines[1][0], Weight::Regular, c.m.detail) > g.detail_room() - key_w, "{size:?}");
+        // on the block's last line, at the right; nothing else on the title's lines
+        let (top, bottom) = (laid.heights[0], laid.heights[0] + laid.heights[1]);
+        let at = ((c.right() - key_w + 0.8 * c.m.label) as u32, c.right() as u32);
+        let last_line = (bottom - c.m.detail_line as u32, bottom);
+        assert!(differ(&s, &bare, at, last_line), "{size:?}");
+        assert!(!differ(&s, &bare, (0, s.pixmap.width()), (0, top)), "{size:?}");
+        // the key's cap: its faint fill
+        let cy = bottom - c.m.detail_line as u32 / 2;
+        assert!(px_at(&s, at.0 + 3, cy)[3] > px_at(&bare, at.0 + 3, cy)[3], "{size:?}");
+    }
+}
+
+#[test]
+fn a_short_last_line_keeps_its_room_beside_the_key_and_a_task_with_no_key_has_none() {
+    let with = |key: Option<(String, String)>| {
+        let t = TaskRow { selected: true, key, ..task("BP-1", "needs") };
+        rows(vec![Row::Task(t), detail("Asks: which one?", true), detail("3 files, +4 −1", true)])
+    };
+    let (laid, s) = draw_in(&with(Some(("i".into(), "answer".into()))), TextSize::Medium);
+    let (_, bare) = draw_in(&with(None), TextSize::Medium);
+    assert_eq!(laid.lines[2], vec!["3 files, +4 −1".to_string()]);
+    let bottom = laid.heights.iter().sum::<u32>();
+    assert!(differ(&s, &bare, (250, 400), (bottom - 25, bottom)));
+    // only the last line has it
+    assert!(!differ(&s, &bare, (0, 400), (0, bottom - 25)));
 }

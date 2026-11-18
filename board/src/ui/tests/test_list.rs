@@ -525,3 +525,20 @@ fn the_header_tallies_the_open_groups_in_the_boards_order_for_the_status_bar() {
     // the segments add up to the open tasks
     assert_eq!(h.tallies.iter().map(|t| t.n).sum::<usize>(), 5);
 }
+
+#[test]
+fn the_selected_task_carries_its_first_key_for_the_image_looks_card_unless_its_asked_about() {
+    let mut a = app(vec![ready("BP-1"), asking("BP-2"), task("BP-3", "todo")], 0, Layout::Grouped);
+    let keys = |a: &App| -> Vec<(String, Option<(String, String)>)> {
+        let r = crate::ui::rows::build(a, 42, false, model::now());
+        r.rows.iter().filter_map(|r| if let crate::ui::rows::Row::Task(t) = r { Some((t.id.clone(), t.key.clone())) } else { None }).collect()
+    };
+    let key = |k: &str, what: &str| Some((k.to_string(), what.to_string()));
+    a.sel = Some("BP-2".into());
+    assert_eq!(keys(&a), vec![("BP-2".into(), key("i", "answer")), ("BP-1".into(), None), ("BP-3".into(), None)]);
+    a.sel = Some("BP-1".into());
+    assert_eq!(keys(&a)[1], ("BP-1".into(), key("a", "accept")));
+    // asked y/n about, the key row asks: the card has no key
+    a.pending = Some((model::Action::Accept, "BP-1".into()));
+    assert_eq!(keys(&a)[1], ("BP-1".into(), None));
+}

@@ -75,6 +75,9 @@ pub(crate) struct TaskRow {
     /// it waits on you (it needs you, stopped, or is ready) and isn't another
     /// coordinator's: a narrow image board gives its title two lines
     pub yours: bool,
+    /// selected (and not asked about): its first key and what it does, which the image
+    /// look puts in a cap at its card's lower right
+    pub key: Option<(String, String)>,
 }
 
 /// A line under a task.
@@ -272,6 +275,7 @@ fn task_row(app: &App, t: &Task, selected: bool, with_age: bool, now: Now) -> Ta
         asked,
         quiet: t.closed() || t.triage() || app.cfg.theirs(t, app.me.as_deref()),
         yours: (t.flagged() || t.status == "ready") && !app.cfg.theirs(t, app.me.as_deref()),
+        key: model::task_keys(Some(t)).first().filter(|_| selected && asked.is_none()).map(|(k, what)| (k.to_string(), what.to_string())),
     }
 }
 

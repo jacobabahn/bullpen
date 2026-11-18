@@ -80,11 +80,13 @@ A module's tests (`tests/test_<module>.rs` in its folder) aren't on the map.
 
 The board (`board/src/`) draws with ratatui. `ui/rows.rs` works out the list's rows
 from the board's state once a frame, as values: each row's text, its mark, whether
-it's selected, asked about, dim, its risk and age. The text list (`ui/list.rs`,
-`ui/later.rs`) draws them as cells. With the image look (docs/board.md) the board
-leaves its cells blank and hands image/ a `View`: the same rows, the top line
-(`list::Head`) and the bottom rows (`bottom::Foot`) as values too, and the blocks of
-cells each has. After ratatui's frame, and through the same output, image/ lays the
+it's selected, asked about, dim, its risk and age (and the selected task's first
+key, which only the image draws). The text list (`ui/list.rs`, `ui/later.rs`) draws
+them as cells. With the image look (docs/board.md) the board leaves its cells blank
+and hands image/ a `View`: the same rows, the top line (`list::Head`, with each open
+group's count for the status bar: `bar.rs`) and the bottom rows (`bottom::Foot`) as
+values too, and the blocks of cells each has (on a tall board the header has the
+three rows above the list). After ratatui's frame, and through the same output, image/ lays the
 rows out (`render.rs`: each row's height from the text size, the selected title
 wrapped), scrolls them by those heights (`list::scroll_by`, which the text list's
 `scroll` is with every row 1 high; it sets `app.top` and `app.page`), and draws the

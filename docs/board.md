@@ -144,10 +144,12 @@ Tasks that waited on the accepted one start by themselves (see
 `bullpen config --board-look image` (or `I` on the board, for this run) draws the
 board as images instead of text: real type, the marks drawn as shapes (rings, a
 check, a diamond) in the status colours, the selected task on a card (a faint fill
-with a faint edge, its mark inside it, clear of its type on every side) with its ID
-in the foreground and its whole title (wrapped to three lines at most; another task's
-is cut to its line, but on a board under 44 columns one that's yours and waits on
-you, needing you, stopped or ready, gets two lines, at medium and large). A detail
+with a faint edge, its mark inside it, clear of its type on every side, and at its
+lower right its first key in a small cap with what it does, `a accept` or
+`i answer`, its last line making room) with its ID in the foreground and its whole
+title (wrapped to three lines at most; another task's is cut to its line, but on a
+board under 44 columns one that's yours and waits on you, needing you, stopped or
+ready, gets two lines, at medium and large). A detail
 line wraps where the type runs out of room, measured in pixels. A task that needs
 you, or whose agent stopped, stands out: it sits on a faint wash of amber (or red)
 over the same rectangle as the card, with a bar of that colour at its left, round at

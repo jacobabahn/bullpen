@@ -4,14 +4,15 @@
 //! detail's text wrapped by pixels to its room; the image itself is the list's block of
 //! cells. The type is real (font.rs), the marks are drawn shapes in the status colours
 //! (rings, a check, a diamond), the selected task sits on a card (a faint fill and
-//! edge, its mark inside) with its whole title (a narrow board's tasks that are yours
-//! get two lines), a task that needs you on a wash of its colour with a round bar at
-//! its left, and a risk is a chip (chip.rs). The title is the loudest thing on a row:
-//! the ID, the age and the group's name are a detail's size. The marks that move are
-//! left out when the image look places them over the list (sprite.rs draws their frames
-//! with `Draw`). The list's last column has the scroll marks. Nothing here touches the
-//! terminal: given rows and a size in pixels, it lays them out and returns an image, or
-//! a window of pixels of them (pieces.rs), drawn as that part of the whole would be.
+//! edge, its mark inside, its first key in a cap at its lower right) with its whole
+//! title (a narrow board's tasks that are yours get two lines), a task that needs you
+//! on a wash of its colour with a round bar at its left, and a risk is a chip
+//! (chip.rs). The title is the loudest thing on a row: the ID, the age and the group's
+//! name are a detail's size. The marks that move are left out when the image look
+//! places them over the list (sprite.rs draws their frames with `Draw`). The list's
+//! last column has the scroll marks. Nothing here touches the terminal: given rows and
+//! a size in pixels, it lays them out and returns an image, or a window of pixels of
+//! them (pieces.rs), drawn as that part of the whole would be.
 
 use super::chip;
 use super::font::{Fonts, Weight};
@@ -186,9 +187,12 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
     let g = Geo { c: *c, idw };
     let mut all = Vec::new();
     let mut heights = Vec::new();
-    for row in &rows.rows {
+    // the room the selected task's key takes on its block's last line
+    let mut key_w = 0.0;
+    for (i, row) in rows.rows.iter().enumerate() {
         let (title, most, weight, right) = match row {
             Row::Task(t) => {
+                key_w = t.key.as_ref().map_or(0.0, |(k, what)| g.key_width(k, what, fonts));
                 let two = t.yours && g.narrow() && !c.m.cells;
                 let most = if t.selected { TITLE_LINES } else if two { YOURS_LINES } else { 1 };
                 (&t.title, most, title_weight(t.asked.is_some()), g.task_right(t, fonts))
@@ -198,13 +202,18 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
                 // a stale age is semibold: the first line has that much less room
                 let (age, _) = crate::model::split_at_width(&d.text, d.lead);
                 let bolder = if d.stale { fonts.width(&age, Weight::Bold, c.m.detail) - fonts.width(&age, Weight::Regular, c.m.detail) } else { 0.0 };
-                let lines = g.detail_lines(&d.text, d.lines, bolder, fonts);
+                let mut lines = g.detail_lines(&d.text, d.lines, bolder, 0.0, fonts);
+                let last = !rows.rows.get(i + 1).is_some_and(Row::is_detail);
+                // the key goes after its last line, which makes room when it must
+                if last && key_w > 0.0 && lines.last().is_some_and(|l| fonts.width(l, Weight::Regular, c.m.detail) > g.detail_room() - key_w) {
+                    lines = g.detail_lines(&d.text, d.lines, bolder, key_w, fonts);
+                }
                 heights.push(g.height(row, lines.len()));
                 all.push(lines);
                 continue;
             }
             Row::ItemDetail(text, most) => {
-                let lines = g.detail_lines(text, *most, 0.0, fonts);
+                let lines = g.detail_lines(text, *most, 0.0, 0.0, fonts);
                 heights.push(g.height(row, lines.len()));
                 all.push(lines);
                 continue;
@@ -306,7 +315,8 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
     d.shift = (cut.at + cut.y) as f32 - EDGE as f32;
     // behind each task's block (its row and its lines): the selected one's card, or the
     // wash of one that needs you, and that one's bar
-    for b in blocks(rows, &places, c.m.pad) {
+    let blocks = blocks(rows, &places, c.m.pad);
+    for b in &blocks {
         match (b.selected, b.flag) {
             (true, _) => d.card(b.top, b.bottom),
             (false, Some(f)) => d.wash(b.top, b.bottom, f),
@@ -325,6 +335,12 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
             d.row(&rows.rows[p.row], &laid.lines[p.row], y, (cut.bare)(p.row));
         }
     }
+    // the selected task's key, at its card's lower right (lay made room for it)
+    for b in blocks.iter().filter(|b| b.ends) {
+        if let Some((key, what)) = b.key {
+            d.action(key, what, b.bottom);
+        }
+    }
     let mut pm = pm.clone_rect(tiny_skia::IntRect::from_xywh(0, EDGE as i32, width, height).ok_or_else(made)?).ok_or_else(made)?;
     Draw::new(&mut pm, fonts, c, laid.idw).scroll_marks(cut.marks, height as f32);
     Ok(Sheet { pixmap: pm, places })
@@ -332,28 +348,37 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
 
 /// A task's (or an item's) block: from its first line's top to its last line's bottom,
 /// whether it's selected, and its flag.
-struct Block {
+struct Block<'r> {
     top: f32,
     bottom: f32,
     selected: bool,
     flag: Option<Flag>,
+    /// the selected task's key, and whether its block ends here with a line under it,
+    /// where the key goes
+    key: Option<&'r (String, String)>,
+    ends: bool,
 }
 
 /// The blocks of the rows placed: each task's or item's row with the lines under it (a
 /// window's first lines, under a row above it, a block of their own).
-fn blocks(rows: &Rows, places: &[Place], pad: f32) -> Vec<Block> {
+fn blocks<'r>(rows: &'r Rows, places: &[Place], pad: f32) -> Vec<Block<'r>> {
     let mut out: Vec<Block> = Vec::new();
     let mut open = false;
     for p in places {
         let row = &rows.rows[p.row];
         let (y, bottom) = (p.y as f32, (p.y + p.h) as f32);
-        let block = |top: f32, selected: bool, flag: Option<Flag>| Block { top, bottom, selected, flag };
+        let block = |top: f32, selected: bool, flag: Option<Flag>| Block { top, bottom, selected, flag, key: None, ends: false };
+        // a line under a task (or an item) that's its block's last
+        let ends = row.is_detail() && !rows.rows.get(p.row + 1).is_some_and(Row::is_detail);
         match row {
-            Row::Task(t) => out.push(block(y + pad, t.selected, t.flag)),
+            Row::Task(t) => out.push(Block { key: t.key.as_ref(), ..block(y + pad, t.selected, t.flag) }),
             Row::Item(i) => out.push(block(y + pad, i.selected, None)),
-            Row::Detail(_) | Row::ItemDetail(..) if open => out.last_mut().expect("a block is open").bottom = bottom,
-            Row::Detail(dr) => out.push(block(y, dr.selected, dr.flag)),
-            Row::ItemDetail(..) => out.push(block(y, true, None)),
+            Row::Detail(_) | Row::ItemDetail(..) if open => {
+                let b = out.last_mut().expect("a block is open");
+                (b.bottom, b.ends) = (bottom, ends);
+            }
+            Row::Detail(dr) => out.push(Block { ends, ..block(y, dr.selected, dr.flag) }),
+            Row::ItemDetail(..) => out.push(Block { ends, ..block(y, true, None) }),
             _ => {}
         }
         open = row.is_entry() || row.is_detail();
@@ -426,12 +451,24 @@ impl Geo {
     }
 
     /// A detail's text wrapped at its spaces to the room under the ID, `most` lines at
-    /// most (the first `less` narrower), the last cut with "…" when there's more. One
-    /// line at least, so a row is never empty.
-    fn detail_lines(&self, text: &str, most: usize, less: f32, fonts: &Fonts) -> Vec<String> {
-        let room = self.c.right() - self.text_x();
+    /// most (the first `less` narrower, and every one `key` narrower), the last cut with
+    /// "…" when there's more. One line at least, so a row is never empty.
+    fn detail_lines(&self, text: &str, most: usize, less: f32, key: f32, fonts: &Fonts) -> Vec<String> {
+        let room = self.detail_room() - key;
         let lines = fonts.wrap(text, Weight::Regular, self.c.m.detail, (room - less, room), most);
         if lines.is_empty() { vec![String::new()] } else { lines }
+    }
+
+    /// A detail line's room: from under the ID to where text ends.
+    fn detail_room(&self) -> f32 {
+        self.c.right() - self.text_x()
+    }
+
+    /// The room the selected task's key takes at the right of its last line: its cap,
+    /// what it does, and a gap before it.
+    fn key_width(&self, key: &str, what: &str, fonts: &Fonts) -> f32 {
+        let px = self.c.m.label;
+        chip::keycap_width(fonts, key, what, px) + 0.8 * px
     }
 
     /// The width a task's age (and risk) take at the right, as `task` draws them.
@@ -585,6 +622,14 @@ impl<'a> Draw<'a> {
         let w = (0.26 * self.c()).max(3.0);
         let color = solid(self.theme.flag(flag));
         self.rounded_fill(x, y, w, h, w / 2.0, color);
+    }
+
+    /// A task's key in a cap and what it does, at the right of its block's last line,
+    /// whose bottom is `bottom`.
+    fn action(&mut self, key: &str, what: &str, bottom: f32) {
+        let px = self.m().label;
+        let x = self.right() - chip::keycap_width(self.fonts, key, what, px);
+        chip::keycap(self, key, what, px, x, bottom - self.m().detail_line / 2.0);
     }
 
     /// A rectangle with rounded corners, filled.

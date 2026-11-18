@@ -99,6 +99,8 @@ fn the_pieces_put_together_are_the_list_drawn_whole() {
             let p = plan(&view, &c, &Fonts::builtin(), None);
             app.top = p.top;
             assert!(p.sel.is_some(), "{sel} at {size:?}: the selected block is an image of its own");
+            // its key in a cap, at its card's lower right, is in that image
+            assert!(view.rows.rows.iter().any(|r| matches!(r, Row::Task(t) if t.selected && t.key.is_some())), "{sel}");
             assert_eq!(most_apart(&put_together(&view, &p, &c, false), &whole(&view, &p, &c)), 0, "{sel} at {size:?}");
         }
     }
