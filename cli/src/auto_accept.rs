@@ -18,6 +18,7 @@ use crate::agents::pane;
 use crate::args::{pos, Arg, Args, Nargs};
 use crate::become_ready::{make_ready, How};
 use crate::jobs::{background, Job};
+use crate::news::kind::Kind;
 use crate::news::{ready_news, say};
 use crate::notes::with_notes;
 use crate::ready::{summary_text, SUMMARY, SUMMARY_FILE};
@@ -144,7 +145,7 @@ pub fn cmd_verdict(argv: &[String]) -> Res<i32> {
                  findings are in {findings}: `bullpen tell {id}` it to read them"
             );
             let why = "Review findings didn't reach its worker";
-            stop(&repo, &mut t, "worker", "not_sent", why, &[line], "not-sent")?;
+            stop(&repo, &mut t, "worker", "not_sent", why, &[line], Kind::NotSent)?;
         }
     } else {
         let base_ref = crate::modes::task_base_ref(&repo, &t)?;
@@ -301,7 +302,7 @@ pub fn run_auto_accept(repo: &Repo, t: &mut Obj) -> Res<()> {
                 "{line}. Sent back to its worker to rebase (trip {} of {CONFLICT_SENDS})",
                 sent + 1
             );
-            say(repo, &t, "rebase_sent", &line)
+            say(repo, &t, Kind::RebaseSent, &line)
         }
         Some(failed) => {
             let line = format!(
@@ -309,7 +310,7 @@ pub fn run_auto_accept(repo: &Repo, t: &mut Obj) -> Res<()> {
                  or `bullpen tell {id}` it to rebase onto {base_ref} and fix them"
             );
             let why = "The request to rebase didn't reach its worker";
-            stop(repo, &mut t, "worker", "not_sent", why, &[line], "not-sent").map(|_| ())
+            stop(repo, &mut t, "worker", "not_sent", why, &[line], Kind::NotSent).map(|_| ())
         }
     }
 }

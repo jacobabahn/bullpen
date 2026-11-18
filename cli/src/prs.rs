@@ -266,7 +266,7 @@ fn send_back(repo: &Repo, t: &mut Obj, lines: &[String], ask: &str) -> Res<()> {
         };
         let tell = format!("`bullpen tell {id}` it when it's free");
         for line in each(&|l| format!("{l}. Not sent to its worker, which is {at}: {tell}")) {
-            news(repo, t, "pr-feedback", &line, Opts::default())?;
+            news(repo, t, Kind::PrFeedback, &line, Opts::default())?;
         }
         return Ok(());
     }
@@ -276,19 +276,19 @@ fn send_back(repo: &Repo, t: &mut Obj, lines: &[String], ask: &str) -> Res<()> {
             // its reviewer, if it had one, is closed: the coordinator passes this on
             let said =
                 each(&|l| format!("{l}. The message didn't reach its worker ({failed}): `bullpen tell {id}` it"));
-            stop(repo, t, "worker", "not_sent", &why, &said, "pr-feedback")?;
+            stop(repo, t, "worker", "not_sent", &why, &said, Kind::PrFeedback)?;
             return Ok(());
         }
         gh(t).insert("sent".into(), json!(true)); // the board says so once its worker is on it
         save(repo, t)?;
         for line in each(&|l| format!("{l}. Sent back to its worker.")) {
-            news(repo, t, "pr-feedback", &line, Opts::default())?;
+            news(repo, t, Kind::PrFeedback, &line, Opts::default())?;
         }
         return Ok(());
     }
     gh(t).insert("sent".into(), json!(true));
     let said = each(&|l| format!("{l}. Its worker's pane is gone: `bullpen resume {id}` restarts it"));
-    stop(repo, t, "worker", "not_sent", &why, &said, "pr-feedback")?;
+    stop(repo, t, "worker", "not_sent", &why, &said, Kind::PrFeedback)?;
     Ok(())
 }
 

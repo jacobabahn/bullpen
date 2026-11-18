@@ -7,6 +7,7 @@ use crate::args::{flag, pos, value, Arg, Args, Nargs};
 use crate::become_ready::{make_ready, How};
 use crate::close::close_task;
 use crate::modes::{is_local, publish, task_base_ref};
+use crate::news::kind::Kind;
 use crate::news::{news, Opts};
 use crate::review::{close_reviewer, review_at_ready, shortstat};
 use crate::saves::save;
@@ -224,7 +225,7 @@ fn finish(repo: &Repo, t: &mut Obj, a: &Args) -> Res<()> {
     if keep {
         // never auto-accept's: the close pushes the branch, and that is the person's call
         let line = format!("{id} finished (branch to be kept, not merged): {first}");
-        news(repo, t, "finished", &line, Opts::default())?;
+        news(repo, t, Kind::Finished, &line, Opts::default())?;
         println!("{id} finished, its branch to be kept. The person closes it: end your turn.");
         return Ok(());
     }
@@ -235,7 +236,7 @@ fn finish(repo: &Repo, t: &mut Obj, a: &Args) -> Res<()> {
     news(
         repo,
         t,
-        "finished",
+        Kind::Finished,
         &format!("{id} finished (nothing to merge): {first}"),
         Opts::default(),
     )?;

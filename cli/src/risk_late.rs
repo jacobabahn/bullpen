@@ -11,6 +11,7 @@
 //! (nothing to merge, no worktree), is left alone, so it happens once per task.
 
 use crate::modes::task_base_ref;
+use crate::news::kind::Kind;
 use crate::news::say;
 use crate::risk::{assess, Said};
 use bullpen_core::json::{obj, s, write_obj, Obj};
@@ -75,7 +76,7 @@ pub fn label_late(repo: &Repo, tid: &str) -> Res<bool> {
         "{tid} became ready without a risk label, so here it is: {}. Tell the person",
         label(level, why)
     );
-    say(repo, &now, "risk", &text)?;
+    say(repo, &now, Kind::Risk, &text)?;
     // the copy that made it ready knows no label: doctor's `copy` says which, if it isn't ours
     let brief = std::fs::read_to_string(repo.dir.join("briefs").join(format!("{tid}.full.md")));
     if let Some(copy) = brief.ok().and_then(|b| told_copy(&b, tid)) {

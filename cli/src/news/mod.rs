@@ -147,7 +147,7 @@ pub fn ready_news(repo: &Repo, t: &mut Obj, facts: &[String], then: &str, again:
     if last_news(repo, s(t, "id")).as_deref() == Some(format!("{NEWS_MARK}{}", squash(&text)).as_str()) {
         return Ok(());
     }
-    say(repo, t, "ready", &text)
+    say(repo, t, Kind::Ready, &text)
 }
 
 /// The last line of news about task tid, as it was logged, or None.
