@@ -128,8 +128,8 @@ def news_kinds():
     a kind whose lines say what to do themselves)."""
     global _news_kinds
     if _news_kinds is None:
-        table = json.loads(subprocess.run([str(BULLPEN), "_news_kinds"], text=True, capture_output=True,
-                                          check=True).stdout)
+        table = json.loads(subprocess.run([str(BULLPEN), "_news_kinds"], env={**os.environ, "BULLPEN_NO_BUILD": "1"},
+                                          text=True, capture_output=True, check=True).stdout)
         _news_kinds = {"rows": table["rows"], "kinds": {k["event"]: k["row"] for k in table["kinds"]}}
     return _news_kinds
 
@@ -147,15 +147,21 @@ def news_row(event, line):
 
 def check_news(test):
     """Every news line bullpen sent in a test is of a kind the table has, and one whose
-    kind has no row of the guide's table says what to do itself. A line a test wrote into
-    the log by hand, with an event its class names in `own_news_events`, isn't bullpen's."""
+    kind has no row of the guide's table says what to do itself. The logs are read
+    through bullpen (`_news_log`, the reader news.log has), not parsed here. A line a
+    test wrote into the log by hand, with an event its class names in `own_news_events`,
+    isn't bullpen's."""
     own = getattr(test, "own_news_events", ())
-    for log in (test.tmp / "state").rglob("news.log"):
-        for record in log.read_text().splitlines():
-            m = re.match(r"\S+(?: \[[^\]]*\])? \S+ ([^ :]+): bullpen · (.*)$", record)
-            if m and m.group(1) not in own and news_row(m.group(1), m.group(2)) is None:
+    logs = [str(p) for p in (test.tmp / "state").rglob("news.log")]
+    if not logs:
+        return
+    read = subprocess.run([str(BULLPEN), "_news_log", *logs], env=test.env, text=True, capture_output=True,
+                          check=True)
+    for log in json.loads(read.stdout):
+        for r in log["records"]:
+            if r["said"].startswith("bullpen · ") and r["event"] not in own and news_row(r["event"], r["text"]) is None:
                 test.fail(f"a news line of a kind the table doesn't have, or that neither says what to do "
-                          f"nor has a row of the guide's table ({m.group(1)}): {m.group(2)}")
+                          f"nor has a row of the guide's table ({r['event']}): {r['text']}")
 
 
 class BullpenTest(unittest.TestCase):
