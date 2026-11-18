@@ -110,7 +110,7 @@ fn accepted(
                     let line = format!("{id} approved by review{notes} and auto-accepted ({how})");
                     news(repo, t, Kind::AutoAccepted, &line, Opts::default())
                 } else {
-                    tell_coordinator(repo, t, "accepted", &format!("{id} accepted ({how})"))
+                    tell_coordinator(repo, t, Kind::Accepted, &format!("{id} accepted ({how})"))
                 }
             }),
         ),
@@ -168,7 +168,7 @@ fn accepted(
                     let line =
                         "Keys changed: tell the person to run `rex config reload` (the cmd+; keys run the old ones \
                                 until then)";
-                    news(repo, t, "keys", line, everyone)?;
+                    news(repo, t, Kind::Keys, line, everyone)?;
                     println!("{KEYS_CHANGED}");
                 }
                 Ok(())
@@ -177,7 +177,7 @@ fn accepted(
     ];
     run_steps(id, steps, &mut |line| {
         let line = format!("{line}. The accept still counts: tell the person");
-        news(repo, t, "accept_failed", &line, Opts::default())
+        news(repo, t, Kind::AcceptFailed, &line, Opts::default())
     });
 }
 
