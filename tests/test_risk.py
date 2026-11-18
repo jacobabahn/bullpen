@@ -99,6 +99,39 @@ class RiskTest(BullpenTest):
         self.assertEqual((r["level"], r["why"]), ("high", "couldn't run the GitHub path"))
         self.assertEqual(r["commit"], sh("git", "-C", wt, "rev-parse", "HEAD").strip())  # it follows the code
 
+    def rebased_after_an_accept(self, before=lambda: None):
+        """BP-1 and BP-2 are approved (BP-2 rated high by its reviewer); before() runs, then
+        BP-1 is accepted, which rebases BP-2 keeping its approval. Returns BP-2's worktree."""
+        tid = self.approved_task()
+        self.bp("add", "Second", "--brief", "x")
+        self.bp("start", "BP-2")
+        wt = self.commit_file("BP-2", "two.txt", "two\n")
+        self.ready("BP-2")
+        self.verdict("BP-2", "approve", APPROVE_HIGH)
+        before()
+        self.merge_on_github(tid)
+        self.bp("accept", tid)
+        self.assertIn("BP-2 rebased; its approval carried over (the same patch after a clean rebase onto "
+                      "origin/main)", self.news()[-1])
+        return wt
+
+    def test_a_task_rebased_after_an_accept_keeps_its_label(self):
+        wt = self.rebased_after_an_accept()  # the same patch on a new base: the rules say the same
+        t = self.show("BP-2")
+        r = t["risk"]
+        self.assertEqual(t["status"], "ready")
+        self.assertEqual((r["level"], r["why"]), ("high", "couldn't run the GitHub path"))
+        self.assertEqual(r["rules"], {"level": "low", "why": "a small change (1 line in 1 file)"})
+        self.assertEqual(r["commit"], sh("git", "-C", wt, "rev-parse", "HEAD").strip())  # it follows the code
+
+    def test_a_task_rebased_after_an_accept_is_labelled_by_the_rules_as_they_are_now(self):
+        def sensitive():  # after BP-2 was labelled
+            self.bp("config", "--risk-path", "two.txt", "--level", "high", "--why", "changes two")
+        self.rebased_after_an_accept(sensitive)
+        r = self.show("BP-2")["risk"]
+        self.assertEqual(r["rules"], {"level": "high", "why": "changes two (1 line)"})
+        self.assertEqual((r["level"], r["why"]), ("high", "couldn't run the GitHub path"))  # the reviewer's kept
+
     def test_a_change_after_approval_works_the_rules_out_again(self):
         tid = self.start_task()
         self.commit_and_ready(tid)

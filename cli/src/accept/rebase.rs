@@ -6,6 +6,7 @@
 //! worker is told is `told`; `show`'s line for a ready task that no longer rebases is
 //! `stale_conflicts`, by `conflicts_with`.
 
+use crate::become_ready::{make_ready, How};
 use crate::git_names::{self, listed};
 use crate::modes::{is_local, quiet_git, refresh, task_base_ref};
 use crate::news::kind::Kind;
@@ -166,7 +167,11 @@ pub fn rebase_task(repo: &Repo, t: &mut Obj, by: &str, base_ref: &str) -> Res<St
         let check = rebase_check(t, base_ref)?;
         if let Some(Check::Kept(why)) = &check {
             keep_approval(t, base_ref)?;
-            save(repo, t)?;
+            if s(t, "status") == "ready" {
+                make_ready(repo, t, base_ref, How::Rebased)?; // labelled for its code now
+            } else {
+                save(repo, t)?; // same status: it stays where it was
+            }
             return Ok(format!("{rebased}; its approval carried over ({why})"));
         }
         if s(t, "status") == "ready" && truthy(repo.cfg.get("review")) {

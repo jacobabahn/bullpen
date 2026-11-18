@@ -159,8 +159,10 @@ auto-accepts. It has two parts, and the higher wins (on a tie, the reviewer's wh
   change needs.
 
 It follows the code. Each step that makes a task ready works the rules out again:
-an approval kept after a rebase that only moved the base says the same (the same
-lines), and keeps the reviewer's part; a change after the approval gets a new review
+an approval kept after a rebase that only moved the base, at `ready` or when an accept
+rebases a ready task ([After accept](accept.md#after-accept)), says the same (the same
+lines) unless `risk_paths` or the size settings changed since, and keeps the
+reviewer's part; a change after the approval gets a new review
 round, whose approval labels it afresh. With review off, or after the last round
 with findings open, the rules alone label it.
 

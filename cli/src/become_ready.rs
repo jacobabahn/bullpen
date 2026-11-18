@@ -27,6 +27,10 @@ pub enum How<'a> {
     /// A ready task whose worker took a turn and left the code as approved (`ready_again`):
     /// what kept its approval. It auto-accepts as a kept approval at `ready` does.
     Again(&'a str),
+    /// A ready task rebased after an accept with its approval kept (`rebase_task`).
+    /// Its news is the accept's `After BP-3: ...` line, and it doesn't auto-accept
+    /// (it was ready before the rebase).
+    Rebased,
     /// `ready` on a branch with no commits: no label, and nothing to merge
     Nothing,
     /// A reviewer's approve verdict: its text (`text`, which the label reads), what the
@@ -46,7 +50,7 @@ pub enum How<'a> {
 pub fn make_ready(repo: &Repo, t: &mut Obj, base_ref: &str, how: How) -> Res<()> {
     match &how {
         How::Plain | How::OutOfRounds { .. } => assess(repo, t, base_ref, Said::Nothing)?,
-        How::Kept(_) | How::Again(_) => assess(repo, t, base_ref, Said::Kept)?,
+        How::Kept(_) | How::Again(_) | How::Rebased => assess(repo, t, base_ref, Said::Kept)?,
         How::Approved { text, .. } => assess(repo, t, base_ref, Said::Approval(text))?,
         How::Nothing => {
             t.insert("risk".into(), Value::Null);
@@ -89,6 +93,7 @@ pub fn make_ready(repo: &Repo, t: &mut Obj, base_ref: &str, how: How) -> Res<()>
             format!(". `bullpen peek {}` if it said something", s(t, "id")),
         ),
         How::Nothing => (vec!["nothing to merge".into()], String::new()),
+        How::Rebased => return Ok(()), // the accept's `After BP-3: ...` line says it
         How::Approved { said, .. } => (vec![commits(n), where_(t), said], String::new()),
         How::OutOfRounds { rounds, findings } => (
             vec![where_(t)],
@@ -106,6 +111,6 @@ fn auto_accept_wait(how: &How) -> Option<bool> {
     match how {
         How::Approved { .. } => Some(true),
         How::Kept(_) | How::Again(_) => Some(false),
-        How::Plain | How::Nothing | How::OutOfRounds { .. } => None,
+        How::Plain | How::Nothing | How::OutOfRounds { .. } | How::Rebased => None,
     }
 }
