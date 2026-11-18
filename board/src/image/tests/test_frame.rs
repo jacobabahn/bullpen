@@ -70,7 +70,9 @@ fn the_bottom_rows_put_each_line_on_its_row_in_its_tone() {
     };
     let pm = foot(&foot_rows, 3, &canvas(TextSize::Medium), &mut Fonts::builtin()).unwrap();
     assert_eq!((pm.width(), pm.height()), (400, 60));
-    assert!(!inked(&block(&pm, (0, 400), (0, 20)))); // the row above the message is empty
+    // the row above the message has only the rule, half a cell over it
+    let above = block(&pm, (0, 400), (0, 20));
+    assert!(above.iter().all(|p| p[3] <= t.rule()[3]) && inked(&above));
     assert!(has(&block(&pm, (0, 400), (20, 40)), t.red));
     let keys = block(&pm, (0, 400), (40, 60));
     assert!(inked(&keys) && !has(&keys, t.red));
@@ -86,4 +88,70 @@ fn a_key_row_too_long_for_its_width_keeps_the_question_mark() {
     let pm = foot(&foot_rows, 1, &c, &mut Fonts::builtin()).unwrap();
     // `?` bare, just short of the scroll marks' column
     assert!(inked(&block(&pm, (200, 224), (0, 20))));
+}
+
+/// The rows of an image with a pixel of this colour (at its alpha, its colour within
+/// what storing it premultiplied rounds off).
+fn rows_with(pm: &Pixmap, c: [u8; 4]) -> Vec<u32> {
+    (0..pm.height())
+        .filter(|&y| block(pm, (0, pm.width()), (y, y + 1)).iter().any(|p| p[3] == c[3] && (0..3).all(|k| p[k].abs_diff(c[k]) <= 8)))
+        .collect()
+}
+
+#[test]
+fn the_headers_counts_are_chips_with_a_rule_under_the_line() {
+    let t = Theme::default();
+    let c = canvas(TextSize::Medium);
+    let pm = head(&head_of(vec![("1 needs you", "needs"), ("2 ready", "ready")]), 2, &c, &mut Fonts::builtin()).unwrap();
+    // each count on its colour, faintly, a pill a word and a half high
+    let amber = rows_with(&pm, [t.yellow.0, t.yellow.1, t.yellow.2, 46]);
+    let tall = amber.last().unwrap() - amber.first().unwrap() + 1;
+    assert!((tall as f32 - 1.5 * (c.m.label + 1.0)).abs() <= 2.0, "{tall}");
+    assert!(!rows_with(&pm, [t.green.0, t.green.1, t.green.2, 46]).is_empty());
+    // the rule: under the chips, across the line
+    let rule = rows_with(&pm, t.rule());
+    assert!(!rule.is_empty() && rule[0] > *amber.last().unwrap());
+    let y = rule[0];
+    assert!(block(&pm, (10, 380), (y, y + 1)).iter().all(|p| p[3] > 0));
+    // a header a cell high has no room for it
+    let one = head(&head_of(vec![("2 ready", "ready")]), 1, &c, &mut Fonts::builtin()).unwrap();
+    assert!(rows_with(&one, t.rule()).is_empty());
+}
+
+#[test]
+fn the_counts_are_numbers_only_when_their_words_dont_fit() {
+    let (h, f) = (head_of(vec![("3 need you", "needs"), ("4 ready", "ready")]), Fonts::builtin());
+    let words = counts(&h, &f, 15.0, 400.0);
+    assert_eq!(words, h.counts);
+    let numbers = counts(&h, &f, 15.0, 120.0);
+    assert_eq!(numbers, vec![("3".to_string(), "needs"), ("4".to_string(), "ready")]);
+}
+
+#[test]
+fn each_key_is_in_a_cap() {
+    let t = Theme::default();
+    let keys = Foot { lines: vec![(0, FootLine::Keys(vec![("a".into(), "accept".into())]))] };
+    let pm = foot(&keys, 1, &canvas(TextSize::Medium), &mut Fonts::builtin()).unwrap();
+    // the cap's fill and its edge, a little stronger, round the key
+    assert!(!rows_with(&pm, t.cap()).is_empty());
+    assert!(!rows_with(&pm, t.cap_edge()).is_empty());
+}
+
+#[test]
+fn at_36_columns_the_keys_and_question_mark_dont_overlap_and_the_question_mark_stays() {
+    let fonts = Fonts::builtin();
+    let keys: Vec<(String, String)> =
+        [("a", "accept"), ("g", "tour"), ("d", "drop"), ("⏎", "open"), ("v", "diff"), ("t", "tell"), ("p", "peek")].map(|(k, w)| (k.into(), w.into())).to_vec();
+    for size in [TextSize::Small, TextSize::Medium, TextSize::Large] {
+        let c = Canvas::new(Grid { cols: 35, cell_w: 16, cell_h: 34 }, size, Theme::default());
+        let room = c.right() - 16.0;
+        for n in 0..=keys.len() {
+            let (shown, help) = fit_keys(&fonts, &keys[..n], c.m.label, room);
+            assert_eq!(help[0].0, "?", "{size:?}");
+            assert_eq!(shown[..], keys[..shown.len()], "the last keys go first");
+            let used = keys_width(&fonts, &shown, c.m.label) + keys_width(&fonts, &help, c.m.label);
+            let gap = if shown.is_empty() { 0.0 } else { KEY_GAP * c.m.label };
+            assert!(used + gap <= room, "{size:?}, {n} keys: {used} of {room}");
+        }
+    }
 }

@@ -161,9 +161,13 @@ task in review's a blue ring with a filled half that turns, and a running comman
 its new mark settles in: it grows a little past its size and back, in 160 ms.
 `bullpen config --board-motion off` stills them all (the working, review and running
 marks stand as their first frame), and the board then sends nothing while nothing
-changes. The top line (the repository and its counts) and the bottom rows (the
-message and the keys) are drawn too, in the list's type and colours, and the scroll
-marks are small chevrons at the list's right edge. What you type into stays text:
+changes. The top line and the bottom rows are drawn too, in the list's type and
+colours, each set off from the list by a faint rule: the repository's name, then its
+counts at the right as chips like the risk's ("3 need you", or only their numbers when
+the words don't fit beside the name); the message, and the keys each in a small
+rounded cap with what it does dim after it, dropping from the end on a narrow board
+as the text's do (`?` is never dropped). The scroll marks are small chevrons at the
+list's right edge. What you type into stays text:
 while a tell, a y/n question (an accept's, a drop's, `q`'s) or the stale tour's
 question is open, the bottom rows are text, cursor and all, and are drawn again
 after. `?`, peeks, answers and mission control stay text, and so does the compact

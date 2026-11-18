@@ -110,6 +110,20 @@ impl Theme {
         faint(self.fg, 0.22)
     }
 
+    /// The rule under the top line and over the bottom rows: the foreground, faintly.
+    pub fn rule(&self) -> [u8; 4] {
+        faint(self.fg, 0.12)
+    }
+
+    /// A key's cap, and its edge: the foreground, faintly.
+    pub fn cap(&self) -> [u8; 4] {
+        faint(self.fg, 0.07)
+    }
+
+    pub fn cap_edge(&self) -> [u8; 4] {
+        faint(self.fg, 0.28)
+    }
+
     /// A flag's colour: amber for a task that needs you, red for one whose agent stopped.
     pub fn flag(&self, flag: Flag) -> Rgb {
         match flag {

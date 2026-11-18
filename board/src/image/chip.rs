@@ -25,3 +25,32 @@ pub fn chip(d: &mut Draw, text: &str, px: f32, right: f32, cy: f32, color: [u8; 
     d.boxed(px, text, Weight::Bold, x + SIDE * px, top, h, color);
     x
 }
+
+/// How wide a key's cap and what it does after it are, in type `px`.
+pub fn keycap_width(fonts: &Fonts, key: &str, what: &str, px: f32) -> f32 {
+    let cap = cap_width(fonts, key, px);
+    if what.is_empty() { cap } else { cap + 0.4 * px + fonts.width(what, Weight::Regular, px) }
+}
+
+/// A key's cap: its letter with a third of the type each side, square at least.
+fn cap_width(fonts: &Fonts, key: &str, px: f32) -> f32 {
+    (fonts.width(key, Weight::Bold, px) + 0.7 * px).max(1.45 * px)
+}
+
+/// A key in a cap from x, centred on cy: the key semibold in the foreground on the
+/// foreground at 7% with a 1-pixel edge at 28%, its corners round by a third of the
+/// type; then what it does, dim, 0.4 of the type after it. Returns where it ends.
+pub fn keycap(d: &mut Draw, key: &str, what: &str, px: f32, x: f32, cy: f32) -> f32 {
+    let theme = d.theme();
+    let (w, h) = (cap_width(d.fonts(), key, px), (1.45 * px).round());
+    let top = (cy - h / 2.0).round();
+    let r = 0.3 * px;
+    d.rounded_fill(x, top, w, h, r, theme.cap());
+    d.rounded_edge(x, top, w, h, r, 1.0, theme.cap_edge());
+    let kw = d.fonts().width(key, Weight::Bold, px);
+    d.boxed(px, key, Weight::Bold, x + (w - kw) / 2.0, top, h, theme.text());
+    if what.is_empty() {
+        return x + w;
+    }
+    d.boxed(px, what, Weight::Regular, x + w + 0.4 * px, top, h, theme.dim())
+}
