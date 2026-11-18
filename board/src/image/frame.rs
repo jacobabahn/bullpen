@@ -1,8 +1,7 @@
 //! The board's top line and bottom rows drawn as images, in the list's type and colours
 //! (render.rs), so the board reads as one drawn surface: the repository and its counts
 //! above the list, the message and the key hints under it. What's typed or asked there
-//! (a tell, a y/n question) stays text (ui/bottom.rs), and so does everything else that
-//! isn't the board's list.
+//! (a tell, a y/n question) stays text (ui/bottom.rs).
 
 use super::font::{Fonts, Weight};
 use super::render::{Canvas, Draw};

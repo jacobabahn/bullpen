@@ -81,16 +81,24 @@ A module's tests (`tests/test_<module>.rs` in its folder) aren't on the map.
 The board (`board/src/`) draws with ratatui. `ui/rows.rs` works out the list's rows
 from the board's state once a frame, as values: each row's text, its mark, whether
 it's selected, asked about, dim, its risk and age. The text list (`ui/list.rs`,
-`ui/later.rs`) draws them as cells. With the image look (docs/board.md) the list
-leaves its cells blank and hands the same rows to `image/`, which draws them as one
-image (`render.rs`, given rows and a size in pixels, with no terminal) and, after
-ratatui's frame and through the same output, sends and places it with the kitty
-graphics protocol (`kitty.rs`, `mod.rs`). Asking the terminal (`term.rs`) needs its
+`ui/later.rs`) draws them as cells. With the image look (docs/board.md) the board
+leaves its cells blank and hands image/ a `View`: the same rows, the top line
+(`list::Head`) and the bottom rows (`bottom::Foot`) as values too, and the blocks of
+cells each has. After ratatui's frame, and through the same output, image/ lays the
+rows out (`render.rs`: each row's height from the text size, the selected title
+wrapped), scrolls them by those heights (`list::scroll_by`, which the text list's
+`scroll` is with every row 1 high; it sets `app.top` and `app.page`), draws the rows
+that fit, the top line and the bottom rows (`frame.rs`) as three images, all with no
+terminal, and sends and places each that changed with the kitty graphics protocol
+(`kitty.rs`, `mod.rs`). The image's detail type is narrower than a cell, so image/
+says how many columns a detail line holds (`app.detail_cols`) and the rows are
+wrapped to that while the board is an image. Asking the terminal (`term.rs`) needs its
 input, so the board asks only when the image look starts or comes back and on a
 resize, never on a timer: the key reader (`main.rs`) stops at the board's wish (a
 `Gate`), marks itself parked before it tells the board, and reads the answers itself,
 up to the terminal's last; the gate opens to keys again when the reader's `Open`
-drops, on every way out. The rest of the board stays text.
+drops, on every way out. What's typed or asked at the bottom, overlays and mission
+control stay text.
 
 ## Closing a task
 

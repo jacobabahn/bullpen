@@ -152,10 +152,10 @@ pub struct App {
     pub look: Look,
     /// the board_look setting as last read: a change to it changes `look`
     look_set: Look,
-    /// the list is drawn as an image this frame (image/): the text list leaves its rows
-    /// blank and puts them in `view`
+    /// the board is drawn as images this frame (image/): the text leaves its cells blank
+    /// and puts what they'd say in `view`
     pub image: bool,
-    /// the list as drawn this frame, for the image
+    /// the board as laid out this frame, for the images
     pub view: Option<crate::image::View>,
     /// the columns of text the image's detail lines hold (image/ says, from its type),
     /// which the rows wrap to while the list is an image

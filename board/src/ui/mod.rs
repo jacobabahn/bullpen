@@ -2,8 +2,9 @@
 //!
 //! `draw` picks what the mode shows, sizes the board once (`Sizes`), then draws the
 //! list (`list`, its Later group `later`, the rows of both `rows`), the bottom rows (`bottom`), a full-screen view (`overlay`) or the
-//! `?` list (`help`). With the image look the list's rows are left blank and handed to
-//! image/, which draws them over that space.
+//! `?` list (`help`). With the image look the top line, the list's rows and the bottom
+//! rows (unless something's typed or asked there) are left blank and handed to image/
+//! as values, which draws them over that space.
 
 pub(crate) mod bottom;
 mod help;

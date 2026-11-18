@@ -276,9 +276,11 @@ impl Geo {
         (3.0 * c).max(1.5 * c + self.mark_r() + 0.7 * self.c.m.title)
     }
 
-    /// Where a title starts: past the ID column and a gap.
+    /// Where a title starts: past the ID column and a gap, a narrow board's narrower (as
+    /// the text's one space after the IDs there).
     fn title_x(&self) -> f32 {
-        self.text_x() + self.idw + 1.1 * self.c.m.title
+        let narrow = self.c.grid.cols + 1 < crate::ui::NARROW;
+        self.text_x() + self.idw + if narrow { 0.6 } else { 1.1 } * self.c.m.title
     }
 
     /// The width a task's age (and risk) take at the right, as `task` draws them.

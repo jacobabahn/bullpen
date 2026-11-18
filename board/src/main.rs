@@ -13,7 +13,7 @@
 //! Usage: bullpen-board --dir <repo state dir> --root <repo> --bullpen <bullpen program>
 //!
 //! With `--mission` first it's mission control instead, every repo on one screen
-//! (mission/; `bullpen mission` runs it). With `--render FILE` it writes its list as the
+//! (mission/; `bullpen mission` runs it). With `--render FILE` it writes itself as the
 //! image look draws it to FILE (a PNG) and quits.
 
 mod app;
@@ -110,7 +110,7 @@ fn main() {
                 picture.clear(term.backend_mut());
                 term_restore();
                 let err = Command::new(&exe).args(app.restart_args()).exec(); // returns only if it failed
-                // the reader never stopped; the image was deleted, so the next frame sends it again
+                // the reader never stopped; the images were deleted, so the next frame sends them again
                 term = term_init();
                 app.exe = None; // don't try again
                 app.msg = Note::failed(format!("Couldn't reload the rebuilt board: {err}"));
@@ -122,7 +122,7 @@ fn main() {
         if term.draw(|f| ui::draw(f, &mut app)).is_err() {
             break;
         }
-        // the image after the frame, through the same output, never in the middle of one
+        // the images after the frame, through the same output, never in the middle of one
         if picture.show(&mut app, term.backend_mut()) {
             continue; // the list is text again: draw it now
         }

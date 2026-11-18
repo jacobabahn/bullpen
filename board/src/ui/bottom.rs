@@ -1,5 +1,6 @@
 //! The board's bottom rows: the message (or the y/n question) above the keys, and the
-//! key row, or what's asked or typed in its place.
+//! key row, or what's asked or typed in its place. With the image look they're values
+//! for image/ (`Foot`), except while something's typed or asked there.
 
 use super::{bold, dim, put, span, Sizes};
 use crate::edit::LineEdit;

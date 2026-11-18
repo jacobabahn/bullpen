@@ -104,7 +104,7 @@ in the order `?` lists them:
 | `s` | start it |
 | `r` | resume a stopped worker |
 | `l` | switch layout: compact, one line a task, or back |
-| `I` | draw the list as an image, or as text again, for as long as the board runs; switching to the image asks the terminal's colours again (see [The image look](#the-image-look)) |
+| `I` | draw the board as images, or as text again, for as long as the board runs; switching to the image asks the terminal's colours again (see [The image look](#the-image-look)) |
 | `f` | show the closed tasks too |
 | `o` | show other coordinators' tasks too (see [Several coordinators](several-coordinators.md)) |
 | `esc` | put a red message away (see below) |
@@ -142,21 +142,34 @@ Tasks that waited on the accepted one start by themselves (see
 ## The image look
 
 `bullpen config --board-look image` (or `I` on the board, for this run) draws the
-list of tasks as one image instead of text: real type, the marks drawn as shapes
-(rings, a check, a diamond) in the status colours, the selected task on a rounded
-tint with its ID in a pill, and the amber or red bar beside a task that needs you.
-It says everything the text list does, row for row: each task's ID, title, mark,
+board as images instead of text: real type, the marks drawn as shapes (rings, a
+check, a diamond) in the status colours, the selected task on a rounded tint with
+its ID in a pill and its whole title (wrapped to three lines at most; another task's
+is cut to its line), and the amber or red bar beside a task that needs you. The
+list says everything the text list does, row for row: each task's ID, title, mark,
 risk, age and lines, the groups and the Later group. The marks stand still: a
 working task's is a ring with a third of it drawn, a task in review's a half-filled
 blue ring, and a running command's (or a tour being written) an arc most of the way
-round. Only the list is an image; the top line, the message and key rows, `?`,
-peeks, answers, the line you type and mission control stay text, and so does the
-compact layout (`l`): with it the list is text whatever the look.
+round. The top line (the repository and its counts) and the bottom rows (the message
+and the keys) are drawn too, in the list's type and colours, and the scroll marks
+are small chevrons at the list's right edge. What you type into stays text: while a
+tell, a y/n question (an accept's, a drop's, `q`'s) or the stale tour's question is
+open, the bottom rows are text, cursor and all, and are drawn again after. `?`,
+peeks, answers and mission control stay text, and so does the compact layout (`l`):
+with it the board is text whatever the look.
+
+`bullpen config --board-text-size` sets the type: `medium` (the default) is the
+terminal's own text size, with a detail line smaller and dim under each title and
+space between the tasks, so a row is a little more than a cell; `large` is larger
+still, for a pane read from further away, and cuts titles sooner; `small` is a
+cell a row, as the text list. The list scrolls by its rows' own heights, keeping the
+selected task and its lines in view and showing only whole rows, so a page (`PgDn`)
+has fewer tasks than the text list's.
 
 It needs a terminal that draws kitty graphics, as Rex does. The board asks the
 terminal first and draws text until it answers; when it doesn't draw images (or
 doesn't answer in two seconds), doesn't say its cell size in pixels, the font
-can't be read or drawing fails, the list is text again and the message line says
+can't be read or drawing fails, the board is text again and the message line says
 why ("Drawing the list as text: the terminal doesn't draw kitty graphics."). `I`
 tries again.
 
@@ -173,16 +186,17 @@ tenth of a second (an answer that was cut right after its own esc gives the boar
 License); `bullpen config --board-font PATH` draws with another font file (TTF or
 OTF) instead, with Inter for the characters it lacks.
 
-The list is drawn whole, at the terminal's cell size, as one tall image sent once
-each time what it shows changes (a task's status or age, the selection), and
-scrolling moves the part of it shown, which costs a few bytes: cheap over a remote
-connection. The image is pinned to the list's columns and rows, so a client with
-other cell sizes (Rex on a phone) scales it to fit. A list taller than 16,000
-pixels is sent a window of rows at a time.
+The board is three images: the top line, the list's rows shown and the bottom rows,
+each drawn at the terminal's cell size and sent only when what it shows changes (the
+selection, a task's status or age on screen, the message), so a change to the list
+doesn't send the top line again. The list scrolls only to follow the selection,
+which changes its image anyway. Each image is pinned to its block of cells, so a
+client with other cell sizes (Rex on a phone) scales it to fit.
 
 `bullpen-board --dir <state dir> --root <repo> --bullpen <program> --render FILE
---cols N` writes the list as the image look draws it to FILE, a PNG N columns wide
-(60 by default), on the default dark colours, without a terminal.
+--cols N` writes the board as the image look draws it to FILE: its top line, its whole
+list and its keys, a PNG N columns wide (60 by default), at the repo's text size, on
+the default dark colours, without a terminal.
 
 ## The Later group
 

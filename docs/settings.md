@@ -53,12 +53,14 @@ too, and `off` none (`needs`, when a task needs you, by default; see
 rows empty. Unset, it's 1 row while workers or reviewers float (Rex draws their
 capsules there), else none. `bullpen config --board-layout compact` starts the board in
 its compact layout, one line a task (`grouped` by default; its `l` switches, see
-[The board](board.md)). `bullpen config --board-look image` draws the board's list
-of tasks as one image (kitty graphics) instead of text (`text` by default; the board's
-`I` switches for one run, and `I` twice redraws it in a new theme's colours; the
-compact layout stays text, and a terminal that doesn't draw images gets text with a
-line saying why), and `--board-font PATH` has it drawn
-in that font file instead of the built-in Inter (`""` clears it; see [The image
+[The board](board.md)). `bullpen config --board-look image` draws the board (its
+list of tasks, its top line and its key rows) as images (kitty graphics) instead of
+text (`text` by default; the board's `I` switches for one run, and `I` twice redraws
+it in a new theme's colours; the compact layout stays text, and a terminal that
+doesn't draw images gets text with a line saying why). `--board-text-size` sets its
+type: `medium` (the default, the terminal's own text size, a row a little more than a
+cell), `large`, or `small` (a cell a row, as the text). `--board-font PATH` has it
+drawn in that font file instead of the built-in Inter (`""` clears it; see [The image
 look](board.md#the-image-look)). `bullpen config --board-others on --coordinator c1` makes c1's
 board show the other coordinators' tasks too (see [Several
 coordinators](several-coordinators.md); the board's `o`). `bullpen config --board-repos off`
