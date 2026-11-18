@@ -4,7 +4,9 @@
 //! comment at each; `off` writes nothing. Unless off, an accepted issue's task closes it:
 //! `Closes #N` at the end of its PR (remote mode, `closes_line`), or after the push to the
 //! push remote (local mode, `close_fixed`, which `_push` calls). A task closed or dropped
-//! unmerged takes `bullpen: started` off again.
+//! unmerged takes `bullpen: started` off again (`unstarted`, which the one close step
+//! calls). A task made from an issue records the issue's number and repository (`issue`),
+//! and its writes go there.
 //!
 //! Every write goes through `gh_write`: always with `-R`, never with a prompt, and not at
 //! all while issues are off or `issues_write` is off. What it writes is bullpen's fixed
@@ -15,7 +17,6 @@ use super::repo::issues_repo;
 use crate::modes::quiet;
 use crate::news::kind::Kind;
 use crate::news::{news, tell_coordinator, Opts};
-use bullpen_core::backlog;
 use bullpen_core::json::{obj, s, truthy, Obj};
 use bullpen_core::text::{splitlines, strip};
 use bullpen_core::{Repo, Res};
@@ -123,13 +124,14 @@ fn slug(repo: &Repo) -> Result<String, String> {
 /// labelled: whether the labels' edit went through, whatever came after.
 fn mark(
     repo: &Repo,
+    slug: Result<String, String>,
     n: i64,
     add: &str,
     remove: Option<&str>,
     comment: &str,
     labelled: &mut bool,
 ) -> Result<(), String> {
-    let slug = slug(repo)?;
+    let slug = slug?;
     labels(repo, &slug)?;
     let num = n.to_string();
     let mut args = vec!["issue", "edit", &num, "--add-label", add];
@@ -152,13 +154,24 @@ fn number_of_item(item: &Obj) -> Option<i64> {
     obj(item, "issue").get("number").and_then(Value::as_i64)
 }
 
-/// The issue a task was made from (its item's), if any.
-pub fn issue_of(repo: &Repo, t: &Obj) -> Option<i64> {
-    if s(t, "origin") != "issue" {
-        return None;
-    }
-    let b = backlog::load(repo).ok()?;
-    number_of_item(b.item(s(t, "from")).ok()?)
+/// What a task made from an issue's item records of the issue (`issue: {number, repo}`),
+/// so every later write goes to the issue it started from, whatever `issues_repo` says
+/// by then. repo is "" when no repository could be told then.
+pub fn for_task(repo: &Repo, item: &Obj) -> Option<Value> {
+    let n = number_of_item(item)?;
+    Some(json!({"number": n, "repo": slug(repo).unwrap_or_default()}))
+}
+
+/// The issue a task was made from, as the task recorded it: its number and repository
+/// (Err: why there is none).
+pub fn issue_of(t: &Obj) -> Option<(i64, Result<String, String>)> {
+    let issue = obj(t, "issue");
+    let n = issue.get("number").and_then(Value::as_i64)?;
+    let slug = match s(issue, "repo") {
+        "" => Err("no GitHub repository could be told when the task was made".to_string()),
+        r => Ok(r.to_string()),
+    };
+    Some((n, slug))
 }
 
 /// A write that failed: one news line, to the task's coordinator (or everyone, about an
@@ -184,11 +197,11 @@ pub fn started(repo: &Repo, t: &mut Obj) -> Res<()> {
     if !writes(repo) || truthy(t.get("issue_started")) {
         return Ok(());
     }
-    let Some(n) = issue_of(repo, t) else { return Ok(()) };
+    let Some((n, slug)) = issue_of(t) else { return Ok(()) };
     let id = s(t, "id").to_string();
     let comment = format!("Being worked on as {id}.");
     let mut labelled = false;
-    let res = mark(repo, n, STARTED, Some(DECLINED), &comment, &mut labelled);
+    let res = mark(repo, slug, n, STARTED, Some(DECLINED), &comment, &mut labelled);
     if labelled {
         // what close and drop take off again: only a label bullpen put there
         t.insert("issue_started".into(), json!(true));
@@ -215,7 +228,7 @@ pub fn declined(repo: &Repo, item: &Obj, why: Option<&str>) -> Res<()> {
         Some(w) => format!("Declined: {w}"),
         None => "Declined.".to_string(),
     };
-    if let Err(e) = mark(repo, n, DECLINED, None, &comment, &mut false) {
+    if let Err(e) = mark(repo, slug(repo), n, DECLINED, None, &comment, &mut false) {
         let id = s(item, "id");
         let about: Obj = json!({"id": id}).as_object().cloned().unwrap_or_default();
         told(
@@ -228,15 +241,16 @@ pub fn declined(repo: &Repo, item: &Obj, why: Option<&str>) -> Res<()> {
     Ok(())
 }
 
-/// The task closed or was dropped without merging: its issue stays open, and loses
-/// `bullpen: started` (if bullpen put it there).
+/// The task closed or was dropped without merging (close.rs's `close` calls this, before
+/// the pane it may run in is closed): its issue stays open, and loses `bullpen: started`
+/// (if bullpen put it there).
 pub fn unstarted(repo: &Repo, t: &Obj) -> Res<()> {
     if !writes(repo) || !truthy(t.get("issue_started")) {
         return Ok(());
     }
-    let Some(n) = issue_of(repo, t) else { return Ok(()) };
+    let Some((n, slug)) = issue_of(t) else { return Ok(()) };
     let num = n.to_string();
-    let res = slug(repo).and_then(|slug| gh_write(repo, &slug, &["issue", "edit", &num, "--remove-label", STARTED]));
+    let res = slug.and_then(|slug| gh_write(repo, &slug, &["issue", "edit", &num, "--remove-label", STARTED]));
     if let Err(why) = res {
         let line = failed_line(n, s(t, "id"), &format!("take `{STARTED}` off it"), &why);
         told(repo, t, false, &line)?;
@@ -248,8 +262,8 @@ pub fn unstarted(repo: &Repo, t: &Obj) -> Res<()> {
 /// the merge (`Closes #12`, or `Closes owner/repo#12` when issues are read from another
 /// repository than origin's).
 pub fn closes_line(repo: &Repo, t: &Obj) -> Option<String> {
-    let n = issue_of(repo, t).filter(|_| writes(repo))?;
-    let slug = slug(repo).ok()?;
+    let (n, slug) = issue_of(t).filter(|_| writes(repo))?;
+    let slug = slug.ok()?;
     let origin = bullpen_core::proc::git(&repo.root, &["remote", "get-url", "origin"], false).ok()?;
     let same = super::repo::slug(&origin.stdout).is_some_and(|o| o.eq_ignore_ascii_case(&slug));
     Some(if same {
@@ -263,7 +277,7 @@ pub fn closes_line(repo: &Repo, t: &Obj) -> Option<String> {
 /// went): close the task's issue with a comment naming the commit, or, not pushed, the
 /// task. A failed close is one news line; the accept stands.
 pub fn close_fixed(repo: &Repo, t: &Obj, pushed: bool) -> Res<()> {
-    let Some(n) = issue_of(repo, t).filter(|_| writes(repo)) else {
+    let Some((n, slug)) = issue_of(t).filter(|_| writes(repo)) else {
         return Ok(());
     };
     let id = s(t, "id");
@@ -274,7 +288,6 @@ pub fn close_fixed(repo: &Repo, t: &Obj, pushed: bool) -> Res<()> {
         format!("Fixed in {id} (not pushed yet)")
     };
     let num = n.to_string();
-    let slug = slug(repo);
     let res = slug
         .clone()
         .and_then(|slug| gh_write(repo, &slug, &["issue", "close", &num, "--comment", &comment]));
@@ -294,11 +307,11 @@ pub fn close_fixed(repo: &Repo, t: &Obj, pushed: bool) -> Res<()> {
 /// it). Whoever ran the revert reads so, and the task's coordinator hears it, to ask the
 /// person.
 pub fn reverted(repo: &Repo, t: &Obj) -> Res<()> {
-    let Some(n) = issue_of(repo, t).filter(|_| writes(repo)) else {
+    let Some((n, slug)) = issue_of(t).filter(|_| writes(repo)) else {
         return Ok(());
     };
     let id = s(t, "id");
-    let reopen = match slug(repo) {
+    let reopen = match slug {
         Ok(slug) => format!(" (`gh issue reopen {n} -R {slug}` reopens it)"),
         Err(_) => String::new(),
     };

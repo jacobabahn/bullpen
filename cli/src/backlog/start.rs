@@ -68,6 +68,10 @@ pub fn make_task(repo: &Repo, id: &str, brief: Option<&str>, started_by: &str, f
             // bullpen's word, from the judgement: an untrusted issue's task never auto-accepts
             let trusted = truthy(bullpen_core::json::obj(&item, "judged").get("trusted"));
             extra.insert("issue_trusted".into(), json!(trusted));
+            // the issue its writes go to, whatever issues_repo says later
+            if let Some(issue) = crate::issues::write::for_task(repo, &item) {
+                extra.insert("issue".into(), issue);
+            }
         }
         let mut argv = vec!["--brief-file".into(), path.display().to_string()];
         argv.extend(flags.iter().cloned());

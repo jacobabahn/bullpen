@@ -79,6 +79,7 @@ A module's tests (`tests/test_<module>.rs` in its folder) aren't on the map.
 Accept, close, drop, finish's auto-accept and auto-accept end a task through one close
 step, `close` in `cli/src/close.rs`, in one order: the reviewer's pane, the PR
 (withdrawn, unless it was merged), the worktree (and its Claude scratch folder) and branch, the status and the save,
+`bullpen: started` taken off an issue's task's issue when nothing was merged (issues/write.rs),
 then what the caller says and does (`then`: news, and after an accept the rebase of
 the other tasks), and the worker's pane last, since the step may run in it. Each
 caller says only what to tell and how to merge. Nothing calls the run queue: the save

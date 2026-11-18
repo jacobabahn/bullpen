@@ -791,6 +791,30 @@ class IssuesWriteTest(IssuesWriteBase):
                                              "-R", "me/proj"])
         self.assertNotIn("close", [c[1] for c in self.writes()])
 
+    def test_a_task_writes_to_the_issue_it_started_from_whatever_issues_repo_says_later(self):
+        tid = self.start_issue()
+        self.assertEqual(self.show(tid)["issue"], {"number": 12, "repo": "me/proj"})
+        self.bp("config", "--issues-repo", "other/place")
+        self.bp("drop", tid, "--force")
+        self.assertEqual(self.writes()[-1], ["issue", "edit", "12", "--remove-label", "bullpen: started",
+                                             "-R", "me/proj"])
+
+    def test_an_auto_closed_finish_takes_the_label_off_before_its_pane_closes(self):
+        # finish runs in the worker's pane, and auto-accept's close closes that pane last:
+        # Claude Code kills finish's tree as it ends
+        self.bp("config", "--auto-accept", "on")
+        self.github_issues(issue(12, "Board flickers", author="me"))
+        self.now()
+        self.bp("issue", "12", "--score", "clear,small,low,yes", "--why", "a timer", "--brief-file", str(self.brief))
+        self.bp("later", "L1", "--start")
+        t = self.show("BP-1")
+        self.assertTrue(t["issue_trusted"])
+        (self.fake / f"kills_tree_{t['block']}").write_text("")
+        self.bp("finish", "BP-1", "--summary", "Answered.", cwd=t["worktree"], ok=False)
+        self.assertEqual(self.show("BP-1")["status"], "done")
+        self.assertEqual(self.writes()[-1], ["issue", "edit", "12", "--remove-label", "bullpen: started",
+                                             "-R", "me/proj"])
+
     def test_a_failed_write_is_one_news_line_and_stops_nothing(self):
         (self.fake / "write_refused").write_text("HTTP 403: Resource not accessible by integration")
         tid = self.start_issue()

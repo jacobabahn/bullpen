@@ -64,8 +64,18 @@ pub fn close(
         t.insert((*k).into(), v.clone());
     }
     save(repo, t)?;
+    if !merged(t) {
+        // an issue's task closed or dropped unmerged: before the pane this may run in goes
+        crate::issues::write::unstarted(repo, t)?;
+    }
     then(t)?;
     close_last(&worker.0, &worker.1)
+}
+
+/// Did the task's work reach its base: merged locally (`merged`), by bullpen on GitHub
+/// (`merged_how`), or outside bullpen?
+fn merged(t: &Obj) -> bool {
+    truthy(t.get("merged")) || truthy(t.get("merged_how")) || s(bullpen_core::json::obj(t, "gh"), "state") == "merged"
 }
 
 /// `close` (the person's call): close a finished task: its worktree, branch and pane
@@ -116,8 +126,7 @@ pub fn close_task(repo: &Repo, t: &mut Obj, auto: bool, first: &str) -> Res<()> 
         }
     };
     let fields = [("closed", json!(true)), ("auto_accepted", json!(auto))];
-    close(repo, t, "done", said, true, true, &fields)?;
-    crate::issues::write::unstarted(repo, t) // nothing merged: its issue stays open
+    close(repo, t, "done", said, true, true, &fields)
 }
 
 // ---------- drop ----------
@@ -140,7 +149,6 @@ pub fn cmd_drop(argv: &[String]) -> Res<i32> {
         let id = s(t, "id");
         println!("{id} dropped");
         tell_coordinator(&repo, t, Kind::Dropped, &format!("{id} dropped"))?;
-        crate::issues::write::unstarted(&repo, t)?; // its issue stays open
         dropped_dep(&repo, t)
     };
     close(&repo, &mut t, "dropped", said, true, force, &[])?;

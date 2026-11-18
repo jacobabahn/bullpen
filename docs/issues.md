@@ -341,7 +341,9 @@ decided; `updated` is the issue's `updatedAt` as last read; `closed`, when there
 bullpen saw the issue gone from the open ones. The item carries `by: "issue"`,
 `issue: {number, url, author, updated}` and, once judged, `judged: {score, worth, area,
 why, trusted, trust, at}` (and `kept: true` when the judgement put it on the list); a task made from it, `issue_trusted`,
-and `issue_started` once bullpen labelled the issue for it.
+`issue: {number, repo}` (the issue and its repository when the task was made: every
+later write for the task goes there, whatever `issues_repo` says by then), and
+`issue_started` once bullpen labelled the issue for it.
 
 `issues-timer.json` beside it (with `issues-timer.lock`) is the timer's: when the last
 read started (`at`) and, while reads fail, what the last one failed with (`failed`).

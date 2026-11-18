@@ -82,7 +82,6 @@ pub fn keep_branch(repo: &Repo, t: &mut Obj, name: Option<&str>) -> Res<()> {
             ),
         }
         tell_coordinator(repo, t, Kind::Kept, &format!("{id} closed without merging. {kept}"))?;
-        crate::issues::write::unstarted(repo, t)?; // not merged: its issue stays open
         waiting_dep(repo, t, "closed with its branch kept, not merged")
     };
     close(repo, t, "done", said, false, false, &[])
