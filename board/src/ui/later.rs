@@ -17,7 +17,7 @@ const ITEM_LINES: usize = 2;
 
 /// The Later group's rows (none for an empty backlog), after a blank row in the
 /// grouped layout when something comes before.
-pub(super) fn later_rows(app: &App, items: &[Item], after_rows: bool, detail_w: usize) -> Vec<Row> {
+pub(super) fn later_rows(app: &App, items: &[Item], after_rows: bool, detail_w: usize, selection: bool) -> Vec<Row> {
     if items.is_empty() {
         return Vec::new();
     }
@@ -32,7 +32,7 @@ pub(super) fn later_rows(app: &App, items: &[Item], after_rows: bool, detail_w: 
     }
     rows.push(Row::Head { name: "Later".into(), count: items.len() });
     for i in items {
-        let row = item_row(app, i);
+        let row = item_row(app, i, selection);
         let selected = row.selected;
         rows.push(Row::Item(row));
         if selected {

@@ -28,7 +28,7 @@ pub(crate) enum Row {
 }
 
 /// A task's mark: still, or one the text board turns.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum Mark {
     /// a command running on it (accept, drop, start, resume): the spinner
     Job,
@@ -142,9 +142,20 @@ const SELECTED_LINES: usize = 8;
 /// its detail lines; the Later group after the open ones, before Closed. With no group
 /// to show, what the board says instead.
 pub(crate) fn build(app: &App, w: usize, narrow: bool, now: Now) -> Rows {
+    build_as(app, w, narrow, now, true)
+}
+
+/// The same rows with nothing selected: every task and item as it is when another is.
+/// The image look draws the list from these, and the selected one's block over them
+/// (image/pieces.rs), so moving the selection doesn't draw the list again.
+pub(crate) fn unselected(app: &App, w: usize, narrow: bool, now: Now) -> Rows {
+    build_as(app, w, narrow, now, false)
+}
+
+fn build_as(app: &App, w: usize, narrow: bool, now: Now, selection: bool) -> Rows {
     let layout = app.cfg.layout;
     let groups = app.groups();
-    let cur_id = app.current().map(|t| t.id.clone());
+    let cur_id = app.current().filter(|_| selection).map(|t| t.id.clone());
     let is_cur = |t: &Task| Some(&t.id) == cur_id.as_ref();
     let items = app.later.iter().filter(|_| app.later_open).map(|i| width(&i.id));
     let idw = groups.iter().flat_map(|(_, ts)| ts).map(|t| width(&t.id)).chain(items).max().unwrap_or(0);
@@ -161,7 +172,7 @@ pub(crate) fn build(app: &App, w: usize, narrow: bool, now: Now) -> Rows {
     for (gi, (heading, ts)) in groups.iter().enumerate() {
         if *heading == "Closed" {
             later_due = false;
-            rows.extend(later_rows(app, &app.later, !rows.is_empty(), detail_w));
+            rows.extend(later_rows(app, &app.later, !rows.is_empty(), detail_w, selection));
         }
         // the compact layout's group names, dim, sit where the grouped one leaves a blank row
         if gi > 0 && layout == Layout::Grouped {
@@ -176,7 +187,7 @@ pub(crate) fn build(app: &App, w: usize, narrow: bool, now: Now) -> Rows {
         }
     }
     if later_due {
-        rows.extend(later_rows(app, &app.later, !rows.is_empty(), detail_w));
+        rows.extend(later_rows(app, &app.later, !rows.is_empty(), detail_w, selection));
     }
     Rows { rows, idw }
 }
@@ -279,14 +290,14 @@ fn loud_detail(app: &App, t: &Task) -> bool {
 }
 
 /// An item's row.
-pub(super) fn item_row(app: &App, i: &Item) -> ItemRow {
+pub(super) fn item_row(app: &App, i: &Item, selection: bool) -> ItemRow {
     ItemRow {
         id: i.id.clone(),
         title: i.title.clone(),
         job: app.job(&i.id).is_some(),
         asks: i.asks(),
         mark: model::item_mark(i),
-        selected: app.current_item().is_some_and(|c| c.id == i.id),
+        selected: selection && app.current_item().is_some_and(|c| c.id == i.id),
         asked: super::bottom::asked_item(app).is_some_and(|a| a.id == i.id),
     }
 }

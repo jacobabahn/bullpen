@@ -158,6 +158,7 @@ pub static SETTINGS: &[Setting] = &[
     Setting { help: "how the board lists tasks", choices: Some(&["grouped", "compact"]), ..base("board_layout", Str("grouped"), Some("Board"), Choice) },
     Setting { help: "how the board draws itself: as text, or as images (kitty graphics; text when the terminal can't)", choices: Some(&["text", "image"]), ..base("board_look", Str("text"), Some("Board"), Choice) },
     Setting { help: "the image look's type size: small (a row a line, as the text), medium or large", choices: Some(&["small", "medium", "large"]), ..base("board_text_size", Str("medium"), Some("Board"), Choice) },
+    Setting { help: "the image look moves: its working, review and running marks turn, and a task's mark settles in when its status changes (off: all still)", ..base("board_motion", Bool(true), Some("Board"), OnOff) },
     Setting { help: "a font file (TTF or OTF) the image look draws with (\"\" clears it)", metavar: Some("PATH"), none: Some("Inter, built in"), clears: true, ..base("board_font", Null, Some("Board"), Text) },
     Setting { help: "empty rows at the board's bottom, under Rex's minimized-pane capsules (0: none)", least: Some(0), says: Some("rows, or 0 for none"), metavar: Some("ROWS"), none: Some("1 while workers or reviewers float, else 0"), ..base("board_bottom_gap", Null, Some("Board"), Number) },
     Setting { help: "the board's top line counts the tasks that need you or are ready in other repositories", ..base("board_repos", Bool(true), Some("Board"), OnOff) },

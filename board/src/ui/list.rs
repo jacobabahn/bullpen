@@ -29,8 +29,9 @@ pub(super) fn draw_list(buf: &mut Buffer, area: Rect, app: &mut App, s: &Sizes, 
         let foot_n = s.h.saturating_sub(2 + s.avail) as u16;
         let cols = w.saturating_sub(1) as u16;
         let rows = Rows { rows, idw };
+        let base = rows::unselected(app, w, s.narrow, now);
         let detail_cols = app.detail_cols;
-        app.view = Some(View { rows, detail_cols, top: app.top, head, foot: None, col: area.x, row0: area.y, row, rows_n, foot_n, cols });
+        app.view = Some(View { rows, base, detail_cols, top: app.top, head, foot: None, col: area.x, row0: area.y, row, rows_n, foot_n, cols });
         return;
     }
     draw_head(buf, area, &head, w);

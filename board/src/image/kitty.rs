@@ -1,14 +1,12 @@
 //! The kitty graphics protocol's commands, as bytes: the query that says whether the
 //! terminal draws images, an upload (PNG, base64 in chunks), a placement (a crop of
-//! the image pinned to a block of cells: the terminal scales the crop to them), and
-//! deleting an image. Every command but the query asks for no answer (q=2), so none
+//! the image pinned to a block of cells: the terminal scales the crop to them; an
+//! image can have several, each with its number, and one with a z-index above another's),
+//! and taking one placement or all of an image off the screen, or deleting it. Every command but the query asks for no answer (q=2), so none
 //! comes back as keys.
 
 /// Base64 chunks the protocol takes at most.
 const CHUNK: usize = 4096;
-
-/// The placement's number: each image has one, which a new one replaces in place.
-const PLACEMENT: u32 = 1;
 
 fn apc(control: &str, payload: &str) -> String {
     if payload.is_empty() {
@@ -42,26 +40,31 @@ pub fn upload(id: u32, png: &[u8]) -> String {
     out
 }
 
-/// Where an image is shown: the top-left cell (0-based), the crop of the image (in
-/// pixels) and the block of cells it fills.
+/// Where an image is shown: its placement's number (a new placement with the same
+/// number replaces it in place), the top-left cell (0-based), the crop of the image (in
+/// pixels), the block of cells it fills, and its z-index (over the images at 0 when 1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Place {
     pub id: u32,
+    pub p: u32,
     pub col: u16,
     pub row: u16,
+    pub crop_x: u32,
     pub crop_y: u32,
     pub crop_w: u32,
     pub crop_h: u32,
     pub cols: u16,
     pub rows: u16,
+    pub z: i32,
 }
 
-/// Show (or move) image's placement: the cursor goes to its cell and back, and doesn't
-/// move for the image (C=1).
+/// Show (or move) an image's placement: the cursor goes to its cell and back, and
+/// doesn't move for the image (C=1).
 pub fn place(p: &Place) -> String {
+    let z = if p.z == 0 { String::new() } else { format!(",z={}", p.z) };
     let control = format!(
-        "a=p,i={},p={PLACEMENT},x=0,y={},w={},h={},c={},r={},C=1,q=2",
-        p.id, p.crop_y, p.crop_w, p.crop_h, p.cols, p.rows
+        "a=p,i={},p={},x={},y={},w={},h={},c={},r={}{z},C=1,q=2",
+        p.id, p.p, p.crop_x, p.crop_y, p.crop_w, p.crop_h, p.cols, p.rows
     );
     format!("\x1b7\x1b[{};{}H{}\x1b8", p.row + 1, p.col + 1, apc(&control, ""))
 }
@@ -69,6 +72,11 @@ pub fn place(p: &Place) -> String {
 /// Take image `id` off the screen, keeping its data to place again.
 pub fn hide(id: u32) -> String {
     apc(&format!("a=d,d=i,i={id},q=2"), "")
+}
+
+/// Take placement `p` of image `id` off the screen, keeping the image and its others.
+pub fn unplace(id: u32, p: u32) -> String {
+    apc(&format!("a=d,d=i,i={id},p={p},q=2"), "")
 }
 
 /// Delete image `id` and its data.

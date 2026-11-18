@@ -118,13 +118,32 @@ pub struct Sheet {
     pub places: Vec<Place>,
 }
 
-/// The rows laid out: each one's height in pixels, a task's (or an item's) title as the
-/// lines it's drawn on, and the ID column's width.
+/// The rows laid out: each one's height in pixels and the space left after it (the
+/// selected block's, so the rows under it move by whole cells: pieces.rs), a task's (or
+/// an item's) title as the lines it's drawn on, and the ID column's width.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Laid {
     pub heights: Vec<u32>,
+    pub after: Vec<u32>,
     titles: Vec<Vec<String>>,
     pub idw: f32,
+}
+
+impl Laid {
+    /// The pixels row i takes: its height and the space after it.
+    pub fn span(&self, i: usize) -> u32 {
+        self.heights[i] + self.after[i]
+    }
+
+    /// Every row's span.
+    pub fn spans(&self) -> Vec<u32> {
+        (0..self.heights.len()).map(|i| self.span(i)).collect()
+    }
+
+    /// Rows [a, b)'s spans, in pixels.
+    pub fn tall(&self, a: usize, b: usize) -> u32 {
+        (a..b.min(self.heights.len())).map(|i| self.span(i)).sum()
+    }
 }
 
 /// The most lines the selected task's title wraps to; any other title is cut to one.
@@ -158,7 +177,8 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
         heights.push(g.height(row, lines.len().max(1)));
         titles.push(lines);
     }
-    Laid { heights, titles, idw }
+    let after = vec![0; heights.len()];
+    Laid { heights, after, titles, idw }
 }
 
 /// How many columns of text a detail line holds, from under the ID to the right edge:
@@ -176,8 +196,8 @@ pub fn detail_cols(c: &Canvas, fonts: &Fonts) -> usize {
 pub fn fitting(laid: &Laid, top: usize, room: u32) -> usize {
     let mut used = 0;
     let mut end = top;
-    while end < laid.heights.len() && (end == top || used + laid.heights[end] <= room) {
-        used += laid.heights[end];
+    while end < laid.heights.len() && (end == top || used + laid.span(end) <= room) {
+        used += laid.span(end);
         end += 1;
     }
     end
@@ -190,12 +210,37 @@ pub struct Marks {
     pub down: bool,
 }
 
-/// Draw rows[range] one under the other, as `laid` lays them out, as an image the grid's
-/// columns wide and `height` pixels high, with the scroll marks.
-pub fn render(rows: &Rows, laid: &Laid, range: Range<usize>, height: u32, marks: Marks, c: &Canvas, fonts: &mut Fonts) -> Result<Sheet, String> {
-    let range = range.start.min(rows.rows.len())..range.end.min(rows.rows.len());
-    let width = c.grid.width();
-    let mut pm = Pixmap::new(width.max(1), height.max(1)).ok_or_else(|| format!("can't make an image {width}×{height} pixels"))?;
+/// The pixels drawn past a window's edges, and cut off (render).
+const EDGE: u32 = 4;
+
+/// What of the laid-out rows an image shows: rows[range], the first at the top of the
+/// layout, of which the pixels [y, y + h); the scroll marks; and the rows whose marks
+/// are left out (`bare`), for sprite.rs to place over them.
+pub struct Cut<'a> {
+    pub range: Range<usize>,
+    pub y: u32,
+    pub h: u32,
+    pub marks: Marks,
+    pub bare: &'a dyn Fn(usize) -> bool,
+}
+
+impl Cut<'_> {
+    /// All of rows[range], from their top, in an image `h` high, every mark drawn.
+    pub fn rows(range: Range<usize>, h: u32) -> Cut<'static> {
+        Cut { range, y: 0, h, marks: Marks::default(), bare: &|_| false }
+    }
+}
+
+/// Draw the rows `cut` says, one under the other, as `laid` lays them out, as an image
+/// the grid's columns wide and `cut.h` pixels high, with the scroll marks.
+pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts) -> Result<Sheet, String> {
+    let range = cut.range.start.min(rows.rows.len())..cut.range.end.min(rows.rows.len());
+    let (width, height) = (c.grid.width().max(1), cut.h.max(1));
+    let made = || format!("can't make an image {width}×{height} pixels");
+    // drawn with EDGE pixels more above and below, then cut to the window: a shape cut
+    // by an image's edge is smoothed there differently, and the window's rows must look
+    // as they do in any other
+    let mut pm = Pixmap::new(width, height + 2 * EDGE).ok_or_else(made)?;
     let mut d = Draw::new(&mut pm, fonts, c, laid.idw);
     let mut places = Vec::new();
     let mut y = 0;
@@ -206,13 +251,17 @@ pub fn render(rows: &Rows, laid: &Laid, range: Range<usize>, height: u32, marks:
             _ => None,
         };
         places.push(Place { row: i, y, h: laid.heights[i], id });
-        y += laid.heights[i];
+        y += laid.span(i);
     }
+    // the window: the rows are drawn where they are in the layout, moved up by its top
+    // (whole pixels), so a row's edges fall on the same fractions of a pixel in any image
+    d.shift = cut.y as f32 - EDGE as f32;
+    let at = |p: &Place| p.y as f32;
     // the selected task's block (its row and its details) sits on one rounded tint
     let mut block: Option<(f32, f32)> = None;
     for p in &places {
         let row = &rows.rows[p.row];
-        let (y, bottom) = (p.y as f32, (p.y + p.h) as f32);
+        let (y, bottom) = (at(p), at(p) + p.h as f32);
         let tinted = match row {
             Row::Task(t) => t.selected && t.asked.is_none(),
             Row::Detail(dr) => dr.selected,
@@ -234,9 +283,14 @@ pub fn render(rows: &Rows, laid: &Laid, range: Range<usize>, height: u32, marks:
     }
     d.tint(block);
     for p in &places {
-        d.row(&rows.rows[p.row], &laid.titles[p.row], p.y as f32, p.h as f32);
+        let (y, h) = (at(p), p.h as f32);
+        // a row outside the window draws nothing (its tint and bar may reach in, above)
+        if y + h + c.m.pad + EDGE as f32 >= cut.y as f32 && y <= (cut.y + height + EDGE) as f32 {
+            d.row(&rows.rows[p.row], &laid.titles[p.row], y, h, (cut.bare)(p.row));
+        }
     }
-    d.scroll_marks(marks, height as f32);
+    let mut pm = pm.clone_rect(tiny_skia::IntRect::from_xywh(0, EDGE as i32, width, height).ok_or_else(made)?).ok_or_else(made)?;
+    Draw::new(&mut pm, fonts, c, laid.idw).scroll_marks(cut.marks, height as f32);
     Ok(Sheet { pixmap: pm, places })
 }
 
@@ -250,6 +304,17 @@ fn id_width(rows: &Rows, fonts: &Fonts, px: f32) -> f32 {
             _ => None,
         })
         .fold(0.0, f32::max)
+}
+
+/// Where a task's (or item's) mark is in its row: across from the image's left edge,
+/// down from the row's top.
+pub(super) fn mark_at(c: &Canvas) -> (f32, f32) {
+    (1.5 * c.c(), c.m.pad + c.m.line / 2.0)
+}
+
+/// How far a mark reaches from its centre at `scale` (Geo::mark_reach).
+pub(super) fn mark_reach(c: &Canvas, scale: f32) -> f32 {
+    Geo { c: *c, idw: 0.0 }.mark_reach(scale)
 }
 
 fn title_weight(asked: bool) -> Weight {
@@ -267,6 +332,12 @@ impl Geo {
     /// A mark's radius.
     fn mark_r(&self) -> f32 {
         (0.27 / 0.62 * self.c.m.title).min(0.95 * self.c.c())
+    }
+
+    /// How far a mark reaches from its centre, at `scale` (a mark settling in grows past
+    /// its size: sprite.rs), with its stroke and a pixel for its edge.
+    pub(super) fn mark_reach(&self, scale: f32) -> f32 {
+        1.15 * self.mark_r() * scale + (self.mark_r() * 0.26).max(1.2) + 2.0
     }
 
     /// Where text starts (under the ID: column 3, as on the text board, or past a larger
@@ -322,11 +393,15 @@ pub(super) struct Draw<'a> {
     /// the type being drawn, and the height of the line it's centred in
     px: f32,
     line_h: f32,
+    /// the marks' size, 1 but while one settles in (sprite.rs)
+    scale: f32,
+    /// how far up what's drawn goes: the top of the window of the rows drawn (render)
+    shift: f32,
 }
 
 impl<'a> Draw<'a> {
     pub(super) fn new(pm: &'a mut Pixmap, fonts: &'a mut Fonts, c: &Canvas, idw: f32) -> Draw<'a> {
-        Draw { pm, fonts, theme: c.theme, g: Geo { c: *c, idw }, px: c.m.title, line_h: c.m.line }
+        Draw { pm, fonts, theme: c.theme, g: Geo { c: *c, idw }, px: c.m.title, line_h: c.m.line, scale: 1.0, shift: 0.0 }
     }
 
     /// Draw in this type from here on, centred in lines this high.
@@ -360,8 +435,10 @@ impl<'a> Draw<'a> {
     fn title_x(&self) -> f32 {
         self.g.title_x()
     }
+    /// The baseline of a line whose top is y: a whole pixel from its top (as the glyphs
+    /// are drawn), so a row drawn at any height in any image looks the same.
     fn baseline(&self, y: f32) -> f32 {
-        y + (self.h() + self.fonts.cap_height(self.px())) / 2.0
+        y + ((self.h() + self.fonts.cap_height(self.px())) / 2.0).round()
     }
 
     /// The width of text in the type being drawn.
@@ -373,17 +450,19 @@ impl<'a> Draw<'a> {
     pub(super) fn text(&mut self, s: &str, weight: Weight, x: f32, y: f32, max: f32, color: [u8; 4]) -> f32 {
         let px = self.px();
         let s = self.fonts.fit(s, weight, px, max.max(0.0));
-        let base = self.baseline(y);
+        let base = self.baseline(y) - self.shift;
         self.fonts.draw(self.pm, &s, weight, px, (x, base), color)
     }
 
     fn fill(&mut self, path: &Path, color: [u8; 4]) {
-        self.pm.fill_path(path, &paint(color), FillRule::Winding, Transform::identity(), None);
+        let t = Transform::from_translate(0.0, -self.shift);
+        self.pm.fill_path(path, &paint(color), FillRule::Winding, t, None);
     }
 
     fn stroke(&mut self, path: &Path, width: f32, color: [u8; 4]) {
         let stroke = Stroke { width, line_cap: LineCap::Round, ..Stroke::default() };
-        self.pm.stroke_path(path, &paint(color), &stroke, Transform::identity(), None);
+        let t = Transform::from_translate(0.0, -self.shift);
+        self.pm.stroke_path(path, &paint(color), &stroke, t, None);
     }
 
     /// The selected task's (or item's) block: a rounded tint from its ID to the right edge.
@@ -400,8 +479,9 @@ impl<'a> Draw<'a> {
         }
     }
 
-    /// A row whose top is y and height h; a task's or item's title on `lines`.
-    fn row(&mut self, row: &Row, lines: &[String], y: f32, h: f32) {
+    /// A row whose top is y and height h; a task's or item's title on `lines`; its mark
+    /// left out when `bare`.
+    fn row(&mut self, row: &Row, lines: &[String], y: f32, h: f32, bare: bool) {
         let m = self.m();
         let (fg, dim) = (self.theme.text(), self.theme.dim());
         let left = self.c();
@@ -417,7 +497,7 @@ impl<'a> Draw<'a> {
                 let gap = 0.5 * self.px();
                 self.text(&count.to_string(), Weight::Regular, end + gap, y, self.right() - end - gap, dim);
             }
-            Row::Task(t) => self.task(t, lines, y, h),
+            Row::Task(t) => self.task(t, lines, y, h, bare),
             Row::Detail(d) => {
                 self.flag(d.flag, y, h);
                 let color = if d.selected || d.loud { fg } else { dim };
@@ -441,7 +521,7 @@ impl<'a> Draw<'a> {
                 let end = self.text(head, Weight::Bold, left, y, full, hc);
                 self.text(rest, Weight::Regular, end, y, self.right() - end, rc);
             }
-            Row::Item(i) => self.item(i, lines, y + m.pad),
+            Row::Item(i) => self.item(i, lines, y + m.pad, bare),
             Row::ItemDetail(text) => {
                 let x = self.text_x();
                 self.text(text, Weight::Regular, x, y, self.right() - x, fg);
@@ -463,11 +543,13 @@ impl<'a> Draw<'a> {
 
     /// A task's row, whose top is y and height h: the space above it, then its first
     /// line (the mark, ID, title, risk and age), then the rest of its title's lines.
-    fn task(&mut self, t: &TaskRow, lines: &[String], y: f32, h: f32) {
+    fn task(&mut self, t: &TaskRow, lines: &[String], y: f32, h: f32, bare: bool) {
         let y = y + self.m().pad;
         self.flag(t.flag, y, h - self.m().pad);
         let (cx, cy) = (1.5 * self.c(), y + self.h() / 2.0);
-        self.mark(&t.mark, cx, cy);
+        if !bare {
+            self.mark(&t.mark, cx, cy, 0.0);
+        }
         let tone = t.asked.map(|risky| solid(if risky { self.theme.red } else { self.theme.green }));
         let id_end = self.id(&t.id, t.selected || tone.is_some(), tone, y);
         if t.from_backlog {
@@ -531,11 +613,13 @@ impl<'a> Draw<'a> {
     }
 
     /// An item's row, from its first line's top y.
-    fn item(&mut self, i: &ItemRow, lines: &[String], y: f32) {
+    fn item(&mut self, i: &ItemRow, lines: &[String], y: f32, bare: bool) {
         let (cx, cy) = (1.5 * self.c(), y + self.h() / 2.0);
         let r = self.mark_r();
         if i.job {
-            self.mark(&Mark::Job, cx, cy);
+            if !bare {
+                self.mark(&Mark::Job, cx, cy, 0.0);
+            }
         } else if i.asks {
             let amber = solid(self.theme.yellow);
             let w = self.width("?", Weight::Bold);
@@ -553,7 +637,7 @@ impl<'a> Draw<'a> {
 
     /// The scroll marks in the last column: ↑ at the top when rows are above, ↓ at the
     /// bottom of an image `height` high when rows are below.
-    fn scroll_marks(&mut self, marks: Marks, height: f32) {
+    pub(super) fn scroll_marks(&mut self, marks: Marks, height: f32) {
         let cx = self.g.c.grid.width() as f32 - 0.6 * self.c();
         let half = 0.5 * self.m().line.min(self.g.c.grid.cell_h as f32);
         if marks.up {
@@ -579,39 +663,49 @@ impl<'a> Draw<'a> {
     }
 
     fn mark_r(&self) -> f32 {
-        self.g.mark_r()
+        self.g.mark_r() * self.scale
+    }
+
+    /// A mark as one frame of a sprite (sprite.rs): turned `turn` of the way round, at
+    /// `scale` of its size.
+    pub(super) fn mark_frame(&mut self, mark: &Mark, cx: f32, cy: f32, turn: f32, scale: f32) {
+        self.scale = scale;
+        self.mark(mark, cx, cy, turn);
+        self.scale = 1.0;
     }
 
     fn line(&self) -> f32 {
         (self.mark_r() * 0.26).max(1.2)
     }
 
-    /// A task's mark, still: each status's own shape in its colour.
-    fn mark(&mut self, mark: &Mark, cx: f32, cy: f32) {
+    /// A task's mark: each status's own shape in its colour. The marks that turn are
+    /// drawn `turn` of the way round (0: as they stand still).
+    fn mark(&mut self, mark: &Mark, cx: f32, cy: f32, turn: f32) {
         let r = self.mark_r();
         let lw = self.line();
         let (fg, dim) = (self.theme.text(), self.theme.dim());
         let color = |st: &str| self.theme.status(st).unwrap_or(dim);
+        let a0 = -0.5 * PI + 2.0 * PI * turn;
         match mark {
-            // a command running, or a tour being written: an arc most of the way round
-            Mark::Job => self.arc(cx, cy, r, -0.5 * PI, 1.0 * PI, lw * 1.2, fg),
+            // a command running, or a tour being written: an arc half the way round
+            Mark::Job => self.arc(cx, cy, r, a0, 1.0 * PI, lw * 1.2, fg),
             Mark::Tour(st) => {
                 let c = color(st);
-                self.arc(cx, cy, r, -0.5 * PI, 1.0 * PI, lw * 1.2, c)
+                self.arc(cx, cy, r, a0, 1.0 * PI, lw * 1.2, c)
             }
-            Mark::Stuck(st) => self.status_mark(st, cx, cy, Some(solid(self.theme.yellow))),
+            Mark::Stuck(st) => self.status_mark(st, cx, cy, Some(solid(self.theme.yellow)), 0.0),
             // working: a faint ring with a third of it drawn
             Mark::Working => {
                 self.arc(cx, cy, r, 0.0, 2.0 * PI, lw, self.theme.tint_strong());
-                self.arc(cx, cy, r, -0.5 * PI, 0.17 * PI, lw, fg);
+                self.arc(cx, cy, r, a0, 0.17 * PI, lw, fg);
             }
-            Mark::Review => self.status_mark("review", cx, cy, None),
-            Mark::Still(st) => self.status_mark(st, cx, cy, None),
+            Mark::Review => self.status_mark("review", cx, cy, None, turn),
+            Mark::Still(st) => self.status_mark(st, cx, cy, None, 0.0),
         }
     }
 
-    /// A status's mark, in its colour or `over` it.
-    fn status_mark(&mut self, st: &str, cx: f32, cy: f32, over: Option<[u8; 4]>) {
+    /// A status's mark, in its colour or `over` it; review's half turned `turn` round.
+    fn status_mark(&mut self, st: &str, cx: f32, cy: f32, over: Option<[u8; 4]>, turn: f32) {
         let r = self.mark_r();
         let lw = self.line();
         let dim = self.theme.dim();
@@ -640,7 +734,7 @@ impl<'a> Draw<'a> {
             "done" => self.check(cx, cy, r * 0.8, lw, color),
             "review" => {
                 self.arc(cx, cy, r, 0.0, 2.0 * PI, lw, color);
-                if let Some(p) = half(cx, cy, r) {
+                if let Some(p) = half(cx, cy, r, 0.5 * PI + 2.0 * PI * turn) {
                     self.fill(&p, color);
                 }
             }
@@ -735,13 +829,17 @@ fn arc_path(cx: f32, cy: f32, r: f32, a0: f32, sweep: f32) -> Option<Path> {
     pb.finish()
 }
 
-/// The left half of a disc (the review mark's ◐).
-fn half(cx: f32, cy: f32, r: f32) -> Option<Path> {
+/// Half a disc, from angle a0 half way round (clockwise on screen): from the bottom
+/// (a0 = π/2) it's the left half, the review mark's ◐.
+fn half(cx: f32, cy: f32, r: f32, a0: f32) -> Option<Path> {
     let mut pb = PathBuilder::new();
-    let k = 0.5523 * r;
-    pb.move_to(cx, cy - r);
-    pb.cubic_to(cx - k, cy - r, cx - r, cy - k, cx - r, cy);
-    pb.cubic_to(cx - r, cy + k, cx - k, cy + r, cx, cy + r);
+    let k = 4.0 / 3.0 * (PI / 8.0).tan();
+    pb.move_to(cx + r * a0.cos(), cy + r * a0.sin());
+    for i in 0..2 {
+        let (s, e) = (a0 + PI / 2.0 * i as f32, a0 + PI / 2.0 * (i + 1) as f32);
+        let (x0, y0, x3, y3) = (cx + r * s.cos(), cy + r * s.sin(), cx + r * e.cos(), cy + r * e.sin());
+        pb.cubic_to(x0 - k * r * s.sin(), y0 + k * r * s.cos(), x3 + k * r * e.sin(), y3 - k * r * e.cos(), x3, y3);
+    }
     pb.close();
     pb.finish()
 }

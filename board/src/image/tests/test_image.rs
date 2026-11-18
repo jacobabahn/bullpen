@@ -21,7 +21,8 @@ fn board(n: usize) -> App {
 }
 
 fn picture() -> Picture {
-    Picture { window: || None, ..Picture::new(Arc::new(term::Gate::default())) }
+    // the time stands still unless a test moves it
+    Picture { window: || None, clock: Some(0), ..Picture::new(Arc::new(term::Gate::default())) }
 }
 
 /// The picture once the terminal has said it draws images.
@@ -39,20 +40,70 @@ fn asked(app: &mut App, p: &mut Picture) -> String {
 /// Draw a frame (the board as images) and show it, as the main loop does: again at once
 /// when the picture says to. What was written to the terminal.
 fn frame(app: &mut App, p: &mut Picture) -> String {
+    frame_in(app, p, 40, 12)
+}
+
+/// The same, on a board `w` by `h`.
+fn frame_in(app: &mut App, p: &mut Picture, w: u16, h: u16) -> String {
     let mut out = Vec::new();
     loop {
         app.image = p.drawing(app);
-        screen(app, 40, 12);
+        screen(app, w, h);
         if !p.show(app, &mut out) {
             return String::from_utf8(out).unwrap();
         }
     }
 }
 
-/// The images' IDs: the header's, the list's and the bottom rows', as first sent.
+/// The images' IDs: the header's, the list's and the bottom rows', as first sent; then
+/// the selected block's.
 const HEAD: u32 = FIRST;
 const LIST: u32 = FIRST + 1;
 const FOOT: u32 = FIRST + 2;
+const SEL: u32 = FIRST + 3;
+
+/// The commands written: each upload as its first chunk's control, and each other command.
+fn commands(out: &str) -> Vec<String> {
+    out.split("\x1b_G")
+        .skip(1)
+        .filter_map(|c| c.split([';', '\x1b']).next())
+        .filter(|c| !c.starts_with("q=2,m="))
+        .map(String::from)
+        .collect()
+}
+
+/// The placements written: image, placement, first row (1-based), rows.
+fn placed(out: &str) -> Vec<(u32, u32, u16, u16)> {
+    let field = |c: &str, k: &str| c.split(',').find_map(|f| f.strip_prefix(k)).and_then(|v| v.parse::<u32>().ok());
+    out.split("\x1b7\x1b[")
+        .skip(1)
+        .filter_map(|c| {
+            let row = c.split(';').next()?.parse().ok()?;
+            let control = c.split("\x1b_G").nth(1)?;
+            Some((field(control, "i=")?, field(control, "p=")?, row, field(control, "r=")? as u16))
+        })
+        .collect()
+}
+
+/// A board with tasks of every kind, as the pieces' tests have, in a taller pane: one
+/// needs you, two ready, one in review, one working, three queued.
+fn mixed() -> App {
+    use crate::ui::testing::{asking, ready};
+    let long = "A title long enough that the selected task's wraps to a second line and more";
+    let mut a = App::for_test(vec![
+        asking("BP-1"),
+        ready("BP-2").with(json!({"title": long, "diffstat": "3 files, +13 −16"})),
+        task("BP-3", "working").with(json!({"title": "Working on it"})),
+        ready("BP-4"),
+        task("BP-5", "review").with(json!({"title": long})),
+        task("BP-6", "todo").with(json!({"title": long})),
+        task("BP-7", "todo").with(json!({"title": "Task 7"})),
+        task("BP-8", "todo").with(json!({"title": "Task 8"})),
+    ]);
+    a.cfg = Config::default_for_test().with(json!({"board_bottom_gap": 0}));
+    a.look = Look::Image;
+    a
+}
 
 #[test]
 fn the_board_asks_the_terminal_once_before_drawing_an_image_and_draws_text_meanwhile() {
@@ -63,7 +114,7 @@ fn the_board_asks_the_terminal_once_before_drawing_an_image_and_draws_text_meanw
 }
 
 #[test]
-fn the_board_is_sent_as_three_images_placed_in_their_cells_and_its_rows_left_blank() {
+fn the_board_is_sent_as_images_placed_in_their_cells_and_its_rows_left_blank() {
     let (mut app, mut p) = (board(3), picture());
     asked(&mut app, &mut p);
     let out = frame(&mut app, &mut p);
@@ -71,31 +122,68 @@ fn the_board_is_sent_as_three_images_placed_in_their_cells_and_its_rows_left_bla
     assert!(s.iter().all(|l| l.is_empty())); // the top line, the rows and the keys are the images'
     let view = app.view.clone().unwrap();
     assert_eq!((view.row0, view.row, view.col, view.cols, view.rows_n, view.foot_n), (0, 2, 0, 39, 6, 4));
-    // the top line's two rows, the list's six and the four under it, 39 columns of 10 pixels
-    for (id, row, rows) in [(HEAD, 1, 2), (LIST, 3, 6), (FOOT, 9, 4)] {
+    // the top line's two rows and the four under the list, 39 columns of 10 pixels
+    for (id, row, rows) in [(HEAD, 1, 2), (FOOT, 9, 4)] {
         assert!(out.contains(&format!("a=t,f=100,t=d,i={id},q=2,")));
         let h = rows * 20;
         assert!(out.contains(&format!("\x1b7\x1b[{row};1H\x1b_Ga=p,i={id},p=1,x=0,y=0,w=390,h={h},c=39,r={rows},C=1,q=2")));
     }
+    // the list's six rows: each covered once, by the list's crops, the selected block or the tail
+    let mut covered = [0; 6];
+    for (id, _, row, rows) in placed(&out) {
+        if (LIST..LIST + 4).contains(&id) && id != FOOT {
+            (row..row + rows).for_each(|r| covered[r as usize - 3] += 1);
+        }
+    }
+    assert!(covered.iter().all(|n| *n <= 1) && covered[..4].iter().all(|n| *n == 1), "{covered:?}");
+    assert!(out.contains(&format!("a=p,i={SEL},p=1,")));
     // nothing changed: nothing is sent
     assert_eq!(frame(&mut app, &mut p), "");
 }
 
 #[test]
 fn a_change_sends_only_the_images_it_changes_and_places_each_before_the_old_one_goes() {
-    let (mut app, mut p) = (board(3), picture());
+    let (mut app, mut p) = (mixed(), picture());
     asked(&mut app, &mut p);
-    frame(&mut app, &mut p);
-    app.sel = Some("BP-2".into()); // the selection moves: the list changes, and the keys may
-    let out = frame(&mut app, &mut p);
-    assert!(!out.contains(&format!("i={HEAD}")));
-    let (sent, placed, deleted) =
-        (out.find(&format!("a=t,f=100,t=d,i={}", FOOT + 1)).unwrap(), out.find(&format!("a=p,i={}", FOOT + 1)).unwrap(), out.find(&kitty::delete(LIST)).unwrap());
-    assert!(sent < placed && placed < deleted);
+    frame_in(&mut app, &mut p, 40, 40);
+    app.sel = Some("BP-4".into()); // the selection moves down a task: the list stays
+    let out = frame_in(&mut app, &mut p, 40, 40);
+    assert!(!out.contains(&format!("i={HEAD}")) && !out.contains(&format!("a=t,f=100,t=d,i={LIST},")));
+    let new = commands(&out).iter().find_map(|c| c.strip_prefix("a=t,f=100,t=d,i=").map(|r| r.split(',').next().unwrap().parse::<u32>().unwrap())).unwrap();
+    let (sent, put, deleted) =
+        (out.find(&format!("a=t,f=100,t=d,i={new}")).unwrap(), out.find(&format!("a=p,i={new}")).unwrap(), out.find(&kitty::delete(SEL)).unwrap());
+    assert!(sent < put && put < deleted);
+    // the list's crops move: placed again, not sent
+    assert!(out.contains(&format!("a=p,i={LIST},")));
     // a message changes the bottom rows' image alone
     app.msg = Note::failed("Couldn't accept BP-2.");
-    let out = frame(&mut app, &mut p);
-    assert!(out.contains(&kitty::delete(FOOT)) && !out.contains(&kitty::delete(HEAD)) && !out.contains(&kitty::delete(FOOT + 1)));
+    let out = frame_in(&mut app, &mut p, 40, 40);
+    let uploads: Vec<_> = commands(&out).into_iter().filter(|c| c.starts_with("a=t")).collect();
+    assert_eq!(uploads.len(), 1, "{uploads:?}");
+    let view = app.view.clone().unwrap();
+    assert!(placed(&out).iter().all(|(_, _, row, _)| *row == view.row + view.rows_n + 1));
+    assert!(!out.contains(&kitty::delete(HEAD)) && !out.contains(&kitty::delete(LIST)));
+}
+
+#[test]
+fn moving_the_selection_sends_a_small_image_not_the_list() {
+    let (mut app, mut p) = (mixed(), picture());
+    asked(&mut app, &mut p);
+    p.cell = Some((16, 34)); // a Mac's cell
+    let first = frame_in(&mut app, &mut p, 60, 45);
+    let list = |out: &str| out.split("\x1b_Ga=t").filter(|c| c.contains(&format!("i={LIST},"))).count();
+    assert_eq!(list(&first), 1);
+    let mut most = 0;
+    for sel in ["BP-2", "BP-4", "BP-5", "BP-3", "BP-6"] {
+        app.sel = Some(sel.into());
+        let out = frame_in(&mut app, &mut p, 60, 45);
+        assert!(!out.contains(&format!("a=t,f=100,t=d,i={LIST},")), "{sel}");
+        let sizes: Vec<_> = out.split("\x1b_Ga=t,f=100,t=d,i=").skip(1).map(|c| c.split("a=p").next().unwrap().len()).collect();
+        eprintln!("{sel}: {} bytes, images {sizes:?}", out.len());
+        most = most.max(out.len());
+    }
+    eprintln!("first frame {} bytes; a j or k at most {most}", first.len());
+    assert!(most * 3 < first.len(), "{most} of {}", first.len());
 }
 
 #[test]
@@ -169,13 +257,18 @@ fn the_images_are_hidden_under_an_overlay_and_deleted_when_the_board_is_text_aga
     asked(&mut app, &mut p);
     frame(&mut app, &mut p);
     app.mode = crate::Mode::Help { top: 0 };
-    assert_eq!(frame(&mut app, &mut p), [HEAD, LIST, FOOT].map(kitty::hide).concat());
+    let out = frame(&mut app, &mut p);
+    let hidden = commands(&out);
+    assert!(hidden.iter().all(|c| c.starts_with("a=d,d=i,") && !c.contains("p=")), "{hidden:?}");
+    assert!([HEAD, LIST, FOOT, SEL].iter().all(|id| out.contains(&kitty::hide(*id))));
     app.mode = crate::Mode::Normal;
     let out = frame(&mut app, &mut p);
     // placed again, not sent again
-    assert!([HEAD, LIST, FOOT].iter().all(|id| out.contains(&format!("a=p,i={id},"))) && !out.contains("a=t"));
+    assert!([HEAD, LIST, FOOT, SEL].iter().all(|id| out.contains(&format!("a=p,i={id},"))) && !out.contains("a=t"));
     app.look = Look::Text;
-    assert_eq!(frame(&mut app, &mut p), [HEAD, LIST, FOOT].map(kitty::delete).concat());
+    let out = frame(&mut app, &mut p);
+    assert!(commands(&out).iter().all(|c| c.starts_with("a=d,d=I,")));
+    assert!([HEAD, LIST, FOOT, SEL].iter().all(|id| out.contains(&kitty::delete(*id))));
     assert_eq!(frame(&mut app, &mut p), "");
 }
 
@@ -241,7 +334,8 @@ fn colours_asked_again_change_the_image() {
     let mut light = answer(true);
     light.said.fg = Some(theme::Rgb(0, 0, 0));
     p.answered(&light);
-    assert!(frame(&mut app, &mut p).contains(&format!("a=t,f=100,t=d,i={}", FOOT + 1)));
+    let out = frame(&mut app, &mut p);
+    assert!([HEAD, LIST, FOOT, SEL].iter().all(|id| out.contains(&kitty::delete(*id))));
 }
 
 #[test]
@@ -258,10 +352,13 @@ fn i_switches_the_look_for_this_run() {
 fn after_a_resize_the_image_is_sent_again() {
     let (mut app, mut p) = (board(3), picture());
     asked(&mut app, &mut p);
-    frame(&mut app, &mut p);
+    let uploads = |out: &str| commands(out).iter().filter(|c| c.starts_with("a=t")).count();
+    let shown = uploads(&frame(&mut app, &mut p));
     p.resized();
     let out = frame(&mut app, &mut p);
-    assert!([1, 2, 3].iter().all(|n| out.contains(&format!("a=t,f=100,t=d,i={}", FOOT + n))) && out.ends_with(&kitty::delete(FOOT)));
+    // each image sent again, the old one deleted after
+    assert_eq!(uploads(&out), shown);
+    assert!([HEAD, LIST, FOOT, SEL].iter().all(|id| out.contains(&kitty::delete(*id))));
 }
 
 /// The key reader reads the answers asked: back to keys, with these answers.
@@ -405,3 +502,4 @@ fn a_board_too_short_for_rows_under_its_list_keeps_them_as_text() {
     assert!(app.view.as_ref().is_some_and(|v| v.foot.is_none()));
     assert!(s.iter().any(|l| l.contains("keys")));
 }
+

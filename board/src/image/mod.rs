@@ -23,23 +23,29 @@
 mod font;
 mod frame;
 mod kitty;
+mod list;
+mod pieces;
 mod png;
 mod render;
+mod shown;
+mod sprite;
 pub mod term;
 mod theme;
 
 use crate::model::{Layout, Look, TextSize};
 use crate::ui::bottom::Foot;
-use crate::ui::list::{scroll_by, Head};
-use crate::ui::rows::Rows;
+use crate::ui::list::Head;
+use crate::ui::rows::{Mark, Row, Rows};
 use crate::{App, Note};
-use std::hash::{Hash, Hasher};
+use shown::{Screen, Slot, Want};
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 pub use font::Fonts;
-pub use render::{render, Canvas, Grid, Marks};
+pub use render::{render, Canvas, Grid};
 pub use theme::Theme;
 
 /// The graphics query's image ID; images shown get IDs from FIRST up.
@@ -51,6 +57,9 @@ const FIRST: u32 = PROBE + 1;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct View {
     pub rows: Rows,
+    /// the same rows with nothing selected (ui/rows.rs's `unselected`): the list's image
+    /// is these, the selected block an image over them (pieces.rs)
+    pub base: Rows,
     /// the columns the rows' detail lines were wrapped to (`app.detail_cols`)
     pub detail_cols: Option<usize>,
     pub top: usize,
@@ -66,16 +75,6 @@ pub struct View {
     pub foot_n: u16,
     pub cols: u16,
 }
-
-/// The images the board is drawn as.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Part {
-    Head,
-    List,
-    Foot,
-}
-
-const PARTS: [Part; 3] = [Part::Head, Part::List, Part::Foot];
 
 /// What drawing a frame came to.
 enum Drawn {
@@ -95,14 +94,6 @@ enum Probe {
     No(String),
 }
 
-/// An image sent, and where it's shown.
-struct Shown {
-    id: u32,
-    /// what it shows: a hash of what it draws, the size, the colours and the cells
-    key: u64,
-    place: Option<kitty::Place>,
-}
-
 /// The image look's state, beside the board's: the main loop owns it, and the
 /// terminal's output.
 pub struct Picture {
@@ -118,9 +109,20 @@ pub struct Picture {
     cell: Option<(u32, u32)>,
     /// the font, for the font file it was loaded from
     fonts: Option<(Option<PathBuf>, Fonts)>,
-    /// the top line's, the list's and the bottom rows' images
-    shown: [Option<Shown>; 3],
-    next_id: u32,
+    /// the images sent and where they're placed
+    screen: Screen,
+    /// each task's mark last frame: a task whose mark changes to a still one has it
+    /// settle in (sprite.rs), with motion on
+    seen: HashMap<String, Mark>,
+    /// the tasks whose marks are settling in, or did while the list's image stayed the
+    /// one drawn then, and when they began (ms since the board started)
+    settling: HashMap<String, u128>,
+    /// what the list's base image shows (list::base_shows): when it changes, the marks
+    /// done settling go back in it
+    base_shows: u64,
+    /// the time, in ms since the board started (set each frame; tests fix it with `clock`)
+    ms: u128,
+    clock: Option<u128>,
     /// a cell's size from the terminal's window size (tests have none)
     window: fn() -> Option<(u32, u32)>,
 }
@@ -136,8 +138,12 @@ impl Picture {
             theme: Theme::default(),
             cell: None,
             fonts: None,
-            shown: [None, None, None],
-            next_id: FIRST,
+            screen: Screen::new(FIRST),
+            seen: HashMap::new(),
+            settling: HashMap::new(),
+            base_shows: 0,
+            ms: 0,
+            clock: None,
             window: window_cell,
         }
     }
@@ -176,7 +182,8 @@ impl Picture {
             self.hide(out);
             return false;
         };
-        match self.draw(&view, app.cfg.text_size, app.cfg.font.as_deref(), out) {
+        self.ms = self.clock.unwrap_or_else(|| app.started.elapsed().as_millis());
+        match self.draw(&view, app.cfg.text_size, app.cfg.font.as_deref(), app.cfg.motion, out) {
             Ok(Drawn::At { top, page }) => {
                 (app.top, app.page) = (top, page);
                 false
@@ -244,12 +251,12 @@ impl Picture {
         (self.window)().or(self.cell).filter(|(w, h)| *w > 0 && *h > 0)
     }
 
-    /// Send each part's image if what it shows changed, and place it. The list scrolls
-    /// from the row shown first last frame, by its rows' heights, to keep the selection
-    /// in view: returns the row it starts at and the tasks a page has (`app.top`,
-    /// `app.page`). Rows wrapped to other columns than the image's detail lines hold
-    /// aren't drawn: the board wraps them again first.
-    fn draw(&mut self, view: &View, size: TextSize, font: Option<&Path>, out: &mut impl Write) -> Result<Drawn, String> {
+    /// Send each image if what it shows changed, and place it. The list scrolls from the
+    /// row shown first last frame, by its rows' heights, to keep the selection in view:
+    /// returns the row it starts at and the tasks a page has (`app.top`, `app.page`).
+    /// Rows wrapped to other columns than the image's detail lines hold aren't drawn: the
+    /// board wraps them again first.
+    fn draw(&mut self, view: &View, size: TextSize, font: Option<&Path>, motion: bool, out: &mut impl Write) -> Result<Drawn, String> {
         let (cell_w, cell_h) =
             self.cell().ok_or("Drawing the list as text: the terminal doesn't say its cell size in pixels.")?;
         let canvas = Canvas::new(Grid { cols: view.cols as usize, cell_w, cell_h }, size, self.theme);
@@ -258,79 +265,50 @@ impl Picture {
         if view.detail_cols != Some(cols) {
             return Ok(Drawn::Rewrap(cols));
         }
-        let laid = render::lay(&view.rows, &canvas, fonts);
-        let room = view.rows_n as u32 * cell_h;
-        let top = scroll_by(&view.rows.rows, view.top, &laid.heights, room);
-        let end = render::fitting(&laid, top, room);
-        let page = view.rows.rows[top..end].iter().filter(|r| r.is_entry()).count().max(1);
-        let marks = Marks { up: top > 0, down: end < view.rows.rows.len() };
-        let what = |part: Part| -> u64 {
-            let mut h = std::collections::hash_map::DefaultHasher::new();
-            (part, canvas.grid, size, canvas.theme).hash(&mut h);
-            match part {
-                Part::Head => (&view.head, view.row - view.row0).hash(&mut h),
-                // the rows shown (an age ticking off screen changes nothing), and the ID
-                // column, which all of them set
-                Part::List => (&view.rows.rows[top..end], laid.idw.to_bits(), view.rows_n, marks).hash(&mut h),
-                Part::Foot => (&view.foot, view.foot_n).hash(&mut h),
-            }
-            h.finish()
+        let ms = self.ms;
+        settle(&mut self.seen, &mut self.settling, &view.rows, motion, ms);
+        let plan = pieces::plan(view, &canvas, fonts);
+        let mut f = list::Frame { view, plan: &plan, c: &canvas, size, bare: &|_| false, began: &|_| 0, ms };
+        // the list's image is drawn again: the marks done settling go back in it
+        let shows = list::base_shows(&f);
+        if shows != self.base_shows {
+            self.base_shows = shows;
+            self.settling.retain(|_, t| ms.saturating_sub(*t) < sprite::settling_ms());
+        }
+        let settling = &self.settling;
+        let bare = |row: &Row| pieces::bare(row, motion, &|id| settling.contains_key(id));
+        // a turning mark turns with the text board's, from the board's start
+        let began = |row: &Row| match row {
+            Row::Task(t) if !sprite::turns(&t.mark) => settling.get(&t.id).copied().unwrap_or(0),
+            _ => 0,
         };
-        let mut images = Vec::new();
-        for part in PARTS {
-            let (row, rows) = match part {
-                Part::Head => (view.row0, view.row - view.row0),
-                Part::List => (view.row, view.rows_n),
-                Part::Foot => (view.row + view.rows_n, if view.foot.is_some() { view.foot_n } else { 0 }),
-            };
-            let key = what(part);
-            let k = part as usize;
-            let new = if rows > 0 && self.shown[k].as_ref().map(|s| s.key) != Some(key) {
-                let drawn = match part {
-                    Part::Head => frame::head(&view.head, rows, &canvas, fonts),
-                    Part::List => render(&view.rows, &laid, top..end, room, marks, &canvas, fonts).map(|s| s.pixmap),
-                    Part::Foot => frame::foot(view.foot.as_ref().expect("a foot"), rows, &canvas, fonts),
-                };
-                Some(png::encode(&drawn.map_err(|e| format!("Drawing the list as text: {e}."))?))
-            } else {
-                None
-            };
-            images.push((part, key, row, rows, new));
+        (f.bare, f.began) = (&bare, &began);
+
+        let head_n = view.row - view.row0;
+        let foot_n = if view.foot.is_some() { view.foot_n } else { 0 };
+        let mut wants = Vec::new();
+        let k = list::key(&Slot::Head, &f, (&view.head, head_n));
+        if head_n > 0 {
+            let png = (!self.screen.has(&Slot::Head, k)).then(|| list::encode(frame::head(&view.head, head_n, &canvas, fonts))).transpose()?;
+            wants.push(Want { slot: Slot::Head, key: k, png, places: vec![whole(view, &canvas, view.row0, head_n)] });
         }
-        for (part, key, row, rows, png) in images {
-            let at = kitty::Place { id: 0, col: view.col, row, crop_y: 0, crop_w: canvas.grid.width(), crop_h: rows as u32 * cell_h, cols: view.cols, rows };
-            self.put(part, key, png, at, out)?;
+        let mut list = list::wants(&f, &self.screen, fonts)?;
+        let sprites = list.split_off(list.iter().position(|w| matches!(w.slot, Slot::Sel | Slot::Tail | Slot::Sprite(_))).unwrap_or(list.len()));
+        wants.extend(list);
+        if let Some(foot) = view.foot.as_ref().filter(|_| foot_n > 0) {
+            let k = list::key(&Slot::Foot, &f, (foot, foot_n));
+            let png = (!self.screen.has(&Slot::Foot, k)).then(|| list::encode(frame::foot(foot, foot_n, &canvas, fonts))).transpose()?;
+            wants.push(Want { slot: Slot::Foot, key: k, png, places: vec![whole(view, &canvas, view.row + view.rows_n, foot_n)] });
         }
-        out.flush().map_err(|e| format!("Drawing the list as text: {e}."))?;
-        Ok(Drawn::At { top, page })
+        wants.extend(sprites);
+        self.screen.show(wants, out).map_err(|e| format!("Drawing the list as text: {e}."))?;
+        Ok(Drawn::At { top: plan.top, page: plan.page })
     }
 
-    /// Show a part: send its new image (`png`) and place it, then delete the old one; or
-    /// move or hide (`at` has no rows) the one there is.
-    fn put(&mut self, part: Part, key: u64, png: Option<Vec<u8>>, mut at: kitty::Place, out: &mut impl Write) -> Result<(), String> {
-        let k = part as usize;
-        let mut old = None;
-        if let Some(png) = png {
-            let id = self.next_id;
-            self.next_id = if self.next_id == u32::MAX { FIRST } else { self.next_id + 1 };
-            write(out, &kitty::upload(id, &png))?;
-            old = self.shown[k].replace(Shown { id, key, place: None });
-        }
-        let Some(s) = self.shown[k].as_mut() else { return Ok(()) };
-        at.id = s.id;
-        if at.rows == 0 {
-            if s.place.take().is_some() {
-                write(out, &kitty::hide(s.id))?;
-            }
-        } else if s.place != Some(at) {
-            write(out, &kitty::place(&at))?;
-            s.place = Some(at);
-        }
-        // the new image is up: now the old one goes
-        if let Some(old) = old {
-            write(out, &kitty::delete(old.id))?;
-        }
-        Ok(())
+    /// Redraw this soon, though nothing else changes: while a mark settles in.
+    pub fn tick(&self) -> Option<Duration> {
+        let busy = self.settling.values().any(|t| self.ms.saturating_sub(*t) < sprite::settling_ms());
+        busy.then(|| Duration::from_millis(sprite::POP_MS as u64))
     }
 
     /// The terminal was resized, and may have cleared the screen and the images with it:
@@ -338,32 +316,50 @@ impl Picture {
     /// Its cell size may have changed with it, and its colours are asked with that.
     pub fn resized(&mut self) {
         self.due = true;
-        for s in self.shown.iter_mut().flatten() {
-            s.key = 0;
-            s.place = None;
-        }
+        self.screen.forget();
     }
 
     /// Take the images off the screen, keeping them for when the board shows again.
     fn hide(&mut self, out: &mut impl Write) {
-        for s in self.shown.iter_mut().flatten() {
-            if s.place.take().is_some() {
-                let _ = write(out, &kitty::hide(s.id));
-                let _ = out.flush();
-            }
-        }
+        self.screen.hide(out);
     }
 
-    /// Delete the images: the board is text again, or it quits.
+    /// Delete the images: the board is text again, or it quits. Back, its marks don't
+    /// settle in for what changed meanwhile.
     pub fn clear(&mut self, out: &mut impl Write) {
-        for s in self.shown.iter_mut() {
-            if let Some(s) = s.take() {
-                let _ = write(out, &kitty::delete(s.id));
-                let _ = out.flush();
-            }
-        }
+        self.screen.clear(out);
+        self.seen.clear();
+        self.settling.clear();
     }
 }
+
+/// Note the tasks' marks: one that changed to a still mark settles in from now (`ms`).
+/// With motion off, none does.
+fn settle(seen: &mut HashMap<String, Mark>, settling: &mut HashMap<String, u128>, rows: &Rows, motion: bool, ms: u128) {
+    if !motion {
+        seen.clear();
+        settling.clear();
+        return;
+    }
+    let mut now = HashMap::new();
+    for row in &rows.rows {
+        if let Row::Task(t) = row {
+            if seen.get(&t.id).is_some_and(|m| *m != t.mark) && !sprite::turns(&t.mark) {
+                settling.insert(t.id.clone(), ms);
+            }
+            now.insert(t.id.clone(), t.mark.clone());
+        }
+    }
+    *seen = now;
+}
+
+/// The placement of an image as wide as the board's images, from the board's row `row`,
+/// `rows` cells high: all of it.
+fn whole(view: &View, c: &Canvas, row: u16, rows: u16) -> kitty::Place {
+    let (crop_w, crop_h) = (c.grid.width(), rows as u32 * c.grid.cell_h);
+    kitty::Place { id: 0, p: 1, col: view.col, row, crop_x: 0, crop_y: 0, crop_w, crop_h, cols: view.cols, rows, z: 0 }
+}
+
 
 /// The font for `path` (the board_font setting), loaded once into `slot`.
 fn fonts<'a>(slot: &'a mut Option<(Option<PathBuf>, Fonts)>, path: Option<&Path>) -> Result<&'a mut Fonts, String> {
@@ -388,9 +384,6 @@ fn fall_back(app: &mut App, why: String) -> bool {
     true
 }
 
-fn write(out: &mut impl Write, s: &str) -> Result<(), String> {
-    out.write_all(s.as_bytes()).map_err(|e| format!("Drawing the list as text: {e}."))
-}
 
 /// The columns of text a detail line holds in images `cols` wide (render::detail_cols).
 pub fn detail_cols(cols: usize, size: TextSize, cell: (u32, u32), font: Option<&Path>) -> Result<usize, String> {
@@ -411,7 +404,7 @@ pub fn render_file(view: &View, size: TextSize, cell: (u32, u32), font: Option<&
     let n = view.rows.rows.len();
     let parts = [
         frame::head(&view.head, view.row - view.row0, &canvas, &mut fonts)?,
-        render(&view.rows, &laid, 0..n, list_h, Marks::default(), &canvas, &mut fonts)?.pixmap,
+        render(&view.rows, &laid, render::Cut::rows(0..n, list_h), &canvas, &mut fonts)?.pixmap,
         match &view.foot {
             Some(foot) => frame::foot(foot, view.foot_n, &canvas, &mut fonts)?,
             None => tiny_skia::Pixmap::new(1, 1).ok_or("can't make the image")?,

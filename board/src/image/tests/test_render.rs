@@ -37,8 +37,8 @@ fn canvas(size: TextSize) -> Canvas {
 fn draw_in(r: &Rows, size: TextSize) -> (Laid, Sheet) {
     let (c, mut fonts) = (canvas(size), Fonts::builtin());
     let laid = lay(r, &c, &fonts);
-    let h = laid.heights.iter().sum();
-    let sheet = render(r, &laid, 0..r.rows.len(), h, Marks::default(), &c, &mut fonts).unwrap();
+    let h: u32 = laid.heights.iter().sum();
+    let sheet = render(r, &laid, Cut::rows(0..r.rows.len(), h), &c, &mut fonts).unwrap();
     (laid, sheet)
 }
 
@@ -110,7 +110,7 @@ fn the_colours_are_the_terminals() {
     let r = rows(vec![Row::Task(TaskRow { risk: Some("high".into()), ..task("BP-1", "todo") })]);
     let c = Canvas::new(GRID, TextSize::Small, theme);
     let laid = lay(&r, &c, &Fonts::builtin());
-    let s = render(&r, &laid, 0..1, 20, Marks::default(), &c, &mut Fonts::builtin()).unwrap();
+    let s = render(&r, &laid, Cut::rows(0..1, 20), &c, &mut Fonts::builtin()).unwrap();
     assert!(has(&row_px(&s, 0), theme.red));
 }
 
@@ -120,7 +120,7 @@ fn the_rows_asked_for_are_drawn_from_the_images_top_in_an_image_the_height_asked
     let r = rows(many);
     let c = canvas(TextSize::Small);
     let laid = lay(&r, &c, &Fonts::builtin());
-    let part = render(&r, &laid, 10..20, 240, Marks::default(), &c, &mut Fonts::builtin()).unwrap();
+    let part = render(&r, &laid, Cut::rows(10..20, 240), &c, &mut Fonts::builtin()).unwrap();
     assert_eq!(part.pixmap.height(), 240);
     assert_eq!(part.places.len(), 10);
     assert_eq!((part.places[0].id.as_deref(), part.places[0].y), (Some("BP-11"), 0));
@@ -163,7 +163,7 @@ fn the_selected_tasks_title_wraps_and_another_is_cut_to_its_row() {
 
 #[test]
 fn the_rows_that_fit_are_whole_rows_and_one_at_least() {
-    let laid = Laid { heights: vec![30, 30, 30, 30], titles: vec![vec![]; 4], idw: 0.0 };
+    let laid = Laid { heights: vec![30, 30, 30, 30], after: vec![0; 4], titles: vec![vec![]; 4], idw: 0.0 };
     assert_eq!(fitting(&laid, 0, 100), 3);
     assert_eq!(fitting(&laid, 2, 100), 4);
     assert_eq!(fitting(&laid, 1, 10), 2); // too tall to fit: cut, but drawn
@@ -178,9 +178,9 @@ fn the_scroll_marks_are_drawn_in_the_last_column() {
         let w = s.pixmap.width();
         (y0..y1).any(|y| (w - 10..w).any(|x| s.pixmap.pixels()[(y * w + x) as usize].alpha() > 0))
     };
-    let none = render(&r, &laid, 0..1, 100, Marks::default(), &c, &mut fonts).unwrap();
+    let none = render(&r, &laid, Cut::rows(0..1, 100), &c, &mut fonts).unwrap();
     assert!(!last_col(&none, (0, 100)));
-    let both = render(&r, &laid, 0..1, 100, Marks { up: true, down: true }, &c, &mut fonts).unwrap();
+    let both = render(&r, &laid, Cut { marks: Marks { up: true, down: true }, ..Cut::rows(0..1, 100) }, &c, &mut fonts).unwrap();
     assert!(last_col(&both, (0, 20)) && last_col(&both, (80, 100)));
 }
 

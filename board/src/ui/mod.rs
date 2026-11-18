@@ -64,12 +64,21 @@ fn frame(app: &App, frames: &[&'static str], ms: u128) -> &'static str {
 
 /// The frame of an animation that began at `started`, each frame held `ms`.
 pub(crate) fn frame_at(started: std::time::Instant, frames: &[&'static str], ms: u128) -> &'static str {
-    frames[(started.elapsed().as_millis() / ms) as usize % frames.len()]
+    frames[frame_index(started.elapsed().as_millis(), frames.len(), ms)]
 }
+
+/// Which of `n` frames, each held `ms`, an animation shows `elapsed` ms after it began
+/// (the image look's marks turn with the text's).
+pub(crate) fn frame_index(elapsed: u128, n: usize, ms: u128) -> usize {
+    (elapsed / ms) as usize % n
+}
+
+/// How long the command spinner holds each frame.
+pub const SPINNER_MS: u128 = 100;
 
 /// A task with a command running (accept, drop, start, resume): a ring with a gap going round.
 fn spinner(app: &App) -> &'static str {
-    frame(app, SPINNER, 100)
+    frame(app, SPINNER, SPINNER_MS)
 }
 
 /// A working task: the six-dot snake, at five frames a second. It says "nothing for you
@@ -230,7 +239,8 @@ pub(crate) fn whole(app: &App, w: usize, now: rows::Now) -> crate::image::View {
     let keys = bottom::keys(app, app.current());
     let foot = bottom::Foot { lines: vec![(2, bottom::FootLine::Keys(keys))] };
     let cols = w.saturating_sub(1) as u16;
-    crate::image::View { rows, detail_cols: app.detail_cols, top: 0, head, foot: Some(foot), col: 0, row0: 0, row: 2, rows_n: 0, foot_n: 3, cols }
+    let base = rows::unselected(app, w, w < NARROW, now);
+    crate::image::View { rows, base, detail_cols: app.detail_cols, top: 0, head, foot: Some(foot), col: 0, row0: 0, row: 2, rows_n: 0, foot_n: 3, cols }
 }
 
 #[cfg(test)]

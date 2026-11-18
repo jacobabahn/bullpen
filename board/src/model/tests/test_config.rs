@@ -49,3 +49,10 @@ fn the_text_size_is_the_settings_and_medium_when_unset_or_unknown() {
     assert_eq!(config(json!({"board_text_size": "large"})).text_size, TextSize::Large);
     assert_eq!(config(json!({"board_text_size": "huge"})).text_size, TextSize::Medium);
 }
+
+#[test]
+fn motion_is_on_unless_the_setting_turns_it_off() {
+    assert!(config(json!({})).motion);
+    assert!(!config(json!({"board_motion": false})).motion);
+    assert!(config(json!({"board_motion": "off"})).motion); // the wrong shape: the default
+}

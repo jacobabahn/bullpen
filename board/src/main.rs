@@ -126,7 +126,9 @@ fn main() {
         if picture.show(&mut app, term.backend_mut()) {
             continue; // the list is text again: draw it now
         }
-        let m = match rx.recv_timeout(app.tick()) {
+        // a mark settling in redraws sooner; a key never waits for it
+        let tick = picture.tick().map_or(app.tick(), |t| t.min(app.tick()));
+        let m = match rx.recv_timeout(tick) {
             Ok(m) => m,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
