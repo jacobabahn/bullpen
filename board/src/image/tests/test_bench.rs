@@ -244,9 +244,10 @@ fn report(case: Case, tallies: &[Tally]) -> String {
 /// drawn ahead, a key's images at a time while none is waiting; a tick draws a frame too). The frames
 /// drawn, the time from the first key to the last key's frame, and how long after the
 /// last key that frame ended.
-fn held(b: &mut Board, keys: usize, gap: Duration) -> (usize, f64, f64) {
+fn held(b: &mut Board, keys: usize, gap: Duration) -> Held {
     b.app.sel = b.app.order().first().map(|t| t.id.clone());
     b.frame();
+    while b.ahead() {}
     let (tx, rx) = mpsc::channel();
     let sender = std::thread::spawn(move || {
         let mut sent = Vec::new();
@@ -257,7 +258,9 @@ fn held(b: &mut Board, keys: usize, gap: Duration) -> (usize, f64, f64) {
         }
         sent
     });
-    let (mut got, mut frames, mut last, mut read) = (0, 0, Instant::now(), Instant::now());
+    let (mut got, mut frames, mut read) = (0, 0, Instant::now());
+    // each key frame's end, and how many keys it had handled by then
+    let mut ends: Vec<(Instant, usize)> = Vec::new();
     while got < keys {
         let tick = b.picture.tick().map_or(b.app.tick(), |t| t.min(b.app.tick()));
         let next = loop {
@@ -290,15 +293,34 @@ fn held(b: &mut Board, keys: usize, gap: Duration) -> (usize, f64, f64) {
         // a key's frame, then the tasks read again and drawn
         b.draw();
         frames += 1;
-        last = Instant::now();
+        ends.push((Instant::now(), got));
         b.frame();
         frames += 1;
         read = Instant::now();
     }
     let sent = sender.join().unwrap();
-    let first = sent[0];
-    let end = *sent.last().unwrap();
-    (frames, (last - first).as_secs_f64() * 1000.0, last.saturating_duration_since(end).as_secs_f64() * 1000.0)
+    // each key: from its sending to the end of the first frame drawn after it was handled
+    let mut waits: Vec<f64> = (0..keys)
+        .map(|k| ends.iter().find(|(_, n)| *n > k).map_or(f64::NAN, |(t, _)| t.duration_since(sent[k]).as_secs_f64() * 1000.0))
+        .collect();
+    let last = ends.last().unwrap().0;
+    Held {
+        frames,
+        total: (last - sent[0]).as_secs_f64() * 1000.0,
+        behind: last.saturating_duration_since(sent[keys - 1]).as_secs_f64() * 1000.0,
+        median: pct(&mut waits, 0.5),
+        most: pct(&mut waits, 1.0),
+    }
+}
+
+/// A held-down j's numbers (ms): the frames drawn, the first key to the last key's
+/// frame, the last key to it, and each key's wait for its frame (median, most).
+struct Held {
+    frames: usize,
+    total: f64,
+    behind: f64,
+    median: f64,
+    most: f64,
 }
 
 #[test]
@@ -331,11 +353,11 @@ fn bench() {
         println!("{}", report(case, &sweep(&mut b)));
     }
     println!("\nA held-down j: 20 keys 30 ms apart\n");
-    println!("| case | frames | first key to last frame ms | last frame after last key ms |");
-    println!("|---|---|---|---|");
+    println!("| case | frames | first key to last frame ms | last frame after last key ms | a key to its frame: median ms | most ms |");
+    println!("|---|---|---|---|---|---|");
     for &case in &cases {
         let mut b = Board::new(&dir, case);
-        let (frames, total, behind) = held(&mut b, 20, Duration::from_millis(30));
-        println!("| {} | {frames} | {total:.1} | {behind:.1} |", case.name());
+        let h = held(&mut b, 20, Duration::from_millis(30));
+        println!("| {} | {} | {:.1} | {:.1} | {:.1} | {:.1} |", case.name(), h.frames, h.total, h.behind, h.median, h.most);
     }
 }
