@@ -128,30 +128,36 @@ impl Board {
         b
     }
 
-    /// Draw a frame as the main loop does, after reading the tasks again: what it wrote.
-    fn frame(&mut self) -> usize {
+    /// Draw a frame as the main loop does: what it wrote.
+    fn draw(&mut self) -> usize {
         let before = self.out.bytes.get();
-        meter::time(|| "reload".into(), || self.app.reload());
-        loop {
-            let again = meter::time(|| "frame".into(), || crate::draw(&mut self.term, &mut self.app, &mut self.picture)).unwrap();
-            if !again {
-                break;
-            }
-        }
+        while meter::time(|| "frame".into(), || crate::draw(&mut self.term, &mut self.app, &mut self.picture)).unwrap() {}
         self.out.bytes.get() - before
     }
 
-    /// A key, as the main loop takes it: handled, then a frame.
-    fn key(&mut self, c: char) -> (Tally, usize) {
+    /// Read the tasks again and draw a frame, as the main loop does after a file changes.
+    fn frame(&mut self) -> usize {
+        meter::time(|| "reload".into(), || self.app.reload());
+        self.draw()
+    }
+
+    /// A key, as the main loop takes it: handled and its frame drawn (the time and bytes
+    /// counted, to the frame's last byte), then the tasks read again and drawn (the time
+    /// noted as "after").
+    fn key(&mut self, c: char) -> Tally {
         meter::start();
         let t = Instant::now();
         meter::time(|| "key".into(), || self.app.handle(Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))));
-        let n = self.frame();
+        let n = self.draw();
+        let ms = t.elapsed().as_secs_f64() * 1000.0;
         let mut tally = meter::take();
-        tally.ms.insert("total".into(), t.elapsed().as_secs_f64() * 1000.0);
-        tally.bytes.insert("total".into(), n);
+        let t = Instant::now();
+        self.frame();
         meter::stop();
-        (tally, n)
+        tally.ms.insert("after".into(), t.elapsed().as_secs_f64() * 1000.0);
+        tally.ms.insert("total".into(), ms);
+        tally.bytes.insert("total".into(), n);
+        tally
     }
 
     /// The tasks and items j moves through.
@@ -173,7 +179,7 @@ fn sweep(b: &mut Board) -> Vec<Tally> {
     let mut out = Vec::new();
     for pass in 0..3 {
         for c in std::iter::repeat_n('j', n).chain(std::iter::repeat_n('k', n)) {
-            let (t, _) = b.key(c);
+            let t = b.key(c);
             if pass > 0 {
                 out.push(t);
             }
@@ -222,8 +228,9 @@ fn report(case: Case, tallies: &[Tally]) -> String {
 
 /// A held-down j: `keys` keys `gap` apart from a thread, as the key reader sends them,
 /// and the board's loop as main.rs runs it (a key's handled with every one waiting, then
-/// a frame; a tick draws a frame too). The frames drawn, the time from the first key to
-/// the last frame, and how long after the last key the last frame ended.
+/// its frame, then the tasks read again and drawn; a tick draws a frame too). The frames
+/// drawn, the time from the first key to the last key's frame, and how long after the
+/// last key that frame ended.
 fn held(b: &mut Board, keys: usize, gap: Duration) -> (usize, f64, f64) {
     b.app.sel = b.app.order().first().map(|t| t.id.clone());
     b.frame();
@@ -237,7 +244,7 @@ fn held(b: &mut Board, keys: usize, gap: Duration) -> (usize, f64, f64) {
         }
         sent
     });
-    let (mut got, mut frames, mut last) = (0, 0, Instant::now());
+    let (mut got, mut frames, mut last, mut read) = (0, 0, Instant::now(), Instant::now());
     while got < keys {
         let tick = b.picture.tick().map_or(b.app.tick(), |t| t.min(b.app.tick()));
         match rx.recv_timeout(tick) {
@@ -249,11 +256,24 @@ fn held(b: &mut Board, keys: usize, gap: Duration) -> (usize, f64, f64) {
                     b.app.handle(m);
                 }
             }
-            Err(_) => {}
+            Err(_) => {
+                // a tick: the main loop reads the tasks once a second
+                if read.elapsed() >= Duration::from_secs(1) {
+                    b.app.reload();
+                    read = Instant::now();
+                }
+                b.draw();
+                frames += 1;
+                continue;
+            }
         }
-        b.frame();
+        // a key's frame, then the tasks read again and drawn
+        b.draw();
         frames += 1;
         last = Instant::now();
+        b.frame();
+        frames += 1;
+        read = Instant::now();
     }
     let sent = sender.join().unwrap();
     let first = sent[0];

@@ -98,10 +98,12 @@ fn main() {
     status("state=idle:app=rust");
     let mut term = term_init();
     // Read the tasks again when their files change, and once a second in case a
-    // change was missed; frames drawn in between only move the animations.
-    let (mut stale, mut read) = (true, Instant::now());
+    // change was missed; frames drawn in between only move the animations. A key's
+    // frame comes first, and the tasks are read after it (what the key changed on disk
+    // is drawn in the next frame, at once): a j or k doesn't wait for every task file.
+    let (mut stale, mut read, mut keyed) = (true, Instant::now(), false);
     'main: loop {
-        if stale || read.elapsed() >= Duration::from_secs(1) {
+        if !keyed && (stale || read.elapsed() >= Duration::from_secs(1)) {
             app.reload();
             (stale, read) = (false, Instant::now());
             // not while the image look asks the terminal: the answers would be the new board's keys
@@ -121,6 +123,9 @@ fn main() {
             Ok(true) => continue, // the list is text again: draw it now
             Ok(false) => {}
         }
+        if std::mem::take(&mut keyed) {
+            continue; // now read the tasks again
+        }
         // a mark settling in redraws sooner; a key never waits for it
         let tick = picture.tick().map_or(app.tick(), |t| t.min(app.tick()));
         let m = match rx.recv_timeout(tick) {
@@ -129,11 +134,13 @@ fn main() {
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
         stale = !matches!(m, Msg::Parked); // a key may have changed a task, and a file event says one did
+        keyed = matches!(m, Msg::Key(_) | Msg::Paste(_));
         if !handle(&mut app, &mut picture, term.backend_mut(), m) {
             break;
         }
         // a burst of file events is one redraw
         while let Ok(m) = rx.try_recv() {
+            keyed |= matches!(m, Msg::Key(_) | Msg::Paste(_));
             if !handle(&mut app, &mut picture, term.backend_mut(), m) {
                 break 'main;
             }
