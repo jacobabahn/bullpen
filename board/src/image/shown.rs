@@ -6,7 +6,7 @@
 //! no longer wanted is taken off, and an image the frame doesn't want is hidden, its
 //! data kept to place again.
 
-use super::kitty;
+use super::{kitty, meter};
 use super::sprite::Sprite;
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -73,7 +73,8 @@ impl Screen {
             if let Some(png) = &w.png {
                 let id = self.next_id;
                 self.next_id = if self.next_id == u32::MAX { self.first } else { self.next_id + 1 };
-                out.write_all(kitty::upload(id, png).as_bytes())?;
+                let up = meter::time(|| "base64".into(), || kitty::upload(id, png));
+                put(out, || format!("upload {:?}", w.slot), &up)?;
                 old.extend(self.shown.insert(w.slot.clone(), Shown { id, key: w.key, places: BTreeMap::new() }));
             }
         }
@@ -83,14 +84,14 @@ impl Screen {
         for (slot, s) in self.shown.iter_mut() {
             if !wants.iter().any(|w| w.slot == *slot) && !s.places.is_empty() {
                 s.places.clear();
-                out.write_all(kitty::hide(s.id).as_bytes())?;
+                put(out, || "hide".into(), &kitty::hide(s.id))?;
             }
         }
         // the new images are up: now the old ones go
         for s in old {
-            out.write_all(kitty::delete(s.id).as_bytes())?;
+            put(out, || "delete".into(), &kitty::delete(s.id))?;
         }
-        out.flush()
+        meter::time(|| "write".into(), || out.flush())
     }
 
     /// Place a wanted image's placements, move those that moved, take off the rest.
@@ -99,14 +100,14 @@ impl Screen {
         for mut at in w.places.iter().copied() {
             at.id = s.id;
             if s.places.get(&at.p) != Some(&at) {
-                out.write_all(kitty::place(&at).as_bytes())?;
+                put(out, || "place".into(), &kitty::place(&at))?;
                 s.places.insert(at.p, at);
             }
         }
         let gone: Vec<u32> = s.places.keys().copied().filter(|p| !w.places.iter().any(|at| at.p == *p)).collect();
         for p in gone {
             s.places.remove(&p);
-            out.write_all(kitty::unplace(s.id, p).as_bytes())?;
+            put(out, || "unplace".into(), &kitty::unplace(s.id, p))?;
         }
         Ok(())
     }
@@ -138,4 +139,10 @@ impl Screen {
             let _ = out.flush();
         }
     }
+}
+
+/// Write a command, noting its bytes as `part` and the time it took as writing.
+fn put(out: &mut impl Write, part: impl FnOnce() -> String, cmd: &str) -> std::io::Result<()> {
+    meter::bytes(part, cmd.len());
+    meter::time(|| "write".into(), || out.write_all(cmd.as_bytes()))
 }

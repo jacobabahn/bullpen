@@ -9,7 +9,7 @@ use super::pieces::{mark_y, rows_in, sprite_mark, Plan};
 use super::render::{render, Canvas, Cut, Marks};
 use super::shown::{Screen, Slot, Want};
 use super::sprite::{self, Sprite, COLS};
-use super::{png, View};
+use super::{meter, png, View};
 use crate::model::TextSize;
 use crate::ui::rows::{Mark, Row};
 use std::collections::BTreeMap;
@@ -49,9 +49,11 @@ pub fn base_shows(f: &Frame) -> u64 {
     key(&Slot::List, f, (&base_rows(f)[p.top..p.base_end], p.base.idw.to_bits(), f.view.rows_n))
 }
 
-/// An image as PNG, or why it couldn't be drawn, as the message says it.
-pub fn encode(drawn: Result<tiny_skia::Pixmap, String>) -> Result<Vec<u8>, String> {
-    Ok(png::encode(&drawn.map_err(|e| format!("Drawing the list as text: {e}."))?))
+/// The slot's image drawn and made a PNG, or why it couldn't be drawn, as the message
+/// says it.
+pub fn encode(slot: &Slot, draw: impl FnOnce() -> Result<tiny_skia::Pixmap, String>) -> Result<Vec<u8>, String> {
+    let drawn = meter::time(|| format!("draw {slot:?}"), draw).map_err(|e| format!("Drawing the list as text: {e}."))?;
+    Ok(meter::time(|| format!("png {slot:?}"), || png::encode(&drawn)))
 }
 
 /// A placement in the list's block: on its cell row `row`, `rows` high, of the image's
@@ -79,7 +81,7 @@ pub fn wants(f: &Frame, screen: &Screen, fonts: &mut Fonts) -> Result<Vec<Want>,
         let rs = if p.whole { &v.rows } else { &v.base };
         let bare = |i: usize| (f.bare)(&rows[i]);
         let cut = Cut { range, y: 0, h: v.rows_n as u32 * ch, marks: Marks::default(), bare: &bare };
-        Some(encode(render(rs, &p.base, cut, c, fonts).map(|s| s.pixmap))?)
+        Some(encode(&Slot::List, || render(rs, &p.base, cut, c, fonts).map(|s| s.pixmap))?)
     };
     let places = p.crops.iter().enumerate().map(|(k, &(from, at, n))| across(f, k as u32 + 1, at, n, from as u32 * ch)).collect();
     wants.push(Want { slot: Slot::List, key: k, png, places });
@@ -94,7 +96,7 @@ pub fn wants(f: &Frame, screen: &Screen, fonts: &mut Fonts) -> Result<Vec<Want>,
         } else {
             let bare = |i: usize| (f.bare)(&v.rows.rows[i]);
             let cut = Cut { range: p.top..p.end, y: first as u32 * ch, h: n as u32 * ch, marks: Marks::default(), bare: &bare };
-            Some(encode(render(&v.rows, &p.laid, cut, c, fonts).map(|s| s.pixmap))?)
+            Some(encode(&slot, || render(&v.rows, &p.laid, cut, c, fonts).map(|s| s.pixmap))?)
         };
         wants.push(Want { slot, key: k, png, places: vec![across(f, 1, first, n, 0)] });
     }
@@ -152,7 +154,7 @@ pub fn wants(f: &Frame, screen: &Screen, fonts: &mut Fonts) -> Result<Vec<Want>,
 fn sprite_want(f: &Frame, slot: Slot, places: Vec<Place>, screen: &Screen, fonts: &mut Fonts) -> Result<Want, String> {
     let k = key(&slot, f, ());
     let png = match (&slot, screen.has(&slot, k)) {
-        (Slot::Sprite(s), false) => Some(encode(sprite::draw(s, f.c, fonts))?),
+        (Slot::Sprite(s), false) => Some(encode(&slot, || sprite::draw(s, f.c, fonts))?),
         _ => None,
     };
     Ok(Want { slot, key: k, png, places })

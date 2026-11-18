@@ -29,6 +29,7 @@ mod font;
 mod frame;
 mod kitty;
 mod list;
+pub(crate) mod meter;
 mod pieces;
 mod png;
 mod render;
@@ -259,7 +260,7 @@ impl Picture {
         let fonts = fonts(&mut self.fonts, font)?;
         let ms = self.ms;
         settle(&mut self.seen, &mut self.settling, &view.rows, motion, ms);
-        let plan = pieces::plan(view, &canvas, fonts);
+        let plan = meter::time(|| "plan".into(), || pieces::plan(view, &canvas, fonts));
         let mut f = list::Frame { view, plan: &plan, c: &canvas, size, bare: &|_| false, began: &|_| 0, ms };
         // the list's image is drawn again: the marks done settling go back in it
         let shows = list::base_shows(&f);
@@ -281,7 +282,7 @@ impl Picture {
         let mut wants = Vec::new();
         let k = list::key(&Slot::Head, &f, (&view.head, head_n));
         if head_n > 0 {
-            let png = (!self.screen.has(&Slot::Head, k)).then(|| list::encode(frame::head(&view.head, head_n, &canvas, fonts))).transpose()?;
+            let png = (!self.screen.has(&Slot::Head, k)).then(|| list::encode(&Slot::Head, || frame::head(&view.head, head_n, &canvas, fonts))).transpose()?;
             wants.push(Want { slot: Slot::Head, key: k, png, places: vec![whole(view, &canvas, view.row0, head_n)] });
         }
         let mut list = list::wants(&f, &self.screen, fonts)?;
@@ -289,7 +290,7 @@ impl Picture {
         wants.extend(list);
         if let Some(foot) = view.foot.as_ref().filter(|_| foot_n > 0) {
             let k = list::key(&Slot::Foot, &f, (foot, foot_n));
-            let png = (!self.screen.has(&Slot::Foot, k)).then(|| list::encode(frame::foot(foot, foot_n, &canvas, fonts))).transpose()?;
+            let png = (!self.screen.has(&Slot::Foot, k)).then(|| list::encode(&Slot::Foot, || frame::foot(foot, foot_n, &canvas, fonts))).transpose()?;
             wants.push(Want { slot: Slot::Foot, key: k, png, places: vec![whole(view, &canvas, view.row + view.rows_n, foot_n)] });
         }
         wants.extend(sprites);
@@ -408,3 +409,7 @@ pub fn render_file(view: &View, size: TextSize, cell: (u32, u32), theme: Theme, 
 #[cfg(test)]
 #[path = "tests/test_image.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/test_bench.rs"]
+mod bench;

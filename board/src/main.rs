@@ -116,15 +116,10 @@ fn main() {
                 app.msg = Note::failed(format!("Couldn't reload the rebuilt board: {err}"));
             }
         }
-        app.settle();
-        app.peek();
-        app.image = picture.drawing(&app);
-        if term.draw(|f| ui::draw(f, &mut app)).is_err() {
-            break;
-        }
-        // the images after the frame, through the same output, never in the middle of one
-        if picture.show(&mut app, term.backend_mut()) {
-            continue; // the list is text again: draw it now
+        match draw(&mut term, &mut app, &mut picture) {
+            Err(_) => break,
+            Ok(true) => continue, // the list is text again: draw it now
+            Ok(false) => {}
         }
         // a mark settling in redraws sooner; a key never waits for it
         let tick = picture.tick().map_or(app.tick(), |t| t.min(app.tick()));
@@ -157,6 +152,20 @@ fn main() {
     picture.clear(term.backend_mut());
     term_restore();
     status("state=clear");
+}
+
+/// Draw a frame: the board, then its images after it, through the same output, never in
+/// the middle of one. True when it's to be drawn again at once (the list is text again).
+fn draw<B: ratatui::backend::Backend + Write>(
+    term: &mut ratatui::Terminal<B>,
+    app: &mut App,
+    picture: &mut image::Picture,
+) -> std::io::Result<bool> {
+    app.settle();
+    app.peek();
+    app.image = picture.drawing(app);
+    term.draw(|f| ui::draw(f, app))?;
+    Ok(picture.show(app, term.backend_mut()))
 }
 
 /// One message: the image look's own (the terminal's answers), else the board's.

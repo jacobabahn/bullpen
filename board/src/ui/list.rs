@@ -6,7 +6,7 @@ use super::later::{draw_item, draw_item_detail, draw_later_line};
 use super::rows::{self, DetailRow, Flag, Mark, Now, Row, Rows, TaskRow};
 use super::{bold, dim, mark_style, put, rev, review_mark, risk_style, span, spinner, working_mark, Sizes, AMBER, TINT};
 use crate::model::{self, fit, pad, width, Layout, Task};
-use crate::image::View;
+use crate::image::{meter, View};
 use crate::App;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -19,7 +19,7 @@ pub(super) fn draw_list(buf: &mut Buffer, area: Rect, app: &mut App, s: &Sizes, 
     let w = s.w;
     let groups = app.groups();
     let head = head(app, &groups, w);
-    let Rows { rows, idw } = rows::build(app, w, s.narrow, now);
+    let Rows { rows, idw } = meter::time(|| "rows".into(), || rows::build(app, w, s.narrow, now));
     if app.image {
         // the image look draws the header, the rows and the scroll marks, in images over
         // these blank cells, and scrolls the list by its rows' own heights, from the row
@@ -29,7 +29,7 @@ pub(super) fn draw_list(buf: &mut Buffer, area: Rect, app: &mut App, s: &Sizes, 
         let foot_n = s.h.saturating_sub(2 + s.avail) as u16;
         let cols = w.saturating_sub(1) as u16;
         let rows = Rows { rows, idw };
-        let base = rows::unselected(app, w, s.narrow, now);
+        let base = meter::time(|| "rows".into(), || rows::unselected(app, w, s.narrow, now));
         app.view = Some(View { rows, base, top: app.top, head, foot: None, col: area.x, row0: area.y, row, rows_n, foot_n, cols });
         return;
     }
