@@ -6,9 +6,14 @@
 //! Pushes take a lock and push the branch as it is then, so two accepts in a row can't
 //! race: the later push carries both. A failed push leaves the accept standing, with
 //! one news line. `up` catches up a push it missed, and doctor checks the remote.
+//!
+//! `_push --task T` (an accept's push) then closes T's issue, if it was made from one
+//! (issues/write.rs's `close_fixed`): pushed or not, once the push is over. A push job
+//! that dies before that says so, with the `gh issue close` command (`close_after_push`).
 
 use crate::args::{pos, value, Arg, Args, Nargs, SUPPRESS};
-use crate::modes::{close_issue, push_base, push_remote, quiet_git};
+use crate::issues::write::close_fixed;
+use crate::modes::{push_base, push_remote, quiet_git};
 use crate::news::kind::Kind;
 use crate::news::{news, Opts};
 use bullpen_core::json::Obj;
@@ -32,7 +37,7 @@ pub fn cmd_push(argv: &[String]) -> Res<i32> {
         .and_then(|t| repo.task(t).ok());
     let Some(remote) = push_remote(&repo)? else {
         if let Some(t) = &task {
-            close_issue(&repo, t, false)?;
+            close_fixed(&repo, t, false)?;
         }
         return Ok(0);
     };
@@ -47,7 +52,7 @@ pub fn cmd_push(argv: &[String]) -> Res<i32> {
         quiet_git(&repo, &["push", "-q", &remote, &refspec], 60)?
     };
     if let Some(t) = &task {
-        close_issue(&repo, t, p.ok())?; // an accepted issue's task: after the push, pushed or not
+        close_fixed(&repo, t, p.ok())?; // an accepted issue's task: after the push, pushed or not
     }
     if p.ok() {
         return Ok(0);

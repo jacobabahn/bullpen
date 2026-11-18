@@ -294,7 +294,9 @@ Unless it is `off`, an accepted issue's task closes the issue:
 - **[local mode](local-mode.md)**: after the merge, once the push to the push remote is
   over (`_push`, in the background), bullpen closes the issue with a comment naming the
   commit: "Fixed in 4f2a1c0". With no push remote, or when the push failed, the comment
-  is "Fixed in BP-3 (not pushed yet)".
+  is "Fixed in BP-3 (not pushed yet)". If the push job itself dies before the close
+  (killed, say), its failure line names the issue and the `gh issue close` command
+  that closes it: nothing tries the close again.
 
 A task closed or dropped without merging (`close`, `close --keep-branch`, `drop`) leaves
 its issue open and takes `bullpen: started` off it. `bullpen revert` of an accepted

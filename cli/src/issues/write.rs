@@ -3,7 +3,8 @@
 //! task starts and `bullpen: declined` on it when the person says no; `comments` adds a
 //! comment at each; `off` writes nothing. Unless off, an accepted issue's task closes it:
 //! `Closes #N` at the end of its PR (remote mode, `closes_line`), or after the push to the
-//! push remote (local mode, `close_fixed`, which `_push` calls). A task closed or dropped
+//! push remote (local mode, `close_fixed`, which `_push` calls; `close_after_push` is
+//! what a push job that dies first says). A task closed or dropped
 //! unmerged takes `bullpen: started` off again (`unstarted`, which the one close step
 //! calls). A task made from an issue records the issue's number and repository (`issue`),
 //! and its writes go there.
@@ -325,15 +326,28 @@ pub fn close_fixed(repo: &Repo, t: &Obj, pushed: bool) -> Res<()> {
         .clone()
         .and_then(|slug| gh_write(repo, &slug, &["issue", "close", &num, "--comment", &comment]));
     if let Err(why) = res {
-        let by_hand = match slug {
-            Ok(slug) => format!(" (`gh issue close {n} -R {slug}` closes it)"),
-            Err(_) => String::new(),
-        };
+        let by_hand = by_hand(n, &slug)
+            .map(|c| format!(" ({c} closes it)"))
+            .unwrap_or_default();
         let line =
             format!("{id} was accepted, but #{n} wasn't closed on GitHub: {why}. The accept still counts: tell the person{by_hand}");
         told(repo, t, false, &line)?;
     }
     Ok(())
+}
+
+/// The command that closes the issue by hand, when its repository is known.
+fn by_hand(n: i64, slug: &Result<String, String>) -> Option<String> {
+    slug.as_ref().ok().map(|slug| format!("`gh issue close {n} -R {slug}`"))
+}
+
+/// Local mode: what an accept's push job (`_push --task`) does after the push, for its
+/// failure line, if it dies before it: ", then closing #12 on GitHub (if #12 is still
+/// open, `gh issue close 12 -R me/proj` closes it)". None when it closes nothing.
+pub fn close_after_push(repo: &Repo, t: &Obj) -> Option<String> {
+    let (n, slug) = issue_of(t).filter(|_| writes(repo))?;
+    let by_hand = by_hand(n, &slug).map(|c| format!(" (if #{n} is still open, {c} closes it)"));
+    Some(format!(", then closing #{n} on GitHub{}", by_hand.unwrap_or_default()))
 }
 
 /// `revert` of an accepted issue task: its issue stays closed (bullpen doesn't reopen

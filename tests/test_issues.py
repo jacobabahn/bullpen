@@ -934,6 +934,14 @@ class IssuesWriteLocalTest(IssuesWriteBase):
         self.assertIn("bullpen · BP-1 was accepted, but #12 wasn't closed on GitHub: HTTP 502: Bad Gateway. The accept "
                       "still counts: tell the person (`gh issue close 12 -R me/proj` closes it)", self.news_log())
 
+    def test_a_push_job_that_dies_before_the_close_says_how_to_close_it(self):
+        self.state_file("push.lock").mkdir(parents=True)  # _push fails at once, before the push and the close
+        self.accept()
+        self.assertNotIn("close", [c[1] for c in self.writes()])
+        self.assertRegex(self.news_log(), r"bullpen · Pushing main to backup, then closing #12 on GitHub \(if #12 is "
+                         r"still open, `gh issue close 12 -R me/proj` closes it\) failed: bullpen: can't take the push lock .*"
+                         r" \(exit 1\)\. Log: .*jobs\.log\. Tell the person if it isn't yours to settle")
+
     def test_off_closes_nothing(self):
         self.bp("config", "--issues-write", "off")
         self.accept()
