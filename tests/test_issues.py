@@ -864,28 +864,30 @@ class IssuesWriteTest(IssuesWriteBase):
 
     def test_no_other_code_writes_to_an_issue(self):
         """Every write goes through issues/write.rs's gh_write: no other source names a
-        write to an issue or a label, or, in a file that runs `gh api`, a flag that makes
+        write to an issue or a label, or, in a file that names `gh api`, a flag that makes
         the call change something."""
         src = Path(__file__).resolve().parent.parent
         write = re.compile(r'"(issue|label)"(\.into\(\)|\.to_string\(\))?\s*,\s*"(edit|comment|close|reopen|create|'
                            r'delete|lock|unlock|transfer|pin|unpin|develop)"|"--(add|remove)-label"')
-        # only where gh api runs: `git commit -F -` or `git merge -X ours` elsewhere is no write
+        # only in a file that names gh api (whichever way it runs gh: repo.gh(), gh_quiet, gh_out):
+        # `git commit -F -` or `git merge -X ours` elsewhere is no write
         api = re.compile(r'"api"')
         api_write = re.compile(r'"(-X|--method|-f|-F|--field|--raw-field|--input)"')
 
         def writes(text):
-            runs_api = ".gh()" in text and api.search(text)
-            return write.search(text) or (runs_api and api_write.search(text))
+            return write.search(text) or (api.search(text) and api_write.search(text))
 
         found = [str(f.relative_to(src)) for root in ("cli/src", "core/src") for f in (src / root).rglob("*.rs")
                  if "tests" not in f.parts and f.name != "write.rs" and writes(f.read_text())]
         self.assertEqual(found, [], "bullpen writes to GitHub issues in one place, issues/write.rs's gh_write (which "
                          "checks issues_write and logs a failure as news). These files name an issue or label write "
-                         "(`issue edit`, `label create`, --add-label ...), or run `gh api` with a flag that changes "
+                         "(`issue edit`, `label create`, --add-label ...), or name `gh api` and a flag that changes "
                          "something (-X, --method, -f, -F, --field, --raw-field, --input): move the write into "
                          "write.rs")
         self.assertTrue(write.search((src / "cli/src/issues/write.rs").read_text()))
         self.assertTrue(writes('let argv = [repo.gh(), "api".into(), "-X".into(), "PATCH".into()];'))
+        self.assertTrue(writes('gh_quiet(repo, &["api", "-X", "PATCH", "repos/o/r/issues/1"], 60)'))
+        self.assertTrue(writes('super::repo::gh_out(repo, &["api".into(), "--method".into(), "POST".into()], "x")'))
         self.assertFalse(writes('git(&repo.root, &["merge", "-X", "ours"]); run(&["commit", "-F", "-"]);'))
 
 
