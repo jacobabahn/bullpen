@@ -210,9 +210,16 @@ status or age on screen, the message), so a change to the list doesn't send the 
 line again. The list is drawn with nothing selected, and the selected task's block
 (its card, its whole title and all its lines) is a small image of its own over the
 cells it takes: the rows under it move down by whole cells to make room, by placing
-the list's image again lower, not sending it. So `j` and `k` send that small image
-and a few placements, a fraction of the list; the list is sent again only when what
-it shows changes or it scrolls. The marks that move and the scroll marks are small
+the list's image again lower, not sending it. The list's image is the whole list
+(two pages of it at a time, when it's longer than three), so scrolling a row places
+it again higher and sends nothing. While the board waits for a key it draws what `j`
+and `k` would show next (the block a task down and up, and the key row for it) and
+sends it without showing it; an image a key replaces is kept on the terminal, hidden,
+a while (the last 16). So `j` and `k` send only a few placements, a few hundred
+bytes, and draw nothing; the list is sent again only when what it shows changes or it
+scrolls a page on. The board draws a key's frame before it reads the tasks again
+(then reads them, and draws what changed), so a key doesn't wait for the task files.
+Everything is deleted when the board is text again or quits. The marks that move and the scroll marks are small
 images too, sent once: a tick only places another frame of a mark (a few dozen bytes
 a mark), never the list. The kitty protocol's own animation (the terminal turning the
 frames itself) would send nothing at all, but Rex's support for it isn't reliable

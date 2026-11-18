@@ -4,13 +4,15 @@
 //! lines) is an image of its own over the cells it takes. The base image is placed
 //! twice, as crops: the cells above the selected block, and the cells under it, moved
 //! down by the whole cells the block grew by (the rows under it start that many cells
-//! lower; the space left over is under the block). So the base image is sent only when
-//! what it shows changes or the list scrolls, and a j or k sends the selected block's
-//! image and moves the two crops.
+//! lower; the space left over is under the block). The base image is a window of the
+//! whole list (all of it under three pages, else two pages at a page's steps), so
+//! scrolling moves the crops too. So the base image is sent only when what it shows
+//! changes or the list scrolls a page on, and a j or k sends the selected block's image
+//! (or places one sent before) and moves the two crops. Every piece draws its rows
+//! where they are in the whole list (render's `Cut::at`), so they match it to the bit.
 //!
-//! The list shows only whole rows: when the block pushes rows under it past the list's
-//! end, the cell where the last whole row ends is an image of its own too (the tail),
-//! and the cells after it are empty. Everything here is worked out from the rows laid
+//! The list shows only whole rows: the crops end at the cell where the last whole row
+//! ends, that cell is an image of its own (the tail), and the cells after it are empty. Everything here is worked out from the rows laid
 //! out (render.rs) and a cell's height; nothing touches the terminal.
 
 use super::render::{card_below, fitting, lay, mark_at, Canvas, Laid, Marks};

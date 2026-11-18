@@ -12,7 +12,9 @@
 //! tick sends a few placements. Each image is drawn at the terminal's cell size and sent
 //! only when what it shows changes (list.rs, shown.rs). A client with other cell sizes
 //! scales them rather than overflowing. A new image is placed before the old one is
-//! deleted, so an update doesn't flicker; the images are deleted when the board is text
+//! taken off, so an update doesn't flicker; the old one is kept a while, hidden, and
+//! while the board waits for a key it sends what a j or k would want next (ahead.rs),
+//! so those keys only place images. The images are deleted when the board is text
 //! again and when it quits. With motion on (`board_motion`), a task whose mark changes
 //! to a still one has it settle in; the board redraws every 40 ms meanwhile (`tick`).
 //!

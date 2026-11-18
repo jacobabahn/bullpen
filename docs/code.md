@@ -89,23 +89,46 @@ rows out (`render.rs`: each row's height from the text size, the selected title
 wrapped), scrolls them by those heights (`list::scroll_by`, which the text list's
 `scroll` is with every row 1 high; it sets `app.top` and `app.page`), and draws the
 top line and the bottom rows (`frame.rs`) and the list, all with no terminal. The list
-is pieces (`pieces.rs`): the rows that fit drawn with nothing selected (the `View`
-has them too, `rows::unselected`), placed as two crops above and under the selected
-block, which is an image of its own; the block grows by whole cells, so the rows under
-it are the same image placed lower, and a j or k sends only the block. The marks that
+is pieces (`pieces.rs`): a window of the rows drawn with nothing selected (the `View`
+has them too, `rows::unselected`; the whole list under three pages, else two at a
+page's steps), placed as two crops above and under the selected block, which is an
+image of its own; the block grows by whole cells, so the rows under it are the same
+image placed lower, and scrolling moves the crops. Every piece draws its rows where
+they are in the whole list (`render::Cut::at`), so the pieces match the list drawn
+whole to the bit. The marks that
 move and the scroll marks are small images sent once (`sprite.rs`): a mark on screen
 is a placement of its strip of frames, and a tick changes which frame it crops; the
 list's images leave those marks out. `list.rs` says which images a frame wants, each
 with a key for what it shows and its placements, and `shown.rs` sends, places, moves
-and hides only what changed, with the kitty graphics protocol (`kitty.rs`). While the
-board is an image, a task's detail is one row holding its whole text and the most
-lines it gets (`rows::detail_lines`), and `render.rs` wraps it by pixels, as its type
-measures; the text list's are wrapped to its columns, a row a line. Asking the terminal (`term.rs`) needs its input, so the board asks only when
+and hides only what changed, with the kitty graphics protocol (`kitty.rs`); an
+image a frame replaces is kept on the terminal, hidden, to be placed again (bounded
+by count and pixels). While no key is waiting, `ahead.rs` presses j and k on the board,
+draws that frame off screen, puts back what the key changed, and sends the images it
+would want unplaced, so a j or k only places images; the main loop also draws a key's
+frame before it reads the tasks again. While the board is an image, a task's detail is
+one row holding its whole text and the most lines it gets (`rows::detail_lines`), and
+`render.rs` wraps it by pixels, as its type measures; the text list's are wrapped to
+its columns, a row a line. Asking the terminal (`term.rs`) needs its input, so the board asks only when
 the image look starts or comes back and on a resize, never on a timer: the key reader
 (`main.rs`) stops at the board's wish (a `Gate`), marks itself parked before it tells
 the board, and reads the answers itself, up to the terminal's last; the gate opens to
 keys again when the reader's `Open` drops, on every way out. What's typed or asked at
 the bottom, overlays and mission control stay text.
+
+How fast a j or k is, without a terminal: `bin/bullpen-cargo test -p bullpen-board
+--release bench -- --ignored --nocapture --test-threads 1` (image/tests/test_bench.rs)
+drives the board's own code over a fixed board on disk (every status, long titles, the
+Later group, 200 closed tasks), at 48 and 80 columns by 45 rows, 16×34 and 32×68 pixel
+cells, each text size, motion on and off, and the text look beside them. For one key
+it prints the time from the key to its frame's last byte and where it goes (building
+rows, laying out, drawing and PNG-encoding each image, base64, writing; `image/meter.rs`
+notes them, in tests only), the bytes sent by image, how many keys sent the list
+again, and what drawing ahead took after it; then a held-down j (20 keys 30 ms apart):
+the frames, how far the last frame lands after the last key, and each key's wait.
+`BENCH_ONLY="80×45 32px,text"` runs some cases. Sizes come from the renderer, so it
+stays right when the look changes; run it before and after a change to the look's
+drawing to see it didn't undo these numbers. It can't see the terminal's own decoding
+and drawing, or the network.
 
 ## Closing a task
 
