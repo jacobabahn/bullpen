@@ -27,10 +27,15 @@ every CPU, and give way when anything else wants one.
 
 There's a module per area (`tests/test_tour.py`, `tests/test_news.py`, ...); what they
 share is in `tests/support.py`. Every test built on it is also held to one rule about
-news: each line bullpen logged during the test has to say what the coordinator does
-(a command, or who to tell) or match a row of the table in the coordinator's guide
-(`check_news`, with the rows in `NEWS_ROWS`; see [News](news.md)). A new news line
-that does neither fails the test that sent it: give it its instruction, or a row. Run the tests for what you're changing while you work,
+news (`check_news`; see [News](news.md)): each line bullpen logged during the test
+has to be of a kind the table of kinds has (`cli/src/news/kind.rs`), and a kind with no
+row of the coordinator guide's news table has to say what the coordinator does itself
+(a command, who to tell, or "nothing to do"). The check reads the logs through
+`bullpen _news_log` and looks each line's row up by its event in `bullpen _news_kinds`,
+so a line's wording can change without a test's pattern changing; only a line that
+carries its own instruction is held to its wording, and only to that instruction. A
+line of a kind that does neither fails the test that sent it: give it its instruction,
+or its kind a row. Run the tests for what you're changing while you work,
 and the full suite once, right before `ready`: `python3 tests/run.py` plus
 `bin/bullpen-cargo test --workspace` (plain `cargo` isn't on an agent's PATH; see
 docs/rebuilds.md). Reviewers run only the tests that check a claim, never a whole suite.

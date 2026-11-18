@@ -88,8 +88,10 @@ asks (`pickup-ask`), the queue's "couldn't start" (`queue-failed`), an `After`
 line with a task not rebased, whose push failed or that a message didn't reach
 (`not-rebased`), and auto-accept's "approved by review and auto-accepted" and
 "closed by auto-accept" lines, which the coordinator reports (`auto-accepted`,
-`auto-closed`). Two kinds still wake though their row needs nothing: `working
-again` lines, and auto-accept's "sent back to its worker to rebase". The line for
+`auto-closed`). Three kinds still wake though their row needs nothing: `working
+again` lines, auto-accept's "sent back to its worker to rebase", and PR feedback
+"sent back to its worker" (`pr-feedback`, whose lines that couldn't be sent say what
+to do). The line for
 new [GitHub issues](issues.md#on-a-timer) wakes: each of them asks you.
 
 ## The waiter (`config --news wake`)
@@ -225,10 +227,25 @@ The guide doesn't list news lines. It has one rule and a short table: a line say
 what happened and, when there is something for the coordinator to do, what (a command
 to run, or who to tell); a line that says nothing of the kind matches a row of the
 table (`For the coordinator:`, a task that needs you, your answer, ready or finished,
-the lines that need nothing, two tasks that changed the same file). So a new news line
-has to carry its own instruction or fit a row. The tests hold every line they send to
-that: `tests/support.py` (`check_news`) fails a test whose news does neither, and
-`tests/test_guide.py` checks that the table's rows are the ones the tests use.
+the lines that need nothing, two tasks that changed the same file). Each kind of line
+says which (`Kind::row` in `cli/src/news/kind.rs`): its row of the table, or that its
+lines say what to do themselves (`Row::Own`, which also says whether they ask anything
+of the coordinator; `asks: false` when what they name is for later or for the person,
+or they say there's nothing to do). The table's rows are worded there too
+(`Row::cell`), and `tests/test_guide.py` holds the guide's table to them, row for row,
+with one example line for each.
+
+So a new kind of line needs a row or its own instruction. The tests hold every line
+they send to that: `tests/support.py` (`check_news`) reads each test's logs through
+`bullpen _news_log` and looks the line's row up by its event in `bullpen
+_news_kinds`, so a line can't claim a row its kind doesn't have, and its wording can
+change freely. Only a line whose kind has no row is held to its wording, and only to
+its instruction: a `bullpen` or `rex` command, someone to tell or ask, or "nothing to
+do". A line of a kind the table doesn't have fails too.
+
+news.log is read back in one place, `cli/src/news/record.rs` (`Record`): the backstop,
+`bullpen news`, `news --recent`, ready news's "said word for word before" and
+`_news_log` all go through it.
 
 ## A changed guide
 
