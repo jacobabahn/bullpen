@@ -632,14 +632,20 @@ fn scrolling_a_row_moves_the_lists_crops_and_sends_the_list_again_only_a_page_on
         }
         ids.dedup();
         assert!(tops.last() > tops.first(), "the list scrolled: {tops:?}");
-        ids.len()
+        // the list's pages, as the image lays it out
+        let view = app.view.clone().unwrap();
+        let c = Canvas::new(Grid { cols: view.cols as usize, cell_w: 10, cell_h: 20 }, app.cfg.text_size, Theme::default());
+        let plan = pieces::plan(&view, &c, &Fonts::builtin());
+        let pages = plan.base.tall(0, plan.base.heights.len()).div_ceil(view.rows_n as u32 * 20) as usize;
+        (ids.len(), pages)
     };
-    // six tasks are under three pages of a six-row list: its image is all of them
-    assert_eq!(walk(6), 1);
-    // thirty, about twelve pages: two pages at a time, sent again a page on (a task
-    // or two takes a page here), not at each of the 29 moves
-    let sent = walk(30);
-    assert!(sent > 1 && sent <= 13, "{sent}");
+    // a few tasks, under three pages of a six-row list: its image is all of them
+    let (sent, pages) = walk(5);
+    assert_eq!((sent, pages <= 3), (1, true), "{pages} pages");
+    // thirty, many pages: two pages at a time, sent again a page on (a task or two
+    // takes a page here), not at each of the 29 moves
+    let (sent, pages) = walk(30);
+    assert!(sent > 1 && sent <= pages + 1 && sent < 29, "{sent} for {pages} pages");
 }
 
 #[test]

@@ -71,3 +71,7 @@ fn moved(app: &mut App, key: char, area: Rect) -> Option<View> {
     (app.sel, app.msg, app.view, app.height) = saved;
     view
 }
+
+#[cfg(test)]
+#[path = "tests/test_ahead.rs"]
+mod tests;
