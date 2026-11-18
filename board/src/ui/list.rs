@@ -30,8 +30,7 @@ pub(super) fn draw_list(buf: &mut Buffer, area: Rect, app: &mut App, s: &Sizes, 
         let cols = w.saturating_sub(1) as u16;
         let rows = Rows { rows, idw };
         let base = rows::unselected(app, w, s.narrow, now);
-        let detail_cols = app.detail_cols;
-        app.view = Some(View { rows, base, detail_cols, top: app.top, head, foot: None, col: area.x, row0: area.y, row, rows_n, foot_n, cols });
+        app.view = Some(View { rows, base, top: app.top, head, foot: None, col: area.x, row0: area.y, row, rows_n, foot_n, cols });
         return;
     }
     draw_head(buf, area, &head, w);
@@ -99,7 +98,7 @@ fn draw_row(buf: &mut Buffer, area: Rect, app: &App, s: &Sizes, y: usize, row: &
         Row::Empty { text, first } => put(buf, area, y, 1, span(fit(text, w.saturating_sub(2)), if *first { bold() } else { dim() })),
         Row::Later { text, amber } => draw_later_line(buf, area, y, app, text, *amber, w),
         Row::Item(i) => draw_item(buf, area, y, app, i, idw, w),
-        Row::ItemDetail(text) => draw_item_detail(buf, area, y, text, detail_w),
+        Row::ItemDetail(text, _) => draw_item_detail(buf, area, y, text, detail_w),
     }
 }
 

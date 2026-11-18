@@ -146,32 +146,34 @@ board as images instead of text: real type, the marks drawn as shapes (rings, a
 check, a diamond) in the status colours, the selected task on a card (a faint fill
 with a faint edge, its mark inside it, clear of its type on every side) with its ID
 in the foreground and its whole title (wrapped to three lines at most; another task's
-is cut to its line). A task that needs you, or whose agent stopped, stands out: it
-sits on a faint wash of amber (or red) over the same rectangle as the card, with a
-bar of that colour at its left, round at its ends; selected, the card replaces the
-wash and the bar stays. A ready task's risk is a chip: the word, small and semibold,
-in its colour on a round pill of that colour, faint. The title is the loudest thing
-on a row: a task's ID (dim, on the title's baseline) and age, and the groups' names
-(a little dim), are a detail line's size. The list says
-everything the text list does, row for row: each task's ID, title, mark, risk, age
-and lines, the groups and the Later group. The marks move as the text board's do, at
-the same pace: a working task's is a faint ring with a short arc going round it, a
-task in review's a blue ring with a filled half that turns, and a running command's
-(or a tour being written) half a ring turning faster. When a task's status changes,
-its new mark settles in: it grows a little past its size and back, in 160 ms.
-`bullpen config --board-motion off` stills them all (the working, review and running
-marks stand as their first frame), and the board then sends nothing while nothing
-changes. The top line and the bottom rows are drawn too, in the list's type and
-colours, each set off from the list by a faint rule: the repository's name, then its
-counts at the right as chips like the risk's ("3 need you", or only their numbers when
-the words don't fit beside the name); the message, and the keys each in a small
-rounded cap with what it does dim after it, dropping from the end on a narrow board
-as the text's do (`?` is never dropped). The scroll marks are small chevrons at the
-list's right edge. What you type into stays text:
-while a tell, a y/n question (an accept's, a drop's, `q`'s) or the stale tour's
-question is open, the bottom rows are text, cursor and all, and are drawn again
-after. `?`, peeks, answers and mission control stay text, and so does the compact
-layout (`l`): with it the board is text whatever the look.
+is cut to its line, but on a board under 44 columns one that's yours and waits on
+you, needing you, stopped or ready, gets two lines, at medium and large). A detail
+line wraps where the type runs out of room, measured in pixels. A task that needs
+you, or whose agent stopped, stands out: it sits on a faint wash of amber (or red)
+over the same rectangle as the card, with a bar of that colour at its left, round at
+its ends; selected, the card replaces the wash and the bar stays. A ready task's risk
+is a chip: the word, small and semibold, in its colour on a round pill of that
+colour, faint. The title is the loudest thing on a row: a task's ID (dim, on the
+title's baseline) and age, and the groups' names (a little dim), are a detail line's
+size. The list says everything the text list does, row for row: each task's ID,
+title, mark, risk, age and lines, the groups and the Later group. The marks move as
+the text board's do, at the same pace: a working task's is a faint ring with a short
+arc going round it, a task in review's a blue ring with a filled half that turns, and
+a running command's (or a tour being written) half a ring turning faster. When a
+task's status changes, its new mark settles in: it grows a little past its size and
+back, in 160 ms. `bullpen config --board-motion off` stills them all (the working,
+review and running marks stand as their first frame), and the board then sends
+nothing while nothing changes. The top line and the bottom rows are drawn too, in the
+list's type and colours, each set off from the list by a faint rule: the repository's
+name, then its counts at the right as chips like the risk's ("3 need you", or only
+their numbers when the words don't fit beside the name); the message, and the keys
+each in a small rounded cap with what it does dim after it, dropping from the end on
+a narrow board as the text's do (`?` is never dropped). The scroll marks are small
+chevrons at the list's right edge. What you type into stays text: while a tell, a y/n
+question (an accept's, a drop's, `q`'s) or the stale tour's question is open, the
+bottom rows are text, cursor and all, and are drawn again after. `?`, peeks, answers
+and mission control stay text, and so does the compact layout (`l`): with it the
+board is text whatever the look.
 
 `bullpen config --board-text-size` sets the type: `medium` (the default) is the
 terminal's own text size, with a detail line smaller and dim under each title, a

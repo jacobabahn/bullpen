@@ -66,8 +66,6 @@ pub struct View {
     /// the same rows with nothing selected (ui/rows.rs's `unselected`): the list's image
     /// is these, the selected block an image over them (pieces.rs)
     pub base: Rows,
-    /// the columns the rows' detail lines were wrapped to (`app.detail_cols`)
-    pub detail_cols: Option<usize>,
     pub top: usize,
     pub head: Head,
     /// None while the bottom rows are text (something typed or asked there)
@@ -82,12 +80,10 @@ pub struct View {
     pub cols: u16,
 }
 
-/// What drawing a frame came to.
-enum Drawn {
-    /// the images are up: the list's first row, and the tasks a page has
-    At { top: usize, page: usize },
-    /// nothing drawn: the rows are to be wrapped to these columns first
-    Rewrap(usize),
+/// What drawing a frame came to: the list's first row, and the tasks a page has.
+struct Drawn {
+    top: usize,
+    page: usize,
 }
 
 /// Whether the terminal draws images, as far as the board knows.
@@ -162,8 +158,7 @@ impl Picture {
 
     /// After a frame: ask the terminal what the image look needs, then send, place,
     /// move or delete the images as the frame's view says. Returns true when the board
-    /// should draw again at once (the list went back to text, or its rows are to be
-    /// wrapped again).
+    /// should draw again at once (the list went back to text).
     pub fn show(&mut self, app: &mut App, out: &mut impl Write) -> bool {
         // the time first: `tick` reads it whether or not the images are drawn
         self.ms = self.clock.unwrap_or_else(|| app.started.elapsed().as_millis());
@@ -191,13 +186,9 @@ impl Picture {
             return false;
         };
         match self.draw(&view, app.cfg.text_size, app.cfg.font.as_deref(), app.cfg.motion, out) {
-            Ok(Drawn::At { top, page }) => {
+            Ok(Drawn { top, page }) => {
                 (app.top, app.page) = (top, page);
                 false
-            }
-            Ok(Drawn::Rewrap(cols)) => {
-                app.detail_cols = Some(cols);
-                true
             }
             Err(why) => {
                 self.clear(out);
@@ -261,17 +252,11 @@ impl Picture {
     /// Send each image if what it shows changed, and place it. The list scrolls from the
     /// row shown first last frame, by its rows' heights, to keep the selection in view:
     /// returns the row it starts at and the tasks a page has (`app.top`, `app.page`).
-    /// Rows wrapped to other columns than the image's detail lines hold aren't drawn: the
-    /// board wraps them again first.
     fn draw(&mut self, view: &View, size: TextSize, font: Option<&Path>, motion: bool, out: &mut impl Write) -> Result<Drawn, String> {
         let (cell_w, cell_h) =
             self.cell().ok_or("Drawing the list as text: the terminal doesn't say its cell size in pixels.")?;
         let canvas = Canvas::new(Grid { cols: view.cols as usize, cell_w, cell_h }, size, self.theme);
         let fonts = fonts(&mut self.fonts, font)?;
-        let cols = render::detail_cols(&canvas, fonts);
-        if view.detail_cols != Some(cols) {
-            return Ok(Drawn::Rewrap(cols));
-        }
         let ms = self.ms;
         settle(&mut self.seen, &mut self.settling, &view.rows, motion, ms);
         let plan = pieces::plan(view, &canvas, fonts);
@@ -309,7 +294,7 @@ impl Picture {
         }
         wants.extend(sprites);
         self.screen.show(wants, out).map_err(|e| format!("Drawing the list as text: {e}."))?;
-        Ok(Drawn::At { top: plan.top, page: plan.page })
+        Ok(Drawn { top: plan.top, page: plan.page })
     }
 
     /// Redraw this soon, though nothing else changes: while a mark settles in.
@@ -388,12 +373,6 @@ fn fall_back(app: &mut App, why: String) -> bool {
     app.look = Look::Text;
     app.msg = Note::info(why);
     true
-}
-
-/// The columns of text a detail line holds in images `cols` wide (render::detail_cols).
-pub fn detail_cols(cols: usize, size: TextSize, cell: (u32, u32), font: Option<&Path>) -> Result<usize, String> {
-    let canvas = Canvas::new(Grid { cols, cell_w: cell.0, cell_h: cell.1 }, size, Theme::default());
-    Ok(render::detail_cols(&canvas, &Fonts::load(font)?))
 }
 
 /// Write the board as the image look draws it to a PNG file (`bullpen-board … --render

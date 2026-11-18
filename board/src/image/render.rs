@@ -1,14 +1,15 @@
 //! Drawing the board's list as an image: the rows rows.rs describes (the same the text
 //! list draws), one under the other, each as tall as the type size makes it (a cell for
-//! small type, more for medium and large), so a row needn't be a whole cell; the image
-//! itself is the list's block of cells. The type is real (font.rs), the marks are drawn
-//! shapes in the status colours (rings, a check, a diamond), the selected task sits on
-//! a card (a faint fill and edge, its mark inside) with its whole title, a task that
-//! needs you on a wash of its colour with a round bar at its left, and a risk is a
-//! chip (chip.rs). The title is the loudest thing on a row: the ID, the age and the
-//! group's name are a detail's size. The marks that move are left
-//! out when the image look places them over the list (sprite.rs draws their frames with
-//! `Draw`). The list's last column has the scroll marks. Nothing here touches the
+//! small type, more for medium and large), so a row needn't be a whole cell, and a
+//! detail's text wrapped by pixels to its room; the image itself is the list's block of
+//! cells. The type is real (font.rs), the marks are drawn shapes in the status colours
+//! (rings, a check, a diamond), the selected task sits on a card (a faint fill and
+//! edge, its mark inside) with its whole title (a narrow board's tasks that are yours
+//! get two lines), a task that needs you on a wash of its colour with a round bar at
+//! its left, and a risk is a chip (chip.rs). The title is the loudest thing on a row:
+//! the ID, the age and the group's name are a detail's size. The marks that move are
+//! left out when the image look places them over the list (sprite.rs draws their frames
+//! with `Draw`). The list's last column has the scroll marks. Nothing here touches the
 //! terminal: given rows and a size in pixels, it lays them out and returns an image, or
 //! a window of pixels of them (pieces.rs), drawn as that part of the whole would be.
 
@@ -58,6 +59,9 @@ pub struct Metrics {
     /// how far the selected card reaches past its first and last lines (a pixel inside
     /// them for small type, whose rows are a cell each)
     pub inset: f32,
+    /// small type's: every row a cell, as the text list's (no title but the selected
+    /// one's wraps)
+    pub cells: bool,
 }
 
 impl Metrics {
@@ -77,7 +81,8 @@ impl Metrics {
         let (title, detail, label) = ((t * ch).max(6.0), (d * ch).max(6.0), (l * ch).max(5.0));
         if size == TextSize::Small {
             let (line, detail_line, gap) = (ch, ch, ch);
-            return Metrics { title, detail, label, line, detail_line, pad: 0.0, head_pad: 0.0, gap, title_gap: 0.0, inset: -1.0 };
+            let (pad, head_pad, title_gap, inset) = (0.0, 0.0, 0.0, -1.0);
+            return Metrics { title, detail, label, line, detail_line, pad, head_pad, gap, title_gap, inset, cells: true };
         }
         Metrics {
             title,
@@ -90,6 +95,7 @@ impl Metrics {
             gap: (0.45 * ch).round(),
             title_gap: (0.06 * title).round(),
             inset: (0.28 * title).round(),
+            cells: false,
         }
     }
 }
@@ -139,12 +145,13 @@ pub struct Sheet {
 
 /// The rows laid out: each one's height in pixels and the space left after it (the
 /// selected block's, so the rows under it move by whole cells: pieces.rs), a task's (or
-/// an item's) title as the lines it's drawn on, and the ID column's width.
+/// an item's) title, or a detail's text, as the lines it's drawn on, and the ID
+/// column's width.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Laid {
     pub heights: Vec<u32>,
     pub after: Vec<u32>,
-    titles: Vec<Vec<String>>,
+    lines: Vec<Vec<String>>,
     pub idw: f32,
 }
 
@@ -165,22 +172,45 @@ impl Laid {
     }
 }
 
-/// The most lines the selected task's title wraps to; any other title is cut to one.
+/// The most lines the selected task's title wraps to; on a narrow board, one that's
+/// yours (it waits on you) wraps to two, but in small type, a cell a row as the text
+/// list's; any other title is cut to one.
 const TITLE_LINES: usize = 3;
+const YOURS_LINES: usize = 2;
 
-/// Lay the rows out: a title cut to its row, or the selected one's wrapped, and how tall
-/// each row is.
+/// Lay the rows out: a title cut to its row, or wrapped (the selected one's, and on a
+/// narrow board one that's yours), a detail's text wrapped by pixels to the room its
+/// type has, and how tall each row is.
 pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
     let idw = id_width(rows, fonts, c.m.detail);
     let g = Geo { c: *c, idw };
-    let mut titles = Vec::new();
+    let mut all = Vec::new();
     let mut heights = Vec::new();
     for row in &rows.rows {
-        let (title, selected, weight, right) = match row {
-            Row::Task(t) => (&t.title, t.selected, title_weight(t.asked.is_some()), g.task_right(t, fonts)),
-            Row::Item(i) => (&i.title, i.selected, title_weight(i.asked), c.right()),
+        let (title, most, weight, right) = match row {
+            Row::Task(t) => {
+                let two = t.yours && g.narrow() && !c.m.cells;
+                let most = if t.selected { TITLE_LINES } else if two { YOURS_LINES } else { 1 };
+                (&t.title, most, title_weight(t.asked.is_some()), g.task_right(t, fonts))
+            }
+            Row::Item(i) => (&i.title, if i.selected { TITLE_LINES } else { 1 }, title_weight(i.asked), c.right()),
+            Row::Detail(d) => {
+                // a stale age is semibold: the first line has that much less room
+                let (age, _) = crate::model::split_at_width(&d.text, d.lead);
+                let bolder = if d.stale { fonts.width(&age, Weight::Bold, c.m.detail) - fonts.width(&age, Weight::Regular, c.m.detail) } else { 0.0 };
+                let lines = g.detail_lines(&d.text, d.lines, bolder, fonts);
+                heights.push(g.height(row, lines.len()));
+                all.push(lines);
+                continue;
+            }
+            Row::ItemDetail(text, most) => {
+                let lines = g.detail_lines(text, *most, 0.0, fonts);
+                heights.push(g.height(row, lines.len()));
+                all.push(lines);
+                continue;
+            }
             _ => {
-                titles.push(vec![]);
+                all.push(vec![]);
                 heights.push(g.height(row, 1));
                 continue;
             }
@@ -188,26 +218,16 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
         let px = c.m.title;
         let x = g.title_x();
         let first = right - x;
-        let lines = if selected {
-            fonts.wrap(title, weight, px, (first, c.right() - x), TITLE_LINES)
+        let lines = if most > 1 {
+            fonts.wrap(title, weight, px, (first, c.right() - x), most)
         } else {
             vec![fonts.fit(title, weight, px, first)]
         };
         heights.push(g.height(row, lines.len().max(1)));
-        titles.push(lines);
+        all.push(lines);
     }
     let after = vec![0; heights.len()];
-    Laid { heights, after, titles, idw }
-}
-
-/// How many columns of text a detail line holds, from under the ID to the right edge:
-/// the image's type is narrower than the terminal's, so its detail lines wrap later
-/// than the text list's. Measured on a typical line, with a little to spare.
-pub fn detail_cols(c: &Canvas, fonts: &Fonts) -> usize {
-    const SAMPLE: &str = "Asks: should the header show the time too? 3 files, +13 −16 · Not toured yet.";
-    let room = c.right() - Geo { c: *c, idw: 0.0 }.text_x();
-    let each = fonts.width(SAMPLE, Weight::Regular, c.m.detail) / SAMPLE.chars().count() as f32;
-    (room / (each * 1.08)).max(1.0) as usize
+    Laid { heights, after, lines: all, idw }
 }
 
 /// The rows from `top` that fit in `room` pixels whole: [top, end). One at least, cut if
@@ -298,7 +318,7 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
         let (y, h) = (at(p), p.h as f32);
         // a row outside the window draws nothing (its card, wash and bar may reach in, above)
         if y + h + c.m.pad + EDGE as f32 >= cut.y as f32 && y <= (cut.y + height + EDGE) as f32 {
-            d.row(&rows.rows[p.row], &laid.titles[p.row], y, (cut.bare)(p.row));
+            d.row(&rows.rows[p.row], &laid.lines[p.row], y, (cut.bare)(p.row));
         }
     }
     let mut pm = pm.clone_rect(tiny_skia::IntRect::from_xywh(0, EDGE as i32, width, height).ok_or_else(made)?).ok_or_else(made)?;
@@ -327,9 +347,9 @@ fn blocks(rows: &Rows, places: &[Place], pad: f32) -> Vec<Block> {
         match row {
             Row::Task(t) => out.push(block(y + pad, t.selected, t.flag)),
             Row::Item(i) => out.push(block(y + pad, i.selected, None)),
-            Row::Detail(_) | Row::ItemDetail(_) if open => out.last_mut().expect("a block is open").bottom = bottom,
+            Row::Detail(_) | Row::ItemDetail(..) if open => out.last_mut().expect("a block is open").bottom = bottom,
             Row::Detail(dr) => out.push(block(y, dr.selected, dr.flag)),
-            Row::ItemDetail(_) => out.push(block(y, true, None)),
+            Row::ItemDetail(..) => out.push(block(y, true, None)),
             _ => {}
         }
         open = row.is_entry() || row.is_detail();
@@ -393,8 +413,21 @@ impl Geo {
     /// Where a title starts: past the ID column and a gap, narrower on a board under 44
     /// columns, where every pixel of title counts.
     fn title_x(&self) -> f32 {
-        let narrow = self.c.grid.cols + 1 < 44;
-        self.text_x() + self.idw + if narrow { 0.5 } else { 0.8 } * self.c.m.title
+        self.text_x() + self.idw + if self.narrow() { 0.5 } else { 0.8 } * self.c.m.title
+    }
+
+    /// A board under 44 columns (the image's are one fewer, the last column the text's).
+    fn narrow(&self) -> bool {
+        self.c.grid.cols + 1 < 44
+    }
+
+    /// A detail's text wrapped at its spaces to the room under the ID, `most` lines at
+    /// most (the first `less` narrower), the last cut with "…" when there's more. One
+    /// line at least, so a row is never empty.
+    fn detail_lines(&self, text: &str, most: usize, less: f32, fonts: &Fonts) -> Vec<String> {
+        let room = self.c.right() - self.text_x();
+        let lines = fonts.wrap(text, Weight::Regular, self.c.m.detail, (room - less, room), most);
+        if lines.is_empty() { vec![String::new()] } else { lines }
     }
 
     /// The width a task's age (and risk) take at the right, as `task` draws them.
@@ -414,14 +447,14 @@ impl Geo {
         self.c.right() - self.right_side(t, fonts) - gap * self.c.m.title
     }
 
-    /// A row's height in whole pixels, with its title on `lines` lines.
+    /// A row's height in whole pixels, with its title (or a detail's text) on `lines` lines.
     fn height(&self, row: &Row, lines: usize) -> u32 {
         let m = &self.c.m;
         let h = match row {
             Row::Head { .. } => m.head_pad + m.line,
             Row::Task(_) | Row::Item(_) => m.pad + lines as f32 * m.line + m.title_gap,
             Row::Later { .. } => m.pad + m.line,
-            Row::Detail(_) | Row::ItemDetail(_) => m.detail_line,
+            Row::Detail(_) | Row::ItemDetail(..) => lines as f32 * m.detail_line,
             Row::Gap => m.gap,
             Row::Empty { .. } => m.line,
         };
@@ -580,15 +613,15 @@ impl<'a> Draw<'a> {
         self.fonts
     }
 
-    /// A row whose top is y; a task's or item's title on `lines`; its mark left out
-    /// when `bare`.
+    /// A row whose top is y; a task's or item's title, or a detail's text, on `lines`;
+    /// its mark left out when `bare`.
     fn row(&mut self, row: &Row, lines: &[String], y: f32, bare: bool) {
         let m = self.m();
         let (fg, dim) = (self.theme.text(), self.theme.dim());
         let left = self.c();
         let full = self.right() - left;
         match row {
-            Row::Detail(_) | Row::ItemDetail(_) => self.set(m.detail, m.detail_line),
+            Row::Detail(_) | Row::ItemDetail(..) => self.set(m.detail, m.detail_line),
             _ => self.set(m.title, m.line),
         }
         match row {
@@ -604,12 +637,16 @@ impl<'a> Draw<'a> {
             Row::Task(t) => self.task(t, lines, y, bare),
             Row::Detail(d) => {
                 let color = if d.selected || d.loud { fg } else { dim };
-                let (age, rest) = crate::model::split_at_width(&d.text, d.lead);
                 let x = self.text_x();
-                let age_color = if d.stale { solid(self.theme.red) } else { dim };
-                let weight = if d.stale { Weight::Bold } else { Weight::Regular };
-                let end = self.text(&age, weight, x, y, self.right() - x, age_color);
-                self.text(&rest, Weight::Regular, end, y, self.right() - end, color);
+                for (k, line) in lines.iter().enumerate() {
+                    let y = y + k as f32 * m.detail_line;
+                    // a narrow board's age starts the first line
+                    let (age, rest) = crate::model::split_at_width(line, if k == 0 { d.lead } else { 0 });
+                    let age_color = if d.stale { solid(self.theme.red) } else { dim };
+                    let weight = if d.stale { Weight::Bold } else { Weight::Regular };
+                    let end = self.text(&age, weight, x, y, self.right() - x, age_color);
+                    self.text(&rest, Weight::Regular, end, y, self.right() - end, color);
+                }
             }
             Row::Gap => {}
             Row::Empty { text, first } => {
@@ -627,9 +664,11 @@ impl<'a> Draw<'a> {
                 self.text(rest, Weight::Regular, end, y, self.right() - end, rc);
             }
             Row::Item(i) => self.item(i, lines, y + m.pad, bare),
-            Row::ItemDetail(text) => {
+            Row::ItemDetail(..) => {
                 let x = self.text_x();
-                self.text(text, Weight::Regular, x, y, self.right() - x, fg);
+                for (k, line) in lines.iter().enumerate() {
+                    self.text(line, Weight::Regular, x, y + k as f32 * m.detail_line, self.right() - x, fg);
+                }
             }
         }
     }

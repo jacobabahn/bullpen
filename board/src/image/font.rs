@@ -118,26 +118,54 @@ impl Fonts {
     }
 
     /// Text wrapped at its spaces: a first line `first` pixels wide, then lines `rest`
-    /// wide, `most` lines at most, the last cut with "…" when there's more.
+    /// wide, `most` lines at most, the last cut with "…" when there's more. A word
+    /// longer than a line is broken where the line ends, the rest of it on the next.
     pub fn wrap(&self, text: &str, weight: Weight, px: f32, (first, rest): (f32, f32), most: usize) -> Vec<String> {
-        let words: Vec<&str> = text.split_whitespace().collect();
+        let mut words: std::collections::VecDeque<String> = text.split_whitespace().map(String::from).collect();
+        let space = self.width(" ", weight, px);
         let mut lines: Vec<String> = Vec::new();
-        let mut i = 0;
-        while i < words.len() {
+        while let Some(word) = words.pop_front() {
             let max = if lines.is_empty() { first } else { rest };
             if lines.len() + 1 >= most.max(1) {
-                lines.push(self.fit(&words[i..].join(" "), weight, px, max));
+                let all: Vec<String> = std::iter::once(word).chain(words).collect();
+                lines.push(self.fit(&all.join(" "), weight, px, max));
                 break;
             }
-            let mut line = words[i].to_string();
-            i += 1;
-            while i < words.len() && self.width(&format!("{line} {}", words[i]), weight, px) <= max {
-                line = format!("{line} {}", words[i]);
-                i += 1;
+            let (mut line, mut w) = self.head_of(word, weight, px, max, &mut words);
+            while let Some(next) = words.front() {
+                let wn = self.width(next, weight, px);
+                if w + space + wn > max {
+                    break;
+                }
+                (w, line) = (w + space + wn, format!("{line} {next}"));
+                words.pop_front();
             }
-            lines.push(self.fit(&line, weight, px, max));
+            lines.push(line);
         }
         lines
+    }
+
+    /// A line's first word and its width: all of it, or as much as fits in `max` with the
+    /// rest put back first in `words` (a word as wide as one character at least).
+    fn head_of(&self, word: String, weight: Weight, px: f32, max: f32, words: &mut std::collections::VecDeque<String>) -> (String, f32) {
+        let whole = self.width(&word, weight, px);
+        if whole <= max {
+            return (word, whole);
+        }
+        let (mut w, mut cut) = (0.0, 0);
+        for (i, c) in word.char_indices() {
+            let a = self.advance(weight, c, px);
+            if i > 0 && w + a > max {
+                cut = i;
+                break;
+            }
+            w += a;
+        }
+        if cut == 0 {
+            return (word, whole);
+        }
+        words.push_front(word[cut..].to_string());
+        (word[..cut].to_string(), w)
     }
 
     /// Draw text from `at`, the start of its baseline, in colour; returns where the pen ends.

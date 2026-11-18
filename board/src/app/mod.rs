@@ -157,9 +157,6 @@ pub struct App {
     pub image: bool,
     /// the board as laid out this frame, for the images
     pub view: Option<crate::image::View>,
-    /// the columns of text the image's detail lines hold (image/ says, from its type),
-    /// which the rows wrap to while the list is an image
-    pub detail_cols: Option<usize>,
 }
 
 pub enum Msg {
@@ -189,7 +186,6 @@ impl App {
             look_set: cfg.look,
             image: false,
             view: None,
-            detail_cols: None,
             cfg,
             tasks: Vec::new(),
             reader: Reader::default(),

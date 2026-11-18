@@ -3,7 +3,7 @@
 //! row per item (`?` amber for one that asks, `◇` dim for a kept one), the selected one
 //! with a line saying what its keys do, red while its drop is asked about.
 
-use super::rows::{item_row, ItemRow, Row};
+use super::rows::{detail_lines, item_row, ItemRow, Row};
 use super::{bold, dim, put, rev, span, spinner, AMBER, TINT};
 use crate::model::{self, fit, pad, Item, Layout};
 use crate::App;
@@ -36,8 +36,8 @@ pub(super) fn later_rows(app: &App, items: &[Item], after_rows: bool, detail_w: 
         let selected = row.selected;
         rows.push(Row::Item(row));
         if selected {
-            for line in model::wrap(&model::item_detail(i), detail_w, ITEM_LINES) {
-                rows.push(Row::ItemDetail(line));
+            for (line, most) in detail_lines(app, &model::item_detail(i), detail_w, ITEM_LINES) {
+                rows.push(Row::ItemDetail(line, most));
             }
         }
     }

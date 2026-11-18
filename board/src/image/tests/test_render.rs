@@ -18,11 +18,12 @@ fn task(id: &str, status: &str) -> TaskRow {
         selected: false,
         asked: None,
         quiet: false,
+        yours: false,
     }
 }
 
 fn detail(text: &str, selected: bool) -> Row {
-    Row::Detail(DetailRow { text: text.into(), loud: false, lead: 0, selected, stale: false, flag: None })
+    Row::Detail(DetailRow { text: text.into(), lines: 1, loud: false, lead: 0, selected, stale: false, flag: None })
 }
 
 fn rows(rows: Vec<Row>) -> Rows {
@@ -153,17 +154,17 @@ fn the_selected_tasks_title_wraps_and_another_is_cut_to_its_row() {
     let r = rows(vec![Row::Task(other), Row::Task(selected)]);
     let (laid, _) = draw_in(&r, TextSize::Medium);
     let m = Metrics::of(TextSize::Medium, 20);
-    assert_eq!(laid.titles[0].len(), 1);
-    assert!(laid.titles[0][0].ends_with('…'));
-    assert!(laid.titles[1].len() > 1 && laid.titles[1].len() <= TITLE_LINES);
-    assert_eq!(laid.heights[1], (m.pad + laid.titles[1].len() as f32 * m.line + m.title_gap) as u32);
-    let joined = laid.titles[1].join(" ");
+    assert_eq!(laid.lines[0].len(), 1);
+    assert!(laid.lines[0][0].ends_with('…'));
+    assert!(laid.lines[1].len() > 1 && laid.lines[1].len() <= TITLE_LINES);
+    assert_eq!(laid.heights[1], (m.pad + laid.lines[1].len() as f32 * m.line + m.title_gap) as u32);
+    let joined = laid.lines[1].join(" ");
     assert!(long.starts_with(joined.trim_end_matches('…')));
 }
 
 #[test]
 fn the_rows_that_fit_are_whole_rows_and_one_at_least() {
-    let laid = Laid { heights: vec![30, 30, 30, 30], after: vec![0; 4], titles: vec![vec![]; 4], idw: 0.0 };
+    let laid = Laid { heights: vec![30, 30, 30, 30], after: vec![0; 4], lines: vec![vec![]; 4], idw: 0.0 };
     assert_eq!(fitting(&laid, 0, 100), 3);
     assert_eq!(fitting(&laid, 2, 100), 4);
     assert_eq!(fitting(&laid, 1, 10), 2); // too tall to fit: cut, but drawn
@@ -185,12 +186,60 @@ fn the_scroll_marks_are_drawn_in_the_last_column() {
 }
 
 #[test]
-fn a_detail_line_holds_more_columns_than_the_texts_where_the_type_is_narrower() {
+fn a_detail_is_wrapped_by_pixels_no_line_breaking_with_room_for_its_next_word() {
     let fonts = Fonts::builtin();
-    // the text list's detail lines hold the board's columns less 5: here 36
-    let cols = |size| detail_cols(&Canvas::new(Grid { cols: 40, cell_w: 10, cell_h: 22 }, size, Theme::default()), &fonts);
-    assert!(cols(TextSize::Small) > cols(TextSize::Medium) && cols(TextSize::Medium) > cols(TextSize::Large));
-    assert!(cols(TextSize::Large) > 20);
+    let text = "Asks: should the inbox show a coordinator's question above the tasks that need you, or in its repo's group? It can't tell.";
+    for size in [TextSize::Small, TextSize::Medium, TextSize::Large] {
+        let c = canvas(size);
+        let r = rows(vec![Row::Task(task("BP-1", "needs")), Row::Detail(DetailRow { lines: 3, ..detail_row(text) })]);
+        let laid = lay(&r, &c, &fonts);
+        let lines = &laid.lines[1];
+        // as many lines as it needs, three at most, the row as tall as they are
+        assert!(lines.len() > 1 && lines.len() <= 3, "{size:?}: {lines:?}");
+        assert_eq!(laid.heights[1], (lines.len() as f32 * c.m.detail_line).round() as u32);
+        let room = c.right() - Geo { c, idw: laid.idw }.text_x();
+        for (k, line) in lines.iter().enumerate() {
+            assert!(fonts.width(line, Weight::Regular, c.m.detail) <= room, "{size:?}: {line}");
+            // the next line's first word didn't fit on this one
+            if let Some(next) = lines.get(k + 1).and_then(|l| l.split(' ').next()) {
+                let with = format!("{line} {next}");
+                assert!(fonts.width(&with, Weight::Regular, c.m.detail) > room, "{size:?}: {with}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_word_longer_than_a_line_is_broken_where_the_line_ends() {
+    let f = Fonts::builtin();
+    let path = "board/src/image/a_very_long_file_name_that_wont_fit_on_one_line.rs";
+    let lines = f.wrap(&format!("Reading {path} now"), Weight::Regular, 12.0, (120.0, 120.0), 4);
+    assert!(lines.iter().all(|l| f.width(l, Weight::Regular, 12.0) <= 120.0), "{lines:?}");
+    assert!(lines.concat().replace(' ', "").starts_with(&format!("Reading{}", &path[..20])), "{lines:?}");
+}
+
+fn detail_row(text: &str) -> DetailRow {
+    DetailRow { text: text.into(), lines: 1, loud: false, lead: 0, selected: false, stale: false, flag: None }
+}
+
+#[test]
+fn on_a_narrow_board_a_title_thats_yours_takes_two_lines() {
+    let fonts = Fonts::builtin();
+    let long = "Mission control: show each repo's coordinator question in the inbox";
+    let r = rows(vec![
+        Row::Task(TaskRow { title: long.into(), yours: true, ..task("BP-1", "needs") }),
+        Row::Task(TaskRow { title: long.into(), ..task("BP-2", "working") }),
+    ]);
+    for (cols, two) in [(35, true), (42, true), (43, false), (59, false)] {
+        let c = Canvas::new(Grid { cols, cell_w: 16, cell_h: 34 }, TextSize::Medium, Theme::default());
+        let laid = lay(&r, &c, &fonts);
+        assert_eq!(laid.lines[0].len(), if two { 2 } else { 1 }, "{cols}");
+        assert_eq!(laid.lines[1].len(), 1, "{cols}: another's is cut to one");
+        assert!(laid.heights[0] > laid.heights[1] || !two);
+    }
+    // small type keeps a cell a row, as the text list
+    let c = Canvas::new(Grid { cols: 35, cell_w: 16, cell_h: 34 }, TextSize::Small, Theme::default());
+    assert_eq!(lay(&r, &c, &fonts).lines[0].len(), 1);
 }
 
 #[test]
@@ -265,7 +314,7 @@ fn medium_type_has_room_above_each_task_and_between_its_title_and_lines() {
     assert!(m.line >= 1.35 * m.title && m.detail_line >= 1.4 * m.detail);
     // small stays a cell a row, its card a pixel inside its rows
     let s = Metrics::of(TextSize::Small, 34);
-    assert_eq!((s.pad, s.title_gap, s.line, s.inset), (0.0, 0.0, 34.0, -1.0));
+    assert_eq!((s.pad, s.title_gap, s.line, s.inset, s.cells), (0.0, 0.0, 34.0, -1.0, true));
 }
 
 #[test]
@@ -308,7 +357,7 @@ fn faintly(px: [u8; 4], c: [u8; 4]) -> bool {
 }
 
 fn flagged(flag: Flag, selected: bool) -> Rows {
-    let d = DetailRow { text: "what it asks".into(), loud: true, lead: 0, selected, stale: false, flag: Some(flag) };
+    let d = DetailRow { text: "what it asks".into(), lines: 1, loud: true, lead: 0, selected, stale: false, flag: Some(flag) };
     rows(vec![Row::Task(TaskRow { flag: Some(flag), selected, ..task("BP-1", "needs") }), Row::Detail(d)])
 }
 

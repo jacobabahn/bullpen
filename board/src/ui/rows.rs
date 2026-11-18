@@ -23,8 +23,8 @@ pub(crate) enum Row {
     Later { text: String, amber: bool },
     /// an item of the Later group, expanded
     Item(ItemRow),
-    /// a line under the selected item
-    ItemDetail(String),
+    /// a line under the selected item, and the most lines it takes (detail_lines)
+    ItemDetail(String, usize),
 }
 
 /// A task's mark: still, or one the text board turns.
@@ -72,12 +72,18 @@ pub(crate) struct TaskRow {
     pub asked: Option<bool>,
     /// its title is dim: closed, its coordinator's, or another coordinator's
     pub quiet: bool,
+    /// it waits on you (it needs you, stopped, or is ready) and isn't another
+    /// coordinator's: a narrow image board gives its title two lines
+    pub yours: bool,
 }
 
 /// A line under a task.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct DetailRow {
     pub text: String,
+    /// the most lines it takes: the text list's are wrapped already (1), the image's
+    /// whole, for it to wrap by pixels (detail_lines)
+    pub lines: usize,
     /// at normal weight: it says what the task needs from you
     pub loud: bool,
     /// its first columns are the task's age (a narrow board's)
@@ -160,8 +166,8 @@ fn build_as(app: &App, w: usize, narrow: bool, now: Now, selection: bool) -> Row
     let items = app.later.iter().filter(|_| app.later_open).map(|i| width(&i.id));
     let idw = groups.iter().flat_map(|(_, ts)| ts).map(|t| width(&t.id)).chain(items).max().unwrap_or(0);
     let age_on_detail = narrow && layout == Layout::Grouped;
-    // from under the ID to the right edge; as much as the image's type holds there
-    let detail_w = app.detail_cols.filter(|_| app.image).unwrap_or(w.saturating_sub(5));
+    // from under the ID to the right edge (the image wraps by pixels: detail_lines)
+    let detail_w = w.saturating_sub(5);
 
     let mut rows: Vec<Row> = Vec::new();
     if groups.is_empty() {
@@ -217,19 +223,29 @@ fn details(rows: &mut Vec<Row>, app: &App, t: &Task, cur: bool, age_on_detail: b
         (false, true) => age.clone(),
         (false, false) => format!("{age} · {text}"),
     };
-    let detail = |text: String, loud: bool, lead: usize| {
-        Row::Detail(DetailRow { text, loud, lead, selected: cur, stale: stale(t, now), flag: flag(t) })
+    let detail = |text: String, lines: usize, loud: bool, lead: usize| {
+        Row::Detail(DetailRow { text, lines, loud, lead, selected: cur, stale: stale(t, now), flag: flag(t) })
     };
-    for (i, d) in model::wrap(&text, detail_w, lines).into_iter().enumerate() {
+    for (i, (d, most)) in detail_lines(app, &text, detail_w, lines).into_iter().enumerate() {
         if !d.is_empty() {
             let lead = if i == 0 { width(&age) } else { 0 };
-            rows.push(detail(d, loud_detail(app, t), lead));
+            rows.push(detail(d, most, loud_detail(app, t), lead));
         }
     }
     let stat = model::stat_line(t);
     if !stat.is_empty() {
-        rows.push(detail(stat, false, 0));
+        rows.push(detail(stat, 1, false, 0));
     }
+}
+
+/// A detail's text as the rows that show it, `lines` lines at most, each with the
+/// lines it takes: the text list's wrapped to `w` columns, a row a line; the image's
+/// whole, in one row, which it wraps by pixels to the room its type has.
+pub(super) fn detail_lines(app: &App, text: &str, w: usize, lines: usize) -> Vec<(String, usize)> {
+    if app.image {
+        return vec![(text.to_string(), lines)];
+    }
+    model::wrap(text, w, lines).into_iter().map(|line| (line, 1)).collect()
 }
 
 /// A task's own row. Asked y/n about, it keeps its title, in the question's colour,
@@ -255,6 +271,7 @@ fn task_row(app: &App, t: &Task, selected: bool, with_age: bool, now: Now) -> Ta
         selected,
         asked,
         quiet: t.closed() || t.triage() || app.cfg.theirs(t, app.me.as_deref()),
+        yours: (t.flagged() || t.status == "ready") && !app.cfg.theirs(t, app.me.as_deref()),
     }
 }
 

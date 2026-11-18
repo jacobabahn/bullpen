@@ -240,7 +240,7 @@ pub(crate) fn whole(app: &App, w: usize, now: rows::Now) -> crate::image::View {
     let foot = bottom::Foot { lines: vec![(2, bottom::FootLine::Keys(keys))] };
     let cols = w.saturating_sub(1) as u16;
     let base = rows::unselected(app, w, w < NARROW, now);
-    crate::image::View { rows, base, detail_cols: app.detail_cols, top: 0, head, foot: Some(foot), col: 0, row0: 0, row: 2, rows_n: 0, foot_n: 3, cols }
+    crate::image::View { rows, base, top: 0, head, foot: Some(foot), col: 0, row0: 0, row: 2, rows_n: 0, foot_n: 3, cols }
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 use super::*;
-use crate::image::render::{self, render, Cut, Grid};
+use crate::image::render::{render, Cut, Grid};
 use crate::image::sprite::{self, Sprite};
 use crate::image::Theme;
 use crate::model::{Config, Look, TextSize};
@@ -35,11 +35,10 @@ fn board() -> App {
     a
 }
 
-/// The board's view with `sel` selected, as the image look lays it out at `size`.
-fn view_of(app: &mut App, sel: &str, size: TextSize) -> View {
+/// The board's view with `sel` selected, as the image look lays it out.
+fn view_of(app: &mut App, sel: &str) -> View {
     app.sel = Some(sel.into());
     app.image = true;
-    app.detail_cols = Some(render::detail_cols(&canvas(size), &Fonts::builtin()));
     screen(app, W, H);
     app.view.clone().unwrap()
 }
@@ -101,7 +100,7 @@ fn the_pieces_put_together_are_the_list_drawn_whole() {
         let c = canvas(size);
         let mut app = board();
         for sel in ["BP-1", "BP-2", "BP-3", "BP-5", "BP-7", "BP-9"] {
-            let view = view_of(&mut app, sel, size);
+            let view = view_of(&mut app, sel);
             let p = plan(&view, &c, &Fonts::builtin());
             app.top = p.top;
             assert!(p.sel.is_some(), "{sel} at {size:?}: the selected block is an image of its own");
@@ -115,7 +114,7 @@ fn the_marks_placed_over_the_list_are_where_it_draws_them() {
     for size in [TextSize::Small, TextSize::Medium, TextSize::Large] {
         let c = canvas(size);
         let mut app = board();
-        let view = view_of(&mut app, "BP-3", size);
+        let view = view_of(&mut app, "BP-3");
         let p = plan(&view, &c, &Fonts::builtin());
         // BP-3's working mark and BP-5's review mark (above it) are sprites; their first
         // frame is the still mark
@@ -131,10 +130,10 @@ fn the_marks_placed_over_the_list_are_where_it_draws_them() {
 fn moving_the_selection_keeps_the_base_image_and_moves_its_crops() {
     let c = canvas(TextSize::Medium);
     let mut app = board();
-    let a = plan(&view_of(&mut app, "BP-4", TextSize::Medium), &c, &Fonts::builtin());
+    let a = plan(&view_of(&mut app, "BP-4"), &c, &Fonts::builtin());
     app.top = a.top;
     // the next task down (the board groups them: BP-2 is under BP-4), still on the page
-    let view = view_of(&mut app, "BP-2", TextSize::Medium);
+    let view = view_of(&mut app, "BP-2");
     let b = plan(&view, &c, &Fonts::builtin());
     assert_eq!((a.top, a.base_end, &a.base), (b.top, b.base_end, &b.base));
     assert!(!a.whole && !b.whole);
@@ -154,7 +153,7 @@ fn moving_the_selection_keeps_the_base_image_and_moves_its_crops() {
 fn the_rows_under_the_block_move_by_whole_cells() {
     let c = canvas(TextSize::Medium);
     let mut app = board();
-    let view = view_of(&mut app, "BP-2", TextSize::Medium);
+    let view = view_of(&mut app, "BP-2");
     let p = plan(&view, &c, &Fonts::builtin());
     let s0 = view.rows.rows.iter().position(Row::is_selected).unwrap();
     let after = s0 + 1 + view.rows.rows[s0 + 1..].iter().take_while(|r| r.is_detail()).count();
@@ -170,7 +169,7 @@ fn with_nothing_selected_in_view_the_base_image_is_the_list() {
     let c = canvas(TextSize::Medium);
     let mut app = App::for_test(vec![]);
     app.look = Look::Image;
-    let view = view_of(&mut app, "BP-1", TextSize::Medium);
+    let view = view_of(&mut app, "BP-1");
     let p = plan(&view, &c, &Fonts::builtin());
     assert!(p.whole && p.sel.is_none() && p.tail.is_none());
     assert_eq!(p.crops, vec![(0, 0, view.rows_n)]);
