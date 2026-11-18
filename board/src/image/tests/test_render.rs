@@ -267,3 +267,27 @@ fn medium_type_has_room_above_each_task_and_between_its_title_and_lines() {
     let s = Metrics::of(TextSize::Small, 34);
     assert_eq!((s.pad, s.title_gap, s.line, s.inset), (0.0, 0.0, 34.0, -1.0));
 }
+
+#[test]
+fn the_title_leads_its_row_the_id_and_age_are_a_details_size() {
+    let r = rows(vec![Row::Task(task("BP-123", "todo"))]);
+    let (c, fonts) = (canvas(TextSize::Medium), Fonts::builtin());
+    let laid = lay(&r, &c, &fonts);
+    assert_eq!(laid.idw, fonts.width("BP-123", Weight::Bold, c.m.detail));
+    let g = Geo { c, idw: laid.idw };
+    let t = task("BP-123", "todo");
+    assert_eq!(g.right_side(&t, &fonts), fonts.width(&t.age, Weight::Bold, c.m.detail));
+    // an unselected ID is dim, never the foreground
+    let s = draw(&r);
+    let id: Vec<_> = row_px(&s, 0).iter().enumerate().filter(|(i, _)| (30..52).contains(&(i % 400))).map(|(_, p)| *p).collect();
+    assert!(id.iter().any(|p| p[3] > 0) && id.iter().all(|p| p[3] < 255 || (p[0], p[1], p[2]) != (0xe5, 0xe5, 0xe5)));
+}
+
+#[test]
+fn a_groups_name_is_a_little_dim_so_its_titles_lead() {
+    let s = draw(&rows(vec![Row::Head { name: "Ready".into(), count: 1 }]));
+    let px = row_px(&s, 0);
+    let theme = Theme::default();
+    assert!(!has(&px, theme.fg));
+    assert!(px.iter().any(|p| p[3] == theme.heading()[3]));
+}

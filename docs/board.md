@@ -146,7 +146,9 @@ board as images instead of text: real type, the marks drawn as shapes (rings, a
 check, a diamond) in the status colours, the selected task on a card (a faint fill
 with a faint edge, its mark inside it, clear of its type on every side) with its ID
 in the foreground and its whole title (wrapped to three lines at most; another task's
-is cut to its line), and the amber or red bar beside a task that needs you. The
+is cut to its line), and the amber or red bar beside a task that needs you. The title
+is the loudest thing on a row: a task's ID (dim, on the title's baseline) and age, and
+the groups' names (a little dim), are a detail line's size. The
 list says everything the text list does, row for row: each task's ID, title, mark,
 risk, age and lines, the groups and the Later group. The marks move as the text
 board's do, at the same pace: a working task's is a faint ring with a short arc going

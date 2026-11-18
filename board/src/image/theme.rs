@@ -93,6 +93,11 @@ impl Theme {
         faint(self.fg, 0.66)
     }
 
+    /// A group's name: the foreground, a little dim, so the titles under it lead.
+    pub fn heading(&self) -> [u8; 4] {
+        faint(self.fg, 0.82)
+    }
+
     /// The selected card's fill: the foreground, faintly.
     pub fn tint(&self) -> [u8; 4] {
         faint(self.fg, 0.085)

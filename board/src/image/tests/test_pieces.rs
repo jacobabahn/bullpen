@@ -131,10 +131,10 @@ fn the_marks_placed_over_the_list_are_where_it_draws_them() {
 fn moving_the_selection_keeps_the_base_image_and_moves_its_crops() {
     let c = canvas(TextSize::Medium);
     let mut app = board();
-    let a = plan(&view_of(&mut app, "BP-2", TextSize::Medium), &c, &Fonts::builtin());
+    let a = plan(&view_of(&mut app, "BP-4", TextSize::Medium), &c, &Fonts::builtin());
     app.top = a.top;
-    // the next task down (the board groups them: BP-6 is under BP-2)
-    let view = view_of(&mut app, "BP-6", TextSize::Medium);
+    // the next task down (the board groups them: BP-2 is under BP-4), still on the page
+    let view = view_of(&mut app, "BP-2", TextSize::Medium);
     let b = plan(&view, &c, &Fonts::builtin());
     assert_eq!((a.top, a.base_end, &a.base), (b.top, b.base_end, &b.base));
     assert!(!a.whole && !b.whole);

@@ -4,7 +4,8 @@
 //! image itself is the list's block of cells. The type is real (font.rs), the marks
 //! are drawn shapes in the status colours (rings, a check, a diamond), the selected
 //! task sits on a card (a faint fill and edge, its mark inside) with its whole title,
-//! and a task that needs you has a bar at its left. The marks that move are left out when the
+//! and a task that needs you has a bar at its left. The title is the loudest thing on
+//! a row: the ID, the age and the group's name are a detail's size. The marks that move are left out when the
 //! image look places them over the list (sprite.rs draws their frames with `Draw`). The
 //! list's last column has the scroll marks. Nothing here touches the terminal: given
 //! rows and a size in pixels, it lays them out and returns an image, or a window of
@@ -35,9 +36,9 @@ impl Grid {
 /// The type's sizes and the space it gets, in pixels, for a text size and a cell.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Metrics {
-    /// a task's title and ID, a heading, the top line
+    /// a task's title, the top line
     pub title: f32,
-    /// a detail line, the message and the keys
+    /// a detail line, a task's ID and age, a group's name, the message and the keys
     pub detail: f32,
     /// a title line's height, and a detail line's
     pub line: f32,
@@ -164,7 +165,7 @@ const TITLE_LINES: usize = 3;
 /// Lay the rows out: a title cut to its row, or the selected one's wrapped, and how tall
 /// each row is.
 pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
-    let idw = id_width(rows, fonts, c.m.title);
+    let idw = id_width(rows, fonts, c.m.detail);
     let g = Geo { c: *c, idw };
     let mut titles = Vec::new();
     let mut heights = Vec::new();
@@ -359,25 +360,25 @@ impl Geo {
     }
 
     /// Where text starts (under the ID: column 3, as on the text board, or past a larger
-    /// type's mark).
+    /// type's mark and a little space).
     fn text_x(&self) -> f32 {
         let c = self.c.c();
-        (3.0 * c).max(1.5 * c + self.mark_r() + 0.7 * self.c.m.title)
+        (3.0 * c).max(1.5 * c + self.mark_r() + 0.4 * self.c.m.title)
     }
 
-    /// Where a title starts: past the ID column and a gap, a narrow board's narrower (as
-    /// the text's one space after the IDs there).
+    /// Where a title starts: past the ID column and a gap, narrower on a board under 44
+    /// columns, where every pixel of title counts.
     fn title_x(&self) -> f32 {
-        let narrow = self.c.grid.cols + 1 < crate::ui::NARROW;
-        self.text_x() + self.idw + if narrow { 0.6 } else { 1.1 } * self.c.m.title
+        let narrow = self.c.grid.cols + 1 < 44;
+        self.text_x() + self.idw + if narrow { 0.5 } else { 0.8 } * self.c.m.title
     }
 
     /// The width a task's age (and risk) take at the right, as `task` draws them.
     fn right_side(&self, t: &TaskRow, fonts: &Fonts) -> f32 {
         let px = self.c.m.title;
-        let mut w = fonts.width(&t.age, Weight::Bold, px);
+        let mut w = fonts.width(&t.age, Weight::Bold, self.c.m.detail);
         if let Some(level) = &t.risk {
-            let gap = if t.age.is_empty() { 0.0 } else { 0.7 * px };
+            let gap = if t.age.is_empty() { 0.0 } else { 0.5 * self.c.m.detail };
             w += gap + fonts.width(level, Weight::Bold, px);
         }
         w
@@ -467,6 +468,13 @@ impl<'a> Draw<'a> {
     /// Text on the line whose top is y, from x, cut to `max` pixels; returns where it ends.
     pub(super) fn text(&mut self, s: &str, weight: Weight, x: f32, y: f32, max: f32, color: [u8; 4]) -> f32 {
         let px = self.px();
+        self.text_in(px, s, weight, x, y, max, color)
+    }
+
+    /// Text in type `px` on the baseline of the line being drawn (its type's), whose top
+    /// is y: an ID or an age beside a title.
+    #[allow(clippy::too_many_arguments)]
+    fn text_in(&mut self, px: f32, s: &str, weight: Weight, x: f32, y: f32, max: f32, color: [u8; 4]) -> f32 {
         let s = self.fonts.fit(s, weight, px, max.max(0.0));
         let base = self.baseline(y) - self.shift;
         self.fonts.draw(self.pm, &s, weight, px, (x, base), color)
@@ -519,9 +527,12 @@ impl<'a> Draw<'a> {
             _ => self.set(m.title, m.line),
         }
         match row {
+            // a group's name at a detail's size, a little dim: the titles under it lead
             Row::Head { name, count } => {
                 let y = y + m.head_pad;
-                let end = self.text(name, Weight::Bold, left, y, full, fg);
+                self.set(m.detail, m.line);
+                let head = self.theme.heading();
+                let end = self.text(name, Weight::Bold, left, y, full, head);
                 let gap = 0.5 * self.px();
                 self.text(&count.to_string(), Weight::Regular, end + gap, y, self.right() - end - gap, dim);
             }
@@ -541,11 +552,13 @@ impl<'a> Draw<'a> {
                 let (weight, color) = if *first { (Weight::Bold, fg) } else { (Weight::Regular, dim) };
                 self.text(text, weight, left, y, full, color);
             }
+            // the Later group, as a group's name
             Row::Later { text, amber } => {
                 let y = y + m.pad;
+                self.set(m.detail, m.line);
                 let (head, rest) = text.split_at(text.find(" ·").unwrap_or(text.len()));
                 let amber_c = solid(self.theme.yellow);
-                let (hc, rc) = if *amber { (amber_c, amber_c) } else { (fg, dim) };
+                let (hc, rc) = if *amber { (amber_c, amber_c) } else { (self.theme.heading(), dim) };
                 let end = self.text(head, Weight::Bold, left, y, full, hc);
                 self.text(rest, Weight::Regular, end, y, self.right() - end, rc);
             }
@@ -584,21 +597,21 @@ impl<'a> Draw<'a> {
             let r = 0.2 * self.px();
             self.backlog_mark(id_end + 0.25 * self.px() + r, cy, r);
         }
-        // the right side: the risk, a coloured word, then the age
-        let px = self.px();
+        // the right side: the risk, a coloured word, then the age at a detail's size
+        let small = self.m().detail;
         let mut right = self.right();
-        let age_w = self.width(&t.age, Weight::Bold);
+        let age_w = self.fonts.width(&t.age, Weight::Bold, small);
         let age_color = match tone {
             Some(c) => c,
             None if t.stale => solid(self.theme.red),
             None => self.theme.dim(),
         };
         let weight = if t.stale || tone.is_some() { Weight::Bold } else { Weight::Regular };
-        let x = right - self.width(&t.age, weight);
-        self.text(&t.age, weight, x, y, age_w + 1.0, age_color);
+        let x = right - self.fonts.width(&t.age, weight, small);
+        self.text_in(small, &t.age, weight, x, y, age_w + 1.0, age_color);
         right -= age_w;
         if let Some(level) = &t.risk {
-            let gap = if t.age.is_empty() { 0.0 } else { 0.7 * px };
+            let gap = if t.age.is_empty() { 0.0 } else { 0.5 * small };
             let w = self.width(level, Weight::Bold);
             let color = self.theme.risk(level);
             self.text(level, Weight::Bold, right - gap - w, y, w + 1.0, color);
@@ -621,17 +634,17 @@ impl<'a> Draw<'a> {
         }
     }
 
-    /// An ID: dim, or in the foreground when selected, or in `tone` when it's asked
-    /// about. Returns where it ends.
+    /// An ID, at a detail's size on the title's baseline: dim, or semibold in the
+    /// foreground when selected, or in `tone` when it's asked about. Returns where it ends.
     fn id(&mut self, id: &str, selected: bool, tone: Option<[u8; 4]>, y: f32) -> f32 {
-        let x = self.text_x();
-        let w = self.width(id, Weight::Bold);
-        let color = match tone {
-            Some(c) => c,
-            None if selected => self.theme.text(),
-            None => self.theme.dim(),
+        let (x, px) = (self.text_x(), self.m().detail);
+        let (weight, color) = match tone {
+            Some(c) => (Weight::Bold, c),
+            None if selected => (Weight::Bold, self.theme.text()),
+            None => (Weight::Regular, self.theme.dim()),
         };
-        self.text(id, Weight::Bold, x, y, w + 1.0, color)
+        let w = self.fonts.width(id, weight, px);
+        self.text_in(px, id, weight, x, y, w + 1.0, color)
     }
 
     /// An item's row, from its first line's top y.
