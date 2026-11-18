@@ -3,6 +3,7 @@
 
 use crate::agents::running;
 use crate::args::{pos, Arg, Args, Nargs};
+use crate::news::kind::Kind;
 use crate::news::tell_coordinator;
 use crate::saves::save;
 use bullpen_core::json::{self, s};
@@ -33,7 +34,7 @@ pub fn cmd_ask(argv: &[String]) -> Res<i32> {
     ask(&mut t, &question);
     save(&repo, &mut t)?;
     let id = s(&t, "id").to_string();
-    tell_coordinator(&repo, &t, "ask", &format!("{id} needs the person: {question}"))?;
+    tell_coordinator(&repo, &t, Kind::Ask, &format!("{id} needs the person: {question}"))?;
     println!("{id} needs the person now: {question}");
     Ok(0)
 }

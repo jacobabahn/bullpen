@@ -15,6 +15,7 @@
 //! hand here, with re's own rules: (?i)'s case folds, Unicode `\s`, `\d` and `\w`.
 
 use crate::agents::pane;
+use crate::news::kind::Kind;
 use bullpen_core::json::{self, obj, s, truthy, Obj};
 use bullpen_core::paths::{is_word, rex, state};
 use bullpen_core::proc::run;
@@ -199,7 +200,7 @@ pub fn limit_hit(repo: &Repo, t: &mut Obj, who: &str, block: &str, state: &str, 
     if before.is_none() {
         line += ". `bullpen start` refuses meanwhile (`--force` overrides, only if the person asks)";
     }
-    crate::news::say(repo, t, "limit", &line)?;
+    crate::news::say(repo, t, Kind::Limit, &line)?;
     Ok(true)
 }
 

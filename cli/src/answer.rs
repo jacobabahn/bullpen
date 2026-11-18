@@ -10,6 +10,7 @@
 use crate::agents::{pane, running};
 use crate::args::{pos, usage_error, value, Arg, Args, Nargs};
 use crate::coordinators::sees_to;
+use crate::news::kind::Kind;
 use crate::news::{news, Opts};
 use crate::rex::{alive, screen, screen_end};
 use crate::saves::save;
@@ -166,7 +167,7 @@ pub fn cmd_reply(argv: &[String]) -> Res<i32> {
         ..Opts::default()
     };
     let line = format!("{id}: the person answers \"{}\": {text}", clip(&question, 120));
-    news(&repo, &t, "answer", &line, o)?;
+    news(&repo, &t, Kind::Answer, &line, o)?;
     println!("sent {id}'s answer to its coordinator");
     Ok(0)
 }

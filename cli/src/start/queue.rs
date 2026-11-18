@@ -67,7 +67,7 @@ pub fn start_queued(repo: &Repo, by: &Obj, how: &str) -> Res<()> {
             everyone: true,
             ..Opts::default()
         };
-        return news(repo, by, "queue", &line, o);
+        return news(repo, by, Kind::Queue, &line, o);
     }
     let max = repo
         .cfg
@@ -85,7 +85,7 @@ pub fn start_queued(repo: &Repo, by: &Obj, how: &str) -> Res<()> {
         };
         match started {
             Ok(false) => continue, // its setup failed: that has its own news
-            Ok(true) => say(repo, &t, "started", &format!("{id} started ({why})"))?,
+            Ok(true) => say(repo, &t, Kind::Started, &format!("{id} started ({why})"))?,
             Err(Fail(e)) => say(
                 repo,
                 &t,

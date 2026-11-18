@@ -20,6 +20,7 @@ use crate::args::{flag, pos, usage_error, value, Arg, Args, Nargs, SUPPRESS};
 use crate::coordinators::home_of;
 use crate::jobs::{background, Job};
 use crate::modes::task_base_ref;
+use crate::news::kind::Kind;
 use crate::news::read::py_int;
 use crate::news::tell_coordinator;
 use crate::review::close_reviewer;
@@ -463,14 +464,14 @@ pub fn send_comments(repo: &Repo, t: &mut Obj) -> Res<String> {
             path.display()
         );
         let why = "The person's tour comments didn't reach its worker";
-        stop(repo, t, "worker", "not_sent", why, &[line], "not-sent")?;
+        stop(repo, t, "worker", "not_sent", why, &[line], Kind::NotSent)?;
         return Ok(format!(
             "{said} written to {}, but they didn't reach {id}'s worker: its coordinator is told",
             path.display()
         ));
     }
     let text = format!("{id} sent back by the person after the tour: {said}");
-    tell_coordinator(repo, t, "tour-sent", &text)?;
+    tell_coordinator(repo, t, Kind::TourSent, &text)?;
     Ok(format!("sent {said} to {id}'s worker ({})", path.display()))
 }
 

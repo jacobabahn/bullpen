@@ -11,6 +11,7 @@ pub mod start;
 
 use crate::args::{flag, pos, value, Arg, Args, Nargs};
 use crate::coordinators::calling_coordinator;
+use crate::news::kind::Kind;
 use bullpen_core::backlog::{self, is_item_id, is_open, Move};
 use bullpen_core::json::{s, Obj};
 use bullpen_core::repo::{lookup_block, repo_root};
@@ -151,7 +152,7 @@ fn add(repo: &Repo, title: &str, a: &Args, who: &Caller) -> Res<i32> {
             "{} added {id} to the backlog: {title} (`bullpen later {id} --keep` puts it on the list, `--drop` says no)",
             s(t, "id")
         );
-        crate::news::say(repo, t, "later", &text)?;
+        crate::news::say(repo, t, Kind::Later, &text)?;
     }
     pickup::soon(repo);
     Ok(0)

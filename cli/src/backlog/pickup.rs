@@ -159,11 +159,11 @@ fn with_state(repo: &Repo, f: impl FnOnce(&mut Obj) -> Res<()>) -> Res<()> {
 
 /// The news a pickup line goes out as: about the repo, not one task (the task's ID in
 /// the log is the item's or the task's).
-fn say(repo: &Repo, about: &Obj, event: &str, text: &str) -> Res<()> {
+fn say(repo: &Repo, about: &Obj, kind: Kind, text: &str) -> Res<()> {
     news(
         repo,
         about,
-        event,
+        kind,
         text,
         Opts {
             everyone: true,
@@ -203,7 +203,7 @@ fn run(repo: &Repo, st: &mut Obj, items: &[Obj]) -> Res<()> {
                 "Pickup paused: {} wait for a look. Tell the person: it goes on once they have looked",
                 and_list(ids)
             );
-            say(repo, &first, Kind::PickupAsk.into(), &told)?;
+            say(repo, &first, Kind::PickupAsk, &told)?;
             crate::notifications::tell_person(repo, &first, &text);
         }
         // Needed is checked first: the pause ends with the pile, not when something else holds it
@@ -218,7 +218,7 @@ fn run(repo: &Repo, st: &mut Obj, items: &[Obj]) -> Res<()> {
             "Pickup started its {} for today (pickup_per_day): the backlog waits for tomorrow, nothing to do",
             num(repo, "pickup_per_day")
         );
-        say(repo, &item_as_task(&items[0]), Kind::Pickup.into(), &text)?;
+        say(repo, &item_as_task(&items[0]), Kind::Pickup, &text)?;
     }
     if held == Some(Held::NoRoom) {
         forget_asks(st); // the room was taken: the next one asks again
@@ -246,7 +246,7 @@ fn run(repo: &Repo, st: &mut Obj, items: &[Obj]) -> Res<()> {
                  `bullpen later {id} --skip \"why\"`",
                 s(item, "title")
             );
-            say(repo, &about, Kind::PickupAsk.into(), &text)?;
+            say(repo, &about, Kind::PickupAsk, &text)?;
         }
         if !sees_to(repo, &about)?.is_empty() {
             st.insert("waits".into(), json!(id));
@@ -293,7 +293,7 @@ fn unanswered(repo: &Repo, st: &mut Obj, item: &Obj) -> Res<()> {
          `bullpen later {id} --brief-file <f>`, or `bullpen later {id} --skip \"why\"` to pass over it"
     );
     let about = item_as_task(item);
-    say(repo, &about, Kind::PickupAsk.into(), &text)?;
+    say(repo, &about, Kind::PickupAsk, &text)?;
     crate::notifications::tell_person(repo, &about, &text);
     Ok(())
 }
@@ -349,13 +349,13 @@ fn start(repo: &Repo, item: &Obj, session: &str) -> Res<()> {
         Ok(true) => say(
             repo,
             &t,
-            "started",
+            Kind::Started,
             &format!("{tid} started by itself from the backlog ({id}: {})", s(item, "title")),
         ),
         Err(Fail(e)) => say(
             repo,
             &t,
-            Kind::PickupAsk.into(),
+            Kind::PickupAsk,
             &format!(
                 "{id} is {tid} now, but it didn't start: {}. `bullpen start {tid}` tries again",
                 clip(&e, 200)

@@ -8,6 +8,7 @@
 
 use crate::args::{pos, value, Arg, Args, Nargs};
 use crate::guide::unified_diff;
+use crate::news::kind::Kind;
 use crate::review::close_reviewer;
 use crate::rex::{alive, type_to_worker};
 use crate::rules::task_rules;
@@ -261,7 +262,7 @@ fn tell(repo: &Repo, t: &mut Obj, msg: &str) -> Res<Told> {
         };
         // nobody is on it now: its coordinator's, not a review with no reviewer
         let stopped = "Its brief changed, but that didn't reach its worker";
-        stop(repo, t, "worker", "not_sent", stopped, &[], "not-sent")?;
+        stop(repo, t, "worker", "not_sent", stopped, &[], Kind::NotSent)?;
         return Ok(Told::ReviewStopped(why));
     }
     if !alive(s(t, "session"), s(t, "block"))? {
