@@ -115,3 +115,17 @@ fn old_logs_events_read_as_they_did() {
         assert!(Kind::of_event(e).unwrap().wakes(), "{e}");
     }
 }
+
+#[test]
+fn each_row_of_the_guides_table_is_listed_once_and_every_kinds_row_is_one() {
+    let cells: Vec<&str> = ROWS.iter().map(|r| r.cell().unwrap()).collect();
+    for (i, c) in cells.iter().enumerate() {
+        assert!(!cells[..i].contains(c), "{c}");
+    }
+    for &k in ALL {
+        match k.row().cell() {
+            Some(c) => assert!(cells.contains(&c), "{k:?}"),
+            None => assert!(matches!(k.row(), Row::Own { .. }), "{k:?}"),
+        }
+    }
+}

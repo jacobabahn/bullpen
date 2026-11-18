@@ -127,7 +127,34 @@ pub enum Row {
     Own { asks: bool },
 }
 
+/// The rows of the guide's table, in its order (but its last, `anything else`: a line
+/// that fits none has to say what to do itself). NotRebased shares Done's row.
+pub const ROWS: &[Row] = &[
+    Row::Triage,
+    Row::NeedsPerson,
+    Row::Answer,
+    Row::Report,
+    Row::Done,
+    Row::BothChanged,
+];
+
 impl Row {
+    /// The first cell of its row in the guide's table, as the guide words it (a test
+    /// holds the guide to these), or None for a line that says what to do itself.
+    pub fn cell(self) -> Option<&'static str> {
+        Some(match self {
+            Row::Triage => "starts `For the coordinator:`",
+            Row::NeedsPerson => "says a task `needs the person`, or is at a prompt",
+            Row::Answer => "has the person's answer to your `ask` (`BP-3: ...`)",
+            Row::Report => "`is ready`, `finished` or auto-accepted",
+            Row::Done | Row::NotRebased => {
+                "`accepted`, `closed`, `dropped`, `started`, `working again`, `sent back`, `After BP-3: ...`"
+            }
+            Row::BothChanged => "two tasks `both changed` a file",
+            Row::Own { .. } => return None,
+        })
+    }
+
     /// Does a line in this row ask the coordinator to do something?
     pub fn asks(self) -> bool {
         !matches!(self, Row::Done | Row::Own { asks: false })
@@ -330,6 +357,27 @@ impl Kind {
             | Kind::Board => true,
         }
     }
+}
+
+/// `_news_kinds`: the table as JSON, for the tests (support.py's `check_news` looks a
+/// logged line's row up by its event; test_guide.py holds the guide's table to `rows`).
+pub fn cmd_news_kinds(argv: &[String]) -> bullpen_core::Res<i32> {
+    crate::args::Args::parse("_news_kinds", argv, &[]);
+    let kinds = ALL
+        .iter()
+        .map(|k| {
+            serde_json::json!({
+                "event": k.event(),
+                "row": k.row().cell(),
+                "asks": k.row().asks(),
+                "wakes": k.wakes(),
+            })
+        })
+        .collect();
+    let rows = ROWS.iter().map(|r| r.cell().into()).collect();
+    let table = serde_json::json!({"rows": serde_json::Value::Array(rows), "kinds": serde_json::Value::Array(kinds)});
+    println!("{}", bullpen_core::json::dumps(&table));
+    Ok(0)
 }
 
 impl From<Kind> for &'static str {
