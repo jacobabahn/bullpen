@@ -100,7 +100,7 @@ class GuideSectionsTest(BullpenTest):
                       "(bob). `bullpen issue 12` shows one.",
                       "Read it with `bullpen issue N`, never with `gh` or on the web.",
                       "Look at the code it touches",
-                      "`bullpen issue 12 --score clear,small,low --area lua/watch.lua --why",
+                      "`bullpen issue 12 --score clear,small,low,yes --area lua/watch.lua --why",
                       "Write the brief in your own words",
                       "makes it high risk, and you ask the person.",
                       "tell the person in one line",

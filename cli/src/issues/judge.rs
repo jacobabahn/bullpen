@@ -1,8 +1,8 @@
 //! The coordinator's judgement of an issue (docs/issues.md, "Judging one"): `bullpen
-//! issue N --score clarity,size,risk --why "..." [--area ...] [--brief-file FILE]`. The
-//! score is three words from short lists; bullpen, not the coordinator, says whether
-//! the issue is trusted (trust.rs). A trusted issue whose score is within `issues_start`
-//! goes on the list (`kept`), so pickup starts it like any item; any other stays asking
+//! issue N --score clarity,size,risk,worth --why "..." [--area ...] [--brief-file FILE]`.
+//! The score is four words from short lists; bullpen, not the coordinator, says whether
+//! the issue is trusted (trust.rs). A trusted issue worth doing (`yes`) whose score is
+//! within `issues_start` goes on the list (`kept`), so pickup starts it like any item; any other stays asking
 //! the person, and the coordinators get one line with its score and why. A brief given
 //! here (or to an issue's item with `later --brief-file`) is the coordinator's, with the
 //! issue quoted at its end, fenced (`with_quote`).
@@ -23,6 +23,7 @@ use serde_json::{json, Value};
 pub const CLARITY: [&str; 2] = ["clear", "vague"];
 pub const SIZE: [&str; 3] = ["small", "medium", "large"];
 pub const RISK: [&str; 2] = ["low", "high"];
+pub const WORTH: [&str; 3] = ["yes", "unsure", "no"];
 
 /// The coordinator's score of an issue: a word from each list.
 #[derive(Debug, Clone, PartialEq)]
@@ -30,51 +31,72 @@ pub struct Score {
     pub clarity: String,
     pub size: String,
     pub risk: String,
+    /// is it worth doing at all: only `yes` can start by itself
+    pub worth: String,
 }
 
 impl Score {
-    /// "clear, small, low"
+    /// "clear, small, low, worth doing: yes"
     pub fn said(&self) -> String {
-        format!("{}, {}, {}", self.clarity, self.size, self.risk)
+        format!(
+            "{}, {}, {}, worth doing: {}",
+            self.clarity, self.size, self.risk, self.worth
+        )
     }
 }
 
-/// `--score`'s words, `clear,small,low`; else what's wrong, with the lists.
+/// `--score`'s words, `clear,small,low,yes`; else what's wrong, with the lists.
 pub fn parse_score(given: &str) -> Result<Score, String> {
     let words: Vec<String> = given.split(',').map(|w| strip(w).to_ascii_lowercase()).collect();
     let lists = format!(
-        "--score is three words, clarity,size,risk: clarity {}; size {}; risk {} (`--score clear,small,low`)",
+        "--score is four words, clarity,size,risk,worth: clarity {}; size {}; risk {}; worth (is it worth doing) \
+         {} (`--score clear,small,low,yes`)",
         CLARITY.join(" or "),
         SIZE.join(", ").replacen(", large", " or large", 1),
-        RISK.join(" or ")
+        RISK.join(" or "),
+        WORTH.join(", ").replacen(", no", " or no", 1)
     );
-    let [c, z, r] = words.as_slice() else {
+    let [c, z, r, w] = words.as_slice() else {
         return Err(lists);
     };
-    if !CLARITY.contains(&c.as_str()) || !SIZE.contains(&z.as_str()) || !RISK.contains(&r.as_str()) {
+    let fits = CLARITY.contains(&c.as_str())
+        && SIZE.contains(&z.as_str())
+        && RISK.contains(&r.as_str())
+        && WORTH.contains(&w.as_str());
+    if !fits {
         return Err(lists);
     }
     Ok(Score {
         clarity: c.clone(),
         size: z.clone(),
         risk: r.clone(),
+        worth: w.clone(),
     })
 }
 
-/// Is the score within issues_start (`off`, `small`, `medium`)? Trust is asked apart.
+/// Is the score within issues_start (`off`, `small`, `medium`)? Only one worth doing
+/// (`yes`) can be. Trust is asked apart.
 pub fn within(score: &Score, start: &str) -> bool {
     let sizes: &[&str] = match start {
         "small" => &["small"],
         "medium" => &["small", "medium"],
         _ => return false,
     };
-    score.clarity == "clear" && score.risk == "low" && sizes.contains(&score.size.as_str())
+    score.worth == "yes" && score.clarity == "clear" && score.risk == "low" && sizes.contains(&score.size.as_str())
 }
 
 /// Why an issue still asks the person, when it does: None when it starts by itself.
 pub fn why_it_asks(score: &Score, start: &str, trust: &Trust) -> Option<String> {
     if start == "off" {
         return Some("issues_start is off: every issue asks the person".into());
+    }
+    if score.worth != "yes" {
+        let think = if score.worth == "no" {
+            "doesn't think it's worth doing"
+        } else {
+            "isn't sure it's worth doing"
+        };
+        return Some(format!("the coordinator {think}"));
     }
     if !within(score, start) {
         let what = if start == "medium" {
@@ -87,6 +109,14 @@ pub fn why_it_asks(score: &Score, start: &str, trust: &Trust) -> Option<String> 
         ));
     }
     (!trust.yes).then(|| trust.why.clone())
+}
+
+/// A judgement's score in words. One judged before the fourth word counts as unsure.
+pub fn score_of(judged: &Obj) -> String {
+    match s(judged, "score") {
+        sc if sc.is_empty() || sc.contains("worth doing") => sc.to_string(),
+        sc => format!("{sc}, worth doing: unsure"),
+    }
 }
 
 fn issues_start(repo: &Repo) -> String {
@@ -106,7 +136,7 @@ pub fn judge(repo: &Repo, n: u32, a: &Args) -> Res<i32> {
     let why = a.opt("--why").map(|w| text::line(w, 200)).filter(|w| !w.is_empty());
     let area = a.opt("--area").map(|w| text::line(w, 200)).filter(|w| !w.is_empty());
     if score.is_none() && (why.is_some() || area.is_some()) {
-        return fail("--why and --area go with --score: `bullpen issue 12 --score clear,small,low --why \"...\"`");
+        return fail("--why and --area go with --score: `bullpen issue 12 --score clear,small,low,yes --why \"...\"`");
     }
     if score.is_some() && why.is_none() {
         return fail("--score needs --why: one line on what the issue is and why you scored it so");
@@ -128,7 +158,7 @@ pub fn judge(repo: &Repo, n: u32, a: &Args) -> Res<i32> {
     let brief = brief.map(|b| with_quote(&b, &issue));
     let start = issues_start(repo);
     let judged = score.as_ref().zip(trust.as_ref()).map(|(sc, t)| {
-        json!({"score": sc.said(), "area": area, "why": why, "trusted": t.yes, "trust": t.why, "at": iso_now()})
+        json!({"score": sc.said(), "worth": sc.worth, "area": area, "why": why, "trusted": t.yes, "trust": t.why, "at": iso_now()})
     });
     let asks = score
         .as_ref()
@@ -235,11 +265,11 @@ fn outcome(repo: &Repo, item: &Obj, was: &str, by_itself: bool, asks: &Option<St
 }
 
 /// The news line for an issue that still asks the person: its item, score and why, and
-/// why it asks. Never the issue's text: its title is the item's, clipped when it was read.
+/// why it asks, so the person reads the coordinator's opinion in one line. Never the issue's text: its title is the item's, clipped when it was read.
 fn tell(repo: &Repo, item: &Obj, score: &Score, why: &str, asks: &str) -> Res<()> {
     let id = s(item, "id");
     let text = format!(
-        "{id} {}: {}, {why}. It asks the person ({asks}): ask them in a line whether they want it. `bullpen later \
+        "{id} {}: {}. Why: {why}. It asks the person ({asks}): ask them in a line whether they want it. `bullpen later \
          {id} --keep` is yes, `bullpen later {id} --drop \"why\"` no",
         s(item, "title"),
         score.said()

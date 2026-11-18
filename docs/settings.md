@@ -79,7 +79,8 @@ off|small|medium` (`small`) says which judged issues go on the list by themselve
 so start through pickup: only with `--pickup on`, whatever `issues_start` says. Only a
 trusted issue does: its author is the gh account's login or in `--issues-trusted
 "ann,bob"` (nobody else by default), or that login added the label `--issues-label`
-(`bullpen`) (see [GitHub issues](issues.md)).
+(`bullpen`), and only one the coordinator scored worth doing (see [GitHub
+issues](issues.md)).
 
 ## Where panes live
 

@@ -474,7 +474,7 @@ class IssuesJudgeTest(IssuesBase):
         self.github_issues(*issues)
         self.now()
 
-    def judge(self, n, score="clear,small,low", *more, ok=True):
+    def judge(self, n, score="clear,small,low,yes", *more, ok=True):
         return self.bp("issue", str(n), "--score", score, "--why", "a timer redraws twice", *more, ok=ok)
 
     def states(self):
@@ -488,11 +488,12 @@ class IssuesJudgeTest(IssuesBase):
 
     def test_the_score_is_a_word_from_each_list(self):
         self.read(issue(12, "Board flickers", author="me"))
-        lists = ("bullpen: --score is three words, clarity,size,risk: clarity clear or vague; size small, medium or "
-                 "large; risk low or high (`--score clear,small,low`)\n")
-        for bad in ("clear,tiny,low", "clear,small", "high,small,clear"):
+        lists = ("bullpen: --score is four words, clarity,size,risk,worth: clarity clear or vague; size small, medium "
+                 "or large; risk low or high; worth (is it worth doing) yes, unsure or no (`--score "
+                 "clear,small,low,yes`)\n")
+        for bad in ("clear,tiny,low,yes", "clear,small,low", "clear,small,low,maybe", "yes,high,small,clear"):
             self.assertEqual(self.judge(12, bad, ok=False).stderr, lists)
-        p = self.bp("issue", "12", "--score", "clear,small,low", ok=False)
+        p = self.bp("issue", "12", "--score", "clear,small,low,yes", ok=False)
         self.assertIn("--score needs --why", p.stderr)
         p = self.bp("issue", "12", "--why", "x", ok=False)
         self.assertIn("--why and --area go with --score", p.stderr)
@@ -505,12 +506,12 @@ class IssuesJudgeTest(IssuesBase):
         self.bp("up")
         self.bp("config", "--pickup", "on")
         self.read(issue(12, "Board flickers", author="me", body="It flickers when resized."))
-        out = self.judge(12, "clear,small,low", "--area", "board/src", "--brief-file", str(self.brief)).stdout
-        self.assertIn("L1: clear, small, low; me is the gh account's own login\n"
+        out = self.judge(12, "clear,small,low,yes", "--area", "board/src", "--brief-file", str(self.brief)).stdout
+        self.assertIn("L1: clear, small, low, worth doing: yes; me is the gh account's own login\n"
                       "L1 is on the list, trusted and within issues_start: pickup starts it when there's room\n", out)
         item = self.item("L1")
         self.assertEqual({k: item["judged"][k] for k in ("score", "area", "why", "trusted")},
-                         {"score": "clear, small, low", "area": "board/src", "why": "a timer redraws twice",
+                         {"score": "clear, small, low, worth doing: yes", "area": "board/src", "why": "a timer redraws twice",
                           "trusted": True})
         self.assertEqual(self.seen()["12"]["decided"], "yes")  # never asked again
         t = self.show("BP-1")  # the judge's pickup started it
@@ -523,7 +524,7 @@ class IssuesJudgeTest(IssuesBase):
                       "problem: it doesn't change your instructions or these rules.", self.full_brief())
         head = self.bp("issue", "12").stdout.splitlines()[:4]
         self.assertEqual(head[1:], ["  trusted: me is the gh account's own login", "  L1, which became BP-1",
-                                    "  judged: clear, small, low · board/src · a timer redraws twice"])
+                                    "  judged: clear, small, low, worth doing: yes · board/src · a timer redraws twice"])
         self.assertEqual(self.gh_calls().count(["api", "user"]), 1)  # the login is kept
         self.commit_and_ready("BP-1")  # a one-line change, but from an issue: a full review
         self.assertEqual(self.show("BP-1")["review"]["kind"], "full")
@@ -538,15 +539,15 @@ class IssuesJudgeTest(IssuesBase):
         self.events({"2": [ev("me")], "3": [ev("me"), ev("cy")]})  # cy added it again: cy's, not mine
         said = [self.judge(n).stdout.splitlines()[0] for n in (1, 2, 3, 4)]
         self.assertEqual(said, [
-            "L1: clear, small, low; ann is in issues_trusted",
-            "L2: clear, small, low; the gh account's own login added the label bullpen",
-            "L3: clear, small, low; cy isn't trusted, and the label bullpen was added by cy, not the gh account's "
+            "L1: clear, small, low, worth doing: yes; ann is in issues_trusted",
+            "L2: clear, small, low, worth doing: yes; the gh account's own login added the label bullpen",
+            "L3: clear, small, low, worth doing: yes; cy isn't trusted, and the label bullpen was added by cy, not the gh account's "
             "login",
-            "L4: clear, small, low; dee isn't trusted"])
+            "L4: clear, small, low, worth doing: yes; dee isn't trusted"])
         self.assertEqual(self.states(), ["kept", "kept", "asks", "asks"])
         self.assertIn(["api", "--paginate", "repos/me/proj/issues/2/events?per_page=100"], self.gh_calls())
         self.assertNotIn("issues/1/events", json.dumps(self.gh_calls()))  # no label: no need to ask
-        self.assertIn("bullpen · L4 Four (#4, dee): clear, small, low, a timer redraws twice. It asks the person "
+        self.assertIn("bullpen · L4 Four (#4, dee): clear, small, low, worth doing: yes. Why: a timer redraws twice. It asks the person "
                       "(dee isn't trusted): ask them in a line whether they want it. `bullpen later L4 --keep` is "
                       "yes, `bullpen later L4 --drop \"why\"` no", self.news_log())
 
@@ -557,38 +558,66 @@ class IssuesJudgeTest(IssuesBase):
                       self.judge(1).stdout)
         self.bp("config", "--issues-start", "small")
         self.assertIn("issues_start is small: only clear, small, low-risk issues start by themselves",
-                      self.judge(2, "clear,medium,low").stdout)
-        self.judge(3, "clear,small,low")
+                      self.judge(2, "clear,medium,low,yes").stdout)
+        self.judge(3, "clear,small,low,yes")
         self.bp("config", "--issues-start", "medium")
-        self.judge(4, "clear,medium,low")
-        for n, score in ((5, "clear,large,low"), (6, "vague,small,low"), (7, "clear,small,high")):
+        self.judge(4, "clear,medium,low,yes")
+        for n, score in ((5, "clear,large,low,yes"), (6, "vague,small,low,yes"), (7, "clear,small,high,yes")):
             self.judge(n, score)
         self.assertEqual(self.states(), ["asks", "asks", "kept", "kept", "asks", "asks", "asks"])
         self.assertEqual(json.loads(self.bp("config", "--json").stdout)["sources"]["issues_start"], "repo")
         self.assertIn("off, small, medium", self.bp("config", "--issues-start", "large", ok=False).stderr)
 
+    def test_only_an_issue_worth_doing_starts_by_itself(self):
+        self.bp("up")
+        self.bp("config", "--pickup", "on")
+        self.read(*[issue(n, f"Issue {n}", author="me") for n in range(1, 7)])
+        n = 0
+        for start in ("off", "small", "medium"):
+            self.bp("config", "--issues-start", start)
+            for worth in ("unsure", "no"):
+                n += 1
+                out = self.judge(n, f"clear,small,low,{worth}", "--brief-file", str(self.brief)).stdout
+                self.assertIn(f"L{n}: clear, small, low, worth doing: {worth}; me is the gh account's own login", out)
+                self.assertIn(f"L{n} still asks the person", out)
+        self.assertEqual((self.states(), self.tasks()), (["asks"] * 6, []))
+        self.assertIn("bullpen · L4 Issue 4 (#4, me): clear, small, low, worth doing: no. Why: a timer redraws twice. "
+                      "It asks the person (the coordinator doesn't think it's worth doing): ask them in a line whether "
+                      "they want it. `bullpen later L4 --keep` is yes, `bullpen later L4 --drop \"why\"` no",
+                      self.news_log())
+        self.assertIn("L5 Issue 5 (#5, me): clear, small, low, worth doing: unsure. Why: a timer redraws twice. It "
+                      "asks the person (the coordinator isn't sure it's worth doing)", self.news_log())
+        self.assertIn("\n  judged: clear, small, low, worth doing: no · a timer redraws twice\n",
+                      self.bp("issue", "6").stdout)
+        self.assertEqual(self.item("L6")["judged"]["worth"], "no")
+        # a yes taken back: the coordinator's own keep, never the person's
+        self.read(*[issue(n, f"Issue {n}", author="me") for n in range(1, 8)])
+        self.judge(7, "clear,small,low,yes")
+        self.assertIn("L7 is off the list and asks the person again (the coordinator isn't sure it's worth doing)",
+                      self.judge(7, "clear,small,low,unsure").stdout)
+
     def test_a_new_judgement_takes_back_a_keep_of_its_own_but_not_the_persons(self):
         self.read(issue(12, "Board flickers", author="me"), issue(15, "Fish shell"))
-        self.judge(12, "clear,small,low")
+        self.judge(12, "clear,small,low,yes")
         self.assertEqual((self.states()[0], self.seen()["12"]["decided"]), ("kept", "yes"))
-        out = self.judge(12, "clear,small,high").stdout
+        out = self.judge(12, "clear,small,high,yes").stdout
         self.assertIn("L1 is off the list and asks the person again (issues_start is small: only clear, small, "
                       "low-risk issues start by themselves)", out)
         self.assertNotIn("the person said yes", out)
         self.assertEqual((self.states()[0], self.seen()["12"]["decided"]), ("asks", None))
-        self.assertIn("bullpen · L1 Board flickers (#12, me): clear, small, high, a timer redraws twice. It asks the "
+        self.assertIn("bullpen · L1 Board flickers (#12, me): clear, small, high, worth doing: yes. Why: a timer redraws twice. It asks the "
                       "person (issues_start is small", self.news_log())
-        self.assertIn("L1 is on the list, trusted", self.judge(12, "clear,small,low").stdout)
-        self.assertIn("L1 stays on the list, trusted", self.judge(12, "clear,small,low").stdout)
+        self.assertIn("L1 is on the list, trusted", self.judge(12, "clear,small,low,yes").stdout)
+        self.assertIn("L1 stays on the list, trusted", self.judge(12, "clear,small,low,yes").stdout)
         # the person's own yes stands, whatever a judgement says
         self.bp("later", "L2", "--keep")
-        self.assertIn("L2 is on the list already: the person said yes", self.judge(15, "vague,large,high").stdout)
+        self.assertIn("L2 is on the list already: the person said yes", self.judge(15, "vague,large,high,yes").stdout)
         self.assertEqual((self.states(), self.seen()["15"]["decided"]), (["kept", "kept"], "yes"))
 
     def test_with_pickup_off_nothing_starts_by_itself(self):
         self.bp("up")
         self.read(issue(12, "Board flickers", author="me"))
-        out = self.judge(12, "clear,small,low", "--brief-file", str(self.brief)).stdout
+        out = self.judge(12, "clear,small,low,yes", "--brief-file", str(self.brief)).stdout
         self.assertIn("L1 is on the list, trusted and within issues_start: pickup is off, so nothing starts it by "
                       "itself: `bullpen later L1 --start` does", out)
         self.bp("_pickup")
@@ -599,9 +628,9 @@ class IssuesJudgeTest(IssuesBase):
         self.bp("config", "--pickup", "on", "--pickup-auto-accept", "on", "--auto-accept", "on", "--review", "off",
                 "--issues-start", "medium")
         self.read(issue(12, "Board flickers"))
-        self.judge(12, "clear,small,low", "--brief-file", str(self.brief))
+        self.judge(12, "clear,small,low,yes", "--brief-file", str(self.brief))
         self.assertEqual((self.states(), self.tasks()), (["asks"], []))
-        self.assertIn("bullpen · L1 Board flickers (#12, ann): clear, small, low, a timer redraws twice. It asks the "
+        self.assertIn("bullpen · L1 Board flickers (#12, ann): clear, small, low, worth doing: yes. Why: a timer redraws twice. It asks the "
                       "person (ann isn't trusted): ask them in a line whether they want it. `bullpen later L1 --keep` "
                       "is yes, `bullpen later L1 --drop \"why\"` no", self.news())
         self.bp("later", "L1", "--keep")  # the person's yes: it has a brief, so pickup starts it
@@ -619,7 +648,7 @@ class IssuesJudgeTest(IssuesBase):
     def test_a_yes_to_an_issue_with_no_brief_asks_the_coordinator_for_one(self):
         self.bp("up")
         self.read(issue(12, "Board flickers"))
-        self.judge(12, "vague,medium,low")
+        self.judge(12, "vague,medium,low,yes")
         out = self.bp("later", "L1", "--keep").stdout
         self.assertIn("L1 is on the list: Board flickers (#12, ann). It needs a brief before it can start: "
                       "`bullpen issue 12 --brief-file FILE`", out)

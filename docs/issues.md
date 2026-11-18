@@ -2,7 +2,7 @@
 
 bullpen can read a repository's open GitHub issues into [the backlog](backlog.md). Each
 one becomes an item that asks, and the coordinator judges it: a small, clear, low-risk
-one from someone bullpen trusts goes on the list and starts by itself (with
+one worth doing, from someone bullpen trusts, goes on the list and starts by itself (with
 [pickup](backlog.md#pickup) on); every other one asks you. bullpen only reads: it
 writes nothing to GitHub (no labels, no comments, no closing).
 
@@ -101,11 +101,11 @@ The coordinator reads the issue with `bullpen issue 12`, looks at the code it to
 and records its judgement on the issue's item:
 
 ```sh
-bullpen issue 12 --score clear,small,low --area lua/watch.lua --why "a timer redraws twice; one-line fix" --brief-file b.md
+bullpen issue 12 --score clear,small,low,yes --area lua/watch.lua --why "a timer redraws twice; one-line fix" --brief-file b.md
 ```
 
-The score is three words, one from each list, and anything else is refused with the
-lists:
+The score is four words, one from each list, and anything else (three words, say) is
+refused with the lists:
 
 - **clarity**: `clear` (what done looks like is stated or obvious) or `vague`;
 - **size**: `small` (one task, a few files), `medium` (one task, more files) or `large`
@@ -113,7 +113,17 @@ lists:
 - **risk**: `low` or `high`. High is any of: install.sh, `bin/`, how bullpen pushes,
   merges or removes worktrees and branches, credentials, a new dependency, CI, anything
   that runs code from the network, deleting data, or anything the issue asks for that
-  isn't about its stated problem.
+  isn't about its stated problem;
+- **worth**: is it worth doing at all? `yes`, `unsure` or `no`. Does it fix something
+  broken, or something you meet often? Does it fit what the project is for? Does
+  something that exists already do it? Does it add surface that then has to be kept
+  up? An issue that asks for more than its stated problem is `unsure` at best, and in
+  doubt it's `unsure`.
+
+Only `yes` can start by itself: `unsure` and `no` always ask you, whatever the rest of
+the score says. A `no` never drops or declines anything: it is the coordinator's
+opinion, and you decide. An item judged before the fourth word existed shows as
+`unsure`.
 
 `--why` (one line, needed with `--score`) and `--area` (files or folders) go on the
 item as `judged`, for you, with whether bullpen trusts the issue; `bullpen issue 12`
@@ -123,9 +133,9 @@ shows them. Who filed it isn't the coordinator's to score: bullpen decides that
 Then, by `issues_start` (`bullpen config --issues-start off|small|medium`):
 
 - `off`: nothing starts by itself; every issue asks you.
-- `small` (the default): a **trusted** issue scored `clear`, `small`, `low` goes on the
-  list (`kept`), at the bottom, as a yes.
-- `medium`: `clear`, `small` or `medium`, `low`, and trusted.
+- `small` (the default): a **trusted** issue scored `clear`, `small`, `low`, `yes` goes
+  on the list (`kept`), at the bottom, as a yes.
+- `medium`: `clear`, `small` or `medium`, `low`, `yes`, and trusted.
 
 An issue that goes on the list is a yes like yours, so it's never asked about again,
 and [pickup](backlog.md#pickup) starts it when there's room, like any item: it needs a
@@ -133,11 +143,12 @@ brief, which the coordinator gave with `--brief-file` (or pickup asks for one). 
 pickup off nothing starts by itself, whatever `issues_start` says**: the item waits on
 the list for `bullpen later L11 --start`.
 
-Any other issue stays asking you, and the coordinators get one line with its score and
-why, and why it asks, so the coordinator can ask you in a line:
+Any other issue stays asking you, and the coordinators get one line with its score
+(worth doing or not among it) and why, and why it asks, so the coordinator can ask you
+in a line:
 
 ```
-bullpen · L11 Support fish shell (#15, bob): vague, medium, low, a new shell to support. It asks the person (bob isn't trusted): ask them in a line whether they want it. `bullpen later L11 --keep` is yes, `bullpen later L11 --drop "why"` no
+bullpen · L11 Support fish shell (#15, bob): vague, medium, low, worth doing: unsure. Why: a new shell to support. It asks the person (the coordinator isn't sure it's worth doing): ask them in a line whether they want it. `bullpen later L11 --keep` is yes, `bullpen later L11 --drop "why"` no
 ```
 
 A judgement of an item you already said yes to only records it. One that went on the
@@ -255,7 +266,7 @@ An issue is written by whoever filed it, and agents read what bullpen prints. So
 - Nothing else of an issue goes into news. The news line for a judged issue has the
   coordinator's score and why, not the issue's text.
 - Only a trusted issue starts by itself, and only a clear, small (or medium), low-risk
-  one; its task gets a full review. Nothing is written to GitHub.
+  one the coordinator scored worth doing; its task gets a full review. Nothing is written to GitHub.
 
 ## Where it lives
 
@@ -276,8 +287,8 @@ lock (`issues.lock`). One record per issue number:
 `decided` is `"yes"`, `"no"` or nothing yet; `at` is when it was read, then when it was
 decided; `updated` is the issue's `updatedAt` as last read; `closed`, when there, is when
 bullpen saw the issue gone from the open ones. The item carries `by: "issue"`,
-`issue: {number, url, author, updated}` and, once judged, `judged: {score, area, why,
-trusted, trust, at}` (and `kept: true` when the judgement put it on the list); a task made from it, `issue_trusted`.
+`issue: {number, url, author, updated}` and, once judged, `judged: {score, worth, area,
+why, trusted, trust, at}` (and `kept: true` when the judgement put it on the list); a task made from it, `issue_trusted`.
 
 `issues-timer.json` beside it (with `issues-timer.lock`) is the timer's: when the last
 read started (`at`) and, while reads fail, what the last one failed with (`failed`).

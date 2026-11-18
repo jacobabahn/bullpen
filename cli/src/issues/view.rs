@@ -16,8 +16,9 @@ const ISSUE: &[Arg] = &[
     pos("number", Nargs::One, "the issue's number, like 12 or #12"),
     value(
         "--score",
-        "C,S,R",
-        "judge it: its clarity (clear, vague), size (small, medium, large) and risk (low, high)",
+        "C,S,R,W",
+        "judge it: its clarity (clear, vague), size (small, medium, large), risk (low, high) and whether it's worth \
+         doing (yes, unsure, no)",
     ),
     value(
         "--why",
@@ -98,7 +99,11 @@ fn head(repo: &Repo, slug: &str, n: u32, issue: &Obj) -> Res<String> {
             "" => String::new(),
             a => format!(" · {a}"),
         };
-        out.push(format!("  judged: {}{area} · {}", s(j, "score"), s(j, "why")));
+        out.push(format!(
+            "  judged: {}{area} · {}",
+            super::judge::score_of(j),
+            s(j, "why")
+        ));
     }
     Ok(out.join("\n"))
 }
