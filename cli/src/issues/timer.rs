@@ -14,6 +14,7 @@
 use super::text;
 use crate::args::{flag as arg_flag, Arg, Args};
 use crate::jobs::{background, Job};
+use crate::news::kind::Kind;
 use crate::news::{news, Opts};
 use bullpen_core::json::{self, s, truthy, Obj};
 use bullpen_core::paths::{self_bin, state};
@@ -143,7 +144,7 @@ fn say(repo: &Repo, text: &str) -> Res<()> {
     news(
         repo,
         &about,
-        "issues",
+        Kind::Issues,
         text,
         Opts {
             everyone: true,

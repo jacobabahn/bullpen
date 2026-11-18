@@ -17,6 +17,7 @@
 
 use crate::args::{flag, Arg, Args};
 use crate::coordinators::{alive, coordinators};
+use crate::news::kind::Kind;
 use crate::news::{follow_cmd, news, Opts};
 use bullpen_core::json::{s, truthy, Obj};
 use bullpen_core::paths::{prompts, state};
@@ -418,7 +419,7 @@ fn tell_repo(r: &mut Repo, says: Option<bool>) -> Res<()> {
             news(
                 r,
                 &task,
-                "guide",
+                Kind::Guide,
                 line,
                 Opts {
                     to,

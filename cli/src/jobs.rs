@@ -11,6 +11,7 @@
 //! output in the log, and says a failure the job didn't say itself. Never start a job
 //! with a bare detached spawn.
 
+use crate::news::kind::Kind;
 use crate::news::{news, Opts};
 use bullpen_core::json::Obj;
 use bullpen_core::repo::repo_root_of;
@@ -242,7 +243,7 @@ fn job_failed(cwd: &Path, tid: Option<&str>, line: &str) -> Res<()> {
     news(
         &repo,
         task.as_ref().unwrap_or(&job),
-        "job",
+        Kind::Job,
         line,
         Opts {
             everyone,

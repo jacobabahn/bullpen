@@ -16,6 +16,7 @@
 
 use crate::args::{usage_error, value, Arg, Args, SUPPRESS};
 use crate::jobs::{background, Job};
+use crate::news::kind::Kind;
 use crate::news::{news, Opts};
 use crate::watcher::restart_watcher;
 use bullpen_core::json::{read_obj, write_obj, Obj};
@@ -47,7 +48,7 @@ pub struct Program {
     pub what: &'static str,
     keeps: &'static str,
     /// the news log's task column and kind for its news
-    news_as: (&'static str, &'static str),
+    news_as: (&'static str, Kind),
 }
 
 pub static CLI: Program = Program {
@@ -56,7 +57,7 @@ pub static CLI: Program = Program {
     crates: &["core", "cli"],
     what: "bullpen's command line",
     keeps: "Commands keep running the old build",
-    news_as: ("bullpen", "build"),
+    news_as: ("bullpen", Kind::Build),
 };
 
 pub static BOARD: Program = Program {
@@ -65,7 +66,7 @@ pub static BOARD: Program = Program {
     crates: &["core", "board"],
     what: "the board",
     keeps: "Boards keep running the old one",
-    news_as: ("board", "board"),
+    news_as: ("board", Kind::Board),
 };
 
 /// The cargo workspace's build folder.

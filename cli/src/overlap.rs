@@ -12,6 +12,7 @@
 
 use crate::coordinators::sees_to;
 use crate::modes::task_base_ref;
+use crate::news::kind::Kind;
 use crate::news::{news, Opts};
 use bullpen_core::json::{py_str, s, truthy, Obj};
 use bullpen_core::task::is_closed;
@@ -159,7 +160,7 @@ fn check_overlaps(repo: &Repo, t: &Obj) -> Res<()> {
         news(
             repo,
             me,
-            "overlap",
+            Kind::Overlap,
             &line,
             Opts {
                 to: whom(repo, me, o)?,

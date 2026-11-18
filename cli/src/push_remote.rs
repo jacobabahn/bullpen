@@ -9,6 +9,7 @@
 
 use crate::args::{pos, value, Arg, Args, Nargs, SUPPRESS};
 use crate::modes::{push_base, push_remote, quiet_git};
+use crate::news::kind::Kind;
 use crate::news::{news, Opts};
 use bullpen_core::json::Obj;
 use bullpen_core::proc::git;
@@ -70,7 +71,7 @@ pub fn cmd_push(argv: &[String]) -> Res<i32> {
     news(
         &repo,
         task.as_ref().unwrap_or(&push_news),
-        "push",
+        Kind::Push,
         &line,
         Opts {
             everyone,
