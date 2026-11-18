@@ -56,3 +56,40 @@ fn a_job_waited_for_writes_its_output_to_the_log() {
     );
     assert!(text.ends_with("out\nerr\n"), "{text}");
 }
+
+#[test]
+fn lines_from_jobs_that_run_at_once_are_whole() {
+    // BP-198: the supervisors' lines and the jobs' output, all appended to one log at once
+    let log = temp("at-once");
+    let dir = log.parent().unwrap().to_path_buf();
+    let long = "y".repeat(3000);
+    let runs: Vec<_> = (0..8)
+        .map(|i| {
+            let (dir, log, long) = (dir.clone(), log.clone(), long.clone());
+            std::thread::spawn(move || {
+                for _ in 0..10 {
+                    let job = Job {
+                        argv: vec!["sh".into(), "-c".into(), format!("echo out{i}"), long.clone()],
+                        cwd: &dir,
+                        log: &log,
+                        what: "Testing".into(),
+                        task: None,
+                        pass_fds: vec![],
+                    };
+                    assert!(background(&job, true).is_some());
+                }
+            })
+        })
+        .collect();
+    for run in runs {
+        run.join().unwrap();
+    }
+    let text = std::fs::read_to_string(&log).unwrap();
+    let start = format!("' {long}");
+    for line in text.lines() {
+        let whole = line.len() == 3 + 1 && line.starts_with("out")
+            || line.contains(" sh -c 'echo out") && line.ends_with(&start) && line.matches('y').count() == 3000;
+        assert!(whole, "a line cut by another: {}", &line[..line.len().min(200)]);
+    }
+    assert_eq!(text.lines().filter(|l| l.starts_with("out")).count(), 80);
+}

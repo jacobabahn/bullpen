@@ -120,7 +120,7 @@ fn supervise(job: &Job, tell: Option<RawFd>) -> Option<u32> {
         }
         return None;
     };
-    let _ = writeln!(f, "{} {}", iso_now(), shell_join(&job.argv));
+    let _ = line_to!(f, "{} {}", iso_now(), shell_join(&job.argv));
     let start = f.metadata().map(|m| m.len()).unwrap_or(0);
     let child = start_job(job, &f);
     let pid = child.as_ref().ok().map(|c| c.id());
@@ -146,7 +146,7 @@ fn supervise(job: &Job, tell: Option<RawFd>) -> Option<u32> {
         }
     }
     if let Some(why) = &why {
-        let _ = writeln!(f, "{} failed: {why}", iso_now());
+        let _ = line_to!(f, "{} failed: {why}", iso_now());
         drop(f);
         let line = format!(
             "{} failed: {why}. Log: {}. Tell the person if it isn't yours to settle",
@@ -155,7 +155,7 @@ fn supervise(job: &Job, tell: Option<RawFd>) -> Option<u32> {
         );
         if let Err(e) = job_failed(job.cwd, job.task, &line) {
             if let Ok(mut f) = OpenOptions::new().append(true).open(log) {
-                let _ = writeln!(f, "{} and saying so failed: {e}", iso_now());
+                let _ = line_to!(f, "{} and saying so failed: {e}", iso_now());
             }
         }
     }

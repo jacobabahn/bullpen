@@ -3,6 +3,9 @@
 //! name bullpen doesn't have is one line (an internal one first catches up with a newer
 //! build: build::catch_up).
 
+#[macro_use]
+mod lines; // first: the eprintln! and println! every module below uses
+
 mod accept;
 mod agents;
 mod answer;
