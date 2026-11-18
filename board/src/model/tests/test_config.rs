@@ -41,3 +41,11 @@ fn the_look_is_text_unless_the_setting_says_image_and_the_font_is_a_path_when_se
     assert_eq!(config(json!({"board_look": "pictures", "board_font": ""})).font, None);
     assert_eq!(config(json!({"board_look": "pictures"})).look, Look::Text);
 }
+
+#[test]
+fn the_text_size_is_the_settings_and_medium_when_unset_or_unknown() {
+    assert_eq!(config(json!({})).text_size, TextSize::Medium);
+    assert_eq!(config(json!({"board_text_size": "small"})).text_size, TextSize::Small);
+    assert_eq!(config(json!({"board_text_size": "large"})).text_size, TextSize::Large);
+    assert_eq!(config(json!({"board_text_size": "huge"})).text_size, TextSize::Medium);
+}

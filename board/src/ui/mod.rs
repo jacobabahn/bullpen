@@ -8,7 +8,7 @@
 pub(crate) mod bottom;
 mod help;
 mod later;
-mod list;
+pub(crate) mod list;
 pub(crate) mod overlay;
 pub(crate) mod rows;
 #[cfg(test)]
@@ -211,9 +211,25 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if let (Layout::Compact, Some(cur)) = (app.cfg.layout, cur) {
         list::draw_panel(buf, area, app, &s, cur, now);
     }
-    if let Some(x) = bottom::draw_bottom(buf, area, app, &s, msg, cur) {
+    // with the image look the bottom rows are an image too, unless something's typed or asked there
+    let foot = if app.view.is_some() { bottom::foot(app, &s, &msg, cur) } else { None };
+    if let Some(foot) = foot {
+        app.view.as_mut().expect("the list's view").foot = Some(foot);
+    } else if let Some(x) = bottom::draw_bottom(buf, area, app, &s, msg, cur) {
         f.set_cursor_position(Position::new(area.x + x as u16, area.y + s.h.saturating_sub(1) as u16));
     }
+}
+
+/// The whole board as `--render` draws it (image::render_file), `w` columns wide: its
+/// top line, all of its list and its key row.
+pub(crate) fn whole(app: &App, w: usize, now: rows::Now) -> crate::image::View {
+    let groups = app.groups();
+    let head = list::head(app, &groups, w);
+    let rows = rows::build(app, w, w < NARROW, now);
+    let keys = bottom::keys(app, app.current());
+    let foot = bottom::Foot { lines: vec![(2, bottom::FootLine::Keys(keys))] };
+    let cols = w.saturating_sub(1) as u16;
+    crate::image::View { rows, detail_cols: app.detail_cols, top: 0, head, foot: Some(foot), col: 0, row0: 0, row: 2, rows_n: 0, foot_n: 3, cols }
 }
 
 #[cfg(test)]

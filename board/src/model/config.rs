@@ -20,6 +20,8 @@ pub struct Config {
     pub look: Look,
     /// the font file the image look draws with, over the built-in one (`--board-font`)
     pub font: Option<std::path::PathBuf>,
+    /// the image look's type size (`--board-text-size`)
+    pub text_size: TextSize,
     pub merge: String,
     /// approved tasks accept themselves (`bullpen config --auto-accept on`)
     pub auto_accept: bool,
@@ -113,6 +115,26 @@ impl Look {
     }
 }
 
+/// The image look's type size (the board_text_size setting): small is a terminal row a
+/// line, as the text list; medium and large are larger, their rows taller than a cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TextSize {
+    Small,
+    Medium,
+    Large,
+}
+
+impl TextSize {
+    /// The size a setting names; one it doesn't know is medium, the default.
+    pub fn named(name: &str) -> TextSize {
+        match name {
+            "small" => TextSize::Small,
+            "large" => TextSize::Large,
+            _ => TextSize::Medium,
+        }
+    }
+}
+
 impl Config {
     /// The repo's settings. A config.json that doesn't parse counts as empty: the board
     /// shows what it can (bullpen's commands say what's wrong).
@@ -143,6 +165,7 @@ impl Config {
         Config {
             layout: if text("board_layout") == "compact" { Layout::Compact } else { Layout::Grouped },
             look: if text("board_look") == "image" { Look::Image } else { Look::Text },
+            text_size: TextSize::named(&text("board_text_size")),
             font: Some(text("board_font")).filter(|f| !f.is_empty()).map(std::path::PathBuf::from),
             merge: text("merge"),
             auto_accept: flag("auto_accept"),

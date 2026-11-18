@@ -1,5 +1,6 @@
 use super::*;
 use crate::image::theme;
+use crate::model::TextSize;
 use crate::ui::rows::{DetailRow, TaskRow};
 
 const GRID: Grid = Grid { cols: 40, cell_w: 10, cell_h: 20 };
@@ -28,8 +29,22 @@ fn rows(rows: Vec<Row>) -> Rows {
     Rows { rows, idw: 5 }
 }
 
+fn canvas(size: TextSize) -> Canvas {
+    Canvas::new(GRID, size, Theme::default())
+}
+
+/// All the rows, in a type size, in an image as tall as they are.
+fn draw_in(r: &Rows, size: TextSize) -> (Laid, Sheet) {
+    let (c, mut fonts) = (canvas(size), Fonts::builtin());
+    let laid = lay(r, &c, &fonts);
+    let h = laid.heights.iter().sum();
+    let sheet = render(r, &laid, 0..r.rows.len(), h, Marks::default(), &c, &mut fonts).unwrap();
+    (laid, sheet)
+}
+
+/// Small type: a row a cell, as the text list's.
 fn draw(r: &Rows) -> Sheet {
-    render(r, 0..r.rows.len(), GRID, &Theme::default(), &mut Fonts::builtin()).unwrap()
+    draw_in(r, TextSize::Small).1
 }
 
 /// The pixels of row i (straight RGBA).
@@ -93,20 +108,89 @@ fn the_colours_are_the_terminals() {
     let mut theme = Theme::default();
     theme.red = theme::Rgb(200, 10, 20);
     let r = rows(vec![Row::Task(TaskRow { risk: Some("high".into()), ..task("BP-1", "todo") })]);
-    let s = render(&r, 0..1, GRID, &theme, &mut Fonts::builtin()).unwrap();
+    let c = Canvas::new(GRID, TextSize::Small, theme);
+    let laid = lay(&r, &c, &Fonts::builtin());
+    let s = render(&r, &laid, 0..1, 20, Marks::default(), &c, &mut Fonts::builtin()).unwrap();
     assert!(has(&row_px(&s, 0), theme.red));
 }
 
 #[test]
-fn a_list_longer_than_the_view_is_drawn_whole_or_the_window_asked_for() {
+fn the_rows_asked_for_are_drawn_from_the_images_top_in_an_image_the_height_asked_for() {
     let many: Vec<Row> = (1..=50).map(|n| Row::Task(task(&format!("BP-{n}"), "todo"))).collect();
     let r = rows(many);
-    let s = draw(&r);
-    assert_eq!(s.pixmap.height(), 50 * 20);
-    let part = render(&r, 10..20, GRID, &Theme::default(), &mut Fonts::builtin()).unwrap();
-    assert_eq!(part.pixmap.height(), 10 * 20);
-    assert_eq!(part.places[0].id.as_deref(), Some("BP-11"));
-    assert_eq!(part.places[0].y, 0);
+    let c = canvas(TextSize::Small);
+    let laid = lay(&r, &c, &Fonts::builtin());
+    let part = render(&r, &laid, 10..20, 240, Marks::default(), &c, &mut Fonts::builtin()).unwrap();
+    assert_eq!(part.pixmap.height(), 240);
+    assert_eq!(part.places.len(), 10);
+    assert_eq!((part.places[0].id.as_deref(), part.places[0].y), (Some("BP-11"), 0));
+}
+
+#[test]
+fn larger_type_makes_taller_rows_with_space_between_tasks_and_a_smaller_detail() {
+    let r = rows(vec![Row::Head { name: "Ready".into(), count: 1 }, Row::Task(task("BP-1", "ready")), detail("what it does", false)]);
+    let small = Metrics::of(TextSize::Small, 20);
+    let (medium, large) = (Metrics::of(TextSize::Medium, 20), Metrics::of(TextSize::Large, 20));
+    assert!(small.title < medium.title && medium.title < large.title);
+    for m in [medium, large] {
+        assert!(m.detail < m.title && m.line > 20.0 && m.pad > 0.0);
+    }
+    let (laid, sheet) = draw_in(&r, TextSize::Medium);
+    let task_h = laid.heights[1];
+    assert_eq!(task_h, (medium.pad + medium.line) as u32);
+    assert!(task_h > 20 && task_h % 20 != 0); // not a whole number of cells
+    assert!(laid.heights[2] < task_h);
+    assert_eq!(sheet.places[2].y, laid.heights[0] + task_h);
+    // small is the text list's: a cell a row
+    assert_eq!(draw_in(&r, TextSize::Small).0.heights, vec![20, 20, 20]);
+}
+
+#[test]
+fn the_selected_tasks_title_wraps_and_another_is_cut_to_its_row() {
+    let long = "a title much too long for one row of a board this narrow, which goes on";
+    let other = TaskRow { title: long.into(), ..task("BP-1", "todo") };
+    let selected = TaskRow { title: long.into(), selected: true, ..task("BP-2", "todo") };
+    let r = rows(vec![Row::Task(other), Row::Task(selected)]);
+    let (laid, _) = draw_in(&r, TextSize::Medium);
+    let m = Metrics::of(TextSize::Medium, 20);
+    assert_eq!(laid.titles[0].len(), 1);
+    assert!(laid.titles[0][0].ends_with('…'));
+    assert!(laid.titles[1].len() > 1 && laid.titles[1].len() <= TITLE_LINES);
+    assert_eq!(laid.heights[1], (m.pad + laid.titles[1].len() as f32 * m.line) as u32);
+    let joined = laid.titles[1].join(" ");
+    assert!(long.starts_with(joined.trim_end_matches('…')));
+}
+
+#[test]
+fn the_rows_that_fit_are_whole_rows_and_one_at_least() {
+    let laid = Laid { heights: vec![30, 30, 30, 30], titles: vec![vec![]; 4], idw: 0.0 };
+    assert_eq!(fitting(&laid, 0, 100), 3);
+    assert_eq!(fitting(&laid, 2, 100), 4);
+    assert_eq!(fitting(&laid, 1, 10), 2); // too tall to fit: cut, but drawn
+}
+
+#[test]
+fn the_scroll_marks_are_drawn_in_the_last_column() {
+    let r = rows(vec![Row::Task(task("BP-1", "todo"))]);
+    let (c, mut fonts) = (canvas(TextSize::Medium), Fonts::builtin());
+    let laid = lay(&r, &c, &fonts);
+    let last_col = |s: &Sheet, (y0, y1): (u32, u32)| {
+        let w = s.pixmap.width();
+        (y0..y1).any(|y| (w - 10..w).any(|x| s.pixmap.pixels()[(y * w + x) as usize].alpha() > 0))
+    };
+    let none = render(&r, &laid, 0..1, 100, Marks::default(), &c, &mut fonts).unwrap();
+    assert!(!last_col(&none, (0, 100)));
+    let both = render(&r, &laid, 0..1, 100, Marks { up: true, down: true }, &c, &mut fonts).unwrap();
+    assert!(last_col(&both, (0, 20)) && last_col(&both, (80, 100)));
+}
+
+#[test]
+fn a_detail_line_holds_more_columns_than_the_texts_where_the_type_is_narrower() {
+    let fonts = Fonts::builtin();
+    // the text list's detail lines hold the board's columns less 5: here 36
+    let cols = |size| detail_cols(&Canvas::new(Grid { cols: 40, cell_w: 10, cell_h: 22 }, size, Theme::default()), &fonts);
+    assert!(cols(TextSize::Small) > cols(TextSize::Medium) && cols(TextSize::Medium) > cols(TextSize::Large));
+    assert!(cols(TextSize::Large) > 20);
 }
 
 #[test]
@@ -124,4 +208,16 @@ fn a_title_too_long_for_the_row_is_cut_with_an_ellipsis() {
     assert!(cut.ends_with('…') && cut.len() < long.len());
     assert!(f.width(&cut, Weight::Regular, 12.0) <= 100.0);
     assert_eq!(f.fit("short", Weight::Regular, 12.0, 100.0), "short");
+}
+
+#[test]
+fn a_title_wraps_at_its_spaces_and_its_last_line_is_cut() {
+    let f = Fonts::builtin();
+    let text = "one two three four five six seven eight nine ten eleven twelve";
+    let lines = f.wrap(text, Weight::Regular, 12.0, (60.0, 90.0), 3);
+    assert_eq!(lines.len(), 3);
+    assert!(f.width(&lines[0], Weight::Regular, 12.0) <= 60.0);
+    assert!(lines[1..].iter().all(|l| f.width(l, Weight::Regular, 12.0) <= 90.0));
+    assert!(lines[2].ends_with('…') && !lines[0].ends_with('…'));
+    assert_eq!(f.wrap("short", Weight::Regular, 12.0, (60.0, 90.0), 3), vec!["short"]);
 }

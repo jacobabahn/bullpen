@@ -7,7 +7,7 @@ use crate::model::{self, fit, width, Action, Task};
 use crate::{App, Kind, Mode};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 /// How many rows a message wraps to, at most.
@@ -44,6 +44,69 @@ pub(crate) fn message(app: &App, w: usize, most: usize) -> Vec<Span<'static>> {
         return vec![span(fit(&format!("{} {id}…{more}", job.doing()), room), dim())];
     }
     vec![]
+}
+
+/// The message and key rows as values, for the image look (image/frame.rs): each line and
+/// the row it's on, counted from the list's foot. None while something is typed or asked
+/// there (a tell, a y/n question, the quit or stale tour question): that stays text.
+pub(super) fn foot(app: &App, s: &Sizes, msg: &[Span<'static>], cur: Option<&Task>) -> Option<Foot> {
+    if app.pending.is_some() || matches!(app.mode, Mode::Tell { .. } | Mode::Quit | Mode::Stale { .. }) {
+        return None;
+    }
+    // a board with no row under its list (too short) keeps them as text
+    if s.h < 3 + s.avail {
+        return None;
+    }
+    // the rows from the list's end (the text's ↓ row on a tall board) to the board's last
+    let last = s.h.saturating_sub(3 + s.avail);
+    let tone = |sp: &Span| match (sp.style.fg, sp.style.add_modifier.contains(Modifier::DIM)) {
+        (Some(Color::Red), _) => Tone::Red,
+        (Some(Color::Green), _) => Tone::Green,
+        (_, true) => Tone::Dim,
+        _ => Tone::Plain,
+    };
+    if s.msg_on_keys {
+        let line = msg.first().map(|m| FootLine::Msg(m.content.to_string(), tone(m)));
+        return Some(Foot { lines: line.into_iter().map(|l| (last as u16, l)).collect() });
+    }
+    let first = last.saturating_sub(msg.len());
+    let mut lines: Vec<(u16, FootLine)> =
+        msg.iter().enumerate().map(|(j, m)| ((first + j) as u16, FootLine::Msg(m.content.to_string(), tone(m)))).collect();
+    lines.push((last as u16, FootLine::Keys(keys(app, cur))));
+    Some(Foot { lines })
+}
+
+/// The selected item's keys, else the selected task's.
+pub(crate) fn keys(app: &App, cur: Option<&Task>) -> Vec<(String, String)> {
+    let keys = match app.current_item() {
+        Some(i) => model::item_keys(i),
+        None => model::task_keys(cur),
+    };
+    keys.into_iter().map(|(k, what)| (k.to_string(), what.to_string())).collect()
+}
+
+/// The bottom rows as values (the image look's): each line and its row.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct Foot {
+    pub lines: Vec<(u16, FootLine)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum FootLine {
+    /// a message row, in its tone
+    Msg(String, Tone),
+    /// the key row: each key and what it does; `?` goes at the right edge
+    Keys(Vec<(String, String)>),
+}
+
+/// A message's colour: bold, bold red (a failure, a risky question), bold green (what
+/// worked), or dim (what's still running).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Tone {
+    Plain,
+    Red,
+    Green,
+    Dim,
 }
 
 /// The Later item whose drop the board is asking about.

@@ -1,20 +1,22 @@
-//! Drawing the board's list as one image: the rows rows.rs describes (the same the
-//! text list draws), a terminal row's height each, so the board scrolls the image by
-//! whole rows as it scrolls the text. The type is real (font.rs), the marks are drawn
-//! shapes in the status colours (rings, a check, a diamond), the selected task sits on
-//! a rounded tint with its ID in a pill, and a task that needs you has a bar at its
-//! left. The marks that turn on the text board stand still here. Nothing here touches
-//! the terminal: given rows and a size in pixels, it returns an image and where each
-//! row is.
+//! Drawing the board's list as an image: the rows rows.rs describes (the same the text
+//! list draws), one under the other, each as tall as the type size makes it (a cell
+//! for small type, more for medium and large), so a row needn't be a whole cell; the
+//! image itself is the list's block of cells. The type is real (font.rs), the marks
+//! are drawn shapes in the status colours (rings, a check, a diamond), the selected
+//! task sits on a rounded tint with its ID in a pill and its whole title, and a task
+//! that needs you has a bar at its left. The marks that turn on the text board stand
+//! still here. The list's last column has the scroll marks. Nothing here touches the
+//! terminal: given rows and a size in pixels, it lays them out and returns an image.
 
 use super::font::{Fonts, Weight};
 use super::theme::{solid, Theme};
+use crate::model::TextSize;
 use crate::ui::rows::{Flag, ItemRow, Mark, Row, Rows, TaskRow};
 use std::f32::consts::PI;
 use std::ops::Range;
 use tiny_skia::{FillRule, LineCap, Paint, Path, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
-/// The list's place on the terminal: its columns, and a cell's size in pixels.
+/// An image's place on the terminal: its columns, and a cell's size in pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Grid {
     pub cols: usize,
@@ -25,6 +27,74 @@ pub struct Grid {
 impl Grid {
     pub fn width(&self) -> u32 {
         self.cols as u32 * self.cell_w
+    }
+}
+
+/// The type's sizes and the space it gets, in pixels, for a text size and a cell.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Metrics {
+    /// a task's title and ID, a heading, the top line
+    pub title: f32,
+    /// a detail line, the message and the keys
+    pub detail: f32,
+    /// a title line's height, and a detail line's
+    pub line: f32,
+    pub detail_line: f32,
+    /// the space above a task (or an item), and above a heading
+    pub pad: f32,
+    pub head_pad: f32,
+    /// the space between groups
+    pub gap: f32,
+}
+
+impl Metrics {
+    /// Small is the terminal's row: every row a cell, as the text list's. Medium and large
+    /// set the type larger than a cell holds and give the rows the height it needs, a
+    /// detail smaller than a title, and space between the tasks.
+    pub fn of(size: TextSize, cell_h: u32) -> Metrics {
+        let ch = cell_h as f32;
+        let (t, d) = match size {
+            TextSize::Small => (0.62, 0.62),
+            // a terminal's own type is about 0.8 of its cell's height
+            TextSize::Medium => (0.80, 0.70),
+            TextSize::Large => (0.92, 0.80),
+        };
+        let (title, detail) = ((t * ch).max(6.0), (d * ch).max(6.0));
+        if size == TextSize::Small {
+            return Metrics { title, detail, line: ch, detail_line: ch, pad: 0.0, head_pad: 0.0, gap: ch };
+        }
+        Metrics {
+            title,
+            detail,
+            line: (1.45 * title).round(),
+            detail_line: (1.38 * detail).round(),
+            pad: (0.35 * title).round(),
+            head_pad: (0.5 * title).round(),
+            gap: (0.45 * ch).round(),
+        }
+    }
+}
+
+/// What an image is drawn on and in: its grid, the type's sizes and the colours.
+#[derive(Debug, Clone, Copy)]
+pub struct Canvas {
+    pub grid: Grid,
+    pub m: Metrics,
+    pub theme: Theme,
+}
+
+impl Canvas {
+    pub fn new(grid: Grid, size: TextSize, theme: Theme) -> Canvas {
+        Canvas { grid, m: Metrics::of(size, grid.cell_h), theme }
+    }
+
+    fn c(&self) -> f32 {
+        self.grid.cell_w as f32
+    }
+
+    /// Where text ends: short of the last column, which has the list's scroll marks.
+    pub fn right(&self) -> f32 {
+        self.grid.width() as f32 - 1.6 * self.c()
     }
 }
 
@@ -48,21 +118,101 @@ pub struct Sheet {
     pub places: Vec<Place>,
 }
 
-/// Draw rows[range] as one image, `grid.cols` columns wide and a row a cell high.
-pub fn render(rows: &Rows, range: Range<usize>, grid: Grid, theme: &Theme, fonts: &mut Fonts) -> Result<Sheet, String> {
+/// The rows laid out: each one's height in pixels, a task's (or an item's) title as the
+/// lines it's drawn on, and the ID column's width.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Laid {
+    pub heights: Vec<u32>,
+    titles: Vec<Vec<String>>,
+    pub idw: f32,
+}
+
+/// The most lines the selected task's title wraps to; any other title is cut to one.
+const TITLE_LINES: usize = 3;
+
+/// Lay the rows out: a title cut to its row, or the selected one's wrapped, and how tall
+/// each row is.
+pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
+    let idw = id_width(rows, fonts, c.m.title);
+    let g = Geo { c: *c, idw };
+    let mut titles = Vec::new();
+    let mut heights = Vec::new();
+    for row in &rows.rows {
+        let (title, selected, weight, right) = match row {
+            Row::Task(t) => (&t.title, t.selected, title_weight(t.asked.is_some()), g.task_right(t, fonts)),
+            Row::Item(i) => (&i.title, i.selected, title_weight(i.asked), c.right()),
+            _ => {
+                titles.push(vec![]);
+                heights.push(g.height(row, 1));
+                continue;
+            }
+        };
+        let px = c.m.title;
+        let x = g.title_x();
+        let first = right - x;
+        let lines = if selected {
+            fonts.wrap(title, weight, px, (first, c.right() - x), TITLE_LINES)
+        } else {
+            vec![fonts.fit(title, weight, px, first)]
+        };
+        heights.push(g.height(row, lines.len().max(1)));
+        titles.push(lines);
+    }
+    Laid { heights, titles, idw }
+}
+
+/// How many columns of text a detail line holds, from under the ID to the right edge:
+/// the image's type is narrower than the terminal's, so its detail lines wrap later
+/// than the text list's. Measured on a typical line, with a little to spare.
+pub fn detail_cols(c: &Canvas, fonts: &Fonts) -> usize {
+    const SAMPLE: &str = "Asks: should the header show the time too? 3 files, +13 −16 · Not toured yet.";
+    let room = c.right() - Geo { c: *c, idw: 0.0 }.text_x();
+    let each = fonts.width(SAMPLE, Weight::Regular, c.m.detail) / SAMPLE.chars().count() as f32;
+    (room / (each * 1.08)).max(1.0) as usize
+}
+
+/// The rows from `top` that fit in `room` pixels whole: [top, end). One at least, cut if
+/// it must be.
+pub fn fitting(laid: &Laid, top: usize, room: u32) -> usize {
+    let mut used = 0;
+    let mut end = top;
+    while end < laid.heights.len() && (end == top || used + laid.heights[end] <= room) {
+        used += laid.heights[end];
+        end += 1;
+    }
+    end
+}
+
+/// Whether there are rows above the image's (↑ at its top right) and below (↓ at its bottom).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Marks {
+    pub up: bool,
+    pub down: bool,
+}
+
+/// Draw rows[range] one under the other, as `laid` lays them out, as an image the grid's
+/// columns wide and `height` pixels high, with the scroll marks.
+pub fn render(rows: &Rows, laid: &Laid, range: Range<usize>, height: u32, marks: Marks, c: &Canvas, fonts: &mut Fonts) -> Result<Sheet, String> {
     let range = range.start.min(rows.rows.len())..range.end.min(rows.rows.len());
-    let h = grid.cell_h;
-    let height = (range.len() as u32 * h).max(1);
-    let mut pm = Pixmap::new(grid.width().max(1), height)
-        .ok_or_else(|| format!("can't make an image {}×{} pixels", grid.width(), height))?;
-    let idw = id_width(rows, &range, fonts, grid);
-    let mut d = Draw { pm: &mut pm, fonts, theme, grid, idw };
+    let width = c.grid.width();
+    let mut pm = Pixmap::new(width.max(1), height.max(1)).ok_or_else(|| format!("can't make an image {width}×{height} pixels"))?;
+    let mut d = Draw::new(&mut pm, fonts, c, laid.idw);
     let mut places = Vec::new();
+    let mut y = 0;
+    for i in range.clone() {
+        let id = match &rows.rows[i] {
+            Row::Task(t) => Some(t.id.clone()),
+            Row::Item(it) => Some(it.id.clone()),
+            _ => None,
+        };
+        places.push(Place { row: i, y, h: laid.heights[i], id });
+        y += laid.heights[i];
+    }
     // the selected task's block (its row and its details) sits on one rounded tint
     let mut block: Option<(f32, f32)> = None;
-    for (j, i) in range.clone().enumerate() {
-        let row = &rows.rows[i];
-        let y = j as f32 * h as f32;
+    for p in &places {
+        let row = &rows.rows[p.row];
+        let (y, bottom) = (p.y as f32, (p.y + p.h) as f32);
         let tinted = match row {
             Row::Task(t) => t.selected && t.asked.is_none(),
             Row::Detail(dr) => dr.selected,
@@ -71,34 +221,28 @@ pub fn render(rows: &Rows, range: Range<usize>, grid: Grid, theme: &Theme, fonts
             _ => false,
         };
         block = match (block, tinted) {
-            (Some((top, _)), true) if !row.is_entry() => Some((top, y + h as f32)),
+            (Some((top, _)), true) if !row.is_entry() => Some((top, bottom)),
             (b, true) => {
                 d.tint(b);
-                Some((y, y + h as f32))
+                Some((if row.is_entry() { y + c.m.pad } else { y }, bottom))
             }
             (b, false) => {
                 d.tint(b);
                 None
             }
         };
-        let id = match row {
-            Row::Task(t) => Some(t.id.clone()),
-            Row::Item(it) => Some(it.id.clone()),
-            _ => None,
-        };
-        places.push(Place { row: i, y: j as u32 * h, h, id });
     }
     d.tint(block);
-    for (j, i) in range.enumerate() {
-        d.row(&rows.rows[i], j as f32 * h as f32);
+    for p in &places {
+        d.row(&rows.rows[p.row], &laid.titles[p.row], p.y as f32, p.h as f32);
     }
+    d.scroll_marks(marks, height as f32);
     Ok(Sheet { pixmap: pm, places })
 }
 
-/// The ID column's width in pixels: the widest ID drawn, so titles line up.
-fn id_width(rows: &Rows, range: &Range<usize>, fonts: &Fonts, grid: Grid) -> f32 {
-    let px = font_px(grid);
-    rows.rows[range.clone()]
+/// The ID column's width in pixels: the widest ID in the list, so titles line up as it scrolls.
+fn id_width(rows: &Rows, fonts: &Fonts, px: f32) -> f32 {
+    rows.rows
         .iter()
         .filter_map(|r| match r {
             Row::Task(t) => Some(fonts.width(&t.id, Weight::Bold, px)),
@@ -108,45 +252,123 @@ fn id_width(rows: &Rows, range: &Range<usize>, fonts: &Fonts, grid: Grid) -> f32
         .fold(0.0, f32::max)
 }
 
-/// The type's size: about the terminal's own in a cell this high.
-pub fn font_px(grid: Grid) -> f32 {
-    (grid.cell_h as f32 * 0.62).max(6.0)
+fn title_weight(asked: bool) -> Weight {
+    if asked { Weight::Bold } else { Weight::Regular }
 }
 
-struct Draw<'a> {
-    pm: &'a mut Pixmap,
-    fonts: &'a mut Fonts,
-    theme: &'a Theme,
-    grid: Grid,
+/// Where things go across a row, and how tall a row is.
+#[derive(Clone, Copy)]
+struct Geo {
+    c: Canvas,
     idw: f32,
 }
 
-impl Draw<'_> {
-    fn c(&self) -> f32 {
-        self.grid.cell_w as f32
+impl Geo {
+    /// A mark's radius.
+    fn mark_r(&self) -> f32 {
+        (0.27 / 0.62 * self.c.m.title).min(0.95 * self.c.c())
     }
-    fn h(&self) -> f32 {
-        self.grid.cell_h as f32
-    }
-    fn px(&self) -> f32 {
-        font_px(self.grid)
-    }
-    fn right(&self) -> f32 {
-        self.grid.width() as f32 - 0.6 * self.c()
-    }
-    /// Where text starts (under the ID: column 3, as on the text board).
+
+    /// Where text starts (under the ID: column 3, as on the text board, or past a larger
+    /// type's mark).
     fn text_x(&self) -> f32 {
-        3.0 * self.c()
+        let c = self.c.c();
+        (3.0 * c).max(1.5 * c + self.mark_r() + 0.7 * self.c.m.title)
     }
+
     /// Where a title starts: past the ID column and a gap.
     fn title_x(&self) -> f32 {
-        self.text_x() + self.idw + 0.6 * self.px() + 0.5 * self.px()
+        self.text_x() + self.idw + 1.1 * self.c.m.title
+    }
+
+    /// The width a task's age (and risk) take at the right, as `task` draws them.
+    fn right_side(&self, t: &TaskRow, fonts: &Fonts) -> f32 {
+        let px = self.c.m.title;
+        let mut w = fonts.width(&t.age, Weight::Bold, px);
+        if let Some(level) = &t.risk {
+            let gap = if t.age.is_empty() { 0.0 } else { 0.7 * px };
+            w += gap + fonts.width(level, Weight::Bold, px);
+        }
+        w
+    }
+
+    /// Where a task's title's first line must end: short of its risk and age.
+    fn task_right(&self, t: &TaskRow, fonts: &Fonts) -> f32 {
+        self.c.right() - self.right_side(t, fonts) - 0.8 * self.c.m.title
+    }
+
+    /// A row's height in whole pixels, with its title on `lines` lines.
+    fn height(&self, row: &Row, lines: usize) -> u32 {
+        let m = &self.c.m;
+        let h = match row {
+            Row::Head { .. } => m.head_pad + m.line,
+            Row::Task(_) | Row::Item(_) => m.pad + lines as f32 * m.line,
+            Row::Later { .. } => m.pad + m.line,
+            Row::Detail(_) | Row::ItemDetail(_) => m.detail_line,
+            Row::Gap => m.gap,
+            Row::Empty { .. } => m.line,
+        };
+        h.round() as u32
+    }
+}
+
+pub(super) struct Draw<'a> {
+    pm: &'a mut Pixmap,
+    fonts: &'a mut Fonts,
+    theme: Theme,
+    g: Geo,
+    /// the type being drawn, and the height of the line it's centred in
+    px: f32,
+    line_h: f32,
+}
+
+impl<'a> Draw<'a> {
+    pub(super) fn new(pm: &'a mut Pixmap, fonts: &'a mut Fonts, c: &Canvas, idw: f32) -> Draw<'a> {
+        Draw { pm, fonts, theme: c.theme, g: Geo { c: *c, idw }, px: c.m.title, line_h: c.m.line }
+    }
+
+    /// Draw in this type from here on, centred in lines this high.
+    pub(super) fn set(&mut self, px: f32, line_h: f32) {
+        (self.px, self.line_h) = (px, line_h);
+    }
+
+    pub(super) fn theme(&self) -> Theme {
+        self.theme
+    }
+
+    fn c(&self) -> f32 {
+        self.g.c.c()
+    }
+    fn m(&self) -> Metrics {
+        self.g.c.m
+    }
+    /// The height of the line being drawn.
+    fn h(&self) -> f32 {
+        self.line_h
+    }
+    fn px(&self) -> f32 {
+        self.px
+    }
+    pub(super) fn right(&self) -> f32 {
+        self.g.c.right()
+    }
+    fn text_x(&self) -> f32 {
+        self.g.text_x()
+    }
+    fn title_x(&self) -> f32 {
+        self.g.title_x()
     }
     fn baseline(&self, y: f32) -> f32 {
         y + (self.h() + self.fonts.cap_height(self.px())) / 2.0
     }
 
-    fn text(&mut self, s: &str, weight: Weight, x: f32, y: f32, max: f32, color: [u8; 4]) -> f32 {
+    /// The width of text in the type being drawn.
+    pub(super) fn width(&self, s: &str, weight: Weight) -> f32 {
+        self.fonts.width(s, weight, self.px)
+    }
+
+    /// Text on the line whose top is y, from x, cut to `max` pixels; returns where it ends.
+    pub(super) fn text(&mut self, s: &str, weight: Weight, x: f32, y: f32, max: f32, color: [u8; 4]) -> f32 {
         let px = self.px();
         let s = self.fonts.fit(s, weight, px, max.max(0.0));
         let base = self.baseline(y);
@@ -165,26 +387,37 @@ impl Draw<'_> {
     /// The selected task's (or item's) block: a rounded tint from its ID to the right edge.
     fn tint(&mut self, block: Option<(f32, f32)>) {
         let Some((top, bottom)) = block else { return };
-        let x = self.text_x() - 0.35 * self.px();
+        // a little past its last line, into the space above the next task
+        let bottom = bottom + 0.4 * self.m().pad;
+        let px = self.m().title;
+        let x = self.text_x() - 0.35 * px;
         let color = self.theme.tint();
-        if let Some(p) = rounded(x, top + 1.0, self.right() + 0.35 * self.px() - x, bottom - top - 2.0, 0.28 * self.h()) {
+        let r = 0.28 * self.m().line.min(self.g.c.grid.cell_h as f32 * 1.2);
+        if let Some(p) = rounded(x, top + 1.0, self.right() + 0.35 * px - x, bottom - top - 2.0, r) {
             self.fill(&p, color);
         }
     }
 
-    fn row(&mut self, row: &Row, y: f32) {
+    /// A row whose top is y and height h; a task's or item's title on `lines`.
+    fn row(&mut self, row: &Row, lines: &[String], y: f32, h: f32) {
+        let m = self.m();
         let (fg, dim) = (self.theme.text(), self.theme.dim());
         let left = self.c();
         let full = self.right() - left;
         match row {
+            Row::Detail(_) | Row::ItemDetail(_) => self.set(m.detail, m.detail_line),
+            _ => self.set(m.title, m.line),
+        }
+        match row {
             Row::Head { name, count } => {
+                let y = y + m.head_pad;
                 let end = self.text(name, Weight::Bold, left, y, full, fg);
                 let gap = 0.5 * self.px();
                 self.text(&count.to_string(), Weight::Regular, end + gap, y, self.right() - end - gap, dim);
             }
-            Row::Task(t) => self.task(t, y),
+            Row::Task(t) => self.task(t, lines, y, h),
             Row::Detail(d) => {
-                self.flag(d.flag, y);
+                self.flag(d.flag, y, h);
                 let color = if d.selected || d.loud { fg } else { dim };
                 let (age, rest) = crate::model::split_at_width(&d.text, d.lead);
                 let x = self.text_x();
@@ -199,13 +432,14 @@ impl Draw<'_> {
                 self.text(text, weight, left, y, full, color);
             }
             Row::Later { text, amber } => {
+                let y = y + m.pad;
                 let (head, rest) = text.split_at(text.find(" ·").unwrap_or(text.len()));
                 let amber_c = solid(self.theme.yellow);
                 let (hc, rc) = if *amber { (amber_c, amber_c) } else { (fg, dim) };
                 let end = self.text(head, Weight::Bold, left, y, full, hc);
                 self.text(rest, Weight::Regular, end, y, self.right() - end, rc);
             }
-            Row::Item(i) => self.item(i, y),
+            Row::Item(i) => self.item(i, lines, y + m.pad),
             Row::ItemDetail(text) => {
                 let x = self.text_x();
                 self.text(text, Weight::Regular, x, y, self.right() - x, fg);
@@ -213,20 +447,23 @@ impl Draw<'_> {
         }
     }
 
-    /// The bar beside a task that needs you (amber) or whose agent stopped (red): its
-    /// rows' bars meet, so it runs down the task's block.
-    fn flag(&mut self, flag: Option<Flag>, y: f32) {
+    /// The bar beside a task that needs you (amber) or whose agent stopped (red), from y
+    /// for h: its rows' bars meet, so it runs down the task's block.
+    fn flag(&mut self, flag: Option<Flag>, y: f32, h: f32) {
         let Some(f) = flag else { return };
         let color = if f == Flag::Stopped { self.theme.red } else { self.theme.yellow };
         let w = (0.22 * self.c()).max(2.0);
-        let rect = Rect::from_xywh(0.2 * self.c(), y, w, self.h());
+        let rect = Rect::from_xywh(0.2 * self.c(), y, w, h);
         if let Some(p) = rect.map(PathBuilder::from_rect) {
             self.fill(&p, solid(color));
         }
     }
 
-    fn task(&mut self, t: &TaskRow, y: f32) {
-        self.flag(t.flag, y);
+    /// A task's row, whose top is y and height h: the space above it, then its first
+    /// line (the mark, ID, title, risk and age), then the rest of its title's lines.
+    fn task(&mut self, t: &TaskRow, lines: &[String], y: f32, h: f32) {
+        let y = y + self.m().pad;
+        self.flag(t.flag, y, h - self.m().pad);
         let (cx, cy) = (1.5 * self.c(), y + self.h() / 2.0);
         self.mark(&t.mark, cx, cy);
         let tone = t.asked.map(|risky| solid(if risky { self.theme.red } else { self.theme.green }));
@@ -238,37 +475,45 @@ impl Draw<'_> {
         // the right side: the risk, a coloured word, then the age
         let px = self.px();
         let mut right = self.right();
-        let age_w = self.fonts.width(&t.age, Weight::Bold, px);
+        let age_w = self.width(&t.age, Weight::Bold);
         let age_color = match tone {
             Some(c) => c,
             None if t.stale => solid(self.theme.red),
             None => self.theme.dim(),
         };
         let weight = if t.stale || tone.is_some() { Weight::Bold } else { Weight::Regular };
-        self.text(&t.age, weight, right - self.fonts.width(&t.age, weight, px), y, age_w + 1.0, age_color);
+        let x = right - self.width(&t.age, weight);
+        self.text(&t.age, weight, x, y, age_w + 1.0, age_color);
         right -= age_w;
         if let Some(level) = &t.risk {
             let gap = if t.age.is_empty() { 0.0 } else { 0.7 * px };
-            let w = self.fonts.width(level, Weight::Bold, px);
+            let w = self.width(level, Weight::Bold);
             let color = self.theme.risk(level);
             self.text(level, Weight::Bold, right - gap - w, y, w + 1.0, color);
-            right -= gap + w;
         }
-        let x = self.title_x();
         let color = match tone {
             Some(c) => c,
             None if t.quiet && !t.selected => self.theme.dim(),
             None => self.theme.text(),
         };
-        let weight = if tone.is_some() { Weight::Bold } else { Weight::Regular };
-        self.text(&t.title, weight, x, y, right - 0.8 * px - x, color);
+        let first = self.g.task_right(t, self.fonts);
+        self.title(lines, title_weight(tone.is_some()), first, y, color);
+    }
+
+    /// A title's lines from the title column, the first ending at `first`, the rest at the right edge.
+    fn title(&mut self, lines: &[String], weight: Weight, first: f32, y: f32, color: [u8; 4]) {
+        let x = self.title_x();
+        for (k, line) in lines.iter().enumerate() {
+            let end = if k == 0 { first } else { self.right() };
+            self.text(line, weight, x, y + k as f32 * self.h(), end - x + 1.0, color);
+        }
     }
 
     /// An ID: dim, or (selected, or asked about in `tone`) in a pill. Returns where it ends.
     fn id(&mut self, id: &str, pill: bool, tone: Option<[u8; 4]>, y: f32) -> f32 {
         let px = self.px();
         let x = self.text_x();
-        let w = self.fonts.width(id, Weight::Bold, px);
+        let w = self.width(id, Weight::Bold);
         if !pill {
             let dim = self.theme.dim();
             return self.text(id, Weight::Bold, x, y, w + 1.0, dim);
@@ -283,15 +528,15 @@ impl Draw<'_> {
         x + w + padx
     }
 
-    fn item(&mut self, i: &ItemRow, y: f32) {
+    /// An item's row, from its first line's top y.
+    fn item(&mut self, i: &ItemRow, lines: &[String], y: f32) {
         let (cx, cy) = (1.5 * self.c(), y + self.h() / 2.0);
         let r = self.mark_r();
         if i.job {
             self.mark(&Mark::Job, cx, cy);
         } else if i.asks {
             let amber = solid(self.theme.yellow);
-            let px = self.px();
-            let w = self.fonts.width("?", Weight::Bold, px);
+            let w = self.width("?", Weight::Bold);
             self.text("?", Weight::Bold, cx - w / 2.0, y, w + 1.0, amber);
         } else if let Some(p) = diamond(cx, cy, r * 0.9) {
             let dim = self.theme.dim();
@@ -299,14 +544,40 @@ impl Draw<'_> {
         }
         let red = solid(self.theme.red);
         self.id(&i.id, i.selected || i.asked, i.asked.then_some(red), y);
-        let x = self.title_x();
         let color = if i.asked { red } else { self.theme.text() };
-        let weight = if i.asked { Weight::Bold } else { Weight::Regular };
-        self.text(&i.title, weight, x, y, self.right() - x, color);
+        let right = self.right();
+        self.title(lines, title_weight(i.asked), right, y, color);
+    }
+
+    /// The scroll marks in the last column: ↑ at the top when rows are above, ↓ at the
+    /// bottom of an image `height` high when rows are below.
+    fn scroll_marks(&mut self, marks: Marks, height: f32) {
+        let cx = self.g.c.grid.width() as f32 - 0.6 * self.c();
+        let half = 0.5 * self.m().line.min(self.g.c.grid.cell_h as f32);
+        if marks.up {
+            self.chevron(cx, half, -1.0);
+        }
+        if marks.down {
+            self.chevron(cx, height - half, 1.0);
+        }
+    }
+
+    /// A small chevron at (cx, cy), pointing down (dir 1) or up (-1).
+    fn chevron(&mut self, cx: f32, cy: f32, dir: f32) {
+        let r = 0.28 * self.c();
+        let mut pb = PathBuilder::new();
+        pb.move_to(cx - r, cy - dir * r / 2.0);
+        pb.line_to(cx, cy + dir * r / 2.0);
+        pb.line_to(cx + r, cy - dir * r / 2.0);
+        if let Some(p) = pb.finish() {
+            let dim = self.theme.dim();
+            let lw = (0.12 * self.c()).max(1.2);
+            self.stroke(&p, lw, dim);
+        }
     }
 
     fn mark_r(&self) -> f32 {
-        (0.27 * self.h()).min(0.95 * self.c())
+        self.g.mark_r()
     }
 
     fn line(&self) -> f32 {

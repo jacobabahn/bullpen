@@ -117,6 +117,29 @@ impl Fonts {
         if room <= 0.0 { String::new() } else { out + "…" }
     }
 
+    /// Text wrapped at its spaces: a first line `first` pixels wide, then lines `rest`
+    /// wide, `most` lines at most, the last cut with "…" when there's more.
+    pub fn wrap(&self, text: &str, weight: Weight, px: f32, (first, rest): (f32, f32), most: usize) -> Vec<String> {
+        let words: Vec<&str> = text.split_whitespace().collect();
+        let mut lines: Vec<String> = Vec::new();
+        let mut i = 0;
+        while i < words.len() {
+            let max = if lines.is_empty() { first } else { rest };
+            if lines.len() + 1 >= most.max(1) {
+                lines.push(self.fit(&words[i..].join(" "), weight, px, max));
+                break;
+            }
+            let mut line = words[i].to_string();
+            i += 1;
+            while i < words.len() && self.width(&format!("{line} {}", words[i]), weight, px) <= max {
+                line = format!("{line} {}", words[i]);
+                i += 1;
+            }
+            lines.push(self.fit(&line, weight, px, max));
+        }
+        lines
+    }
+
     /// Draw text from `at`, the start of its baseline, in colour; returns where the pen ends.
     pub fn draw(&mut self, pm: &mut Pixmap, text: &str, weight: Weight, px: f32, at: (f32, f32), color: [u8; 4]) -> f32 {
         let (mut pen, y) = at;

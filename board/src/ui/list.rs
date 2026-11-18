@@ -14,23 +14,30 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 /// The header, the list and its scroll marks. Keeps the selected task in view, and
-/// sets `app.top` and `app.page`.
+/// sets `app.top` and `app.page`; with the image look, hands them to image/ instead.
 pub(super) fn draw_list(buf: &mut Buffer, area: Rect, app: &mut App, s: &Sizes, now: Now) {
     let w = s.w;
     let groups = app.groups();
-    header(buf, area, app, &groups, w);
+    let head = head(app, &groups, w);
     let Rows { rows, idw } = rows::build(app, w, s.narrow, now);
+    if app.image {
+        // the image look draws the header, the rows and the scroll marks, in images over
+        // these blank cells, and scrolls the list by its rows' own heights, from the row
+        // shown first last frame (image/ sets `app.top` and `app.page`). Its images take
+        // every column but the last, as the text does
+        let (row, rows_n) = (area.y + 2, s.avail as u16);
+        let foot_n = s.h.saturating_sub(2 + s.avail) as u16;
+        let cols = w.saturating_sub(1) as u16;
+        let rows = Rows { rows, idw };
+        let detail_cols = app.detail_cols;
+        app.view = Some(View { rows, detail_cols, top: app.top, head, foot: None, col: area.x, row0: area.y, row, rows_n, foot_n, cols });
+        return;
+    }
+    draw_head(buf, area, &head, w);
     let top = scroll(&rows, app.top, s.avail);
     app.top = top;
     // a page, for PgDn and PgUp: the tasks (and items) this list has room for
     app.page = rows.iter().skip(top).take(s.avail).filter(|r| r.is_entry()).count().max(1);
-    if app.image {
-        // the image covers the columns the rows use, up to where the scroll marks go
-        let (row, cols) = (area.y + 2, w.saturating_sub(2) as u16);
-        app.view = Some(View { rows: Rows { rows, idw }, top, row, col: area.x, rows_n: s.avail as u16, cols });
-        draw_marks(buf, area, s, top, app.view.as_ref().map_or(0, |v| v.rows.rows.len()));
-        return;
-    }
     let app = &*app;
     for (j, row) in rows.iter().skip(top).take(s.avail).enumerate() {
         draw_row(buf, area, app, s, 2 + j, row, idw);
@@ -108,19 +115,36 @@ fn mark_span(app: &App, mark: &Mark) -> Span<'static> {
 }
 
 /// The header's right side: what you act on here, in the marks' colours.
-fn counts(parts: Vec<(String, &'static str)>, sep: &'static str) -> Line<'static> {
+fn counts(parts: &[(String, &'static str)], sep: &'static str) -> Line<'static> {
     let mut spans = Vec::new();
-    for (i, (text, st)) in parts.into_iter().enumerate() {
+    for (i, (text, st)) in parts.iter().enumerate() {
         if i > 0 {
             spans.push(span(sep, dim()));
         }
-        spans.push(span(text, mark_style(st)));
+        spans.push(span(text.clone(), mark_style(st)));
     }
     Line::from(spans)
 }
 
+/// The board's top line as values, fit to its columns: the text header and the image
+/// look's (image/frame.rs) draw it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct Head {
+    /// the repository's name (bold)
+    pub name: String,
+    /// after it, dim: auto-accept, whose board this is, what it hides
+    pub auto: String,
+    /// the other repositories with something for you; amber when one needs you
+    pub others: String,
+    pub others_amber: bool,
+    /// at the right edge: what needs you or is ready here, each with the status whose
+    /// colour it takes, and what goes between them
+    pub counts: Vec<(String, &'static str)>,
+    pub sep: &'static str,
+}
+
 /// The header: the repository, and what you act on.
-fn header(buf: &mut Buffer, area: Rect, app: &App, groups: &[(&'static str, Vec<&Task>)], w: usize) {
+pub(crate) fn head(app: &App, groups: &[(&'static str, Vec<&Task>)], w: usize) -> Head {
     let name = fit(&app.repo_name, w.saturating_sub(2).min(24));
     // a small marker when approved tasks accept themselves
     let auto = if app.cfg.auto_accept { " · auto-accept" } else { "" };
@@ -146,21 +170,37 @@ fn header(buf: &mut Buffer, area: Rect, app: &App, groups: &[(&'static str, Vec<
         auto = left(false);
         right = top(&auto);
     }
-    let others_x = 1 + width(&name) + width(&auto) + 3;
-    if !right.others.is_empty() {
-        let style = if app.others.counts.iter().any(|c| c.needs > 0) { Style::new().fg(AMBER) } else { dim() };
+    let others_amber = app.others.counts.iter().any(|c| c.needs > 0);
+    Head { name, auto, others: right.others, others_amber, counts: right.counts, sep: right.sep }
+}
+
+/// The header as text.
+fn draw_head(buf: &mut Buffer, area: Rect, head: &Head, w: usize) {
+    let others_x = 1 + width(&head.name) + width(&head.auto) + 3;
+    if !head.others.is_empty() {
+        let style = if head.others_amber { Style::new().fg(AMBER) } else { dim() };
         put(buf, area, 0, others_x - 3, span(" · ", dim()));
-        put(buf, area, 0, others_x, span(right.others, style));
+        put(buf, area, 0, others_x, span(head.others.clone(), style));
     }
-    let count = counts(right.counts, right.sep);
+    let count = counts(&head.counts, head.sep);
     put(buf, area, 0, w.saturating_sub(2 + count.width()), count);
-    put(buf, area, 0, 1 + width(&name), span(auto, dim()));
-    put(buf, area, 0, 1, span(name, bold()));
+    put(buf, area, 0, 1 + width(&head.name), span(head.auto.clone(), dim()));
+    put(buf, area, 0, 1, span(head.name.clone(), bold()));
 }
 
 /// The first row to show, from `top`: keeps the selected task (or item) in view with
 /// its details, starting at a heading or a task.
-pub(super) fn scroll(rows: &[Row], mut top: usize, avail: usize) -> usize {
+pub(super) fn scroll(rows: &[Row], top: usize, avail: usize) -> usize {
+    scroll_by(rows, top, &vec![1; rows.len()], avail as u32)
+}
+
+/// The same, for rows of these heights in a list `room` high (the image look's, whose
+/// rows aren't a cell each).
+pub(crate) fn scroll_by(rows: &[Row], mut top: usize, heights: &[u32], room: u32) -> usize {
+    // rows [a, b)'s height, a row past the end none
+    let tall = |a: usize, b: usize| heights[a.min(heights.len())..b.min(heights.len())].iter().sum::<u32>();
+    // the first row from which the rows up to `end` fit
+    let fits_to = |end: usize| (0..=end).find(|&t| tall(t, end) <= room).unwrap_or(end);
     let sel_row = rows.iter().position(Row::is_selected);
     if let Some(i) = sel_row {
         let details = rows[i + 1..].iter().take_while(|r| r.is_detail()).count();
@@ -168,16 +208,16 @@ pub(super) fn scroll(rows: &[Row], mut top: usize, avail: usize) -> usize {
         let end = i + details + 1;
         if i < top {
             top = i - usize::from(i > 0 && matches!(rows[i - 1], Row::Head { .. }));
-        } else if end >= top + avail {
-            top = (end + 1).saturating_sub(avail).min(i); // with room for one row, the task's own
+        } else if tall(top, end + 1) > room {
+            top = fits_to(end + 1).min(i); // with room for one row, the task's own
         }
     }
-    top = top.min(rows.len().saturating_sub(avail));
+    top = top.min(fits_to(rows.len()));
     while top > 0 && top < rows.len() && (rows[top].is_detail() || matches!(rows[top], Row::Gap)) {
         top += 1;
     }
     if let Some(i) = sel_row {
-        if i >= top + avail {
+        if tall(top, i + 1) > room {
             top = i;
         }
     }

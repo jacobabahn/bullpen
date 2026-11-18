@@ -1,6 +1,7 @@
 use super::*;
 use crate::model::testing::{json, task};
 use crate::model::{Config, Task};
+use crate::model::TextSize;
 use crate::ui::testing::screen;
 
 /// A terminal's answer: it draws images (or not), with a cell 10 by 20 pixels.
@@ -35,14 +36,23 @@ fn asked(app: &mut App, p: &mut Picture) -> String {
     String::from_utf8(out).unwrap()
 }
 
-/// Draw a frame (the list as an image) and show it: what was written to the terminal.
+/// Draw a frame (the board as images) and show it, as the main loop does: again at once
+/// when the picture says to. What was written to the terminal.
 fn frame(app: &mut App, p: &mut Picture) -> String {
-    app.image = p.drawing(app);
-    screen(app, 40, 12);
     let mut out = Vec::new();
-    p.show(app, &mut out);
-    String::from_utf8(out).unwrap()
+    loop {
+        app.image = p.drawing(app);
+        screen(app, 40, 12);
+        if !p.show(app, &mut out) {
+            return String::from_utf8(out).unwrap();
+        }
+    }
 }
+
+/// The images' IDs: the header's, the list's and the bottom rows', as first sent.
+const HEAD: u32 = FIRST;
+const LIST: u32 = FIRST + 1;
+const FOOT: u32 = FIRST + 2;
 
 #[test]
 fn the_board_asks_the_terminal_once_before_drawing_an_image_and_draws_text_meanwhile() {
@@ -53,68 +63,104 @@ fn the_board_asks_the_terminal_once_before_drawing_an_image_and_draws_text_meanw
 }
 
 #[test]
-fn the_list_is_sent_once_placed_in_its_cells_and_its_rows_left_blank() {
+fn the_board_is_sent_as_three_images_placed_in_their_cells_and_its_rows_left_blank() {
     let (mut app, mut p) = (board(3), picture());
     asked(&mut app, &mut p);
-    app.image = true;
-    let s = screen(&mut app, 40, 12);
-    assert!(s[0].contains("repo")); // the top line is text
-    assert!(!s.iter().any(|l| l.contains("BP-1"))); // the rows are the image's
-    let view = app.view.clone().unwrap();
-    assert_eq!((view.row, view.col, view.cols, view.top), (2, 0, 38, 0));
     let out = frame(&mut app, &mut p);
-    assert!(out.starts_with(&format!("\x1b_Ga=t,f=100,t=d,i={FIRST},q=2,")));
-    // the rows the list has room for (6 of its 7: the heading, three tasks and their
-    // details), a cell each
-    assert_eq!((view.rows.rows.len(), view.rows_n), (7, 6));
-    assert!(out.contains(&format!("a=p,i={FIRST},p=1,x=0,y=0,w=380,h=120,c=38,r=6,C=1,q=2")));
-    assert!(out.contains("\x1b7\x1b[3;1H"));
+    let s = screen(&mut app, 40, 12);
+    assert!(s.iter().all(|l| l.is_empty())); // the top line, the rows and the keys are the images'
+    let view = app.view.clone().unwrap();
+    assert_eq!((view.row0, view.row, view.col, view.cols, view.rows_n, view.foot_n), (0, 2, 0, 39, 6, 4));
+    // the top line's two rows, the list's six and the four under it, 39 columns of 10 pixels
+    for (id, row, rows) in [(HEAD, 1, 2), (LIST, 3, 6), (FOOT, 9, 4)] {
+        assert!(out.contains(&format!("a=t,f=100,t=d,i={id},q=2,")));
+        let h = rows * 20;
+        assert!(out.contains(&format!("\x1b7\x1b[{row};1H\x1b_Ga=p,i={id},p=1,x=0,y=0,w=390,h={h},c=39,r={rows},C=1,q=2")));
+    }
     // nothing changed: nothing is sent
     assert_eq!(frame(&mut app, &mut p), "");
 }
 
 #[test]
-fn scrolling_moves_the_crop_and_sends_no_image() {
+fn a_change_sends_only_the_images_it_changes_and_places_each_before_the_old_one_goes() {
+    let (mut app, mut p) = (board(3), picture());
+    asked(&mut app, &mut p);
+    frame(&mut app, &mut p);
+    app.sel = Some("BP-2".into()); // the selection moves: the list changes, and the keys may
+    let out = frame(&mut app, &mut p);
+    assert!(!out.contains(&format!("i={HEAD}")));
+    let (sent, placed, deleted) =
+        (out.find(&format!("a=t,f=100,t=d,i={}", FOOT + 1)).unwrap(), out.find(&format!("a=p,i={}", FOOT + 1)).unwrap(), out.find(&kitty::delete(LIST)).unwrap());
+    assert!(sent < placed && placed < deleted);
+    // a message changes the bottom rows' image alone
+    app.msg = Note::failed("Couldn't accept BP-2.");
+    let out = frame(&mut app, &mut p);
+    assert!(out.contains(&kitty::delete(FOOT)) && !out.contains(&kitty::delete(HEAD)) && !out.contains(&kitty::delete(FOOT + 1)));
+}
+
+#[test]
+fn the_list_scrolls_by_its_rows_heights_to_keep_the_selection_in_view() {
     let (mut app, mut p) = (board(30), picture());
     asked(&mut app, &mut p);
     frame(&mut app, &mut p);
-    let mut view = app.view.clone().unwrap();
-    view.top = 5;
-    app.view = Some(view);
-    let mut out = Vec::new();
-    p.show(&mut app, &mut out);
-    let out = String::from_utf8(out).unwrap();
-    assert!(!out.contains("a=t"));
-    assert!(out.contains(&format!("a=p,i={FIRST},p=1,x=0,y=100,w=380,h=")));
+    let text_page = {
+        let mut text = board(30);
+        screen(&mut text, 40, 12);
+        text.page
+    };
+    // a medium row is taller than a cell: fewer tasks to a page than the text list's
+    assert!(app.page < text_page, "{} < {text_page}", app.page);
+    app.sel = Some("BP-20".into());
+    frame(&mut app, &mut p);
+    let view = app.view.clone().unwrap();
+    let at = view.rows.rows.iter().position(|r| r.is_selected()).unwrap();
+    assert!(app.top > 0 && app.top <= at);
+    // the selected task and its detail are within the list's 6 rows of 20 pixels
+    let (c, fonts) = (Canvas::new(Grid { cols: 39, cell_w: 10, cell_h: 20 }, TextSize::Medium, p.theme), Fonts::builtin());
+    let laid = render::lay(&view.rows, &c, &fonts);
+    assert!(laid.heights[app.top..at + 2].iter().sum::<u32>() <= 120);
+    // the text list's scrolling is its own: it goes by rows
+    assert_eq!(crate::ui::list::scroll_by(&view.rows.rows, 0, &vec![1; view.rows.rows.len()], 6), {
+        let mut text = board(30);
+        text.sel = Some("BP-20".into());
+        screen(&mut text, 40, 12);
+        text.top
+    });
 }
 
 #[test]
-fn a_change_sends_a_new_image_and_places_it_before_the_old_one_goes() {
+fn while_a_line_is_typed_or_a_question_asked_the_bottom_rows_are_text() {
     let (mut app, mut p) = (board(3), picture());
     asked(&mut app, &mut p);
     frame(&mut app, &mut p);
-    app.sel = Some("BP-2".into()); // the selection moves: the rows change
+    app.mode = crate::Mode::Tell { id: "BP-1".into(), text: crate::edit::LineEdit::default(), reply: false };
     let out = frame(&mut app, &mut p);
-    let (sent, placed, deleted) = (
-        out.find(&format!("a=t,f=100,t=d,i={}", FIRST + 1)).unwrap(),
-        out.find(&format!("a=p,i={}", FIRST + 1)).unwrap(),
-        out.find(&kitty::delete(FIRST)).unwrap(),
-    );
-    assert!(sent < placed && placed < deleted);
+    assert_eq!(out, kitty::hide(FOOT)); // the list and the top line stay
+    let s = screen(&mut app, 40, 12);
+    assert!(s[11].contains("Tell BP-1:"));
+    assert!(s[..11].iter().all(|l| l.is_empty()));
+    // back: the image is placed again, not sent again
+    app.mode = crate::Mode::Normal;
+    let out = frame(&mut app, &mut p);
+    assert!(out.contains(&format!("a=p,i={FOOT}")) && !out.contains("a=t"));
+    // a y/n question: its keys are text
+    app.pending = Some((crate::model::Action::Drop, "BP-1".into()));
+    frame(&mut app, &mut p);
+    assert!(screen(&mut app, 40, 12)[11].contains("y drop"));
 }
 
 #[test]
-fn the_image_is_hidden_under_an_overlay_and_deleted_when_the_list_is_text_again() {
-    let (mut app, mut p) = (board(3), picture());
-    asked(&mut app, &mut p);
-    frame(&mut app, &mut p);
-    app.mode = crate::Mode::Help { top: 0 };
-    assert_eq!(frame(&mut app, &mut p), kitty::hide(FIRST));
-    app.mode = crate::Mode::Normal;
-    assert!(frame(&mut app, &mut p).contains(&format!("a=p,i={FIRST}"))); // placed again, not sent again
-    app.look = Look::Text;
-    assert_eq!(frame(&mut app, &mut p), kitty::delete(FIRST));
-    assert_eq!(frame(&mut app, &mut p), "");
+fn the_text_size_setting_sets_the_rows_heights() {
+    let heights = |size: &str| {
+        let (mut app, mut p) = (board(3), picture());
+        app.cfg = app.cfg.with(json!({"board_text_size": size}));
+        asked(&mut app, &mut p);
+        frame(&mut app, &mut p);
+        let c = Canvas::new(Grid { cols: 39, cell_w: 10, cell_h: 20 }, app.cfg.text_size, p.theme);
+        render::lay(&app.view.unwrap().rows, &c, &Fonts::builtin()).heights
+    };
+    assert!(heights("small").iter().all(|h| *h == 20));
+    assert!(heights("large").iter().sum::<u32>() > heights("medium").iter().sum::<u32>());
 }
 
 #[test]
@@ -171,17 +217,6 @@ fn the_compact_layout_stays_text() {
 }
 
 #[test]
-fn a_list_too_tall_for_one_image_is_sent_a_window_at_a_time() {
-    assert_eq!(window(10, 0, 5, 100, None), (0, 10));
-    assert_eq!(window(300, 0, 10, 100, None), (0, 100));
-    // the window sent before, while it holds the rows shown
-    assert_eq!(window(300, 50, 10, 100, Some((0, 100))), (0, 100));
-    // a new one round them once it doesn't
-    assert_eq!(window(300, 95, 10, 100, Some((0, 100))), (50, 150));
-    assert_eq!(window(300, 295, 5, 100, None), (200, 300));
-}
-
-#[test]
 fn colours_asked_again_change_the_image() {
     let (mut app, mut p) = (board(3), picture());
     asked(&mut app, &mut p);
@@ -190,7 +225,7 @@ fn colours_asked_again_change_the_image() {
     let mut light = answer(true);
     light.said.fg = Some(theme::Rgb(0, 0, 0));
     p.answered(&light);
-    assert!(frame(&mut app, &mut p).contains(&format!("a=t,f=100,t=d,i={}", FIRST + 1)));
+    assert!(frame(&mut app, &mut p).contains(&format!("a=t,f=100,t=d,i={}", FOOT + 1)));
 }
 
 #[test]
@@ -210,7 +245,7 @@ fn after_a_resize_the_image_is_sent_again() {
     frame(&mut app, &mut p);
     p.resized();
     let out = frame(&mut app, &mut p);
-    assert!(out.contains(&format!("a=t,f=100,t=d,i={}", FIRST + 1)) && out.ends_with(&kitty::delete(FIRST)));
+    assert!([1, 2, 3].iter().all(|n| out.contains(&format!("a=t,f=100,t=d,i={}", FOOT + n))) && out.ends_with(&kitty::delete(FOOT)));
 }
 
 /// The key reader reads the answers asked: back to keys, with these answers.
@@ -334,4 +369,23 @@ fn a_reload_waits_until_the_answers_are_read_and_a_failed_one_leaves_the_image_a
     p.resized();
     frame(&mut app, &mut p);
     assert!(p.gate.wanted());
+}
+
+#[test]
+fn an_age_changing_off_screen_sends_nothing() {
+    let (mut app, mut p) = (board(30), picture());
+    asked(&mut app, &mut p);
+    frame(&mut app, &mut p);
+    app.tasks[29] = task("BP-30", "todo").with(json!({"title": "Task 30", "updated": "2020-01-01T00:00:00+00:00"}));
+    assert_eq!(frame(&mut app, &mut p), "");
+}
+
+#[test]
+fn a_board_too_short_for_rows_under_its_list_keeps_them_as_text() {
+    let (mut app, mut p) = (board(3), picture());
+    asked(&mut app, &mut p);
+    app.image = true;
+    let s = screen(&mut app, 40, 3);
+    assert!(app.view.as_ref().is_some_and(|v| v.foot.is_none()));
+    assert!(s.iter().any(|l| l.contains("keys")));
 }

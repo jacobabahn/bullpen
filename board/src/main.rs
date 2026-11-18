@@ -236,15 +236,17 @@ fn read_keys(keys: mpsc::Sender<Msg>, gate: Arc<image::term::Gate>) {
     });
 }
 
-/// `--render FILE`: the board's list as the image look draws it, written to FILE.
+/// `--render FILE`: the board as the image look draws it, written to FILE.
 fn render(args: app::Args, path: &std::path::Path) {
     let (tx, _rx) = mpsc::channel();
     let cols = args.cols.unwrap_or(60).max(20);
     let mut app = App::new(args, None, tx);
     app.read();
     app.settle();
-    let rows = ui::rows::build(&app, cols + 2, cols + 2 < ui::NARROW, model::now());
-    if let Err(e) = image::render_file(&rows, cols, (16, 34), app.cfg.font.as_deref(), path) {
+    app.image = true;
+    app.detail_cols = image::detail_cols(cols, app.cfg.text_size, (16, 34), app.cfg.font.as_deref()).ok();
+    let view = ui::whole(&app, cols + 1, model::now());
+    if let Err(e) = image::render_file(&view, app.cfg.text_size, (16, 34), app.cfg.font.as_deref(), path) {
         eprintln!("bullpen-board: {e}");
         std::process::exit(1);
     }

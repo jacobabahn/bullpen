@@ -149,8 +149,8 @@ pub(crate) fn build(app: &App, w: usize, narrow: bool, now: Now) -> Rows {
     let items = app.later.iter().filter(|_| app.later_open).map(|i| width(&i.id));
     let idw = groups.iter().flat_map(|(_, ts)| ts).map(|t| width(&t.id)).chain(items).max().unwrap_or(0);
     let age_on_detail = narrow && layout == Layout::Grouped;
-    // from under the ID to the right edge
-    let detail_w = w.saturating_sub(5);
+    // from under the ID to the right edge; as much as the image's type holds there
+    let detail_w = app.detail_cols.filter(|_| app.image).unwrap_or(w.saturating_sub(5));
 
     let mut rows: Vec<Row> = Vec::new();
     if groups.is_empty() {
