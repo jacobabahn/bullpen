@@ -131,7 +131,9 @@ the reason as news, except a conflict with its base (below). An approval kept wi
 a new review auto-accepts too: at `ready` (the same commit, or only the base moved),
 and when a ready task's worker takes a turn that leaves the code as approved (you
 typed to it, say). `bullpen add` or `start` with `--no-auto-accept` keeps one task
-for you while it's on (and `--auto-accept` auto-accepts one task while it's off).
+for you while it's on (and `--auto-accept` auto-accepts one task while it's off). A
+task made from a GitHub issue whose author isn't trusted never auto-accepts, whatever
+these say (see [GitHub issues](issues.md#a-task-from-an-issue)).
 The board shows `· auto-accept` beside the repo's name while it's on, and a task
 held back says "Kept for you: no auto-accept."
 

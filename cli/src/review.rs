@@ -356,8 +356,11 @@ pub fn change_size_of(changed: &[Changed]) -> (i64, Option<i64>, bool) {
 }
 
 /// (kind, why) for a task's first review: "full" or "light", by its own review mode,
-/// else by what the change touches and its size.
+/// else by what the change touches and its size. A task made from an issue: full, always.
 fn first_kind(repo: &Repo, t: &Obj, base_ref: &str) -> Res<(String, Option<String>)> {
+    if s(t, "origin") == "issue" {
+        return Ok(("full".into(), Some("from an issue".into())));
+    }
     let mode = match s(t, "review_mode") {
         "" => "auto",
         m => m,

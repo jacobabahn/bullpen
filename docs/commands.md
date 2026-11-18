@@ -61,8 +61,9 @@ bullpen rules         # the rules every worker and reviewer gets, and where they
 bullpen keys          # the Rex config line for bullpen's key bindings (--install adds it)
 bullpen doctor        # check the setup: a line per check, with the fix for what's wrong (see doctor.md)
 bullpen later "Tidy the errors"  # an idea for later, on the backlog (see backlog.md)
-bullpen issues --now  # read the open GitHub issues into the backlog, each asking for a yes (see issues.md)
+bullpen issues --now  # read the open GitHub issues into the backlog, for the coordinator to judge (see issues.md)
 bullpen issue 12      # one issue for reading, its text in a fence
+bullpen issue 12 --score clear,small,low --why "..." --brief-file b.md   # judge it: a trusted small one starts by itself
 bullpen stats BP-1    # where its time went: its timeline and totals (no ID: across closed tasks; see stats.md)
 bullpen tour BP-1     # a guided tour of a ready task's change, step by step (see tours.md)
 bullpen tour-comment BP-1 2 "Say why."   # a draft comment on its step 2 (no STEP: list them; --remove N)

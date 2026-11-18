@@ -55,8 +55,10 @@ the item records it: `bullpen start BP-140` once it can.
 
 - **A GitHub issue**, with `bullpen config --issues on`: `bullpen issues --now` reads the
   open issues, and each new one becomes an item that asks, added by `issue`, at the
-  bottom: `Board flickers on resize (#12, ann)`. Your `--keep` or `--drop` is remembered,
-  so an issue is never asked about twice. See [GitHub issues](issues.md).
+  bottom: `Board flickers on resize (#12, ann)`. The coordinator judges each (`bullpen
+  issue 12 --score ...`): a trusted, clear, small, low-risk one goes on the list by
+  itself, and the rest ask you. Your `--keep` or `--drop` is remembered, so an issue is
+  never asked about twice. See [GitHub issues](issues.md).
 
 ## A task from the backlog
 

@@ -272,3 +272,22 @@ fn counts_in_words() {
     assert_eq!(count_phrase(1, "ready"), "1 ready");
     assert_eq!(count_phrase(3, "running"), "3 running");
 }
+
+#[test]
+fn a_task_from_an_untrusted_issue_is_kept_for_you() {
+    let on = config(json!({"auto_accept": true}));
+    let off = config(json!({"auto_accept": false}));
+    let untrusted = task(json!({"status": "ready", "origin": "issue", "issue_trusted": false}));
+    assert_eq!(
+        auto_detail(&on, &untrusted),
+        "Kept for you: from an issue whose author isn't trusted."
+    );
+    let asked = task(json!({"status": "ready", "origin": "issue", "auto_accept": true}));
+    assert_eq!(
+        auto_detail(&off, &asked),
+        "Kept for you: from an issue whose author isn't trusted."
+    );
+    assert_eq!(auto_detail(&off, &untrusted), "");
+    let trusted = task(json!({"status": "ready", "origin": "issue", "issue_trusted": true, "auto_accept": true}));
+    assert_eq!(auto_detail(&off, &trusted), "Auto-accepts once approved.");
+}

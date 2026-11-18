@@ -11,6 +11,9 @@
 //!   issues.json      the repository's issues (a JSON list): `issue list` prints the ones
 //!                    not CLOSED (at most --limit), `issue view N` the one numbered N.
 //!                    Signed out, both fail as gh does
+//!   gh_user          the login `api user` says gh is signed in as (else me)
+//!   events.json      what `api .../issues/N/events` answers, by issue number: {"12": [...]}
+//!                    (else none)
 
 use std::io::Read;
 use std::path::Path;
@@ -50,6 +53,9 @@ fn run(argv: &[String]) -> Res<()> {
     }
     if argv.first().is_some_and(|a| a == "issue") {
         return issue(&d, argv);
+    }
+    if argv.first().is_some_and(|a| a == "api") {
+        return api(&d, argv);
     }
     if two("pr", "create") {
         print("https://github.com/me/repo/pull/7");
@@ -102,6 +108,37 @@ fn issue(d: &Path, argv: &[String]) -> Res<()> {
         _ => {}
     }
     Ok(())
+}
+
+/// `api user`, and `api [--paginate] repos/O/R/issues/N/events...`, the issue's events.
+fn api(d: &Path, argv: &[String]) -> Res<()> {
+    if d.join("gh_signed_out").exists() {
+        return Err(exit_msg("To get started with GitHub CLI, please run:  gh auth login"));
+    }
+    let path = argv
+        .iter()
+        .skip(1)
+        .find(|a| !a.starts_with('-'))
+        .cloned()
+        .unwrap_or_default();
+    if path == "user" {
+        let f = d.join("gh_user");
+        let login = if f.exists() {
+            read_text(&f)?.trim().to_string()
+        } else {
+            "me".into()
+        };
+        print(&dumps(&json!({"login": login})));
+        return Ok(());
+    }
+    let parts: Vec<&str> = path.split(['/', '?']).collect();
+    if let ["repos", _, _, "issues", n, "events", ..] = parts.as_slice() {
+        let f = d.join("events.json");
+        let all = if f.exists() { read_json(&f)? } else { json!({}) };
+        print(&dumps(all.get(*n).unwrap_or(&json!([]))));
+        return Ok(());
+    }
+    Err(exit_msg(&format!("gh: Not Found (HTTP 404): {path}")))
 }
 
 /// Run the command the tests say happens while gh answers; it must work.

@@ -19,6 +19,8 @@ pub const FLOAT_BOUNDS: [f64; 4] = [0.4, 0.35, 0.58, 0.62];
 
 /// The statuses of a task that is over.
 pub const CLOSED: [&str; 2] = ["done", "dropped"];
+/// `issues_start`'s choices: which judged issues start by themselves.
+pub const ISSUES_START: [&str; 3] = ["off", "small", "medium"];
 pub const REVIEW_MODES: [&str; 3] = ["full", "light", "auto"];
 /// A task stopped on something: "triage" waits on its coordinator, "needs" on the person.
 pub const WAITING: [&str; 2] = ["needs", "triage"];
@@ -166,9 +168,12 @@ pub static SETTINGS: &[Setting] = &[
     Setting { help: "self-started tasks a day, a spending guard", least: Some(1), says: Some("a number of tasks, 1 or more"), metavar: Some("N"), ..base("pickup_per_day", Int(4), Some("Pickup"), Number) },
     Setting { help: "claude's --model for self-started tasks", none: Some("the worker model"), ..base("pickup_model", Null, Some("Pickup"), Model) },
     Setting { help: "self-started tasks accept by themselves once review approves them", ..base("pickup_auto_accept", Bool(false), Some("Pickup"), OnOff) },
-    Setting { help: "read this repository's GitHub issues into the backlog, each asking for a yes (docs/issues.md)", ..base("issues", Bool(false), Some("Issues"), OnOff) },
+    Setting { help: "read this repository's GitHub issues into the backlog, for the coordinator to judge (docs/issues.md)", ..base("issues", Bool(false), Some("Issues"), OnOff) },
     Setting { help: "the GitHub repository issues are read from, as OWNER/REPO (\"\" clears it)", repo_only: true, metavar: Some("OWNER/REPO"), none: Some("origin's, or in local mode the push remote's"), clears: true, ..base("issues_repo", Null, Some("Issues"), Text) },
     Setting { help: "minutes between the watcher's reads of the GitHub issues", least: Some(1), says: Some("minutes, 1 or more"), metavar: Some("MINUTES"), ..base("issues_every", Int(30), Some("Issues"), Number) },
+    Setting { help: "which judged issues start by themselves, through pickup (so only with pickup on): none (off), a trusted author's clear, small, low-risk ones (small), or medium-sized ones too (medium)", choices: Some(&ISSUES_START), ..base("issues_start", Str("small"), Some("Issues"), Choice) },
+    Setting { help: "GitHub logins whose issues are trusted besides the gh account's own, separated by commas (\"\" clears it)", metavar: Some("LOGINS"), none: Some("nobody else"), clears: true, ..base("issues_trusted", Null, Some("Issues"), Text) },
+    Setting { help: "a label that makes an issue trusted when the gh account's own login added it", metavar: Some("LABEL"), ..base("issues_label", Str("bullpen"), Some("Issues"), Text) },
     Setting { repo_only: true, ..base("coordinators", List(&[]), None, File) },
     Setting { repo_only: true, ..base("next_coordinator", Int(1), None, File) },
 ];

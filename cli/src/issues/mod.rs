@@ -2,9 +2,11 @@
 //! for the repository's open issues once and compares them with `issues.json` (`sync`): one not
 //! seen before becomes a backlog item that asks for a yes, an undecided one that was
 //! edited is read again, a closed one's item is done. `bullpen issues` lists what's
-//! recorded, and `bullpen issue N` (view.rs) prints one for reading. Nothing is written
-//! to GitHub and nothing starts by itself: every issue asks the person, whose keep or
-//! drop of its item is remembered (`decided`), so it is never asked again.
+//! recorded, and `bullpen issue N` (view.rs) prints one for reading. The coordinator
+//! judges each (`issue N --score`, judge.rs): a trusted (trust.rs), clear, small,
+//! low-risk one goes on the list by itself, and the rest ask the person. Nothing is
+//! written to GitHub. A keep or drop of an issue's item is remembered (`decided`), so it
+//! is never asked again.
 //!
 //! The watcher reads them too, on a timer, and tells the coordinators of new ones in
 //! one news line (timer.rs).
@@ -12,10 +14,12 @@
 //! An issue's text is whoever filed it's: only its title, clipped and without control
 //! characters (text.rs), its number and its author reach the backlog and the news.
 
+pub mod judge;
 pub mod repo;
 pub mod store;
 pub mod text;
 pub mod timer;
+pub mod trust;
 pub mod view;
 
 use crate::args::{flag, Arg, Args};
@@ -61,12 +65,12 @@ pub fn cmd_issues(argv: &[String]) -> Res<i32> {
         println!("{}", c.line);
     }
     let count = format!("{n} open issue{} in {slug}", if n == 1 { "" } else { "s" });
-    if changes.is_empty() {
-        println!("nothing new: {count}");
-    } else {
-        println!(
-            "{count}. `bullpen issue N` shows one; `bullpen later L7 --keep` says yes to its item, `--drop \"why\"` no"
-        );
+    match changes.iter().find_map(|c| c.asks.as_deref()) {
+        _ if changes.is_empty() => println!("nothing new: {count}"),
+        Some(id) => println!(
+            "{count}. `bullpen issue N` shows one; `bullpen later {id} --keep` says yes to its item, `--drop \"why\"` no"
+        ),
+        None => println!("{count}. `bullpen issue N` shows one"),
     }
     Ok(0)
 }
@@ -76,6 +80,8 @@ pub fn cmd_issues(argv: &[String]) -> Res<i32> {
 pub struct Change {
     pub line: String,
     pub new: Option<(i64, String)>,
+    /// the item, when it asks for a yes now (new, edited or open again)
+    pub asks: Option<String>,
 }
 
 /// What a read found: the repository, how many issues are open there, what changed.
@@ -85,8 +91,12 @@ pub struct Read {
     pub changes: Vec<Change>,
 }
 
-fn changed(line: String) -> Option<Change> {
-    Some(Change { line, new: None })
+fn changed(line: String, asks: Option<&str>) -> Option<Change> {
+    Some(Change {
+        line,
+        new: None,
+        asks: asks.map(str::to_string),
+    })
 }
 
 /// One read (`issues --now`, and the watcher's timer): ask gh for the repository's open
@@ -148,6 +158,7 @@ fn read_one(seen: &mut Obj, b: &mut Backlog, issue: &Obj) -> Option<Change> {
         return Some(Change {
             line: format!("new: {id}  {title}"),
             new: Some((n, text::told(issue))),
+            asks: Some(id),
         });
     };
     let id = s(rec, "item").to_string();
@@ -167,9 +178,10 @@ fn read_one(seen: &mut Obj, b: &mut Backlog, issue: &Obj) -> Option<Change> {
             about.insert("updated".into(), json!(updated));
         }
     }
+    let asks = (s(item, "state") == "asks").then_some(id.as_str());
     match (reopened, edited) {
-        (true, _) => changed(format!("open again: {id}  {title}")),
-        (_, true) => changed(format!("edited: {id}  {title}")),
+        (true, _) => changed(format!("open again: {id}  {title}"), asks),
+        (_, true) => changed(format!("edited: {id}  {title}"), asks),
         _ => None,
     }
 }
@@ -193,7 +205,7 @@ fn close_gone(seen: &mut Obj, b: &mut Backlog, open: &[&Obj]) -> Vec<Change> {
                 s(item, "id"),
                 s(item, "title")
             );
-            said.extend(changed(line));
+            said.extend(changed(line, None));
         }
     }
     said

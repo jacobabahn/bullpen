@@ -92,7 +92,9 @@ line with a task not rebased, whose push failed or that a message didn't reach
 again` lines, auto-accept's "sent back to its worker to rebase", and PR feedback
 "sent back to its worker" (`pr-feedback`, whose lines that couldn't be sent say what
 to do). The line for
-new [GitHub issues](issues.md#on-a-timer) wakes: each of them asks you.
+new [GitHub issues](issues.md#on-a-timer) wakes: the coordinator judges each; so does the
+line for a judged issue that asks you, or one you said yes to that needs a brief
+(`issue-ask`), each of which says what to do.
 
 ## The waiter (`config --news wake`)
 

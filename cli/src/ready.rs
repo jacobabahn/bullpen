@@ -113,7 +113,8 @@ fn ready(repo: &Repo, t: &mut Obj, a: &Args) -> Res<()> {
     t.shift_remove("nothing_to_merge"); // an earlier ready's with no commits: this one says again
     let local = is_local(repo, t)?;
     t.insert("local".into(), json!(local)); // its mode, fixed now: every later step goes by it
-    let review = truthy(repo.cfg.get("review"));
+                                            // a task made from an issue is reviewed whatever the settings say
+    let review = truthy(repo.cfg.get("review")) || s(t, "origin") == "issue";
     if !review {
         t.shift_remove("tour_sent"); // no reviewer checks the person's comments with review off
     }

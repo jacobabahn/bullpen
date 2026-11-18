@@ -232,12 +232,22 @@ pub fn set_auto_accept(t: &mut Obj, on: Option<bool>) {
     }
 }
 
-/// Does the task get accepted by itself once review approves it?
+/// Does the task get accepted by itself once review approves it? Never one made from an
+/// issue that isn't trusted, whatever the settings say.
 pub fn auto_accepts(repo: &Repo, t: &Obj) -> bool {
+    if from_untrusted_issue(t) {
+        return false;
+    }
     match get(t, "auto_accept") {
         None => truthy(repo.cfg.get("auto_accept")),
         own => truthy(own),
     }
+}
+
+/// Was the task made from a GitHub issue whose author bullpen doesn't trust (or that
+/// was never judged)?
+pub fn from_untrusted_issue(t: &Obj) -> bool {
+    s(t, "origin") == "issue" && !truthy(t.get("issue_trusted"))
 }
 
 /// Is the task finished with its branch to be kept (`finish --keep-branch`)? Its

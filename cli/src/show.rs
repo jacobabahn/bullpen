@@ -264,7 +264,9 @@ pub fn cmd_show(argv: &[String]) -> Res<i32> {
             }
         });
     }
-    if let Some(on) = get(&t, "auto_accept") {
+    if bullpen_core::task::from_untrusted_issue(&t) {
+        out.push("     auto: kept for you (from an issue whose author isn't trusted)".into());
+    } else if let Some(on) = get(&t, "auto_accept") {
         let says = if truthy(Some(on)) {
             "accepts by itself once approved"
         } else {

@@ -160,18 +160,23 @@ fn add(repo: &Repo, title: &str, a: &Args, who: &Caller) -> Res<i32> {
 
 /// --brief-file's text, if given.
 fn brief_text(a: &Args) -> Res<Option<String>> {
-    let Some(f) = a.opt("--brief-file").filter(|f| !f.is_empty()) else {
-        return Ok(None);
-    };
+    match a.opt("--brief-file").filter(|f| !f.is_empty()) {
+        Some(f) => Ok(Some(brief_text_of(f)?)),
+        None => Ok(None),
+    }
+}
+
+/// A brief file's text, which mustn't be empty.
+pub fn brief_text_of(f: &str) -> Res<String> {
     let text = crate::start::read_text(f)?;
     if strip(&text).is_empty() {
         return fail(format!("{f} is empty: a brief says what a worker would do"));
     }
-    Ok(Some(text))
+    Ok(text)
 }
 
 /// Write an item's brief to briefs/<ID>.md; its file name there (the item's `brief`).
-fn write_brief(repo: &Repo, id: &str, text: &str) -> Res<String> {
+pub fn write_brief(repo: &Repo, id: &str, text: &str) -> Res<String> {
     let briefs = repo.dir.join("briefs");
     std::fs::create_dir_all(&briefs)?;
     let name = format!("{id}.md");
@@ -207,7 +212,15 @@ fn change(repo: &Repo, id: &str, a: &Args, who: &Caller) -> Res<i32> {
     if a.arg("why").is_some() && acts != ["--drop"] {
         return fail("a second argument is only for --drop: why not");
     }
-    let brief = brief_text(a)?;
+    let brief = match brief_text(a)? {
+        // an issue's item: the issue quoted at the brief's end
+        Some(text) => Some(crate::issues::judge::brief_for(
+            repo,
+            backlog::load(repo)?.item(id)?,
+            &text,
+        )?),
+        None => None,
+    };
     let act = acts.first().copied();
     if act == Some("--start") {
         return start::start(repo, id, brief.as_deref(), who);
@@ -237,6 +250,9 @@ fn change(repo: &Repo, id: &str, a: &Args, who: &Caller) -> Res<i32> {
     if matches!(act, Some("--keep" | "--drop")) {
         crate::issues::decided(repo, id)?; // an issue's item: the yes or no is remembered
     }
+    if act == Some("--keep") && matches!(who, Caller::Person) {
+        crate::issues::judge::yes_needs_brief(repo, backlog::load(repo)?.item(id)?)?;
+    }
     if !viewing {
         pickup::soon(repo); // a brief, a yes, a skip or a move can make the next item another
     }
@@ -257,7 +273,14 @@ fn keep(item: &mut Obj) -> Res<String> {
         "kept" => Ok(format!("{id} is on the list already")),
         "asks" | "dropped" | "done" => {
             item.insert("state".into(), json!("kept"));
-            Ok(format!("{id} is on the list: {}", s(item, "title")))
+            let n = bullpen_core::json::obj(item, "issue").get("number").cloned();
+            let needs = match n {
+                Some(n) if s(item, "by") == "issue" && !bullpen_core::json::truthy(item.get("brief")) => {
+                    format!(". It needs a brief before it can start: `bullpen issue {n} --brief-file FILE`")
+                }
+                _ => String::new(),
+            };
+            Ok(format!("{id} is on the list: {}{needs}", s(item, "title")))
         }
         _ => fail(not_open(item)),
     }
@@ -289,7 +312,7 @@ fn skip(item: &mut Obj, why: &str) -> Res<String> {
 }
 
 /// Why a started (or dropped) item can't be changed.
-fn not_open(item: &Obj) -> String {
+pub fn not_open(item: &Obj) -> String {
     let id = s(item, "id");
     match s(item, "state") {
         "started" => format!(

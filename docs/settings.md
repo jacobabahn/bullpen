@@ -71,11 +71,15 @@ accept](accept.md#after-accept)), and `--gh PATH` runs that gh instead of the on
 themselves when there's room, under caps (`--pickup-running`, `--pickup-waiting`,
 `--pickup-per-day`, `--pickup-model`, `--pickup-auto-accept`; see
 [Pickup](backlog.md#pickup)). `bullpen config --issues on` lets `bullpen issues --now` read
-the repository's open GitHub issues into the backlog, each asking for a yes (off by
+the repository's open GitHub issues into the backlog, for the coordinator to judge (off by
 default), and `--issues-repo OWNER/REPO` names the repository when it isn't origin's, or
 in local mode the push remote's. While it is on the watcher reads them too, every
-`--issues-every` minutes (30), and tells the coordinator of new ones (see
-[GitHub issues](issues.md)).
+`--issues-every` minutes (30), and tells the coordinator of new ones. `--issues-start
+off|small|medium` (`small`) says which judged issues go on the list by themselves, and
+so start through pickup: only with `--pickup on`, whatever `issues_start` says. Only a
+trusted issue does: its author is the gh account's login or in `--issues-trusted
+"ann,bob"` (nobody else by default), or that login added the label `--issues-label`
+(`bullpen`) (see [GitHub issues](issues.md)).
 
 ## Where panes live
 

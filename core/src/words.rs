@@ -472,6 +472,8 @@ pub fn auto_detail(cfg: &Obj, t: &Obj) -> &'static str {
         ""
     } else if truthy(t.get("auto_wait")) && st == "ready" {
         "Auto-accepts once its checks pass."
+    } else if crate::task::from_untrusted_issue(t) && (on || truthy(t.get("auto_accept"))) {
+        "Kept for you: from an issue whose author isn't trusted."
     } else if on && t.get("auto_accept") == Some(&Value::Bool(false)) {
         "Kept for you: no auto-accept."
     } else if !on && t.get("auto_accept") == Some(&Value::Bool(true)) {

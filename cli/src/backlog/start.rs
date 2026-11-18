@@ -64,6 +64,11 @@ pub fn make_task(repo: &Repo, id: &str, brief: Option<&str>, started_by: &str, f
         extra.insert("from".into(), json!(id));
         extra.insert("origin".into(), json!(origin(&item)));
         extra.insert("started_by".into(), json!(started_by));
+        if origin(&item) == "issue" {
+            // bullpen's word, from the judgement: an untrusted issue's task never auto-accepts
+            let trusted = truthy(bullpen_core::json::obj(&item, "judged").get("trusted"));
+            extra.insert("issue_trusted".into(), json!(trusted));
+        }
         let mut argv = vec!["--brief-file".into(), path.display().to_string()];
         argv.extend(flags.iter().cloned());
         // `--` last: a title may start with a dash

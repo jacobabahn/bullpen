@@ -40,7 +40,9 @@ Review costs only what it has to:
   `config --light-review-lines`) in at most 2 files. A change that touches
   `prompts/` or `.bullpen/rules.md` is never small: those are what agents are told
   to do, a wrong one changes behaviour, so it gets a full review however few lines
-  it is ("full review (changes a prompt)", "full review (changes the rules)").
+  it is ("full review (changes a prompt)", "full review (changes the rules)"). A task
+  made from a [GitHub issue](issues.md#a-task-from-an-issue) always gets a full review
+  ("full review (from an issue)"), even with review off.
   These checks, and the risk label's, read each file's name exactly as it is, an
   accent, a space, a quote or a tab in it too; a renamed file counts as both its
   old and its new path.

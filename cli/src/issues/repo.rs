@@ -1,6 +1,7 @@
 //! Which GitHub repository a repo's issues are read from (`issues_repo`, `slug`), and the
 //! one way gh is asked about them (`gh_json`): always with `-R <repo>`, so gh's own guess
-//! among remotes never matters.
+//! among remotes never matters; and `gh api`, which takes the repository in its path
+//! (`gh_api_pages`), and the signed-in account's login (`gh_login`).
 
 use bullpen_core::proc::{git, run_in};
 use bullpen_core::task::clip;
@@ -77,9 +78,52 @@ pub fn issues_repo(repo: &Repo) -> Res<String> {
 
 /// Run `gh <args> -R <slug>` and read its JSON. `what` says what it was for, when it fails.
 pub fn gh_json(repo: &Repo, slug: &str, args: &[&str], what: &str) -> Res<Value> {
-    let mut argv = vec![repo.gh()];
-    argv.extend(args.iter().map(|a| a.to_string()));
+    let mut argv: Vec<String> = args.iter().map(|a| a.to_string()).collect();
     argv.extend(["-R".into(), slug.into()]);
+    let out = gh_out(repo, &argv, what)?;
+    match serde_json::from_str(&out) {
+        Ok(v) => Ok(v),
+        Err(_) => fail(format!("gh couldn't {what}: what it printed isn't JSON")),
+    }
+}
+
+/// `gh api` on a path of the repository's (`repos/<owner>/<repo>/<path>`), every page:
+/// what each page printed, in order. `gh api` takes no `-R`, so the repository is in the
+/// path, and its host (a slug of three parts) is `--hostname`.
+pub fn gh_api_pages(repo: &Repo, slug: &str, path: &str, what: &str) -> Res<Vec<Value>> {
+    let parts: Vec<&str> = slug.split('/').collect();
+    let (host, owner_repo) = match parts.as_slice() {
+        [host, o, r] => (Some(*host), format!("{o}/{r}")),
+        _ => (None, slug.to_string()),
+    };
+    let mut argv = vec!["api".to_string(), "--paginate".into()];
+    if let Some(h) = host {
+        argv.extend(["--hostname".into(), h.into()]);
+    }
+    argv.push(format!("repos/{owner_repo}/{path}"));
+    let out = gh_out(repo, &argv, what)?;
+    let pages: Result<Vec<Value>, _> = serde_json::Deserializer::from_str(&out).into_iter().collect();
+    match pages {
+        Ok(p) => Ok(p),
+        Err(_) => fail(format!("gh couldn't {what}: what it printed isn't JSON")),
+    }
+}
+
+/// `gh api user`'s login: the account gh is signed in as.
+pub fn gh_login(repo: &Repo) -> Res<String> {
+    let what = "say which account it is signed in as";
+    let out = gh_out(repo, &["api".into(), "user".into()], what)?;
+    let v: Value = serde_json::from_str(&out).unwrap_or(Value::Null);
+    match v.get("login").and_then(Value::as_str).filter(|l| !l.is_empty()) {
+        Some(l) => Ok(l.to_string()),
+        None => fail(format!("gh couldn't {what}: what it printed has no login")),
+    }
+}
+
+/// Run gh with args in the repo; what it printed. `what` says what it was for, when it fails.
+fn gh_out(repo: &Repo, args: &[String], what: &str) -> Res<String> {
+    let mut argv = vec![repo.gh()];
+    argv.extend(args.iter().cloned());
     let done = match run_in(&argv, &repo.root, false) {
         Ok(d) => d,
         Err(e) => return fail(format!("gh couldn't {what}: it didn't run ({})", e.0)),
@@ -96,10 +140,7 @@ pub fn gh_json(repo: &Repo, slug: &str, args: &[&str], what: &str) -> Res<Value>
             clip(said.unwrap_or("it failed"), 200)
         ));
     }
-    match serde_json::from_str(&done.stdout) {
-        Ok(v) => Ok(v),
-        Err(_) => fail(format!("gh couldn't {what}: what it printed isn't JSON")),
-    }
+    Ok(done.stdout)
 }
 
 #[cfg(test)]
