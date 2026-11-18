@@ -156,6 +156,18 @@ class TourTest(unittest.TestCase):
         self.assertEqual([s["title"] for s in self.tour_file(tid)["steps"]], ["All of it"])
         self.assertEqual(self.show(tid)["status"], "review")
 
+    def test_a_writer_that_finishes_before_its_pid_is_noted_leaves_the_tour_written(self):
+        tid = self.start_task()
+        self.commit_and_ready(tid)
+        self.answer([{"title": "All of it", "note": "n", "hunks": [{"file": "fix1.txt"}]}])
+        # the writer runs to the end before `tour` notes its pid on the task
+        self.env["BULLPEN_TOUR_WAIT"] = "1"
+        self.bp("tour", tid)
+        del self.env["BULLPEN_TOUR_WAIT"]
+        self.assertEqual(self.show(tid)["tour"]["state"], "written")
+        self.assertNotIn("pid", self.show(tid)["tour"])
+        self.assertIn(f"{tid}'s tour: current", self.bp("tour", tid, "--show").stdout)
+
     def test_a_tour_stays_current_after_a_clean_rebase_and_goes_stale_when_the_code_changes(self):
         tid = self.two_file_task()
         self.answer([{"title": "All", "note": "n", "hunks": [{"file": "a.txt"}, {"file": "fix1.txt"}]}])

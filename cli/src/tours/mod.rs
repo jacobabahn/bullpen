@@ -60,6 +60,19 @@ pub fn write_task(repo: &Repo, t: &Obj) -> Res<()> {
     Ok(json::write_obj(&repo.task_path(s(t, "id")), t)?)
 }
 
+/// Change task tid's file as it is now, under the tours' lock (tours.lock): read it
+/// again, change it, and write it if change says so. The command that starts a writer
+/// and the writer both write t["tour"], so neither writes over the other with an older
+/// copy. Returns the task as it is.
+pub fn update_task(repo: &Repo, tid: &str, change: impl FnOnce(&mut Obj) -> bool) -> Res<Obj> {
+    let _held = bullpen_core::lock::lock(&repo.dir.join("tours.lock"))?;
+    let mut t = repo.task(tid)?;
+    if change(&mut t) {
+        write_task(repo, &t)?;
+    }
+    Ok(t)
+}
+
 // ---------- the diff ----------
 
 /// One hunk of a diff: its old and new (start, count), and its text (the @@ line on).
@@ -234,10 +247,11 @@ pub fn covers(r: &Obj, f: &DiffFile, h: &Hunk) -> bool {
 
 /// The tour wasn't written: a line on the board and in the log. No news, no triage.
 pub fn tour_failed(repo: &Repo, tid: &str, why: &str) -> Res<()> {
-    let mut t = repo.task(tid)?;
-    t.insert("tour".into(), json!({"state": "failed", "at": iso_now(), "why": why}));
-    t.insert("note".into(), json!(format!("tour failed: {why}")));
-    write_task(repo, &t)?;
+    let t = update_task(repo, tid, |t| {
+        t.insert("tour".into(), json!({"state": "failed", "at": iso_now(), "why": why}));
+        t.insert("note".into(), json!(format!("tour failed: {why}")));
+        true
+    })?;
     append(&tour_log(repo, &t), &format!("{} failed: {why}\n", iso_now()))?;
     Ok(())
 }

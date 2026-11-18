@@ -29,7 +29,7 @@ use crate::start::launch::hand_back;
 use crate::stops::stop;
 use crate::tours::comments::read_comments;
 use crate::tours::{comments_path, step_diff, step_files, tour_diff, tour_failed, tour_log, tour_path};
-use crate::tours::{tour_state, write_task};
+use crate::tours::{tour_state, update_task, write_task};
 use bullpen_core::json::{self, obj, py_str, s, truthy, Obj};
 use bullpen_core::paths::self_bin;
 use bullpen_core::proc::{head, merge_base};
@@ -263,7 +263,8 @@ fn start_tour(repo: &Repo, t: &mut Obj, wait: bool, opener: Option<Value>) -> Re
     if wt.is_empty() || !Path::new(wt).is_dir() {
         return fail(format!("{id} has no worktree, so there's nothing to tour"));
     }
-    let mut run = json!({"state": "writing", "at": iso_now(), "pid": std::process::id()});
+    let at = json!(iso_now());
+    let mut run = json!({"state": "writing", "at": at, "pid": std::process::id()});
     if let Some(opener) = opener {
         run["open"] = opener;
     }
@@ -304,12 +305,23 @@ fn start_tour(repo: &Repo, t: &mut Obj, wait: bool, opener: Option<Value>) -> Re
         task: Some(&id),
         pass_fds: vec![],
     };
-    let pid = background(&job, false);
-    if let Some(Value::Object(run)) = t.get_mut("tour") {
-        run.insert("pid".into(), pid.map_or(Value::Null, Value::from));
-    }
-    write_task(repo, t)?;
+    let pid = background(&job, std::env::var("BULLPEN_TOUR_WAIT").is_ok_and(|v| !v.is_empty()));
+    note_writer(repo, &id, &at, pid)?;
     Ok(None)
+}
+
+/// The writer's pid on the task, while the run started at `at` is still being written:
+/// a writer that has already finished (written, or failed) is left as it said.
+/// BULLPEN_TOUR_WAIT (the tests): the writer runs to the end first.
+fn note_writer(repo: &Repo, id: &str, at: &Value, pid: Option<u32>) -> Res<()> {
+    update_task(repo, id, |t| match t.get_mut("tour") {
+        Some(Value::Object(run)) if run.get("state") == Some(&json!("writing")) && run.get("at") == Some(at) => {
+            run.insert("pid".into(), pid.map_or(Value::Null, Value::from));
+            true
+        }
+        _ => false,
+    })?;
+    Ok(())
 }
 
 /// The tour as it is, for the board: its state and steps (--json), or one step's hunks

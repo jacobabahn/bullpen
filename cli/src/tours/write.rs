@@ -3,7 +3,7 @@
 //! asked on the board to open the tour once written, it opens in the stepper there.
 //! The stepper starts `_tour` (`tour`, `tour --wait` and the board's g: stepper/).
 
-use super::{append, diff_files, lines_of, tour_failed, tour_log, tour_path, write_task, DiffFile, OTHER};
+use super::{append, diff_files, lines_of, tour_failed, tour_log, tour_path, update_task, DiffFile, OTHER};
 use crate::args::{pos, Arg, Args, Nargs};
 use crate::modes::task_base_ref;
 use crate::review::patch_id;
@@ -451,16 +451,18 @@ pub fn write_tour(repo: &Repo, tid: &str) -> Wr<PathBuf> {
                       "patch": patch_id(wt, &base_ref)?, "written": iso_now(),
                       "model": model_in(&tour_command(repo)), "steps": steps});
     bullpen_core::json::write(&path, &tour)?;
-    let mut t = repo.task(tid)?; // read again: it may have changed while the agent ran
-    let opener = obj(&t, "tour").get("open").filter(|v| truthy(Some(v))).cloned();
-    t.insert(
-        "tour".into(),
-        json!({"state": "written", "at": iso_now(), "commit": commit}),
-    );
-    if s(&t, "note").starts_with("tour failed") {
-        t.insert("note".into(), Value::Null);
-    }
-    write_task(repo, &t)?;
+    let mut opener = None; // read again: it may have changed while the agent ran
+    let t = update_task(repo, tid, |t| {
+        opener = obj(t, "tour").get("open").filter(|v| truthy(Some(v))).cloned();
+        t.insert(
+            "tour".into(),
+            json!({"state": "written", "at": iso_now(), "commit": commit}),
+        );
+        if s(t, "note").starts_with("tour failed") {
+            t.insert("note".into(), Value::Null);
+        }
+        true
+    })?;
     if let Some(opener) = opener {
         open_when_written(repo, &t, &opener);
     }
@@ -606,17 +608,18 @@ pub fn cmd_tour_bg(argv: &[String]) -> Res<i32> {
     let a = Args::parse("_tour", argv, TOUR_BG);
     let tid = a.arg("id").unwrap_or("");
     let repo = Repo::new(repo_root()?)?;
-    let mut t = repo.task(tid)?;
     let pid = json!(std::process::id()); // this process writes it, whoever started it
-    match t.get_mut("tour") {
-        Some(Value::Object(run)) => {
-            run.insert("pid".into(), pid);
+    update_task(&repo, tid, |t| {
+        match t.get_mut("tour") {
+            Some(Value::Object(run)) => {
+                run.insert("pid".into(), pid);
+            }
+            _ => {
+                t.insert("tour".into(), json!({"pid": pid}));
+            }
         }
-        _ => {
-            t.insert("tour".into(), json!({"pid": pid}));
-        }
-    }
-    write_task(&repo, &t)?;
+        true
+    })?;
     match write_tour(&repo, tid) {
         Ok(_) => Ok(0),
         Err(Wrong::Fail(_)) => Ok(1), // recorded on the task

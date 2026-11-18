@@ -1,6 +1,7 @@
 //! Lock files, as fcntl.flock takes them (std's File::lock is flock(2) on Linux and
 //! macOS, so the Python bullpen and this one exclude each other): the news readers,
-//! notifications, the push and the build. A lock is held while its File is open.
+//! notifications, the push, the build and tours' writes to a task. A lock is held while
+//! its File is open.
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io;
