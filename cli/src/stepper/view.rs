@@ -8,13 +8,13 @@ use crate::coordinators::home_of;
 use crate::line_edit::{read_keys, ready, term_size, Decoder, Raw, PASTE_OFF, PASTE_ON};
 use crate::rex::{alive, rex_focus};
 use crate::tours::comments::{add_comment, read_comments};
-use crate::tours::{step_diff, tour_diff, tour_path, tour_stale, write_task};
+use crate::tours::{step_diff, tour_diff, tour_path, tour_stale, update_task};
 use bullpen_core::json::{obj, read_obj, s, truthy, Obj};
 use bullpen_core::paths::self_bin;
 use bullpen_core::proc::{run_with, which};
 use bullpen_core::text::{splitlines, strip};
 use bullpen_core::{fail, Fail, Repo, Res};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::io::Write;
 use std::path::Path;
 
@@ -114,11 +114,19 @@ pub fn view_tour(repo: &Repo, t: &mut Obj, back: bool) -> Res<()> {
     let commit = tour.get("commit").cloned().unwrap_or(Value::Null);
     let run = obj(t, "tour");
     if s(run, "state") == "written" && !truthy(run.get("stale")) && tour_stale(repo, t, &tour)?.is_none() {
-        // the board marks it toured (not for the old code's tour)
-        if let Some(Value::Object(run)) = t.get_mut("tour") {
-            run.insert("opened".into(), commit.clone());
-        }
-        write_task(repo, t)?;
+        // the board marks it toured (not for the old code's tour): if it is still this
+        // tour, under the tours' lock, and not one being written since the task was read
+        *t = update_task(repo, &id, |t| match t.get_mut("tour") {
+            Some(Value::Object(run))
+                if run.get("state") == Some(&json!("written"))
+                    && !truthy(run.get("stale"))
+                    && run.get("commit") == Some(&commit) =>
+            {
+                run.insert("opened".into(), commit.clone());
+                true
+            }
+            _ => false,
+        })?;
     }
     let comments = read_comments(repo, t)?;
     let place = obj(&comments, "at");

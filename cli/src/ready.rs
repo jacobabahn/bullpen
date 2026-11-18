@@ -96,6 +96,12 @@ fn ready(repo: &Repo, t: &mut Obj, a: &Args) -> Res<()> {
         gh.shift_remove("sent"); // whatever GitHub sent it back for is answered now
     }
     t.shift_remove("rebased"); // what the board says of a rebase after an accept
+                               // Not through tours::update_task: ready changes its copy of the task and saves it
+                               // all after the push, as every command that changes a task's status does, so a tour
+                               // write made meanwhile is lost. That is safe: a ready means the code changed, and a
+                               // tour is asked for while it doesn't. A tour written meanwhile anyway is still on
+                               // disk for the stepper; at worst the task says it failed (its writer gone while
+                               // "writing"), and g writes it again.
     if s(obj(t, "tour"), "state") == "written" {
         let tour = read_obj(&tour_path(repo, t))?;
         if let Some(tour) = tour.filter(|o| !o.is_empty()) {

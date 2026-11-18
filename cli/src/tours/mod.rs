@@ -56,14 +56,15 @@ pub fn append(log: &Path, text: &str) -> std::io::Result<()> {
 }
 
 /// Write a task's file as it is: not a save, since its status didn't change.
-pub fn write_task(repo: &Repo, t: &Obj) -> Res<()> {
+fn write_task(repo: &Repo, t: &Obj) -> Res<()> {
     Ok(json::write_obj(&repo.task_path(s(t, "id")), t)?)
 }
 
 /// Change task tid's file as it is now, under the tours' lock (tours.lock): read it
-/// again, change it, and write it if change says so. The command that starts a writer
-/// and the writer both write t["tour"], so neither writes over the other with an older
-/// copy. Returns the task as it is.
+/// again, change it, and write it if change says so. The writer and the commands that
+/// start one, ask it to open the tour, mark it failed or mark it opened all write
+/// t["tour"], so none writes over another with an older copy: each looks again at the
+/// tour here before it changes it. Returns the task as it is.
 pub fn update_task(repo: &Repo, tid: &str, change: impl FnOnce(&mut Obj) -> bool) -> Res<Obj> {
     let _held = bullpen_core::lock::lock(&repo.dir.join("tours.lock"))?;
     let mut t = repo.task(tid)?;
@@ -248,12 +249,37 @@ pub fn covers(r: &Obj, f: &DiffFile, h: &Hunk) -> bool {
 /// The tour wasn't written: a line on the board and in the log. No news, no triage.
 pub fn tour_failed(repo: &Repo, tid: &str, why: &str) -> Res<()> {
     let t = update_task(repo, tid, |t| {
-        t.insert("tour".into(), json!({"state": "failed", "at": iso_now(), "why": why}));
-        t.insert("note".into(), json!(format!("tour failed: {why}")));
+        mark_failed(t, why);
         true
     })?;
     append(&tour_log(repo, &t), &format!("{} failed: {why}\n", iso_now()))?;
     Ok(())
+}
+
+fn mark_failed(t: &mut Obj, why: &str) {
+    t.insert("tour".into(), json!({"state": "failed", "at": iso_now(), "why": why}));
+    t.insert("note".into(), json!(format!("tour failed: {why}")));
+}
+
+/// Mark the tour failed if, looked at again under the tours' lock, it is still being
+/// written by a writer that is gone: one that finished since the task was read has
+/// written the tour (or why it failed), and a new one may have started. Returns the
+/// task as it is.
+fn writer_gone(repo: &Repo, tid: &str) -> Res<Obj> {
+    let why = "its writer stopped before the tour was written";
+    let mut failed = false;
+    let t = update_task(repo, tid, |t| {
+        let run = obj(t, "tour");
+        failed = s(run, "state") == "writing" && !pid_alive(run.get("pid"));
+        if failed {
+            mark_failed(t, why);
+        }
+        failed
+    })?;
+    if failed {
+        append(&tour_log(repo, &t), &format!("{} failed: {why}\n", iso_now()))?;
+    }
+    Ok(t)
 }
 
 /// Is a process with this pid running (or there, but not ours to signal)?
@@ -272,9 +298,11 @@ pub fn tour_state(repo: &Repo, t: &mut Obj) -> Res<(&'static str, Option<Obj>, O
         if pid_alive(obj(t, "tour").get("pid")) {
             return Ok(("writing", None, None));
         }
-        tour_failed(repo, s(t, "id"), "its writer stopped before the tour was written")?;
-        let fresh = repo.task(s(t, "id"))?;
+        let fresh = writer_gone(repo, s(t, "id"))?;
         t.extend(fresh);
+        if s(obj(t, "tour"), "state") == "writing" {
+            return Ok(("writing", None, None)); // a new writer
+        }
     }
     let run = obj(t, "tour");
     if s(run, "state") == "failed" {

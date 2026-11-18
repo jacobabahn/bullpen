@@ -121,3 +121,67 @@ fn step_files_names_files_and_lines() {
     assert_eq!(step_files(&step), "a 1-2, b");
     assert_eq!(step_files(&r(json!({"hunks": []}))), "(no code)");
 }
+
+/// A repo of its own in the temp folder, with no config, and task BP-1 on disk as given.
+pub fn repo_with(name: &str, task: Value) -> Repo {
+    let dir = std::env::temp_dir().join(format!("bullpen-test-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("tasks")).unwrap();
+    std::fs::create_dir_all(dir.join("briefs")).unwrap();
+    let repo = Repo {
+        root: dir.clone(),
+        dir,
+        cfg: Obj::new(),
+        own: Default::default(),
+    };
+    json::write_obj(&repo.task_path("BP-1"), &r(task)).unwrap();
+    repo
+}
+
+/// The pid of a process that has ended.
+pub fn dead_pid() -> u32 {
+    let mut p = std::process::Command::new("true").spawn().unwrap();
+    p.wait().unwrap();
+    p.id()
+}
+
+#[test]
+fn a_writer_that_finished_after_its_task_was_read_leaves_the_tour_written() {
+    let written = json!({"id": "BP-1", "status": "ready", "tour": {"state": "written", "commit": "c1"}});
+    let repo = repo_with("tour-state-written", written);
+    json::write(
+        &tour_path(&repo, &r(json!({"id": "BP-1"}))),
+        &json!({"commit": "c1", "steps": []}),
+    )
+    .unwrap();
+    // read while the writer still ran: it has since written the tour and ended
+    let mut old = r(json!({"id": "BP-1", "status": "ready", "tour": {"state": "writing", "pid": dead_pid()}}));
+    let (state, tour, why) = tour_state(&repo, &mut old).unwrap();
+    assert_eq!((state, why), ("current", None));
+    assert!(tour.is_some());
+    assert_eq!(
+        repo.task("BP-1").unwrap()["tour"],
+        json!({"state": "written", "commit": "c1"})
+    );
+    assert_eq!(old["tour"]["state"], "written");
+    let _ = std::fs::remove_dir_all(&repo.dir);
+}
+
+#[test]
+fn a_tour_whose_writer_is_gone_has_failed_unless_a_new_one_writes_it() {
+    let gone = json!({"id": "BP-1", "status": "ready", "tour": {"state": "writing", "pid": dead_pid()}});
+    let repo = repo_with("tour-state-gone", gone.clone());
+    let (state, _, why) = tour_state(&repo, &mut r(gone.clone())).unwrap();
+    let why = why.unwrap();
+    assert_eq!(
+        (state, why.as_str()),
+        ("failed", "its writer stopped before the tour was written")
+    );
+    assert_eq!(repo.task("BP-1").unwrap()["tour"]["state"], "failed");
+    // a new writer took over since the task was read
+    let alive = json!({"id": "BP-1", "status": "ready", "tour": {"state": "writing", "pid": std::process::id()}});
+    json::write_obj(&repo.task_path("BP-1"), &r(alive)).unwrap();
+    assert_eq!(tour_state(&repo, &mut r(gone)).unwrap().0, "writing");
+    assert_eq!(repo.task("BP-1").unwrap()["tour"]["pid"], json!(std::process::id()));
+    let _ = std::fs::remove_dir_all(&repo.dir);
+}

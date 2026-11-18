@@ -29,7 +29,7 @@ use crate::start::launch::hand_back;
 use crate::stops::stop;
 use crate::tours::comments::read_comments;
 use crate::tours::{comments_path, step_diff, step_files, tour_diff, tour_failed, tour_log, tour_path};
-use crate::tours::{tour_state, update_task, write_task};
+use crate::tours::{tour_state, update_task};
 use bullpen_core::json::{self, obj, py_str, s, truthy, Obj};
 use bullpen_core::paths::self_bin;
 use bullpen_core::proc::{head, merge_base};
@@ -191,12 +191,13 @@ fn tour_pane(repo: &Repo, t: &mut Obj, state: &str, new: bool, session: Value, f
     let id = s(t, "id").to_string();
     let opener = json!({"session": session, "from": from});
     if state == "writing" {
-        if let Some(Value::Object(run)) = t.get_mut("tour") {
-            run.insert("open".into(), opener);
+        if open_once_written(repo, t, &opener)? {
+            println!("{id}'s tour is being written: it opens when it's done");
+            return Ok(());
         }
-        write_task(repo, t)?;
-        println!("{id}'s tour is being written: it opens when it's done");
-        return Ok(());
+        // its writer finished since the task was read: go by what it left
+        let (now, _, _) = tour_state(repo, t)?;
+        return tour_pane(repo, t, now, false, session, from);
     }
     if matches!(state, "none" | "failed") || new {
         start_tour(repo, t, false, Some(opener))?;
@@ -216,6 +217,23 @@ fn tour_pane(repo: &Repo, t: &mut Obj, state: &str, new: bool, session: Value, f
     };
     println!("opened {id}'s tour{stale}");
     Ok(())
+}
+
+/// Ask the writer of the tour being written to open it where opener says once it's
+/// written: only while it still is being written, looked at again under the tours' lock,
+/// so a writer that finished since the task was read isn't written over with "writing".
+/// Returns whether it was asked; t is the task as it is now.
+fn open_once_written(repo: &Repo, t: &mut Obj, opener: &Value) -> Res<bool> {
+    let mut asked = false;
+    *t = update_task(repo, s(t, "id"), |t| match t.get_mut("tour") {
+        Some(Value::Object(run)) if run.get("state") == Some(&json!("writing")) => {
+            run.insert("open".into(), opener.clone());
+            asked = true;
+            true
+        }
+        _ => false,
+    })?;
+    Ok(asked)
 }
 
 pub fn tour_label(t: &Obj) -> String {
@@ -268,11 +286,15 @@ fn start_tour(repo: &Repo, t: &mut Obj, wait: bool, opener: Option<Value>) -> Re
     if let Some(opener) = opener {
         run["open"] = opener;
     }
-    t.insert("tour".into(), run);
-    if s(t, "note").starts_with("tour failed") {
-        t.insert("note".into(), Value::Null);
-    }
-    write_task(repo, t)?;
+    // Onto the task as it is, not checked again: the caller found no tour being written.
+    // Should another command have started a writer since, both write the same code's tour.
+    *t = update_task(repo, &id, |t| {
+        t.insert("tour".into(), run);
+        if s(t, "note").starts_with("tour failed") {
+            t.insert("note".into(), Value::Null);
+        }
+        true
+    })?;
     let me = self_bin().to_string_lossy().into_owned();
     if wait {
         let _ = std::io::stdout().flush();
@@ -493,3 +515,7 @@ fn save_place(repo: &Repo, t: &Obj, commit: &Value, at: usize) -> Res<()> {
     c.insert("at".into(), json!({"commit": commit, "step": at + 1}));
     Ok(json::write_obj(&comments_path(repo, t), &c)?)
 }
+
+#[cfg(test)]
+#[path = "tests/test_stepper.rs"]
+mod tests;
