@@ -10,6 +10,7 @@ use crate::become_ready::{make_ready, How};
 use crate::coordinators::{coordinator_at, coordinator_gone};
 use crate::limit::{limit_hit, limit_over, limited, LIMIT_STATES};
 use crate::modes::task_base_ref;
+use crate::news::kind::Kind;
 use crate::news::say;
 use crate::review::{keep_approval, rebase_check, Check};
 use crate::rex::screen;
@@ -130,7 +131,7 @@ pub fn event(ev: &Event) -> Res<()> {
             say(
                 &repo,
                 &t,
-                "working",
+                Kind::Working,
                 &format!("{id} is working again (was ready): it must run `ready` again{holds}"),
             )?;
         } else if status == "finished" && !after_working {
@@ -138,7 +139,7 @@ pub fn event(ev: &Event) -> Res<()> {
             say(
                 &repo,
                 &t,
-                "working",
+                Kind::Working,
                 &format!("{id} is working again (was finished): it must run `finish` (or `ready`) again"),
             )?;
         }
@@ -172,7 +173,7 @@ pub fn event(ev: &Event) -> Res<()> {
                 "prompt",
                 &why,
                 &[prompt_news(&id, kind, &msg)],
-                "needs-you",
+                Kind::NeedsYou,
             )?;
         }
         "error" => {
@@ -184,7 +185,7 @@ pub fn event(ev: &Event) -> Res<()> {
                 "failed",
                 &format!("Failed{}", saying(msg)),
                 &[line],
-                "failed",
+                Kind::Failed,
             )?;
         }
         "done" | "idle" => {
@@ -215,7 +216,7 @@ pub fn event(ev: &Event) -> Res<()> {
                 "ended",
                 "Ended its turn without saying ready",
                 &[line],
-                "quiet",
+                Kind::Quiet,
             )?;
         }
         _ => save(&repo, &mut t)?,
@@ -338,7 +339,7 @@ fn review_event(repo: &Repo, t: &mut Obj, ev: &Event) -> Res<()> {
                 "prompt",
                 &format!("Reviewer needs you ({kind}){tail}"),
                 &[line],
-                "needs-you",
+                Kind::NeedsYou,
             )?;
         }
         "done" | "idle" | "error" if status == "review" => {
@@ -364,7 +365,7 @@ fn review_event(repo: &Repo, t: &mut Obj, ev: &Event) -> Res<()> {
                 "ended",
                 "Reviewer stopped without a verdict",
                 &[line],
-                "quiet",
+                Kind::Quiet,
             )?;
         }
         _ if woke => save(repo, t)?,
@@ -423,7 +424,7 @@ pub fn gone(block: &str) -> Res<()> {
                 "exited",
                 "Reviewer exited without a verdict",
                 &[line],
-                "stopped",
+                Kind::Stopped,
             )?;
         }
         return save(&repo, &mut t);
@@ -446,7 +447,7 @@ pub fn gone(block: &str) -> Res<()> {
             "exited",
             "Agent exited before saying ready",
             &[line],
-            "stopped",
+            Kind::Stopped,
         )?;
     } else {
         save(&repo, &mut t)?;

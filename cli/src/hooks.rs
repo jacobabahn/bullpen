@@ -3,6 +3,7 @@
 //! in a new one (`set_up`), teardown before it goes (`remove_worktree`, close's).
 
 use crate::modes::task_base_ref;
+use crate::news::kind::Kind;
 use crate::stops::stop;
 use bullpen_core::json::{py_str, s, truthy, Obj};
 use bullpen_core::proc::git;
@@ -180,7 +181,7 @@ pub fn set_up(repo: &Repo, t: &mut Obj) -> Res<bool> {
                 "{id}'s setup failed (exit {code}), so its worker didn't start: see {log}. \
                  `bullpen start {id}` sets it up again"
             );
-            stop(repo, t, "worker", "setup", &why, &[line], "stopped")?;
+            stop(repo, t, "worker", "setup", &why, &[line], Kind::Stopped)?;
             return Ok(false);
         }
     }

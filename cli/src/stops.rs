@@ -68,7 +68,12 @@ pub fn escalate(repo: &Repo, t: &mut Obj, late: &(String, String)) -> Res<()> {
     );
     set_status(t, "needs", Some(&why), None);
     save(repo, t)?;
-    say(repo, t, "needs-you", &format!("{} needs the person: {why}", s(t, "id")))
+    say(
+        repo,
+        t,
+        Kind::NeedsYou,
+        &format!("{} needs the person: {why}", s(t, "id")),
+    )
 }
 
 fn triage_minutes(repo: &Repo) -> &Value {

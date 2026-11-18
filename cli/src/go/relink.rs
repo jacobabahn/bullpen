@@ -2,6 +2,7 @@
 //! again by their labels. `go` runs it when the pane it would show is gone.
 
 use crate::coordinators::alive;
+use crate::news::kind::Kind;
 use crate::panes::{find, View};
 use crate::rex::{board_label, coordinator_label, find_pane, find_panes, review_label, rex_close, rex_view};
 use crate::saves::save;
@@ -199,7 +200,7 @@ fn relink_reviewers(repo: &Repo, session: &str, view: &mut View) -> Res<()> {
                 "pane_gone",
                 "Reviewer's pane was gone",
                 &[line],
-                "stopped",
+                Kind::Stopped,
             )?;
         }
         save(repo, &mut t)?;

@@ -6,6 +6,7 @@ use crate::agents::pane;
 use crate::args::{pos, usage_error, Arg, Args, Nargs};
 use crate::limit::{limit_active, limit_file, LIMIT_CONTINUE, LIMIT_GRACE};
 use crate::modes::task_base_ref;
+use crate::news::kind::Kind;
 use crate::news::{news, say, Opts};
 use crate::review::start_review;
 use crate::rex::{alive, rex_type};
@@ -62,7 +63,7 @@ pub fn cmd_stuck(argv: &[String]) -> Res<i32> {
     } else {
         format!("{id} has shown no progress for {minutes} min: `bullpen peek {id}`")
     };
-    say(&repo, &t, "stuck", &line)?;
+    say(&repo, &t, Kind::Stuck, &line)?;
     Ok(0)
 }
 
@@ -97,7 +98,7 @@ pub fn cmd_limit(argv: &[String]) -> Res<i32> {
             news(
                 &repo,
                 first,
-                "limit-reset",
+                Kind::LimitReset,
                 &line,
                 Opts {
                     everyone: true,
@@ -131,7 +132,7 @@ fn continue_limited(repo: &Repo, t: &mut Obj) -> Res<String> {
         Err(e) => {
             let e = clip(&e.to_string(), 120);
             let why = format!("Couldn't be continued after the usage limit: {e}");
-            stop(repo, t, &who, "limit", &why, &[], "stopped")?;
+            stop(repo, t, &who, "limit", &why, &[], Kind::Stopped)?;
             Ok(if s(t, "status") == "triage" {
                 format!("{id} (not continued, for its coordinator to see to: {e}; `bullpen resume {id}` continues it)")
             } else {
