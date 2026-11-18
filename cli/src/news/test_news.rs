@@ -73,20 +73,3 @@ fn outboxes_are_found_in_order() {
     assert_eq!(names, ["outbox-c1.txt", "outbox-c2.txt", "outbox.txt"]);
     std::fs::remove_dir_all(&dir).unwrap();
 }
-
-#[test]
-fn a_news_lines_task_and_words() {
-    let at = "2026-01-01T00:00:00+00:00";
-    assert_eq!(
-        news_line(&format!("{at} [c1,c2] BP-3 ready: bullpen · BP-3 is ready")),
-        Some(("BP-3", "bullpen · BP-3 is ready"))
-    );
-    assert_eq!(
-        news_line(&format!("{at} BP-3 added: bullpen · BP-3 added")),
-        Some(("BP-3", "bullpen · BP-3 added"))
-    );
-    assert_eq!(news_line(&format!("{at} BP-3 ready:x")), None);
-    assert_eq!(news_line("\tdocs.md | 1 +"), None);
-    // a [to] that isn't one: the regex takes it as the task
-    assert_eq!(news_line(&format!("{at} [c1 ready: said")), Some(("[c1", "said")));
-}

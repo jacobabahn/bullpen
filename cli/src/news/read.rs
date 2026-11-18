@@ -9,6 +9,7 @@
 //! Locks (hard spot 4): one reader per coordinator, by flock on news-<cid>.lock, the
 //! lock the Python took; a second follower waits, a one-off read doesn't.
 
+use super::record;
 use super::NEWS_MARK;
 use crate::args::{flag, pos, value, Args, Nargs};
 use crate::coordinators::{calling_coordinator, coordinator_at, coordinators, primary};
@@ -309,44 +310,6 @@ pub fn news_size(repo: &Repo) -> u64 {
     std::fs::metadata(repo.dir.join("news.log")).map_or(0, |m| m.len())
 }
 
-/// Is a logged line for coordinator cid? Lines name the coordinators they're for as
-/// `[c1,c2]` before the task ID; lines without, or for coordinators no longer listed,
-/// are for everyone.
-pub fn news_for(text: &str, cid: &str, listed: &[String]) -> bool {
-    let head = text.split(NEWS_MARK).next().unwrap_or("");
-    let to: Option<Vec<&str>> = bullpen_core::text::split(head)
-        .into_iter()
-        .find(|w| w.len() >= 2 && w.starts_with('[') && w.ends_with(']'))
-        .map(|w| w[1..w.len() - 1].split(',').collect());
-    let Some(to) = to else { return true };
-    cid.is_empty() || to.contains(&cid) || !to.iter().any(|x| listed.iter().any(|l| l == x))
-}
-
-/// The whole news lines in data, each with the tab-led lines after it, as lists of raw
-/// lines. One still being written isn't given, nor the record it would end.
-pub fn news_records(data: &[u8]) -> Vec<Vec<&[u8]>> {
-    let mut out = Vec::new();
-    let mut rec: Vec<&[u8]> = Vec::new();
-    for raw in data.split_inclusive(|b| *b == b'\n') {
-        if !raw.ends_with(b"\n") {
-            return out;
-        }
-        if !rec.is_empty() && !raw.starts_with(b"\t") {
-            out.push(std::mem::take(&mut rec));
-        }
-        rec.push(raw);
-    }
-    if !rec.is_empty() {
-        out.push(rec);
-    }
-    out
-}
-
-/// A raw line as Python decodes it (errors="replace"), without its newline.
-fn decoded(raw: &[u8]) -> String {
-    String::from_utf8_lossy(raw).trim_end_matches('\n').to_string()
-}
-
 /// Print coordinator cid's news logged after offset, moving its cursor past each record
 /// once it is out (or skipped: another coordinator's). A record's own lines after it
 /// (each starting with a tab: a diff) go with it. Returns the new offset. A line still
@@ -368,19 +331,14 @@ fn print_news(repo: &Repo, mut offset: u64, cid: &str) -> Res<(u64, Out)> {
     f.seek(SeekFrom::Start(offset))?;
     let mut data = Vec::new();
     f.read_to_end(&mut data)?;
-    for raws in news_records(&data) {
+    for raws in record::raw(&data) {
         if INTERRUPTED.load(Ordering::SeqCst) {
             break;
         }
-        let text = decoded(raws[0]);
         // Printing and moving the cursor go together: being stopped in between (a
         // monitor expiring) would print the line again next time.
         let held = block_signals();
-        // a tab-led line with no line before it (a cursor left between them) is skipped
-        if !text.starts_with('\t') && news_for(&text, cid, &listed) {
-            let at = text.find(NEWS_MARK).unwrap_or(0);
-            let mut lines = vec![text[at..].to_string()];
-            lines.extend(raws[1..].iter().map(|r| decoded(r).chars().skip(1).collect::<String>()));
+        if let Some(lines) = record::shown(&raws, cid, &listed) {
             let mut out = std::io::stdout().lock();
             if writeln!(out, "{}", lines.join("\n")).and_then(|_| out.flush()).is_err() {
                 restore_signals(&held);

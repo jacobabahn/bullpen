@@ -5,20 +5,6 @@ fn at(stamp: &str) -> Stamp {
 }
 
 #[test]
-fn a_line_in_its_parts() {
-    let it = parse_line("2026-11-15T14:03:00-06:00 [c1,c2] BP-3 ready: bullpen · BP-3 is ready: Fix it").unwrap();
-    assert_eq!(it.stamp, "2026-11-15T14:03:00-06:00");
-    assert_eq!(it.to, vec!["c1", "c2"]);
-    assert_eq!((it.task.as_str(), it.event.as_str()), ("BP-3", "ready"));
-    assert_eq!(it.text, "BP-3 is ready: Fix it");
-    let it = parse_line("2026-11-15T14:03:00-06:00 - guide: bullpen · Your guide changed").unwrap();
-    assert!(it.to.is_empty());
-    assert_eq!(it.text, "Your guide changed");
-    assert_eq!(parse_line("\t+ a diff line"), None);
-    assert_eq!(parse_line("junk"), None);
-}
-
-#[test]
 fn times_for_a_person() {
     let now = at("2026-11-15T14:04:00-06:00"); // a minute after: the same day in any time zone
     let today = at("2026-11-15T14:03:00-06:00").with_timezone(&Local);
@@ -79,7 +65,7 @@ fn repo(name: &str) -> Repo {
 #[test]
 fn lines_for_a_terminal() {
     let now = at("2026-11-15T14:04:00-06:00");
-    let line = |stamp: &str, text: &str| parse_line(&format!("{stamp} BP-1 blocked: bullpen · {text}")).unwrap();
+    let line = |stamp: &str, text: &str| Record::parse(&format!("{stamp} BP-1 blocked: bullpen · {text}")).unwrap();
     let mut diffed = line("2026-11-15T14:03:00-06:00", "guide changed");
     diffed.more = vec!["+a".into(), "-b".into()];
     let items = vec![(repo("shop"), line("garbled", "first")), (repo("proj-long"), diffed)];

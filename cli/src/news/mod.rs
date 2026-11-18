@@ -1,12 +1,13 @@
 //! News for the coordinators: a news line, logged (`news`, `tell_coordinator`,
 //! `ready_news`), and the outboxes the watcher types into their panes (`deliver`,
 //! waiting behind a draft: `has_draft`). `bullpen news` (one-off and `--follow`) is in
-//! read.rs, `news --recent` in recent.rs.
+//! read.rs, `news --recent` in recent.rs; record.rs reads the log back.
 
 pub mod hook;
 pub mod kind;
 pub mod read;
 pub mod recent;
+pub mod record;
 pub mod switch;
 pub mod waiter;
 pub mod wake;
@@ -149,7 +150,7 @@ pub fn ready_news(repo: &Repo, t: &mut Obj, facts: &[String], then: &str, again:
     say(repo, t, Kind::Ready, &text)
 }
 
-/// The last line of news about task tid, as it was logged, or None.
+/// The last line of news about task tid, what it said as it was logged, or None.
 pub fn last_news(repo: &Repo, tid: &str) -> Option<String> {
     use std::io::{Read, Seek, SeekFrom};
     let mut f = std::fs::File::open(repo.dir.join("news.log")).ok()?;
@@ -161,33 +162,9 @@ pub fn last_news(repo: &Repo, tid: &str) -> Option<String> {
     splitlines(&text)
         .into_iter()
         .rev()
-        .find_map(|line| match news_line(line) {
-            Some((id, said)) if id == tid => Some(said.to_string()),
-            _ => None,
-        })
-}
-
-/// (task ID, what it said) of a news.log line: `<stamp>[ [to]] <id> <event>: <said>`
-/// (the regex `\S+(?: \[[^\]]*\])? (\S+) [^ :]+: (.*)$`).
-pub fn news_line(line: &str) -> Option<(&str, &str)> {
-    let first = line.find(char::is_whitespace).filter(|i| *i > 0)?;
-    let rest = &line[first..];
-    let after_to = rest
-        .strip_prefix(" [")
-        .and_then(|r| r.find(']').map(|i| &r[i + 1..]))
-        .and_then(|r| id_and_said(r));
-    after_to.or_else(|| id_and_said(rest))
-}
-
-/// " <id> <event>: <said>" (no line break in it).
-fn id_and_said(rest: &str) -> Option<(&str, &str)> {
-    let rest = rest.strip_prefix(' ')?;
-    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
-    let (id, rest) = rest.split_at(end);
-    let rest = rest.strip_prefix(' ').filter(|_| !id.is_empty())?;
-    let end = rest.find([' ', ':']).filter(|i| *i > 0)?;
-    let said = rest[end..].strip_prefix(": ")?;
-    (!said.contains('\n')).then_some((id, said))
+        .filter_map(record::Record::parse)
+        .find(|r| r.task == tid)
+        .map(|r| r.said)
 }
 
 /// News of something the person may have done elsewhere (the board, a shell). The

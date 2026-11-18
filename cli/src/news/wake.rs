@@ -3,7 +3,7 @@
 //! When news isn't typed (`config --news monitor` or `wake`), a coordinator hears it only
 //! while a reader runs: its Monitor on `news --follow`, or the waiter of its Stop hook. A
 //! Monitor expires after 30 minutes, and news that comes while none runs would sit unseen
-//! until the person speaks. So a line worth a wake (`wakes`) touches `<state>/wake-due`, and while that exists the watcher
+//! until the person speaks. So a line worth a wake (its kind `wakes`) touches `<state>/wake-due`, and while that exists the watcher
 //! runs `_wake_check` every 3 s. For each live coordinator that isn't paused and has
 //! such news past its cursor, a minute old, with no live reader (a `news --follow`, or
 //! the waiter its Stop hook parks: waiter.rs), it types every line
@@ -15,7 +15,8 @@
 //! coordinator until `news --resume` or its next `bullpen up`; news is still logged.
 
 use super::kind::Kind;
-use super::read::{news_cursor, news_for, news_records, news_size, set_news_cursor};
+use super::read::{news_cursor, news_size, set_news_cursor};
+use super::record::{self, Record};
 use super::{has_draft, touch, LINE_BREAK, NEWS_MARK};
 use crate::coordinators::{alive, coordinators};
 use crate::rex;
@@ -31,12 +32,6 @@ use std::path::PathBuf;
 pub const UNREAD_FOR: f64 = 60.0;
 /// Seconds the backstop waits behind a draft before it tells the person.
 pub const DRAFT_FOR: f64 = 600.0;
-
-/// Is news of this event worth waking a coordinator for? Its kind says (kind.rs); an
-/// event no kind has (news() writes none, but an old log may have one) wakes.
-pub fn wakes(event: &str) -> bool {
-    Kind::of_event(event).is_none_or(Kind::wakes)
-}
 
 /// Is news typed into the coordinators' panes? (As news() decides it.) Then the backstop
 /// has nothing to do.
@@ -95,18 +90,6 @@ pub fn after_logged(repo: &Repo, kind: Kind) -> Res<()> {
     Ok(())
 }
 
-/// (stamp, task ID, event) of a news.log record's first line: `<stamp>[ [to]] <id> <event>: <line>`.
-pub fn record_head(line: &str) -> Option<(&str, &str, &str)> {
-    let (stamp, rest) = line.split_once(' ')?;
-    let rest = match rest.strip_prefix('[') {
-        Some(r) => r.split_once("] ")?.1,
-        None => rest,
-    };
-    let (id, rest) = rest.split_once(' ')?;
-    let (event, _) = rest.split_once(": ")?;
-    (!stamp.is_empty() && !event.is_empty() && !event.contains([' ', ':'])).then_some((stamp, id, event))
-}
-
 /// A record past a coordinator's cursor: where it ends, and what typing it says (None:
 /// not for this coordinator, skipped).
 pub(super) struct Unread {
@@ -128,11 +111,9 @@ pub(super) fn unread(repo: &Repo, offset: u64, cid: &str, listed: &[String]) -> 
     f.read_to_end(&mut data)?;
     let mut out = Vec::new();
     let mut end = offset;
-    for raws in news_records(&data) {
+    for raws in record::raw(&data) {
         end += raws.iter().map(|r| r.len() as u64).sum::<u64>();
-        let first = String::from_utf8_lossy(raws[0]).trim_end_matches('\n').to_string();
-        let mine = !first.starts_with('\t') && news_for(&first, cid, listed);
-        if !mine {
+        let Some(lines) = record::shown(&raws, cid, listed) else {
             out.push(Unread {
                 end,
                 said: None,
@@ -140,27 +121,13 @@ pub(super) fn unread(repo: &Repo, offset: u64, cid: &str, listed: &[String]) -> 
                 what: String::new(),
             });
             continue;
-        }
-        let at = first.find(NEWS_MARK).unwrap_or(0);
-        let mut lines = vec![first[at..].to_string()];
-        for raw in &raws[1..] {
-            lines.push(
-                String::from_utf8_lossy(raw)
-                    .trim_end_matches('\n')
-                    .chars()
-                    .skip(1)
-                    .collect(),
-            );
-        }
-        let head = record_head(&first);
-        let wakes_since = head
-            .filter(|(_, _, event)| wakes(event))
-            .map(|(stamp, _, _)| stamp.to_string());
+        };
+        let rec = Record::read(&raws);
         out.push(Unread {
             end,
             said: Some(lines.join(LINE_BREAK)),
-            wakes_since,
-            what: head.map_or(String::new(), |(_, id, event)| format!("{id} {event}")),
+            wakes_since: rec.as_ref().filter(|r| r.wakes()).map(|r| r.stamp.clone()),
+            what: rec.map_or(String::new(), |r| format!("{} {}", r.task, r.event)),
         });
     }
     Ok(out)
@@ -415,7 +382,3 @@ pub fn end_pause_at_up(repo: &Repo, cid: &str) -> Res<Option<String>> {
     Ok(resume(repo, cid)?
         .then(|| format!("News for {cid} was paused: `up` ended the pause (`bullpen news --pause` pauses it again).")))
 }
-
-#[cfg(test)]
-#[path = "test_wake.rs"]
-mod tests;
