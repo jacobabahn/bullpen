@@ -1,9 +1,9 @@
 use super::*;
 
 /// Kinds that wake though their row needs nothing, left so until it is decided whether
-/// they should ride along: "working again" lines, and auto-accept's "sent back to
-/// rebase".
-const NOT_YET: &[Kind] = &[Kind::Working, Kind::RebaseSent];
+/// they should ride along: "working again" lines, auto-accept's "sent back to rebase",
+/// and PR feedback "sent back to its worker".
+const NOT_YET: &[Kind] = &[Kind::Working, Kind::RebaseSent, Kind::PrFeedback];
 
 #[test]
 fn a_line_whose_row_asks_wakes_and_one_that_needs_nothing_rides_along() {

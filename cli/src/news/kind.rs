@@ -81,7 +81,8 @@ pub enum Kind {
     Risk,
     /// `BP-4 and BP-6 both changed ...`
     Overlap,
-    /// new comments or failed checks on a task's PR
+    /// new comments or failed checks on a task's PR: `... Sent back to its worker.`, or
+    /// what to do when it couldn't be sent
     PrFeedback,
     /// `BP-3's PR was merged outside bullpen: tell the person; ...`
     PrMerged,
@@ -279,7 +280,9 @@ impl Kind {
             | Kind::Working
             | Kind::TourSent
             | Kind::Rebased
-            | Kind::RebaseSent => Row::Done,
+            | Kind::RebaseSent
+            // `... Sent back to its worker.`; its others say what to do, or come by stop()
+            | Kind::PrFeedback => Row::Done,
             Kind::NotRebased => Row::NotRebased,
             Kind::NeedsYou | Kind::Ask => Row::NeedsPerson,
             Kind::Answer => Row::Answer,
@@ -295,7 +298,6 @@ impl Kind {
             | Kind::Limit
             | Kind::LimitReset
             | Kind::Risk
-            | Kind::PrFeedback
             | Kind::PrMerged
             | Kind::PrClosed
             | Kind::Job

@@ -114,46 +114,48 @@ def tearDownModule():
         raise AssertionError(f"tests left {len(left)} files in TMPDIR: {', '.join(left[:5])}")
 
 
-# The rows of the table in the coordinator's guide (prompts/coordinator.md, "News"): the
-# first cell of each, and the lines it is for. Its last row ("anything else") is left
-# out: a news line has to say what to do itself or match one of these.
-TASK = r"[A-Z]{2,5}-\d+"
-NEWS_ROWS = {
-    "starts `For the coordinator:`": r"^For the coordinator: ",
-    "says a task `needs the person`, or is at a prompt":
-        rf"^{TASK} needs the person|^{TASK}('s reviewer)? is at an? .*prompt|so it needs the person$",
-    "has the person's answer to your `ask` (`BP-3: ...`)": rf"^{TASK}: the person answers ",
-    "`is ready`, `finished` or auto-accepted":
-        rf"^{TASK} (is ready|finished \(|approved by review.* and auto-accepted \()",
-    "`accepted`, `closed`, `dropped`, `started`, `working again`, `sent back`, `After BP-3: ...`":
-        rf"^{TASK} (accepted \(|closed |dropped$|started |is working again |(was )?sent back )"
-        rf"|Sent back to its worker|^After {TASK}((, {TASK})* and {TASK})?: ",
-    "two tasks `both changed` a file": rf"^{TASK} and {TASK} both changed ",
-}
-# What a line that says what to do itself has: a command to run, or who to tell.
+# What a line whose kind has no row in the guide's table (prompts/coordinator.md, "News")
+# has, since it says what to do itself: a command to run, who to tell, or that there is
+# nothing to do. Only the instruction is held to wording: a line's row goes by its kind.
 NEWS_OWN = r"`bullpen |`rex |[Tt]ell the person|[Aa]sk the person|[Nn]othing to do|^Your coordinator guide "
 
+_news_kinds = None
 
-def news_row(line):
-    """The guide's row for a news line (without its `bullpen · `), "own" for one that
-    says what to do itself, or None: the coordinator would have to guess."""
-    for row, pattern in NEWS_ROWS.items():
-        if re.search(pattern, line):
-            return row
-    return "own" if re.search(NEWS_OWN, line) else None
+
+def news_kinds():
+    """The table of news kinds (`bullpen _news_kinds`, from cli/src/news/kind.rs): the
+    guide's rows in order (`rows`), and each kind's row by its event (`kinds`; None for
+    a kind whose lines say what to do themselves)."""
+    global _news_kinds
+    if _news_kinds is None:
+        table = json.loads(subprocess.run([str(BULLPEN), "_news_kinds"], text=True, capture_output=True,
+                                          check=True).stdout)
+        _news_kinds = {"rows": table["rows"], "kinds": {k["event"]: k["row"] for k in table["kinds"]}}
+    return _news_kinds
+
+
+def news_row(event, line):
+    """The guide's row for a news line of this event (the line without its `bullpen · `):
+    its kind's row, "own" for a kind whose lines say what to do themselves and this one
+    does, or None: a kind the table doesn't have, or a line that leaves the coordinator to
+    guess."""
+    kinds = news_kinds()["kinds"]
+    if event not in kinds:
+        return None
+    return kinds[event] or ("own" if re.search(NEWS_OWN, line) else None)
 
 
 def check_news(test):
-    """Every news line bullpen sent in a test says what to do itself, or matches a row
-    of the table in the coordinator's guide. A line a test wrote into the log by hand,
-    with an event its class names in `own_news_events`, isn't bullpen's."""
+    """Every news line bullpen sent in a test is of a kind the table has, and one whose
+    kind has no row of the guide's table says what to do itself. A line a test wrote into
+    the log by hand, with an event its class names in `own_news_events`, isn't bullpen's."""
     own = getattr(test, "own_news_events", ())
     for log in (test.tmp / "state").rglob("news.log"):
         for record in log.read_text().splitlines():
             m = re.match(r"\S+(?: \[[^\]]*\])? \S+ ([^ :]+): bullpen · (.*)$", record)
-            if m and m.group(1) not in own and news_row(m.group(2)) is None:
-                test.fail(f"a news line that neither says what to do nor matches a row of the "
-                          f"guide's table ({m.group(1)}): {m.group(2)}")
+            if m and m.group(1) not in own and news_row(m.group(1), m.group(2)) is None:
+                test.fail(f"a news line of a kind the table doesn't have, or that neither says what to do "
+                          f"nor has a row of the guide's table ({m.group(1)}): {m.group(2)}")
 
 
 class BullpenTest(unittest.TestCase):
