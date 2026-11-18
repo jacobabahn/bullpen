@@ -4,9 +4,9 @@
 //! summary a worker or reviewer gives (`summary_text`).
 
 use crate::args::{flag, pos, value, Arg, Args, Nargs};
+use crate::become_ready::{make_ready, How};
 use crate::close::close_task;
 use crate::modes::{is_local, publish, task_base_ref};
-use crate::news::ready_news;
 use crate::news::{news, Opts};
 use crate::review::{close_reviewer, review_at_ready, shortstat};
 use crate::saves::save;
@@ -15,7 +15,7 @@ use bullpen_core::json::{obj, read_obj, s, truthy, Obj};
 use bullpen_core::proc::git;
 use bullpen_core::repo::repo_root;
 use bullpen_core::settings::CLOSED;
-use bullpen_core::task::{auto_accepts, commits, is_status, set_status, where_};
+use bullpen_core::task::{auto_accepts, is_status, set_status};
 use bullpen_core::text::strip;
 use bullpen_core::{fail, Fail, Repo, Res};
 use serde_json::{json, Value};
@@ -128,7 +128,6 @@ fn ready(repo: &Repo, t: &mut Obj, a: &Args) -> Res<()> {
         }
     };
     if ahead == 0 {
-        set_status(t, "ready", Some("Nothing to merge (no commits)"), None);
         let none = if summary.is_empty() {
             Value::Null
         } else {
@@ -136,9 +135,7 @@ fn ready(repo: &Repo, t: &mut Obj, a: &Args) -> Res<()> {
         };
         t.insert("summary".into(), none);
         t.insert("diffstat".into(), Value::Null);
-        t.insert("risk".into(), Value::Null);
-        save(repo, t)?;
-        ready_news(repo, t, &["nothing to merge".into()], "", false)?;
+        make_ready(repo, t, &base_ref, How::Nothing)?;
         println!("no commits: marked ready with nothing to merge");
         return Ok(());
     }
@@ -153,10 +150,7 @@ fn ready(repo: &Repo, t: &mut Obj, a: &Args) -> Res<()> {
         println!("{published}. {said}");
         return Ok(());
     }
-    crate::risk::assess(repo, t, &base_ref, crate::risk::Said::Nothing)?;
-    set_status(t, "ready", None, None);
-    save(repo, t)?;
-    ready_news(repo, t, &[commits(ahead), where_(t)], "", false)?;
+    make_ready(repo, t, &base_ref, How::Plain)?;
     println!("{published}");
     Ok(())
 }

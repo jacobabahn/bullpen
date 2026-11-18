@@ -20,7 +20,6 @@ use crate::args::{pos, Arg, Args, Nargs};
 use crate::coordinators::session_for;
 use crate::git_names::{unquote, Changed};
 use crate::modes::task_base_ref;
-use crate::news::ready_news;
 use crate::rex::{review_label, rex_close};
 use crate::rules::task_rules;
 use crate::saves::save;
@@ -29,7 +28,7 @@ use bullpen_core::json::{get, obj, py_str, s, truthy, Obj};
 use bullpen_core::paths::{home, prompts, self_bin};
 use bullpen_core::proc::{git, head, merge_base, resolve, run_input};
 use bullpen_core::repo::{index_block, repo_root, unindex_block};
-use bullpen_core::task::{auto_accepts, commits, is_closed, is_status, set_status, where_, whose_turn, with_model};
+use bullpen_core::task::{is_closed, is_status, set_status, whose_turn, with_model};
 use bullpen_core::{fail, Repo, Res};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -97,17 +96,7 @@ pub fn review_at_ready(repo: &Repo, t: &mut Obj, base_ref: &str) -> Res<String> 
     let check = rebase_check(t, base_ref)?;
     if let Some(Check::Kept(kept)) = &check {
         keep_approval(t, base_ref)?;
-        crate::risk::assess(repo, t, base_ref, crate::risk::Said::Kept)?;
-        set_status(t, "ready", None, None);
-        save(repo, t)?;
-        let id = s(t, "id").to_string();
-        if auto_accepts(repo, t) {
-            crate::auto_accept::start_auto_accept(repo, &id, false); // not waited for: it closes this pane
-        } else {
-            let n = t.get("commits").and_then(Value::as_i64).unwrap_or(0);
-            let facts = [commits(n), where_(t), format!("its approval carried over: {kept}")];
-            ready_news(repo, t, &facts, "", false)?;
-        }
+        crate::become_ready::make_ready(repo, t, base_ref, crate::become_ready::How::Kept(kept))?;
         return Ok(format!(
             "Its review approval carries over ({kept}), so there's no new review: end your turn."
         ));

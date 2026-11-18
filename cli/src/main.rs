@@ -9,6 +9,7 @@ mod answer;
 mod args;
 mod auto_accept;
 mod backlog;
+mod become_ready;
 mod board;
 mod brief;
 mod build;
