@@ -51,12 +51,13 @@ fn answers_cut_off_wait_for_the_rest_and_are_never_keys() {
     }
 }
 
-/// Input as a terminal sends it, in pieces; then nothing.
+/// Input as a terminal sends it, in pieces (an empty one: nothing comes in the time
+/// asked); then nothing.
 struct Script(Vec<&'static [u8]>);
 
 impl Input for Script {
     fn next(&mut self, _wait: Duration) -> Option<Vec<u8>> {
-        (!self.0.is_empty()).then(|| self.0.remove(0).to_vec())
+        (!self.0.is_empty()).then(|| self.0.remove(0).to_vec()).filter(|b| !b.is_empty())
     }
 }
 
@@ -80,9 +81,46 @@ fn answers_that_come_late_are_read_to_their_end_and_only_the_keys_passed_on() {
     // the rest comes late, with a key typed meanwhile: only the key is passed on
     let mut late = Script(vec![b"1e1e/2e2e\x1b", b"\\g\x1b[?62c\x1b"]);
     let mut typed = Vec::new();
-    drain(&mut late, left, Some(5), |t| typed.push(t));
+    drain(&mut late, left, Some(5), |t| typed.push(t), || {});
     let esc = Typed::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert_eq!(typed, [keys(b"g"), vec![esc]].concat());
+}
+
+#[test]
+fn answers_however_late_are_read_to_their_end() {
+    // long after any time the board would wait, with keys typed between
+    let mut pieces: Vec<&'static [u8]> = vec![b"j"];
+    pieces.extend(std::iter::repeat(&b""[..]).take(500));
+    pieces.extend([&b"\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\k"[..], DA]);
+    let mut late = Script(pieces);
+    let (mut typed, mut ticks) = (Vec::new(), 0);
+    drain(&mut late, Vec::new(), Some(5), |t| typed.push(t), || ticks += 1);
+    assert_eq!(typed, keys(b"jk"));
+    assert!(ticks >= 500); // the reader looked for a resize meanwhile
+}
+
+#[test]
+fn an_esc_typed_while_the_answers_are_late_is_passed_on_once_nothing_follows_it() {
+    let esc = || Typed::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    // typed alone: passed on after a quiet while, not held until the answers come
+    let mut late = Script(vec![b"\x1b", b"", b"\x1b]10;rgb:ff/ff/ff\x1b\\", DA]);
+    let typed = std::cell::RefCell::new(Vec::new());
+    drain(&mut late, Vec::new(), Some(5), |t| typed.borrow_mut().push(t), || {
+        typed.borrow_mut().push(Typed::Paste("tick".into()));
+    });
+    let typed = typed.into_inner();
+    assert_eq!(typed[..2], [Typed::Paste("tick".into()), esc()]);
+    assert_eq!(typed.iter().filter(|t| **t == esc()).count(), 1);
+    // left over from the wait, the same
+    let mut late = Script(vec![b"", DA]);
+    let mut typed = Vec::new();
+    drain(&mut late, b"\x1b".to_vec(), Some(5), |t| typed.push(t), || {});
+    assert_eq!(typed, [esc()]);
+    // an answer's esc with its rest close behind is no key
+    let mut late = Script(vec![b"\x1b", b"]11;rgb:00/00/00\x07", DA]);
+    let mut typed = Vec::new();
+    drain(&mut late, Vec::new(), Some(5), |t| typed.push(t), || {});
+    assert!(typed.is_empty());
 }
 
 #[test]
@@ -143,8 +181,9 @@ fn the_gate_hands_input_to_the_answers_and_back() {
     assert!(gate.wanted());
     let reader = gate.clone();
     let t = std::thread::spawn(move || {
-        reader.park(); // waits for the questions
-        reader.done();
+        let open = reader.park(|| true); // waits for the questions
+        assert_eq!(reader.get(), Stage::Asked);
+        drop(open); // the answers are read
     });
     while gate.get() != Stage::Parked {
         std::thread::yield_now();
@@ -152,4 +191,69 @@ fn the_gate_hands_input_to_the_answers_and_back() {
     gate.asked();
     t.join().unwrap();
     assert_eq!(gate.get(), Stage::Keys);
+}
+
+/// The reader parks at the board's wish and `read`s on a thread of its own; its
+/// `tell` is the board hearing of it. Whether it came back, within a few seconds.
+fn reader(gate: &std::sync::Arc<Gate>, tell: impl FnOnce() -> bool + Send + 'static, read: impl FnOnce() + Send + 'static) -> bool {
+    assert!(gate.want());
+    let (gate, (tx, rx)) = (gate.clone(), std::sync::mpsc::channel());
+    std::thread::spawn(move || {
+        let _open = gate.park(tell);
+        let _ = tx.send(());
+        read();
+    });
+    rx.recv_timeout(Duration::from_secs(5)).is_ok()
+}
+
+#[test]
+fn the_board_writing_the_questions_before_the_reader_waits_doesnt_strand_it() {
+    // the board hears the reader parked and writes the questions before the reader
+    // has begun to wait: it goes on to read the answers all the same, not parked for good
+    let gate = std::sync::Arc::new(Gate::default());
+    let board = gate.clone();
+    assert!(reader(&gate, move || {
+        board.asked();
+        true
+    }, || {}));
+}
+
+#[test]
+fn the_gate_opens_to_keys_again_however_the_reader_leaves_the_answers() {
+    let gate = std::sync::Arc::new(Gate::default());
+    let wait_open = |gate: &Gate| {
+        let start = std::time::Instant::now();
+        while gate.get() != Stage::Keys {
+            assert!(start.elapsed() < Duration::from_secs(5), "the gate stayed shut: {:?}", gate.get());
+            std::thread::yield_now();
+        }
+    };
+    // the answers read
+    let board = gate.clone();
+    assert!(reader(&gate, move || {
+        board.asked();
+        true
+    }, || {}));
+    wait_open(&gate);
+    // the board gone before it heard
+    assert!(reader(&gate, || false, || {}));
+    wait_open(&gate);
+    // reading the answers failed
+    let board = gate.clone();
+    assert!(reader(&gate, move || {
+        board.asked();
+        true
+    }, || panic!("reading failed")));
+    wait_open(&gate);
+    assert!(gate.want()); // the board can ask again
+}
+
+#[test]
+fn the_board_saying_asked_when_the_reader_isnt_parked_changes_nothing() {
+    let gate = Gate::default();
+    gate.asked();
+    assert_eq!(gate.get(), Stage::Keys);
+    assert!(gate.want());
+    gate.asked(); // wanted, not yet parked
+    assert_eq!(gate.get(), Stage::Wanted);
 }

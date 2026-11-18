@@ -24,8 +24,9 @@ builds that program again in the background:
 - Each running board checks its program every second. Once it's replaced, the board
   runs the new one in its own pane, keeping the selected task and `f` (`l` and `o`
   are settings already), and says "Reloaded: the board was rebuilt." It waits while
-  a command it started is running, a y/n question is open, or you're typing or
-  answering. No pane is reopened.
+  a command it started is running, a y/n question is open, you're typing or
+  answering, or the image look is asking the terminal something (its answers would
+  reach the new board as keys). No pane is reopened.
 - If a program's source has uncommitted changes, it isn't built, so half-finished
   work never goes out. One news line says so.
 - If the build fails (no cargo, a compile error), the old programs keep running. One

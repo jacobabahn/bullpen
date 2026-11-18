@@ -10,11 +10,12 @@
 //! image is deleted when the list is text again and when the board quits.
 //!
 //! Before the first image the board asks the terminal whether it draws images, and
-//! its colours and cell size (term.rs); it asks for the colours again every few
-//! seconds, so the image follows a change of theme (not once its answers have come
-//! late: they would hold up the keys). When the terminal doesn't draw
-//! images, the font can't be loaded or drawing fails, the list is text again and the
-//! message line says why.
+//! its colours and cell size (term.rs). It asks for the colours and cell size again
+//! only when the person does something that may have changed them: a resize, or
+//! switching to the image look (`I`, so `I` twice follows a new theme). There is no
+//! timer: each time it asks, the key reader stops for the round trip. When the
+//! terminal doesn't draw images, the font can't be loaded or drawing fails, the list
+//! is text again and the message line says why.
 
 mod font;
 mod kitty;
@@ -30,7 +31,6 @@ use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 pub use font::Fonts;
 pub use render::{render, Grid};
@@ -39,8 +39,6 @@ pub use theme::Theme;
 /// The graphics query's image ID; images shown get IDs from FIRST up.
 pub const PROBE: u32 = 0x4250_0000;
 const FIRST: u32 = PROBE + 1;
-/// How often the colours are asked again while the image shows.
-const RECHECK: Duration = Duration::from_secs(3);
 /// The tallest image sent, in pixels: a longer list is sent a window of it at a time.
 const MAX_PX: u32 = 16_000;
 
@@ -85,9 +83,10 @@ pub struct Picture {
     probe: Probe,
     /// the questions written are waiting for answers; with the graphics query
     asking: Option<bool>,
-    /// the terminal's answers came late once: its colours aren't asked again
-    slow: bool,
-    asked_at: Instant,
+    /// the colours and cell size are to be asked again (a resize, or the look switched)
+    due: bool,
+    /// the image look was on last frame
+    on: bool,
     theme: Theme,
     cell: Option<(u32, u32)>,
     /// the font, for the font file it was loaded from
@@ -104,8 +103,8 @@ impl Picture {
             gate,
             probe: Probe::Unasked,
             asking: None,
-            slow: false,
-            asked_at: Instant::now(),
+            due: false,
+            on: false,
             theme: Theme::default(),
             cell: None,
             fonts: None,
@@ -126,9 +125,12 @@ impl Picture {
     /// should draw again at once (the list went back to text).
     pub fn show(&mut self, app: &mut App, out: &mut impl Write) -> bool {
         if app.look != Look::Image {
+            self.on = false;
             self.clear(out);
             return false;
         }
+        // switched to the image look: the terminal's theme may have changed meanwhile
+        self.due |= !std::mem::replace(&mut self.on, true);
         match &self.probe {
             Probe::Unasked => {
                 self.ask(true);
@@ -138,13 +140,13 @@ impl Picture {
             Probe::No(why) => return fall_back(app, why.clone()),
             Probe::Yes => {}
         }
+        if self.due {
+            self.ask(false);
+        }
         let Some(view) = app.view.as_ref() else {
             self.hide(out);
             return false;
         };
-        if self.asked_at.elapsed() >= RECHECK && !self.slow {
-            self.ask(false);
-        }
         match self.draw(view, app.cfg.font.as_deref(), out) {
             Ok(()) => false,
             Err(why) => {
@@ -154,15 +156,22 @@ impl Picture {
         }
     }
 
-    /// Have the key reader stop, so the questions can be written (term.rs).
+    /// Have the key reader stop, so the questions can be written (term.rs). While
+    /// it's still reading answers asked before, `due` stays, for once it's done.
     fn ask(&mut self, graphics: bool) {
         if self.asking.is_none() && self.gate.want() {
             self.asking = Some(graphics);
-            self.asked_at = Instant::now();
+            self.due = false;
             if graphics {
                 self.probe = Probe::Asking;
             }
         }
+    }
+
+    /// Is the board done asking the terminal, its answers all read? A reload waits for
+    /// it: answers that came after the exec would reach the new board as keys.
+    pub fn idle(&self) -> bool {
+        self.asking.is_none() && self.gate.open()
     }
 
     /// The key reader has stopped: write the questions.
@@ -176,9 +185,10 @@ impl Picture {
     /// The terminal's answers: whether it draws images, its colours and cell size.
     pub fn answered(&mut self, a: &term::Answers) {
         let graphics = self.asking.take().unwrap_or(false);
-        self.asked_at = Instant::now();
-        self.slow |= !a.done;
-        self.theme = Theme::default().with(&a.said);
+        // all the answers came: the colours are what they say; some came late: what
+        // they say over what was known
+        let known = if a.done { Theme::default() } else { self.theme };
+        self.theme = known.with(&a.said);
         if a.cell.is_some() {
             self.cell = a.cell;
         }
@@ -260,7 +270,9 @@ impl Picture {
 
     /// The terminal was resized, and may have cleared the screen and the images with it:
     /// the next frame sends the image again (the old one is deleted after, if it's there).
+    /// Its cell size may have changed with it, and its colours are asked with that.
     pub fn resized(&mut self) {
+        self.due = true;
         if let Some(s) = self.shown.as_mut() {
             s.key = 0;
             s.place = None;

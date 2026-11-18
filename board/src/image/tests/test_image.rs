@@ -213,17 +213,125 @@ fn after_a_resize_the_image_is_sent_again() {
     assert!(out.contains(&format!("a=t,f=100,t=d,i={}", FIRST + 1)) && out.ends_with(&kitty::delete(FIRST)));
 }
 
+/// The key reader reads the answers asked: back to keys, with these answers.
+fn answer_with(p: &mut Picture, a: &term::Answers) {
+    let mut out = Vec::new();
+    p.parked(&mut out);
+    assert_eq!(String::from_utf8(out).unwrap(), term::questions(None)); // the colours, no graphics query
+    p.gate.done();
+    p.answered(a);
+}
+
 #[test]
-fn colours_are_asked_again_every_few_seconds_unless_the_answers_came_late() {
+fn the_colours_are_never_asked_again_by_time_alone() {
+    let (mut app, mut p) = (board(3), picture());
+    asked(&mut app, &mut p);
+    for _ in 0..3 {
+        frame(&mut app, &mut p);
+        app.sel = Some("BP-2".into()); // the board changes, as it does each second
+        frame(&mut app, &mut p);
+        app.sel = Some("BP-1".into());
+    }
+    assert!(!p.gate.wanted());
+}
+
+#[test]
+fn a_resize_asks_the_colours_and_cell_size_again() {
     let (mut app, mut p) = (board(3), picture());
     asked(&mut app, &mut p);
     frame(&mut app, &mut p);
-    p.asked_at = Instant::now() - RECHECK * 2;
+    p.resized();
     frame(&mut app, &mut p);
-    assert!(p.gate.wanted()); // asked again
-    p.gate.done();
-    p.answered(&term::Answers { cell: Some((10, 20)), ..Default::default() }); // late: no attributes
-    p.asked_at = Instant::now() - RECHECK * 2;
+    assert!(p.gate.wanted());
+    let mut light = answer(true);
+    light.said.fg = Some(theme::Rgb(0, 0, 0));
+    light.cell = Some((12, 24));
+    answer_with(&mut p, &light);
+    assert_eq!((p.theme.fg, p.cell), (theme::Rgb(0, 0, 0), Some((12, 24))));
+    assert!(frame(&mut app, &mut p).contains("a=t,f=100")); // drawn in them
     frame(&mut app, &mut p);
+    assert!(!p.gate.wanted()); // once
+}
+
+#[test]
+fn i_twice_asks_the_colours_again() {
+    let (mut app, mut p) = (board(3), picture());
+    asked(&mut app, &mut p);
+    frame(&mut app, &mut p);
+    crate::app::testing::press(&mut app, 'I');
+    frame(&mut app, &mut p); // text: the image goes, nothing is asked
     assert!(!p.gate.wanted());
+    crate::app::testing::press(&mut app, 'I');
+    frame(&mut app, &mut p);
+    assert!(p.gate.wanted());
+    let mut light = answer(true);
+    light.said.bg = Some(theme::Rgb(255, 255, 255));
+    answer_with(&mut p, &light);
+    assert_eq!(p.theme.bg, theme::Rgb(255, 255, 255));
+    assert!(frame(&mut app, &mut p).contains("a=t,f=100"));
+}
+
+#[test]
+fn a_resize_while_the_answers_are_read_asks_once_theyre_read() {
+    let (mut app, mut p) = (board(3), picture());
+    asked(&mut app, &mut p);
+    p.resized();
+    frame(&mut app, &mut p);
+    assert!(p.gate.wanted());
+    let mut out = Vec::new();
+    p.parked(&mut out);
+    p.resized(); // the reader is reading the answers: asked again after
+    frame(&mut app, &mut p);
+    p.answered(&answer(true));
+    frame(&mut app, &mut p);
+    assert!(p.due); // the reader hasn't opened the gate yet
+    p.gate.done();
+    frame(&mut app, &mut p);
+    assert!(p.gate.wanted() && !p.due);
+}
+
+#[test]
+fn answers_that_came_late_keep_the_colours_they_didnt_say() {
+    let (mut app, mut p) = (board(3), picture());
+    asked(&mut app, &mut p);
+    let mut first = answer(true);
+    first.said.fg = Some(theme::Rgb(1, 2, 3));
+    first.said.bg = Some(theme::Rgb(4, 5, 6));
+    p.asking = Some(false);
+    p.answered(&first);
+    // late, with only the foreground
+    let mut late = term::Answers::default();
+    late.said.fg = Some(theme::Rgb(7, 8, 9));
+    p.asking = Some(false);
+    p.answered(&late);
+    assert_eq!((p.theme.fg, p.theme.bg), (theme::Rgb(7, 8, 9), theme::Rgb(4, 5, 6)));
+    assert_eq!(p.cell, Some((10, 20)));
+}
+
+#[test]
+fn a_reload_waits_until_the_answers_are_read_and_a_failed_one_leaves_the_image_and_keys_working() {
+    let (mut app, mut p) = (board(3), picture());
+    assert!(p.idle());
+    asked(&mut app, &mut p);
+    frame(&mut app, &mut p);
+    p.resized();
+    frame(&mut app, &mut p);
+    assert!(!p.idle()); // asking: no reload
+    let mut out = Vec::new();
+    p.parked(&mut out);
+    assert!(!p.idle());
+    p.answered(&answer(true));
+    assert!(!p.idle()); // the reader is still reading what's left
+    p.gate.done();
+    assert!(p.idle());
+    frame(&mut app, &mut p);
+    // the reload deletes the image; the exec fails: the next frame sends it again,
+    // and the board can still ask the terminal (the reader is reading keys)
+    let mut out = Vec::new();
+    p.clear(&mut out);
+    assert!(String::from_utf8(out).unwrap().starts_with("\x1b_Ga=d"));
+    assert!(frame(&mut app, &mut p).contains("a=t,f=100"));
+    p.resized();
+    frame(&mut app, &mut p);
+    assert!(p.gate.wanted());
 }

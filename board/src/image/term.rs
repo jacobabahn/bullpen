@@ -11,9 +11,12 @@
 //!
 //! An answer is never taken for keys. One cut off is held until the rest of it comes.
 //! When the answers don't all come in `WAIT`, the board goes on without them, but the
-//! reader keeps reading (`drain`), passing keys on, until the device attributes come
-//! (or `LATE` passes), so a late answer doesn't reach crossterm either; and the board
-//! doesn't ask that terminal again.
+//! reader keeps reading (`drain`), passing keys on as they come, until the device
+//! attributes come: the terminal's last answer, however late, so no answer reaches
+//! crossterm. An esc with nothing after it for `QUIET` is a key there (one typed while
+//! the answers are late), as crossterm takes it. A terminal that never sends its device
+//! attributes has the board's keys read here for the rest of the run, and isn't asked
+//! again.
 
 use super::theme::{parse_color, Said};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -22,8 +25,8 @@ use std::time::{Duration, Instant};
 
 /// How long the board waits for the terminal's answers.
 pub const WAIT: Duration = Duration::from_secs(2);
-/// How long the reader keeps reading answers that came late, before it goes back to keys.
-pub const LATE: Duration = Duration::from_secs(10);
+/// How long an esc read while the answers are late waits for more bytes before it's a key.
+pub const QUIET: Duration = Duration::from_millis(100);
 
 /// The questions: the graphics query (with `graphics`), the colours, the cell size,
 /// and last the device attributes, whose answer ends the answers.
@@ -178,22 +181,26 @@ pub fn read_answers(input: &mut impl Input, graphics: Option<u32>) -> (Answers, 
 }
 
 /// After answers that didn't all come in time: read on until the device attributes
-/// come (the terminal's last answer) or `LATE` passes, passing the keys typed meanwhile
-/// to `typed` and dropping the answers. `left` is the cut-off answer read already.
-pub fn drain(input: &mut impl Input, left: Vec<u8>, graphics: Option<u32>, mut typed: impl FnMut(Typed)) {
-    let deadline = Instant::now() + LATE;
+/// come (the terminal's last answer), passing the keys typed meanwhile to `typed` and
+/// dropping the answers. `left` is the cut-off answer read already. A lone esc with
+/// nothing after it for `QUIET` is a key. `tick` is called each `QUIET` or so, so the
+/// reader can look for what it can't read here (the window's size).
+pub fn drain(input: &mut impl Input, left: Vec<u8>, graphics: Option<u32>, mut typed: impl FnMut(Typed), mut tick: impl FnMut()) {
     let mut buf = left;
     loop {
-        let a = read_until(input, &mut buf, graphics, deadline.min(Instant::now() + Duration::from_millis(100)));
+        let before = buf.len();
+        let a = read_until(input, &mut buf, graphics, Instant::now() + QUIET);
+        let quiet = buf.len() == before;
         keys(&a.rest).into_iter().for_each(&mut typed);
-        let left = buf.split_off(a.whole);
-        if a.done {
+        let mut left = buf.split_off(a.whole);
+        if a.done || (quiet && left == b"\x1b") {
             keys(&left).into_iter().for_each(&mut typed);
+            left.clear();
+        }
+        if a.done {
             return;
         }
-        if Instant::now() >= deadline {
-            return; // what's left is the start of an answer: dropped
-        }
+        tick();
         buf = left;
     }
 }
@@ -395,29 +402,56 @@ impl Gate {
         true
     }
 
+    /// Is the reader reading keys (not stopped for the board, nor reading answers)?
+    pub fn open(&self) -> bool {
+        self.get() == Stage::Keys
+    }
+
     /// The reader, before it looks for a key: should it stop for the board?
     pub fn wanted(&self) -> bool {
         self.get() == Stage::Wanted
     }
 
-    /// The reader stops (the board is told by a message), and waits until the
-    /// questions are written.
-    pub fn park(&self) {
+    /// The reader stops for the board: it's parked first, then the board is told
+    /// (`tell`, false when the board is gone), then it waits until the questions are
+    /// written. Parked before the board hears of it, so the board's `asked` can't come
+    /// first and be lost. The gate opens to keys again when what this returns is
+    /// dropped, however the reader goes on (None: at once).
+    pub fn park(&self, tell: impl FnOnce() -> bool) -> Option<Open<'_>> {
         self.set(Stage::Parked);
+        let open = Open(self);
+        if !tell() {
+            return None;
+        }
         let mut s = self.stage.lock().unwrap_or_else(|e| e.into_inner());
         while *s == Stage::Parked {
             s = self.moved.wait(s).unwrap_or_else(|e| e.into_inner());
         }
+        Some(open)
     }
 
     /// The board has written the questions: the reader reads the answers.
     pub fn asked(&self) {
-        self.set(Stage::Asked);
+        let mut s = self.stage.lock().unwrap_or_else(|e| e.into_inner());
+        if *s == Stage::Parked {
+            *s = Stage::Asked;
+            self.moved.notify_all();
+        }
     }
 
     /// The answers are read: back to keys.
     pub fn done(&self) {
         self.set(Stage::Keys);
+    }
+}
+
+/// The reader is away from keys: when this is dropped, on every way out of reading
+/// the answers (an error, a panic, the board gone), the gate opens to keys again.
+pub struct Open<'a>(&'a Gate);
+
+impl Drop for Open<'_> {
+    fn drop(&mut self) {
+        self.0.done();
     }
 }
 

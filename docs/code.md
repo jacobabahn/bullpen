@@ -86,8 +86,11 @@ leaves its cells blank and hands the same rows to `image/`, which draws them as 
 image (`render.rs`, given rows and a size in pixels, with no terminal) and, after
 ratatui's frame and through the same output, sends and places it with the kitty
 graphics protocol (`kitty.rs`, `mod.rs`). Asking the terminal (`term.rs`) needs its
-input: the key reader (`main.rs`) stops while the board asks, and reads the answers
-itself. The rest of the board stays text.
+input, so the board asks only when the image look starts or comes back and on a
+resize, never on a timer: the key reader (`main.rs`) stops at the board's wish (a
+`Gate`), marks itself parked before it tells the board, and reads the answers itself,
+up to the terminal's last; the gate opens to keys again when the reader's `Open`
+drops, on every way out. The rest of the board stays text.
 
 ## Closing a task
 

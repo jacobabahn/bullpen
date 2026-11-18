@@ -27,6 +27,7 @@ mod ui;
 use app::{parse_args, App, Kind, Mode, Msg, Note};
 use notify::{RecursiveMode, Watcher};
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
+use ratatui::crossterm::terminal;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
@@ -103,11 +104,13 @@ fn main() {
         if stale || read.elapsed() >= Duration::from_secs(1) {
             app.reload();
             (stale, read) = (false, Instant::now());
-            if let Some(exe) = app.replaced() {
+            // not while the image look asks the terminal: the answers would be the new board's keys
+            if let Some(exe) = app.replaced().filter(|_| picture.idle()) {
                 use std::os::unix::process::CommandExt;
                 picture.clear(term.backend_mut());
                 term_restore();
                 let err = Command::new(&exe).args(app.restart_args()).exec(); // returns only if it failed
+                // the reader never stopped; the image was deleted, so the next frame sends it again
                 term = term_init();
                 app.exe = None; // don't try again
                 app.msg = Note::failed(format!("Couldn't reload the rebuilt board: {err}"));
@@ -185,25 +188,33 @@ fn handle(app: &mut App, picture: &mut image::Picture, out: &mut impl Write, m: 
 fn read_keys(keys: mpsc::Sender<Msg>, gate: Arc<image::term::Gate>) {
     std::thread::spawn(move || loop {
         if gate.wanted() {
-            if keys.send(Msg::Parked).is_err() {
+            // the gate opens to keys again when `_open` goes, on every way out of here
+            let Some(_open) = gate.park(|| keys.send(Msg::Parked).is_ok()) else {
                 return;
-            }
-            gate.park();
+            };
             let (answers, left) = image::term::read_answers(&mut image::term::Stdin, Some(image::PROBE));
             let late = !answers.done;
             if keys.send(Msg::Answered(answers)).is_err() {
                 return;
             }
-            // what didn't come in time mustn't reach crossterm as keys: read it here
+            // what didn't come in time mustn't reach crossterm as keys: read it here, and
+            // since crossterm doesn't see a resize meanwhile, look for one here too
             if late {
-                image::term::drain(&mut image::term::Stdin, left, Some(image::PROBE), |typed| {
+                let mut size = terminal::size().ok();
+                let typed = |typed| {
                     let _ = keys.send(match typed {
                         image::term::Typed::Key(k) => Msg::Key(k),
                         image::term::Typed::Paste(text) => Msg::Paste(text),
                     });
+                };
+                image::term::drain(&mut image::term::Stdin, left, Some(image::PROBE), typed, || {
+                    let now = terminal::size().ok();
+                    if now != size {
+                        size = now;
+                        let _ = keys.send(Msg::Redraw);
+                    }
                 });
             }
-            gate.done();
             continue;
         }
         // look for a key a tenth of a second at a time, so a wish to ask is seen soon

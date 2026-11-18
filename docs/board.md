@@ -104,7 +104,7 @@ in the order `?` lists them:
 | `s` | start it |
 | `r` | resume a stopped worker |
 | `l` | switch layout: compact, one line a task, or back |
-| `I` | draw the list as an image, or as text again, for as long as the board runs (see [The image look](#the-image-look)) |
+| `I` | draw the list as an image, or as text again, for as long as the board runs; switching to the image asks the terminal's colours again (see [The image look](#the-image-look)) |
 | `f` | show the closed tasks too |
 | `o` | show other coordinators' tasks too (see [Several coordinators](several-coordinators.md)) |
 | `esc` | put a red message away (see below) |
@@ -161,11 +161,14 @@ why ("Drawing the list as text: the terminal doesn't draw kitty graphics."). `I`
 tries again.
 
 The image follows the terminal's theme: its colours are the terminal's own
-foreground, background, red, green, yellow and blue, asked when the board starts
-drawing images and again every three seconds (not once the terminal's answers have
-come late, after two seconds), and its background is clear, so the pane's shows
-through. While the board waits for those answers it reads the keys itself and passes
-them on; a late answer is read to its end, never taken for keys. The type is Inter (built into the board, SIL Open Font
+foreground, background, red, green, yellow and blue, and its background is clear, so
+the pane's shows through. The board asks for them (with the cell size) when it starts
+drawing images, and again only on a resize or when you switch to the image look: after
+a change of theme, `I` twice redraws in the new colours. It never asks on a timer.
+While the board waits for those answers it reads the keys itself and passes them on;
+an answer that comes late (after two seconds), however late, is read to its end and
+never taken for keys, and an `esc` typed meanwhile counts once nothing follows it for a
+tenth of a second. The type is Inter (built into the board, SIL Open Font
 License); `bullpen config --board-font PATH` draws with another font file (TTF or
 OTF) instead, with Inter for the characters it lacks.
 

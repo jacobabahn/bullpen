@@ -55,8 +55,9 @@ capsules there), else none. `bullpen config --board-layout compact` starts the b
 its compact layout, one line a task (`grouped` by default; its `l` switches, see
 [The board](board.md)). `bullpen config --board-look image` draws the board's list
 of tasks as one image (kitty graphics) instead of text (`text` by default; the board's
-`I` switches for one run; the compact layout stays text, and a terminal that doesn't
-draw images gets text with a line saying why), and `--board-font PATH` has it drawn
+`I` switches for one run, and `I` twice redraws it in a new theme's colours; the
+compact layout stays text, and a terminal that doesn't draw images gets text with a
+line saying why), and `--board-font PATH` has it drawn
 in that font file instead of the built-in Inter (`""` clears it; see [The image
 look](board.md#the-image-look)). `bullpen config --board-others on --coordinator c1` makes c1's
 board show the other coordinators' tasks too (see [Several
