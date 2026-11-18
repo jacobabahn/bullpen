@@ -92,13 +92,16 @@ pub fn cmd_limit(argv: &[String]) -> Res<i32> {
         if let Some((first, _)) = done.first() {
             let said: Vec<&str> = done.iter().map(|(_, said)| said.as_str()).collect();
             let mut line = format!("the usage limit has reset: continued {}", said.join(", "));
-            if !line.contains("(not continued") {
+            let kind = if line.contains("(not continued") {
+                Kind::LimitReset
+            } else {
                 line += ": nothing to do";
-            }
+                Kind::LimitContinued
+            };
             news(
                 &repo,
                 first,
-                Kind::LimitReset,
+                kind,
                 &line,
                 Opts {
                     everyone: true,

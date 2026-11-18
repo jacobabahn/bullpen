@@ -348,6 +348,7 @@ class StatusTest(BullpenTest):
         self.assertIn("--continue", cmd)  # BP-2, resumed in a new pane
         self.assertEqual(self.news()[-1], "bullpen · the usage limit has reset: continued BP-1, "
                                           "BP-2 (its pane was gone: resumed in a new one): nothing to do")
+        self.assertIn(" limit-continued: bullpen · the usage limit has reset", self.news_log())  # rides along
         for t in (self.show(tid), self.show(tid2)):
             self.assertEqual((t["status"], t["why"]), ("working", None))
             self.assertNotIn("limit", t)
@@ -368,6 +369,7 @@ class StatusTest(BullpenTest):
         self.assertEqual(t["why"], "Couldn't be continued after the usage limit: rex: couldn't send to the block")
         self.assertIn("BP-1 (not continued, for its coordinator to see to: rex: couldn't send", self.news()[-1])
         self.assertTrue(self.news()[-1].endswith("; `bullpen resume BP-1` continues it)"))
+        self.assertIn(" limit-reset: bullpen · the usage limit has reset", self.news_log())  # it wakes
         (self.fake / f"send_fails_{worker}").unlink()
         self.bp("tell", tid, "Carry on.")
         self.assertEqual(self.show(tid)["status"], "working")

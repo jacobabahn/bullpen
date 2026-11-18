@@ -78,20 +78,23 @@ A line that asks the coordinator to do something wakes it; one that needs nothin
 rides along with the next line that does (or waits for `bullpen news`). Each kind of
 line is in one table (`cli/src/news/kind.rs`), with the row of the guide's news
 table it belongs to, and that row decides. What rides along: `accepted`, `closed`,
-`kept`, `dropped`, `started` and `sent back` lines; an `After BP-3: ...` line where
-every task was brought up to date (event `rebased`); `not auto-accepted (nothing to
-do ...)`; pickup's "started its 4 for today, nothing to do" (`pickup`); the queue's
-"can start, but the usage limit is reached" and revert's "isn't started" (`queue`);
-and a worker's backlog item (`later`). Everything else wakes (bullpen writes no
-line without a kind; an event it doesn't know, in an old log, wakes too): among them the keys-changed line (`keys`), pickup's
-asks (`pickup-ask`), the queue's "couldn't start" (`queue-failed`), an `After`
-line with a task not rebased, whose push failed or that a message didn't reach
-(`not-rebased`), and auto-accept's "approved by review and auto-accepted" and
-"closed by auto-accept" lines, which the coordinator reports (`auto-accepted`,
-`auto-closed`). Three kinds still wake though their row needs nothing: `working
-again` lines, auto-accept's "sent back to its worker to rebase", and PR feedback
-"sent back to its worker" (`pr-feedback`, whose lines that couldn't be sent say what
-to do). The line for
+`kept`, `dropped`, `started` and `working again` lines; a task `sent back` by the
+person after a tour (`tour-sent`), by auto-accept to rebase (`rebase_sent`), or with
+its PR's feedback (`pr-sent-back`); an `After BP-3: ...` line
+where every task was brought up to date (event `rebased`); `not auto-accepted
+(nothing to do ...)`; pickup's "started its 4 for today, nothing to do" (`pickup`);
+the queue's "can start, but the usage limit is reached" and revert's "isn't started"
+(`queue`); "the usage limit has reset: continued ...: nothing to do"
+(`limit-continued`); and a worker's backlog item (`later`). Everything else wakes
+(bullpen writes no line without a kind; an event it doesn't know, in an old log,
+wakes too): among them the keys-changed line (`keys`), pickup's asks (`pickup-ask`),
+the queue's "couldn't start" (`queue-failed`), an `After` line with a task not
+rebased, whose push failed or that a message didn't reach (`not-rebased`), PR feedback
+"not sent to its worker" while it is on a prompt or mid-turn (`pr-feedback`), a reset
+where an agent wasn't continued (`limit-reset`), and auto-accept's "approved by review
+and auto-accepted" and "closed by auto-accept" lines, which the coordinator reports to
+the person, as it does a task that is ready or finished (`auto-accepted`,
+`auto-closed`). The line for
 new [GitHub issues](issues.md#on-a-timer) wakes: the coordinator judges each; so does the
 line for a judged issue that asks you, or one you said yes to that needs a brief
 (`issue-ask`), each of which says what to do. So does a write to an issue that failed,
@@ -248,7 +251,11 @@ do". A line of a kind the table doesn't have fails too.
 
 news.log is read back in one place, `cli/src/news/record.rs` (`Record`): the backstop,
 `bullpen news`, `news --recent`, ready news's "said word for word before" and
-`_news_log` all go through it.
+`_news_log` all go through it. An event that once named two kinds of line
+keeps its word for one, and `Record` reads an old log's line of it by its wording:
+`pr-feedback` was also the "sent back to its worker" line (`pr-sent-back` now), and
+`limit-reset` the reset with nothing to do (`limit-continued` now). PR feedback that
+didn't reach its worker is a stop, logged `not-sent` now.
 
 ## A changed guide
 

@@ -34,6 +34,7 @@ class AcceptTest(BullpenTest):
         self.bp("_prs")
         self.assertEqual(self.news_lines()[-1],
                          "bullpen · BP-1's PR checks failed: test, ci/build. Sent back to its worker.")
+        self.assertIn(" pr-sent-back: bullpen · BP-1's PR checks failed", self.news_log())  # rides along
         line = [l for b, l in self.typed() if b == worker][-1]
         self.assertIn("test, ci/build", line)
         self.assertIn("ready command again", line)
@@ -363,6 +364,7 @@ class AcceptTest(BullpenTest):
         self.assertEqual((t["status"], t["why"]), ("triage", "PR checks failed: test, ci/build"))
         self.assertFalse((self.fake / "alive" / reviewer).exists())  # moot once the work changes
         self.assertIn("The message didn't reach its worker", self.news_lines()[-1])
+        self.assertIn(" not-sent: bullpen · For the coordinator: BP-1's PR checks failed", self.news_log())
         (self.fake / f"send_fails_{worker}").unlink()
         self.bp("tell", tid, "Fix the checks.")
         self.assertEqual(self.show(tid)["status"], "working")
@@ -381,6 +383,7 @@ class AcceptTest(BullpenTest):
         self.assertEqual(t["status"], "needs")
         self.assertIn("Allow rm?", t["why"])
         self.assertIn("Not sent to its worker", self.news_lines()[-1])
+        self.assertIn(" pr-feedback: bullpen · BP-1's PR has 1 new comment", self.news_log())  # it wakes
         self.bp("_prs")  # recorded: not news again
         self.assertIn("Not sent to its worker", self.news_lines()[-1])
         self.assertEqual(len([l for l in self.news_lines() if "new comment" in l]), 1)

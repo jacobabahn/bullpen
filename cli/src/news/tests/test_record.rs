@@ -43,6 +43,10 @@ fn a_records_kind_says_whether_it_wakes_and_an_unknown_event_wakes() {
         "queue",
         "tour-sent",
         "not-auto-accepted",
+        "working",
+        "rebase_sent",
+        "pr-sent-back",
+        "limit-continued",
     ] {
         assert!(!wakes(event), "{event}");
     }
@@ -54,10 +58,30 @@ fn a_records_kind_says_whether_it_wakes_and_an_unknown_event_wakes() {
         "pickup-ask",
         "queue-failed",
         "not-rebased",
+        "pr-feedback",
+        "limit-reset",
         "a-new-one",
     ] {
         assert!(wakes(event), "{event}");
     }
+}
+
+#[test]
+fn an_old_line_of_an_event_since_split_reads_by_its_wording() {
+    let kind = |event: &str, text: &str| rec(&format!("{AT} BP-3 {event}: bullpen · {text}")).kind();
+    let sent = "BP-3's PR checks failed: test. Sent back to its worker.";
+    assert_eq!(kind("pr-feedback", sent), Some(Kind::PrSentBack));
+    let kept = "BP-3's PR checks failed: test. Not sent to its worker, which is on a prompt: `bullpen tell BP-3` it \
+                when it's free";
+    assert_eq!(kind("pr-feedback", kept), Some(Kind::PrFeedback));
+    let stopped = "For the coordinator: BP-3's PR checks failed: test. The message didn't reach its worker (x): \
+                   `bullpen tell BP-3` it (still here in 10 min, it goes to the person)";
+    assert!(rec(&format!("{AT} BP-3 pr-feedback: bullpen · {stopped}")).wakes());
+    let all = "the usage limit has reset: continued BP-4, BP-6's reviewer: nothing to do";
+    assert_eq!(kind("limit-reset", all), Some(Kind::LimitContinued));
+    let some = "the usage limit has reset: continued BP-4 (not continued: boom; tell the person)";
+    assert_eq!(kind("limit-reset", some), Some(Kind::LimitReset));
+    assert_eq!(kind("pr-sent-back", sent), Some(Kind::PrSentBack));
 }
 
 #[test]

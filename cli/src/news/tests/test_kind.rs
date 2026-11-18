@@ -1,22 +1,35 @@
 use super::*;
 
-/// Kinds that wake though their row needs nothing, left so until it is decided whether
-/// they should ride along: "working again" lines, auto-accept's "sent back to rebase",
-/// and PR feedback "sent back to its worker".
-const NOT_YET: &[Kind] = &[Kind::Working, Kind::RebaseSent, Kind::PrFeedback];
-
 #[test]
 fn a_line_whose_row_asks_wakes_and_one_that_needs_nothing_rides_along() {
     for &k in ALL {
-        if NOT_YET.contains(&k) {
-            assert!(
-                k.wakes() && !k.row().asks(),
-                "{k:?} is settled now: take it out of NOT_YET"
-            );
-            continue;
-        }
         assert_eq!(k.wakes(), k.row().asks(), "{k:?} ({:?})", k.row());
     }
+    // lines that only say what happened, or that there is nothing to do
+    for k in [
+        Kind::Working,
+        Kind::RebaseSent,
+        Kind::PrSentBack,
+        Kind::LimitContinued,
+        Kind::Accepted,
+        Kind::Closed,
+    ] {
+        assert!(!k.wakes(), "{k:?}");
+    }
+    // the coordinator reports these, or does what they say
+    for k in [
+        Kind::AutoAccepted,
+        Kind::AutoClosed,
+        Kind::PrFeedback,
+        Kind::LimitReset,
+        Kind::NotSent,
+    ] {
+        assert!(k.wakes(), "{k:?}");
+    }
+    assert_eq!(
+        (Kind::AutoAccepted.row(), Kind::AutoClosed.row()),
+        (Row::Report, Row::Report)
+    );
 }
 
 #[test]
@@ -66,9 +79,11 @@ fn every_kind_is_listed() {
             | Kind::NotSent
             | Kind::Stuck
             | Kind::Limit
+            | Kind::LimitContinued
             | Kind::LimitReset
             | Kind::Risk
             | Kind::Overlap
+            | Kind::PrSentBack
             | Kind::PrFeedback
             | Kind::PrMerged
             | Kind::PrClosed
@@ -83,7 +98,7 @@ fn every_kind_is_listed() {
             | Kind::Board => k,
         }
     }
-    assert_eq!(ALL.len(), 46);
+    assert_eq!(ALL.len(), 48);
     assert!(ALL.iter().all(|&k| named(k) == k));
 }
 
@@ -101,19 +116,12 @@ fn old_logs_events_read_as_they_did() {
         "dropped",
         "later",
         "tour-sent",
+        "working",
+        "rebase_sent",
     ] {
         assert!(!Kind::of_event(e).unwrap().wakes(), "{e}");
     }
-    for e in [
-        "ready",
-        "quiet",
-        "needs-you",
-        "pr-feedback",
-        "guide",
-        "working",
-        "risk",
-        "issues",
-    ] {
+    for e in ["ready", "quiet", "needs-you", "pr-feedback", "guide", "risk", "issues"] {
         assert!(Kind::of_event(e).unwrap().wakes(), "{e}");
     }
 }

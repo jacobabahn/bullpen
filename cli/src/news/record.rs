@@ -66,9 +66,15 @@ impl Record {
         }
     }
 
-    /// Its kind, if its event names one (an old log's may not).
+    /// Its kind, if its event names one (an old log's may not). An old log wrote both
+    /// kinds of a split event under its one word: its wording says which.
     pub fn kind(&self) -> Option<Kind> {
-        Kind::of_event(&self.event)
+        let text = self.text();
+        match Kind::of_event(&self.event)? {
+            Kind::PrFeedback if text.ends_with(". Sent back to its worker.") => Some(Kind::PrSentBack),
+            Kind::LimitReset if text.ends_with(": nothing to do") => Some(Kind::LimitContinued),
+            k => Some(k),
+        }
     }
 
     /// Is it worth waking a coordinator for? Its kind says; an event no kind has wakes.

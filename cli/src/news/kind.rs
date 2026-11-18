@@ -1,12 +1,13 @@
 //! The kinds of news line: for each, its event (the word news.log keeps for it), the
 //! row of the coordinator guide's news table it belongs to (or that it says what to do
-//! itself), and whether it wakes a coordinator (wake.rs). A line whose row asks the
+//! itself), and so whether it wakes a coordinator (wake.rs): a line whose row asks the
 //! coordinator to act wakes it; one that needs nothing rides along with the next line
-//! that does (test_kind.rs holds that, but for the few its NOT_YET names).
+//! that does.
 //!
 //! Every call that writes news (`news`, `say`, `tell_coordinator`, `stop`) passes a
 //! kind, so a new line can't be written without one. An event no kind has (an old
-//! log's) still wakes when read back.
+//! log's) still wakes when read back, and record.rs reads an old line of an event since
+//! split by its wording.
 
 /// A kind of news line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,14 +76,20 @@ pub enum Kind {
     Stuck,
     /// an agent stopped at the usage limit
     Limit,
-    /// `the usage limit has reset: continued ...`
+    /// `the usage limit has reset: continued BP-4, BP-6's reviewer: nothing to do`
+    LimitContinued,
+    /// `the usage limit has reset: continued ...` where one wasn't: `BP-4 (not continued,
+    /// ...; `bullpen resume BP-4` continues it)`, or `(not continued: ...; tell the person)`
     LimitReset,
     /// `BP-3 became ready without a risk label, so here it is: ... Tell the person`
     Risk,
     /// `BP-4 and BP-6 both changed ...`
     Overlap,
-    /// new comments or failed checks on a task's PR: `... Sent back to its worker.`, or
-    /// what to do when it couldn't be sent
+    /// new comments or failed checks on a task's PR: `... Sent back to its worker.`
+    PrSentBack,
+    /// the same, kept for a worker on a prompt or stopped mid-turn: `... Not sent to its
+    /// worker, which is on a prompt: `bullpen tell BP-3` it when it's free` (one that
+    /// didn't reach it is a stop: NotSent)
     PrFeedback,
     /// `BP-3's PR was merged outside bullpen: tell the person; ...`
     PrMerged,
@@ -201,9 +208,11 @@ pub const ALL: &[Kind] = &[
     Kind::NotSent,
     Kind::Stuck,
     Kind::Limit,
+    Kind::LimitContinued,
     Kind::LimitReset,
     Kind::Risk,
     Kind::Overlap,
+    Kind::PrSentBack,
     Kind::PrFeedback,
     Kind::PrMerged,
     Kind::PrClosed,
@@ -220,8 +229,8 @@ pub const ALL: &[Kind] = &[
 
 impl Kind {
     /// The word news.log keeps for it (`<stamp>[ [to]] <task> <event>: <line>`). An
-    /// event that meant several things kept its word for what didn't wake, so old logs
-    /// read as they did.
+    /// event that meant several things kept its word for one of them, and record.rs
+    /// reads an old line of it by its wording.
     pub fn event(self) -> &'static str {
         match self {
             Kind::Ready => "ready",
@@ -255,9 +264,11 @@ impl Kind {
             Kind::NotSent => "not-sent",
             Kind::Stuck => "stuck",
             Kind::Limit => "limit",
+            Kind::LimitContinued => "limit-continued",
             Kind::LimitReset => "limit-reset",
             Kind::Risk => "risk",
             Kind::Overlap => "overlap",
+            Kind::PrSentBack => "pr-sent-back",
             Kind::PrFeedback => "pr-feedback",
             Kind::PrMerged => "pr-merged",
             Kind::PrClosed => "pr-closed",
@@ -291,15 +302,16 @@ impl Kind {
             | Kind::TourSent
             | Kind::Rebased
             | Kind::RebaseSent
-            // `... Sent back to its worker.`; its others say what to do, or come by stop()
-            | Kind::PrFeedback => Row::Done,
+            | Kind::PrSentBack => Row::Done,
             Kind::NotRebased => Row::NotRebased,
             Kind::NeedsYou | Kind::Ask => Row::NeedsPerson,
             Kind::Answer => Row::Answer,
             Kind::Quiet | Kind::Failed | Kind::Stopped | Kind::NotSent => Row::Triage,
             Kind::Overlap => Row::BothChanged,
-            // a command for later, or for whoever decides: nothing to do now
-            Kind::NotAutoAccepted | Kind::Pickup | Kind::Queue | Kind::Later => Row::Own { asks: false },
+            // a command for later or for whoever decides, or nothing to do: nothing to do now
+            Kind::NotAutoAccepted | Kind::Pickup | Kind::Queue | Kind::Later | Kind::LimitContinued => {
+                Row::Own { asks: false }
+            }
             Kind::Keys
             | Kind::AcceptFailed
             | Kind::QueueFailed
@@ -308,6 +320,7 @@ impl Kind {
             | Kind::Limit
             | Kind::LimitReset
             | Kind::Risk
+            | Kind::PrFeedback
             | Kind::PrMerged
             | Kind::PrClosed
             | Kind::Job
@@ -322,56 +335,10 @@ impl Kind {
         }
     }
 
-    /// Does a line of this kind wake a coordinator by itself?
+    /// Does a line of this kind wake a coordinator by itself? Only when its row asks
+    /// something of it.
     pub fn wakes(self) -> bool {
-        match self {
-            Kind::NotAutoAccepted
-            | Kind::Accepted
-            | Kind::Closed
-            | Kind::Kept
-            | Kind::Dropped
-            | Kind::Started
-            | Kind::TourSent
-            | Kind::Rebased
-            | Kind::Queue
-            | Kind::Pickup
-            | Kind::Later => false,
-            Kind::Ready
-            | Kind::Finished
-            | Kind::AutoAccepted
-            | Kind::AutoClosed
-            | Kind::Working
-            | Kind::NotRebased
-            | Kind::RebaseSent
-            | Kind::Keys
-            | Kind::AcceptFailed
-            | Kind::QueueFailed
-            | Kind::PickupAsk
-            | Kind::NeedsYou
-            | Kind::Ask
-            | Kind::Answer
-            | Kind::Quiet
-            | Kind::Failed
-            | Kind::Stopped
-            | Kind::NotSent
-            | Kind::Stuck
-            | Kind::Limit
-            | Kind::LimitReset
-            | Kind::Risk
-            | Kind::Overlap
-            | Kind::PrFeedback
-            | Kind::PrMerged
-            | Kind::PrClosed
-            | Kind::Job
-            | Kind::Push
-            | Kind::Guide
-            | Kind::Issues
-            | Kind::IssueAsk
-            | Kind::IssueWrite
-            | Kind::DroppedDependency
-            | Kind::Build
-            | Kind::Board => true,
-        }
+        self.row().asks()
     }
 }
 

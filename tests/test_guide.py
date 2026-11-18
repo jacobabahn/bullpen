@@ -193,7 +193,7 @@ class NewsTableTest(BullpenTest):
         ("working", "BP-5 is working again (was ready): it must run `ready` again; its approval holds if the code "
                     "doesn't change"),
         ("tour-sent", "BP-3 sent back by the person after the tour: 2 comments"),
-        ("pr-feedback", "BP-3's PR checks failed: test. Sent back to its worker."),
+        ("pr-sent-back", "BP-3's PR checks failed: test. Sent back to its worker."),
         ("rebase_sent", "BP-5 approved by review, but the auto-accept was refused: it conflicts with main in README.md. "
                         "Sent back to its worker to rebase (trip 1 of 3)"),
         ("rebased", "After BP-8: BP-5 told to rebase (conflicts in bin/bullpen); BP-7 left alone (no overlap); "
@@ -217,7 +217,9 @@ class NewsTableTest(BullpenTest):
         ("pickup", "Pickup started its 4 for today (pickup_per_day): the backlog waits for tomorrow, nothing to do"),
         ("limit", "BP-4 stopped at the usage limit, resets 3:00 PM: nothing to do, it is continued then. `bullpen "
                   "start` refuses meanwhile (`--force` overrides, only if the person asks)"),
-        ("limit-reset", "the usage limit has reset: continued BP-4, BP-6's reviewer: nothing to do"),
+        ("limit-continued", "the usage limit has reset: continued BP-4, BP-6's reviewer: nothing to do"),
+        ("limit-reset", "the usage limit has reset: continued BP-4 (not continued, for its coordinator to see to: "
+                        "no pane; `bullpen resume BP-4` continues it)"),
         ("limit", "BP-4 stopped at the usage limit, and its reset time couldn't be read, so it won't be continued by "
                   "itself: tell the person, and `bullpen tell BP-4 continue` when they say the limit has reset"),
         ("pr-feedback", "BP-3's PR has 1 new comment: ann Please cover logout too. Not sent to its worker, which is "
