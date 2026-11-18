@@ -171,7 +171,7 @@ fn moving_the_selection_sends_a_small_image_not_the_list() {
     asked(&mut app, &mut p);
     p.cell = Some((16, 34)); // a Mac's cell
     let first = frame_in(&mut app, &mut p, 60, 45);
-    let list = |out: &str| out.split("\x1b_Ga=t").filter(|c| c.contains(&format!("i={LIST},"))).count();
+    let list = |out: &str| out.matches(&format!("a=t,f=100,t=d,i={LIST},")).count();
     assert_eq!(list(&first), 1);
     let mut most = 0;
     for sel in ["BP-2", "BP-4", "BP-5", "BP-3", "BP-6"] {
@@ -578,4 +578,36 @@ fn a_mark_settles_in_when_its_task_changes_status_then_goes_back_in_the_list() {
     assert!(marks_placed(&out).is_empty());
     let mark = placed(&out).len(); // the list's crops and the block, placed again
     assert!(mark > 0 && commands(&out).iter().any(|c| c.starts_with("a=d,d=i,") && !c.contains("p=")), "{:?}", commands(&out));
+}
+
+#[test]
+fn a_j_or_k_sends_its_new_images_before_anything_moves_and_deletes_the_old_after() {
+    let (mut app, mut p) = (mixed(), picture());
+    asked(&mut app, &mut p);
+    frame_in(&mut app, &mut p, 40, 40);
+    for sel in ["BP-4", "BP-2", "BP-5", "BP-1"] {
+        app.sel = Some(sel.into());
+        let c = commands(&frame_in(&mut app, &mut p, 40, 40));
+        let last = |pre: &str| c.iter().rposition(|x| x.starts_with(pre));
+        let first = |pre: &str| c.iter().position(|x| x.starts_with(pre));
+        // no cell is left without its image while the new block is on its way
+        assert!(last("a=t").is_some() && last("a=t") < first("a=p"), "{sel}: {c:?}");
+        assert!(last("a=p") < first("a=d,d=I"), "{sel}: {c:?}");
+    }
+}
+
+#[test]
+fn under_an_overlay_a_mark_settling_doesnt_keep_the_board_waking() {
+    let (mut app, mut p) = (board(3), picture());
+    asked(&mut app, &mut p);
+    frame(&mut app, &mut p);
+    p.clock = Some(1000);
+    app.tasks[1] = task("BP-2", "ready").with(json!({"title": "Task 2"}));
+    frame(&mut app, &mut p);
+    assert!(p.tick().is_some());
+    // `?` opens: the images are hidden; time goes on, and the board needn't redraw for them
+    app.mode = crate::Mode::Help { top: 0 };
+    p.clock = Some(1500);
+    frame(&mut app, &mut p);
+    assert_eq!(p.tick(), None);
 }

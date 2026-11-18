@@ -163,6 +163,8 @@ impl Picture {
     /// should draw again at once (the list went back to text, or its rows are to be
     /// wrapped again).
     pub fn show(&mut self, app: &mut App, out: &mut impl Write) -> bool {
+        // the time first: `tick` reads it whether or not the images are drawn
+        self.ms = self.clock.unwrap_or_else(|| app.started.elapsed().as_millis());
         if app.look != Look::Image {
             self.on = false;
             self.clear(out);
@@ -186,7 +188,6 @@ impl Picture {
             self.hide(out);
             return false;
         };
-        self.ms = self.clock.unwrap_or_else(|| app.started.elapsed().as_millis());
         match self.draw(&view, app.cfg.text_size, app.cfg.font.as_deref(), app.cfg.motion, out) {
             Ok(Drawn::At { top, page }) => {
                 (app.top, app.page) = (top, page);
@@ -364,7 +365,6 @@ fn whole(view: &View, c: &Canvas, row: u16, rows: u16) -> kitty::Place {
     kitty::Place { id: 0, p: 1, col: view.col, row, crop_x: 0, crop_y: 0, crop_w, crop_h, cols: view.cols, rows, z: 0 }
 }
 
-
 /// The font for `path` (the board_font setting), loaded once into `slot`.
 fn fonts<'a>(slot: &'a mut Option<(Option<PathBuf>, Fonts)>, path: Option<&Path>) -> Result<&'a mut Fonts, String> {
     if slot.as_ref().map(|(p, _)| p.as_deref()) != Some(path) {
@@ -387,7 +387,6 @@ fn fall_back(app: &mut App, why: String) -> bool {
     app.msg = Note::info(why);
     true
 }
-
 
 /// The columns of text a detail line holds in images `cols` wide (render::detail_cols).
 pub fn detail_cols(cols: usize, size: TextSize, cell: (u32, u32), font: Option<&Path>) -> Result<usize, String> {

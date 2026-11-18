@@ -1,7 +1,7 @@
 //! The images on the terminal, and where each is placed: a frame says the images it
 //! wants (what each shows, as a key, and its placements), and only what changed is
-//! written. A new image is sent and placed before the old one is deleted, so an update
-//! doesn't flicker; a placement that moved is placed again (a few dozen bytes, the image
+//! written. The frame's new images are all sent before any placement moves, and the
+//! old ones deleted after, so an update doesn't flicker or leave cells blank; a placement that moved is placed again (a few dozen bytes, the image
 //! isn't sent); one no longer wanted is taken off, and an image the frame doesn't want
 //! is hidden, its data kept to place again.
 
@@ -62,31 +62,38 @@ impl Screen {
         self.shown.get(slot).is_some_and(|s| s.key == key)
     }
 
-    /// Show what a frame wants: each image sent if it's new, its placements placed,
-    /// moved or taken off; then the images it doesn't want hidden.
+    /// Show what a frame wants, in three steps, so nothing is left blank meanwhile: every
+    /// new image sent (which shows nothing yet), then every placement placed, moved or
+    /// taken off and the images the frame doesn't want hidden, then the old images
+    /// deleted. A j or k's new block is up before the list's crops move around it.
     pub fn show(&mut self, wants: Vec<Want>, out: &mut impl Write) -> std::io::Result<()> {
-        let mut wanted = Vec::new();
-        for w in wants {
-            wanted.push(w.slot.clone());
-            self.put(w, out)?;
+        let mut old = Vec::new();
+        for w in &wants {
+            if let Some(png) = &w.png {
+                let id = self.next_id;
+                self.next_id = if self.next_id == u32::MAX { self.first } else { self.next_id + 1 };
+                out.write_all(kitty::upload(id, png).as_bytes())?;
+                old.extend(self.shown.insert(w.slot.clone(), Shown { id, key: w.key, places: BTreeMap::new() }));
+            }
+        }
+        for w in &wants {
+            self.place(w, out)?;
         }
         for (slot, s) in self.shown.iter_mut() {
-            if !wanted.contains(slot) && !s.places.is_empty() {
+            if !wants.iter().any(|w| w.slot == *slot) && !s.places.is_empty() {
                 s.places.clear();
                 out.write_all(kitty::hide(s.id).as_bytes())?;
             }
         }
+        // the new images are up: now the old ones go
+        for s in old {
+            out.write_all(kitty::delete(s.id).as_bytes())?;
+        }
         out.flush()
     }
 
-    fn put(&mut self, w: Want, out: &mut impl Write) -> std::io::Result<()> {
-        let mut old = None;
-        if let Some(png) = &w.png {
-            let id = self.next_id;
-            self.next_id = if self.next_id == u32::MAX { self.first } else { self.next_id + 1 };
-            out.write_all(kitty::upload(id, png).as_bytes())?;
-            old = self.shown.insert(w.slot.clone(), Shown { id, key: w.key, places: BTreeMap::new() });
-        }
+    /// Place a wanted image's placements, move those that moved, take off the rest.
+    fn place(&mut self, w: &Want, out: &mut impl Write) -> std::io::Result<()> {
         let Some(s) = self.shown.get_mut(&w.slot) else { return Ok(()) };
         for mut at in w.places.iter().copied() {
             at.id = s.id;
@@ -99,10 +106,6 @@ impl Screen {
         for p in gone {
             s.places.remove(&p);
             out.write_all(kitty::unplace(s.id, p).as_bytes())?;
-        }
-        // the new image is up: now the old one goes
-        if let Some(old) = old {
-            out.write_all(kitty::delete(old.id).as_bytes())?;
         }
         Ok(())
     }

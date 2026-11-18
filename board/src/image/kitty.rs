@@ -1,9 +1,9 @@
 //! The kitty graphics protocol's commands, as bytes: the query that says whether the
 //! terminal draws images, an upload (PNG, base64 in chunks), a placement (a crop of
 //! the image pinned to a block of cells: the terminal scales the crop to them; an
-//! image can have several, each with its number, and one with a z-index above another's),
-//! and taking one placement or all of an image off the screen, or deleting it. Every command but the query asks for no answer (q=2), so none
-//! comes back as keys.
+//! image can have several, each with its number, and one with a z-index above
+//! another's), and taking one placement or all of an image off the screen, or deleting
+//! it. Every command but the query asks for no answer (q=2), so none comes back as keys.
 
 /// Base64 chunks the protocol takes at most.
 const CHUNK: usize = 4096;

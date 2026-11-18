@@ -63,8 +63,9 @@ cell), `large`, or `small` (a cell a row, as the text). `--board-font PATH` has 
 drawn in that font file instead of the built-in Inter (`""` clears it; see [The image
 look](board.md#the-image-look)). `--board-motion off` stills it: its working, review
 and running marks stop turning, and a task's mark no longer settles in when its status
-changes (on by default; the text board's marks turn either way). `bullpen config --board-others on --coordinator c1` makes c1's
-board show the other coordinators' tasks too (see [Several
+changes (on by default; the text board's marks turn either way).
+`bullpen config --board-others on --coordinator c1` makes c1's board show the other
+coordinators' tasks too (see [Several
 coordinators](several-coordinators.md); the board's `o`). `bullpen config --board-repos off`
 takes the other repositories off the board's top line (on by default; see [Several
 repositories](several-repositories.md)). `bullpen config --prefix XY --base develop` changes the task prefix (default `BP`)

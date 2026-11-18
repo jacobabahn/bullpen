@@ -97,15 +97,15 @@ move and the scroll marks are small images sent once (`sprite.rs`): a mark on sc
 is a placement of its strip of frames, and a tick changes which frame it crops; the
 list's images leave those marks out. `list.rs` says which images a frame wants, each
 with a key for what it shows and its placements, and `shown.rs` sends, places, moves
-and hides only what changed, with the kitty graphics protocol (`kitty.rs`). The image's detail type is narrower than a cell, so image/
-says how many columns a detail line holds (`app.detail_cols`) and the rows are
-wrapped to that while the board is an image. Asking the terminal (`term.rs`) needs its
-input, so the board asks only when the image look starts or comes back and on a
-resize, never on a timer: the key reader (`main.rs`) stops at the board's wish (a
-`Gate`), marks itself parked before it tells the board, and reads the answers itself,
-up to the terminal's last; the gate opens to keys again when the reader's `Open`
-drops, on every way out. What's typed or asked at the bottom, overlays and mission
-control stay text.
+and hides only what changed, with the kitty graphics protocol (`kitty.rs`). The
+image's detail type is narrower than a cell, so image/ says how many columns a detail
+line holds (`app.detail_cols`) and the rows are wrapped to that while the board is an
+image. Asking the terminal (`term.rs`) needs its input, so the board asks only when
+the image look starts or comes back and on a resize, never on a timer: the key reader
+(`main.rs`) stops at the board's wish (a `Gate`), marks itself parked before it tells
+the board, and reads the answers itself, up to the terminal's last; the gate opens to
+keys again when the reader's `Open` drops, on every way out. What's typed or asked at
+the bottom, overlays and mission control stay text.
 
 ## Closing a task
 
