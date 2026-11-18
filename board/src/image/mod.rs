@@ -396,11 +396,10 @@ pub fn detail_cols(cols: usize, size: TextSize, cell: (u32, u32), font: Option<&
 
 /// Write the board as the image look draws it to a PNG file (`bullpen-board … --render
 /// FILE`): its top line, its whole list and its key row, `view.cols` columns wide, at a
-/// cell of `cell` pixels, in the default colours. For looking at the image look without
-/// a terminal.
-pub fn render_file(view: &View, size: TextSize, cell: (u32, u32), font: Option<&Path>, path: &Path) -> Result<(), String> {
+/// cell of `cell` pixels, in `theme`'s colours on its background. For looking at the
+/// image look without a terminal.
+pub fn render_file(view: &View, size: TextSize, cell: (u32, u32), theme: Theme, font: Option<&Path>, path: &Path) -> Result<(), String> {
     let mut fonts = Fonts::load(font)?;
-    let theme = Theme::default();
     let canvas = Canvas::new(Grid { cols: view.cols as usize, cell_w: cell.0, cell_h: cell.1 }, size, theme);
     let laid = render::lay(&view.rows, &canvas, &fonts);
     let list_h = laid.heights.iter().sum::<u32>().div_ceil(cell.1) * cell.1;

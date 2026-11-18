@@ -100,3 +100,10 @@ fn render_takes_a_file_and_a_width() {
     assert_eq!((args.render, args.cols), (Some("out.png".into()), Some(50)));
     assert!(parse_args(["--dir", "d", "--root", "r", "--bullpen", "b", "--cols", "wide"].map(String::from)).is_err());
 }
+
+#[test]
+fn render_takes_a_theme_light_or_dark() {
+    let args = parse_args(["--dir", "d", "--root", "r", "--bullpen", "b", "--theme", "light"].map(String::from)).unwrap();
+    assert_eq!(args.theme, Some(crate::image::Theme::light()));
+    assert!(parse_args(["--dir", "d", "--root", "r", "--bullpen", "b", "--theme", "blue"].map(String::from)).is_err());
+}

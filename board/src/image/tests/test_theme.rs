@@ -29,3 +29,30 @@ fn status_and_risk_colours_mean_what_the_text_boards_do() {
     assert_eq!(t.status("todo"), None);
     assert_eq!((t.risk("high"), t.risk("medium"), t.risk("low")), (solid(t.red), solid(t.yellow), solid(t.green)));
 }
+
+/// The contrast of colour `c` drawn over `bg`, as WCAG works it out.
+fn contrast(c: [u8; 4], bg: Rgb) -> f32 {
+    let over = |f: u8, b: u8| (f as f32 * c[3] as f32 + b as f32 * (255 - c[3]) as f32) / 255.0;
+    let lin = |v: f32| {
+        let v = v / 255.0;
+        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    };
+    let lum = |r: f32, g: f32, b: f32| 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+    let a = lum(over(c[0], bg.0), over(c[1], bg.1), over(c[2], bg.2));
+    let b = lum(bg.0 as f32, bg.1 as f32, bg.2 as f32);
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+#[test]
+fn dim_text_reads_on_a_light_theme_and_a_dark_one() {
+    for t in [Theme::light(), Theme::default()] {
+        assert!(contrast(t.dim(), t.bg) >= 4.5, "{t:?}");
+    }
+}
+
+#[test]
+fn a_theme_is_named_light_or_dark() {
+    assert_eq!(Theme::named("light"), Some(Theme::light()));
+    assert_eq!(Theme::named("dark"), Some(Theme::default()));
+    assert_eq!(Theme::named("blue"), None);
+}

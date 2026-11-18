@@ -207,8 +207,10 @@ block of cells, so a client with other cell sizes (Rex on a phone) scales it to 
 
 `bullpen-board --dir <state dir> --root <repo> --bullpen <program> --render FILE
 --cols N` writes the board as the image look draws it to FILE: its top line, its whole
-list and its keys, a PNG N columns wide (60 by default), at the repo's text size, on
-the default dark colours, without a terminal.
+list and its keys, a PNG N columns wide (60 by default), at the repo's text size,
+without a terminal. `--theme light` draws it in a light terminal's colours (GitHub's
+light ones) on white, `--theme dark` (the default) in the default dark ones, and
+`--select ID` selects that task, so a change can be checked on both.
 
 ## The Later group
 

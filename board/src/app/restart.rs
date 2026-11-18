@@ -91,6 +91,8 @@ pub struct Args {
     pub render: Option<PathBuf>,
     /// `--cols N`: how wide a list `--render` draws
     pub cols: Option<usize>,
+    /// `--theme light|dark`: the colours `--render` draws in (dark by default)
+    pub theme: Option<crate::image::Theme>,
 }
 
 pub fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<Args, String> {
@@ -111,6 +113,7 @@ pub fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<Args, String
             "--look" => out.look = Some(if v == "image" { Look::Image } else { Look::Text }),
             "--render" => out.render = Some(PathBuf::from(v)),
             "--cols" => out.cols = Some(v.parse().map_err(|_| format!("--cols needs a number, not {v}"))?),
+            "--theme" => out.theme = Some(crate::image::Theme::named(&v).ok_or(format!("--theme is light or dark, not {v}"))?),
             _ => return Err(format!("unknown argument {a}")),
         }
     }

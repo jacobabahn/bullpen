@@ -242,13 +242,14 @@ fn read_keys(keys: mpsc::Sender<Msg>, gate: Arc<image::term::Gate>) {
 fn render(args: app::Args, path: &std::path::Path) {
     let (tx, _rx) = mpsc::channel();
     let cols = args.cols.unwrap_or(60).max(20);
+    let theme = args.theme.unwrap_or_default();
     let mut app = App::new(args, None, tx);
     app.read();
     app.settle();
     app.image = true;
     app.detail_cols = image::detail_cols(cols, app.cfg.text_size, (16, 34), app.cfg.font.as_deref()).ok();
     let view = ui::whole(&app, cols + 1, model::now());
-    if let Err(e) = image::render_file(&view, app.cfg.text_size, (16, 34), app.cfg.font.as_deref(), path) {
+    if let Err(e) = image::render_file(&view, app.cfg.text_size, (16, 34), theme, app.cfg.font.as_deref(), path) {
         eprintln!("bullpen-board: {e}");
         std::process::exit(1);
     }

@@ -35,6 +35,30 @@ impl Default for Theme {
     }
 }
 
+impl Theme {
+    /// A light terminal's (GitHub's light colours): `--render --theme light`, for
+    /// checking the image on white.
+    pub fn light() -> Theme {
+        Theme {
+            fg: Rgb(0x24, 0x29, 0x2f),
+            bg: Rgb(0xff, 0xff, 0xff),
+            red: Rgb(0xcf, 0x22, 0x2e),
+            green: Rgb(0x1a, 0x7f, 0x37),
+            yellow: Rgb(0x9a, 0x67, 0x00),
+            blue: Rgb(0x09, 0x69, 0xda),
+        }
+    }
+
+    /// The theme `--theme` names: light, or dark (the default's).
+    pub fn named(name: &str) -> Option<Theme> {
+        match name {
+            "light" => Some(Theme::light()),
+            "dark" => Some(Theme::default()),
+            _ => None,
+        }
+    }
+}
+
 /// What the terminal said about its colours (None: it didn't).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Said {
@@ -63,9 +87,10 @@ impl Theme {
         solid(self.fg)
     }
 
-    /// Dim text: the foreground, half seen.
+    /// Dim text: the foreground at 66%, which reads at 4.5:1 on a light theme's white,
+    /// even on the selected card (and at over 6:1 on a dark one).
     pub fn dim(&self) -> [u8; 4] {
-        faint(self.fg, 0.55)
+        faint(self.fg, 0.66)
     }
 
     /// The selection's tint: the foreground, faintly.
