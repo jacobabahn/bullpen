@@ -195,7 +195,11 @@ fn the_gate_hands_input_to_the_answers_and_back() {
 
 /// The reader parks at the board's wish and `read`s on a thread of its own; its
 /// `tell` is the board hearing of it. Whether it came back, within a few seconds.
-fn reader(gate: &std::sync::Arc<Gate>, tell: impl FnOnce() -> bool + Send + 'static, read: impl FnOnce() + Send + 'static) -> bool {
+fn reader(
+    gate: &std::sync::Arc<Gate>,
+    tell: impl FnOnce() -> bool + Send + 'static,
+    read: impl FnOnce() + Send + 'static,
+) -> bool {
     assert!(gate.want());
     let (gate, (tx, rx)) = (gate.clone(), std::sync::mpsc::channel());
     std::thread::spawn(move || {

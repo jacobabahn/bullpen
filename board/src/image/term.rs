@@ -185,7 +185,13 @@ pub fn read_answers(input: &mut impl Input, graphics: Option<u32>) -> (Answers, 
 /// dropping the answers. `left` is the cut-off answer read already. A lone esc with
 /// nothing after it for `QUIET` is a key. `tick` is called each `QUIET` or so, so the
 /// reader can look for what it can't read here (the window's size).
-pub fn drain(input: &mut impl Input, left: Vec<u8>, graphics: Option<u32>, mut typed: impl FnMut(Typed), mut tick: impl FnMut()) {
+pub fn drain(
+    input: &mut impl Input,
+    left: Vec<u8>,
+    graphics: Option<u32>,
+    mut typed: impl FnMut(Typed),
+    mut tick: impl FnMut(),
+) {
     let mut buf = left;
     loop {
         let before = buf.len();
