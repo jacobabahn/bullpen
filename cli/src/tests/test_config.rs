@@ -27,6 +27,20 @@ fn settings_are_grouped_in_the_tables_order_and_the_rest_under_other() {
 }
 
 #[test]
+fn a_setting_the_table_gives_no_group_is_not_listed() {
+    let hidden: Vec<String> = SETTINGS
+        .iter()
+        .filter(|s| s.group.is_none())
+        .map(|s| s.name.to_string())
+        .collect();
+    assert!(!hidden.is_empty());
+    let mut keys = hidden.clone();
+    keys.push("prefix".into());
+    let listed: Vec<String> = config_groups(&keys).into_iter().flat_map(|(_, ks)| ks).collect();
+    assert_eq!(listed, ["prefix"]);
+}
+
+#[test]
 fn every_setting_with_a_flag_is_in_the_spec_once_with_its_default() {
     let sp = spec();
     for s in SETTINGS.iter() {

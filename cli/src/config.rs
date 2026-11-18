@@ -11,7 +11,7 @@ use bullpen_core::config::{config_source, global_config_path, inherited_config, 
 use bullpen_core::json::{self, dumps, dumps_line, py_str, s, Obj};
 use bullpen_core::paths::{home_path, homes, state};
 use bullpen_core::repo::{reindex, repo_root};
-use bullpen_core::settings::{defaults, is_internal, is_repo_only, Kind as SKind, Setting, SETTINGS};
+use bullpen_core::settings::{defaults, is_internal, is_repo_only, setting, Kind as SKind, Setting, SETTINGS};
 use bullpen_core::task::model_phrase;
 use bullpen_core::text::{len, ljust, shell_join, strip};
 use bullpen_core::{fail, Repo, Res};
@@ -348,7 +348,8 @@ pub fn config_value(v: &Value) -> String {
     }
 }
 
-/// [(title, keys)]: keys in the settings' groups and order, the rest under Other.
+/// [(title, keys)]: keys in the settings' groups and order, keys the table doesn't know
+/// under Other; a setting the table gives no group isn't listed.
 pub fn config_groups(keys: &[String]) -> Vec<(String, Vec<String>)> {
     let mut titles: Vec<&str> = Vec::new();
     for g in SETTINGS.iter().filter_map(|s| s.group) {
@@ -356,7 +357,6 @@ pub fn config_groups(keys: &[String]) -> Vec<(String, Vec<String>)> {
             titles.push(g);
         }
     }
-    let grouped = |k: &str| SETTINGS.iter().any(|s| s.name == k && s.group.is_some());
     let mut out: Vec<(String, Vec<String>)> = titles
         .iter()
         .map(|t| {
@@ -369,7 +369,10 @@ pub fn config_groups(keys: &[String]) -> Vec<(String, Vec<String>)> {
             (t.to_string(), ks)
         })
         .collect();
-    out.push(("Other".into(), keys.iter().filter(|k| !grouped(k)).cloned().collect()));
+    out.push((
+        "Other".into(),
+        keys.iter().filter(|k| setting(k).is_none()).cloned().collect(),
+    ));
     out.retain(|(_, ks)| !ks.is_empty());
     out
 }
@@ -442,11 +445,7 @@ fn show_config(repo: Option<&Repo>, as_json: bool) -> Res<()> {
     for (k, v) in head {
         println!("{}{v}", ljust(&format!("{k}:"), 8));
     }
-    let keys: Vec<String> = sources
-        .iter()
-        .map(|(k, _)| k.clone())
-        .filter(|k| !["next", "next_coordinator", "coordinators"].contains(&k.as_str()))
-        .collect();
+    let keys: Vec<String> = sources.iter().map(|(k, _)| k.clone()).collect();
     let source = |k: &str| sources.iter().find(|(n, _)| n == k).map_or("", |(_, v)| *v);
     let cols = term_width().filter(|c| *c != 0);
     for (title, group) in config_groups(&keys) {
