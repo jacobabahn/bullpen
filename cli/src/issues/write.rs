@@ -120,7 +120,15 @@ fn slug(repo: &Repo) -> Result<String, String> {
 }
 
 /// Add and take off labels (made first), then comment, if `issues_write` comments.
-fn mark(repo: &Repo, n: i64, add: &str, remove: Option<&str>, comment: &str) -> Result<(), String> {
+/// labelled: whether the labels' edit went through, whatever came after.
+fn mark(
+    repo: &Repo,
+    n: i64,
+    add: &str,
+    remove: Option<&str>,
+    comment: &str,
+    labelled: &mut bool,
+) -> Result<(), String> {
     let slug = slug(repo)?;
     labels(repo, &slug)?;
     let num = n.to_string();
@@ -129,6 +137,7 @@ fn mark(repo: &Repo, n: i64, add: &str, remove: Option<&str>, comment: &str) -> 
         args.extend(["--remove-label", r]);
     }
     gh_write(repo, &slug, &args)?;
+    *labelled = true;
     if comments(repo) {
         gh_write(repo, &slug, &["issue", "comment", &num, "--body", comment])?;
     }
@@ -177,10 +186,15 @@ pub fn started(repo: &Repo, t: &mut Obj) -> Res<()> {
     }
     let Some(n) = issue_of(repo, t) else { return Ok(()) };
     let id = s(t, "id").to_string();
-    t.insert("issue_started".into(), json!(true)); // what close and drop take off again
-    crate::saves::save(repo, t)?;
     let comment = format!("Being worked on as {id}.");
-    if let Err(why) = mark(repo, n, STARTED, Some(DECLINED), &comment) {
+    let mut labelled = false;
+    let res = mark(repo, n, STARTED, Some(DECLINED), &comment, &mut labelled);
+    if labelled {
+        // what close and drop take off again: only a label bullpen put there
+        t.insert("issue_started".into(), json!(true));
+        crate::saves::save(repo, t)?;
+    }
+    if let Err(why) = res {
         told(
             repo,
             t,
@@ -201,7 +215,7 @@ pub fn declined(repo: &Repo, item: &Obj, why: Option<&str>) -> Res<()> {
         Some(w) => format!("Declined: {w}"),
         None => "Declined.".to_string(),
     };
-    if let Err(e) = mark(repo, n, DECLINED, None, &comment) {
+    if let Err(e) = mark(repo, n, DECLINED, None, &comment, &mut false) {
         let id = s(item, "id");
         let about: Obj = json!({"id": id}).as_object().cloned().unwrap_or_default();
         told(

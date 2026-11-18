@@ -800,6 +800,10 @@ class IssuesWriteTest(IssuesWriteBase):
                       "Resource not accessible by integration. Nothing to do for the work; if it keeps failing, tell "
                       "the person (`bullpen config --issues-write off` stops the writes)", self.news_log())
         self.assertFalse(self.state_file("issue-labels").exists())  # made next time
+        self.assertNotIn("issue_started", self.show(tid))
+        (self.fake / "write_refused").unlink()
+        self.bp("drop", tid, "--force")  # the label never went on: nothing to take off
+        self.assertEqual(len(self.writes()), 1)
 
     def test_config_issues_on_says_once_what_bullpen_writes(self):
         self.bp("config", "--issues", "off")
