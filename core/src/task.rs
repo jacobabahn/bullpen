@@ -75,9 +75,11 @@ pub fn ok(t: &mut Obj) {
 }
 
 /// The task's worker is at it again, and has to run ready again. Its approval stays on
-/// record: that ready keeps it if the code didn't change (approval_kept).
+/// record: that ready keeps it if the code didn't change (approval_kept). Whether there
+/// is anything to merge is said again by whatever makes it ready next.
 pub fn back_to_work(t: &mut Obj) {
     t.shift_remove("from_ready");
+    t.shift_remove("nothing_to_merge");
     set_status(t, "working", None, None);
 }
 

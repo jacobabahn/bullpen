@@ -108,6 +108,9 @@ fn an_asked_task_remembers_where_it_was_asked_from() {
     back_to_work(&mut t);
     assert_eq!(t["status"], json!("working"));
     assert!(!t.contains_key("from_ready") && !t.contains_key("asked_from"));
+    let mut nothing = task(json!({"status": "ready", "nothing_to_merge": true}));
+    back_to_work(&mut nothing); // the next ready says again whether there is anything to merge
+    assert!(!nothing.contains_key("nothing_to_merge"));
     // a stop given replaces the one it had; a status that keeps it stopped keeps it
     set_status(
         &mut s,

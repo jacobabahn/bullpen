@@ -29,6 +29,21 @@ class ReviewTest(BullpenTest):
                                           "its approval carried over: the same commit); risk: low · a small change (1 line in 1 file)")
         self.assertIn("kept 1 time as the code didn't change", self.bp("show", tid).stdout)
 
+    def test_a_turn_back_to_the_approved_code_after_a_ready_with_no_commits_has_something_to_merge(self):
+        tid = self.approved_task()
+        wt, blk = self.show(tid)["worktree"], self.block(tid)
+        approved = sh("git", "-C", wt, "rev-parse", "HEAD").strip()
+        sh("git", "-C", wt, "reset", "-q", "--hard", "HEAD~1")  # back to the base: nothing to merge
+        self.bp("_event", blk, "idle", "", "")
+        self.ready(tid)
+        self.assertTrue(self.show(tid)["nothing_to_merge"])
+        self.bp("_event", blk, "working", "", "Put it back")
+        sh("git", "-C", wt, "reset", "-q", "--hard", approved)
+        self.bp("_event", blk, "idle", "", "")
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["why"]), ("ready", None))  # its worker's turn left the code as approved
+        self.assertNotIn("nothing_to_merge", t)
+
     def test_a_turn_that_changes_no_code_leaves_a_ready_task_ready(self):
         tid = self.approved_task()
         blk = self.block(tid)

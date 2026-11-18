@@ -91,7 +91,8 @@ the task ready through one step, `make_ready` in `cli/src/become_ready.rs`, told
 became ready (`How`): the risk label, the status, the save, then auto-accept (only for
 an approval, as a job started one way, `start_auto_accept`) or the ready news. A branch
 with no commits is recorded there as `nothing_to_merge`, the field core's
-`nothing_to_merge` reads; a task made ready before that field is read by its why. The
+`nothing_to_merge` reads, and it goes when the worker is back at work (`back_to_work`)
+or runs `ready` again; a task made ready before that field is read by its why. The
 verdict, a worker's turn that leaves a ready task's code as approved, and a rebase that
 keeps an approval still make it ready on their own.
 
