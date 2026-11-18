@@ -1,0 +1,292 @@
+//! The list's rows as values: what each row of the board's list says and how it should
+//! look, worked out once from the board's state. The text list (list.rs, later.rs) and
+//! the image (image/) both draw from these, so they never read the tasks two ways.
+
+use super::later::later_rows;
+use crate::model::{self, width, Item, Layout, Task, STALE};
+use crate::App;
+
+pub(crate) type Now = chrono::DateTime<chrono::FixedOffset>;
+
+/// One row of the list.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum Row {
+    /// a group's heading and how many it has
+    Head { name: String, count: usize },
+    Task(TaskRow),
+    /// a line under a task
+    Detail(DetailRow),
+    Gap,
+    /// what a board with no tasks to show says instead; the first line bold
+    Empty { text: String, first: bool },
+    /// the Later group folded to one line; amber when something there waits on you
+    Later { text: String, amber: bool },
+    /// an item of the Later group, expanded
+    Item(ItemRow),
+    /// a line under the selected item
+    ItemDetail(String),
+}
+
+/// A task's mark: still, or one the text board turns.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum Mark {
+    /// a command running on it (accept, drop, start, resume): the spinner
+    Job,
+    /// its tour being written: the spinner, in its status's colour
+    Tour(String),
+    /// an agent gone quiet: its status's mark, in the colour of one that needs you
+    Stuck(String),
+    /// working: turns on the text board
+    Working,
+    /// in review: turns on the text board
+    Review,
+    /// its status's mark, in its colour (one at the usage limit too)
+    Still(String),
+}
+
+/// The bar beside a task that needs you (amber), or whose agent stopped (red).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Flag {
+    Needs,
+    Stopped,
+}
+
+/// A task's row: its mark, ID, title, risk and age.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct TaskRow {
+    pub id: String,
+    /// as the board shows it (another coordinator's starts with whose), not cut to fit
+    pub title: String,
+    pub mark: Mark,
+    /// it came from the backlog (↻)
+    pub from_backlog: bool,
+    pub flag: Option<Flag>,
+    /// its age; "y / n" while it's asked about; empty when its detail line has it
+    pub age: String,
+    /// a ready task's risk level
+    pub risk: Option<String>,
+    /// it has needed you STALE seconds: its age is red
+    pub stale: bool,
+    pub selected: bool,
+    /// asked y/n about: Some(true) when what's asked is risky (red), else green
+    pub asked: Option<bool>,
+    /// its title is dim: closed, its coordinator's, or another coordinator's
+    pub quiet: bool,
+}
+
+/// A line under a task.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct DetailRow {
+    pub text: String,
+    /// at normal weight: it says what the task needs from you
+    pub loud: bool,
+    /// its first columns are the task's age (a narrow board's)
+    pub lead: usize,
+    /// its task is selected
+    pub selected: bool,
+    /// its task's age is red
+    pub stale: bool,
+    pub flag: Option<Flag>,
+}
+
+/// An item of the Later group.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct ItemRow {
+    pub id: String,
+    pub title: String,
+    /// `bullpen later` running on it: the spinner
+    pub job: bool,
+    /// it asks for a yes (amber), else it's an idea on the list (dim)
+    pub asks: bool,
+    /// its mark as text: `?` for one that asks, `◇` for an idea
+    pub mark: &'static str,
+    pub selected: bool,
+    /// its drop is asked about (red)
+    pub asked: bool,
+}
+
+impl Row {
+    /// A line under a task or an item: scrolling keeps them with it.
+    pub(crate) fn is_detail(&self) -> bool {
+        matches!(self, Row::Detail(..) | Row::ItemDetail(..))
+    }
+
+    /// The selected task's row, or the selected item's.
+    pub(crate) fn is_selected(&self) -> bool {
+        match self {
+            Row::Task(t) => t.selected,
+            Row::Item(i) => i.selected,
+            _ => false,
+        }
+    }
+
+    /// A task's or an item's own row (what a page counts).
+    pub(crate) fn is_entry(&self) -> bool {
+        matches!(self, Row::Task(_) | Row::Item(_))
+    }
+}
+
+/// The list's rows, and the width of its ID column: IDs share a column as wide as the
+/// longest, so titles and details line up.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct Rows {
+    pub rows: Vec<Row>,
+    pub idw: usize,
+}
+
+/// How many lines of detail the selected task gets.
+const SELECTED_LINES: usize = 8;
+
+/// The rows of a board `w` columns wide (`narrow`: a task's age goes on its detail line
+/// in the grouped layout): each group's heading, then its tasks, each (grouped) with
+/// its detail lines; the Later group after the open ones, before Closed. With no group
+/// to show, what the board says instead.
+pub(crate) fn build(app: &App, w: usize, narrow: bool, now: Now) -> Rows {
+    let layout = app.cfg.layout;
+    let groups = app.groups();
+    let cur_id = app.current().map(|t| t.id.clone());
+    let is_cur = |t: &Task| Some(&t.id) == cur_id.as_ref();
+    let items = app.later.iter().filter(|_| app.later_open).map(|i| width(&i.id));
+    let idw = groups.iter().flat_map(|(_, ts)| ts).map(|t| width(&t.id)).chain(items).max().unwrap_or(0);
+    let age_on_detail = narrow && layout == Layout::Grouped;
+    // from under the ID to the right edge
+    let detail_w = w.saturating_sub(5);
+
+    let mut rows: Vec<Row> = Vec::new();
+    if groups.is_empty() {
+        let lines = model::empty_board(&app.tasks, &app.cfg, app.me.as_deref(), app.closed);
+        rows.extend(lines.into_iter().enumerate().map(|(j, l)| Row::Empty { text: l, first: j == 0 }));
+    }
+    let mut later_due = true;
+    for (gi, (heading, ts)) in groups.iter().enumerate() {
+        if *heading == "Closed" {
+            later_due = false;
+            rows.extend(later_rows(app, &app.later, !rows.is_empty(), detail_w));
+        }
+        // the compact layout's group names, dim, sit where the grouped one leaves a blank row
+        if gi > 0 && layout == Layout::Grouped {
+            rows.push(Row::Gap);
+        }
+        rows.push(Row::Head { name: heading.to_string(), count: ts.len() });
+        for t in ts {
+            rows.push(Row::Task(task_row(app, t, is_cur(t), !age_on_detail, now)));
+            if layout == Layout::Grouped {
+                details(&mut rows, app, t, is_cur(t), age_on_detail, detail_w, now);
+            }
+        }
+    }
+    if later_due {
+        rows.extend(later_rows(app, &app.later, !rows.is_empty(), detail_w));
+    }
+    Rows { rows, idw }
+}
+
+/// A task's detail lines (the grouped layout's): what its agent is doing now, or
+/// what there is to say about it; then its stat line.
+fn details(rows: &mut Vec<Row>, app: &App, t: &Task, cur: bool, age_on_detail: bool, detail_w: usize, now: Now) {
+    // a working or in-review task: what its agent is doing now, on one line
+    let doing = model::doing_now(t, now);
+    // what a task needs from you, GitHub said, or the usage limit gets two lines,
+    // as does one its coordinator is on (when it comes to you); anything else
+    // one; the selected task all it has to say, up to SELECTED_LINES
+    let lines = if cur {
+        SELECTED_LINES
+    } else if !doing.is_empty() {
+        1
+    } else if t.flagged() || t.is_limited() || t.triage() || t.status == "finished" || !model::pr_phrase(t).is_empty() {
+        2
+    } else {
+        1
+    };
+    let text = if doing.is_empty() { model::detail_with_auto(t, &app.cfg, now) } else { doing };
+    // on a narrow board the age starts the first line, off the title's
+    let age = if age_on_detail { model::ago(t, now) } else { String::new() };
+    let text = match (age.is_empty(), text.is_empty()) {
+        (true, _) => text,
+        (false, true) => age.clone(),
+        (false, false) => format!("{age} · {text}"),
+    };
+    let detail = |text: String, loud: bool, lead: usize| {
+        Row::Detail(DetailRow { text, loud, lead, selected: cur, stale: stale(t, now), flag: flag(t) })
+    };
+    for (i, d) in model::wrap(&text, detail_w, lines).into_iter().enumerate() {
+        if !d.is_empty() {
+            let lead = if i == 0 { width(&age) } else { 0 };
+            rows.push(detail(d, loud_detail(app, t), lead));
+        }
+    }
+    let stat = model::stat_line(t);
+    if !stat.is_empty() {
+        rows.push(detail(stat, false, 0));
+    }
+}
+
+/// A task's own row. Asked y/n about, it keeps its title, in the question's colour,
+/// with "y / n" for the age; without `with_age` (a narrow board's) its age is on its
+/// detail line.
+fn task_row(app: &App, t: &Task, selected: bool, with_age: bool, now: Now) -> TaskRow {
+    let asked = app.pending.as_ref().filter(|(_, tid)| *tid == t.id).map(|(action, _)| model::confirm_risky(*action, t, &app.cfg));
+    let age = match asked {
+        Some(_) => "y / n".to_string(),
+        None if with_age => model::ago(t, now),
+        None => String::new(),
+    };
+    let risk = if asked.is_some() { None } else { bullpen_core::risk::shown(t.obj()).map(|(level, _)| level.to_string()) };
+    TaskRow {
+        id: t.id.clone(),
+        title: model::shown_title(t, &app.cfg, app.me.as_deref()),
+        mark: mark(app, t),
+        from_backlog: t.is_from_backlog(),
+        flag: flag(t),
+        age,
+        risk,
+        stale: stale(t, now),
+        selected,
+        asked,
+        quiet: t.closed() || t.triage() || app.cfg.theirs(t, app.me.as_deref()),
+    }
+}
+
+/// A task's mark: a task with a command running gets the spinner in place of its own.
+fn mark(app: &App, t: &Task) -> Mark {
+    let st = t.status.clone();
+    match app.job(&t.id) {
+        Some(_) => Mark::Job,
+        None if t.tour_writing() => Mark::Tour(st),
+        None if t.is_stuck() => Mark::Stuck(st),
+        // one stopped at the usage limit isn't working either: a still mark
+        None if t.is_limited() => Mark::Still(st),
+        None if st == "working" => Mark::Working,
+        None if st == "review" => Mark::Review,
+        None => Mark::Still(st),
+    }
+}
+
+fn flag(t: &Task) -> Option<Flag> {
+    t.flagged().then_some(if t.status == "stopped" { Flag::Stopped } else { Flag::Needs })
+}
+
+/// Has the task needed you STALE seconds?
+fn stale(t: &Task, now: Now) -> bool {
+    t.needs_you() && model::seconds_in_status(t, now) >= STALE
+}
+
+/// Is a task's detail at normal weight? What you read and act on is (needs you, stopped,
+/// ready, finished); background is dim (working, queued, in review, the coordinator's,
+/// closed), and so is all of another coordinator's task, as its title is.
+fn loud_detail(app: &App, t: &Task) -> bool {
+    (t.needs_you() || t.awaits_accept()) && !app.cfg.theirs(t, app.me.as_deref())
+}
+
+/// An item's row.
+pub(super) fn item_row(app: &App, i: &Item) -> ItemRow {
+    ItemRow {
+        id: i.id.clone(),
+        title: i.title.clone(),
+        job: app.job(&i.id).is_some(),
+        asks: i.asks(),
+        mark: model::item_mark(i),
+        selected: app.current_item().is_some_and(|c| c.id == i.id),
+        asked: super::bottom::asked_item(app).is_some_and(|a| a.id == i.id),
+    }
+}

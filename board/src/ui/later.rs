@@ -3,7 +3,7 @@
 //! row per item (`?` amber for one that asks, `◇` dim for a kept one), the selected one
 //! with a line saying what its keys do, red while its drop is asked about.
 
-use super::list::Row;
+use super::rows::{item_row, ItemRow, Row};
 use super::{bold, dim, put, rev, span, spinner, AMBER, TINT};
 use crate::model::{self, fit, pad, Item, Layout};
 use crate::App;
@@ -17,7 +17,7 @@ const ITEM_LINES: usize = 2;
 
 /// The Later group's rows (none for an empty backlog), after a blank row in the
 /// grouped layout when something comes before.
-pub(super) fn later_rows<'a>(app: &App, items: &'a [Item], after_rows: bool, detail_w: usize) -> Vec<Row<'a>> {
+pub(super) fn later_rows(app: &App, items: &[Item], after_rows: bool, detail_w: usize) -> Vec<Row> {
     if items.is_empty() {
         return Vec::new();
     }
@@ -27,14 +27,15 @@ pub(super) fn later_rows<'a>(app: &App, items: &'a [Item], after_rows: bool, det
     }
     if !app.later_open {
         let (line, amber) = model::later_line(items);
-        rows.push(Row::Later(line, amber));
+        rows.push(Row::Later { text: line, amber });
         return rows;
     }
-    rows.push(Row::Head(format!("Later  {}", items.len())));
-    let sel = app.current_item().map(|i| i.id.clone());
+    rows.push(Row::Head { name: "Later".into(), count: items.len() });
     for i in items {
-        rows.push(Row::Item(i));
-        if Some(&i.id) == sel.as_ref() {
+        let row = item_row(app, i);
+        let selected = row.selected;
+        rows.push(Row::Item(row));
+        if selected {
             for line in model::wrap(&model::item_detail(i), detail_w, ITEM_LINES) {
                 rows.push(Row::ItemDetail(line));
             }
@@ -58,26 +59,24 @@ pub(super) fn draw_later_line(buf: &mut Buffer, area: Rect, y: usize, app: &App,
 
 /// An item's row: its mark (a spinner while it starts), its ID and title; the
 /// selected one's ID reversed on the tint, as a task's.
-pub(super) fn draw_item(buf: &mut Buffer, area: Rect, y: usize, app: &App, i: &Item, idw: usize, w: usize) {
-    let selected = app.current_item().is_some_and(|c| c.id == i.id);
-    let mark = match app.job(&i.id) {
-        Some(_) => span(spinner(app), bold()),
-        None if i.asks() => span(model::item_mark(i), bold().fg(AMBER)),
-        None => span(model::item_mark(i), dim()),
+pub(super) fn draw_item(buf: &mut Buffer, area: Rect, y: usize, app: &App, i: &ItemRow, idw: usize, w: usize) {
+    let mark = match (i.job, i.asks) {
+        (true, _) => span(spinner(app), bold()),
+        (false, true) => span(i.mark, bold().fg(AMBER)),
+        (false, false) => span(i.mark, dim()),
     };
     put(buf, area, y, 1, mark);
     let width_all = w.saturating_sub(5);
     let title = fit(&i.title, width_all.saturating_sub(idw + 2));
     let rest = pad(&format!("{}  {title}", " ".repeat(idw.saturating_sub(model::width(&i.id)))), width_all.saturating_sub(model::width(&i.id)));
-    let asked = super::bottom::asked_item(app).is_some_and(|a| a.id == i.id);
-    let (id_style, rest_style) = if asked {
+    let (id_style, rest_style) = if i.asked {
         (rev().add_modifier(Modifier::BOLD).fg(Color::Red), bold().fg(Color::Red))
-    } else if selected {
+    } else if i.selected {
         (rev().add_modifier(Modifier::BOLD), Style::new().bg(TINT))
     } else {
         (dim(), Style::new())
     };
-    let rest = if selected || asked { rest } else { rest.trim_end().to_string() };
+    let rest = if i.selected || i.asked { rest } else { rest.trim_end().to_string() };
     put(buf, area, y, 3, Line::from(vec![span(i.id.clone(), id_style), span(rest, rest_style)]));
 }
 

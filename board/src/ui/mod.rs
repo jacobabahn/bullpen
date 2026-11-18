@@ -9,6 +9,7 @@ mod help;
 mod later;
 mod list;
 pub(crate) mod overlay;
+pub(crate) mod rows;
 #[cfg(test)]
 #[path = "tests/testing.rs"]
 pub(crate) mod testing;
