@@ -308,7 +308,7 @@ impl Kind {
             Kind::Answer => Row::Answer,
             Kind::Quiet | Kind::Failed | Kind::Stopped | Kind::NotSent => Row::Triage,
             Kind::Overlap => Row::BothChanged,
-            // a command for later or for whoever decides, or nothing to do: nothing to do now
+            // a command for later or for whoever decides, or that there's nothing to do
             Kind::NotAutoAccepted | Kind::Pickup | Kind::Queue | Kind::Later | Kind::LimitContinued => {
                 Row::Own { asks: false }
             }
