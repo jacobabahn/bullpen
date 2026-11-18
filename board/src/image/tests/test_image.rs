@@ -164,6 +164,22 @@ fn the_text_size_setting_sets_the_rows_heights() {
 }
 
 #[test]
+fn the_images_are_hidden_under_an_overlay_and_deleted_when_the_board_is_text_again() {
+    let (mut app, mut p) = (board(3), picture());
+    asked(&mut app, &mut p);
+    frame(&mut app, &mut p);
+    app.mode = crate::Mode::Help { top: 0 };
+    assert_eq!(frame(&mut app, &mut p), [HEAD, LIST, FOOT].map(kitty::hide).concat());
+    app.mode = crate::Mode::Normal;
+    let out = frame(&mut app, &mut p);
+    // placed again, not sent again
+    assert!([HEAD, LIST, FOOT].iter().all(|id| out.contains(&format!("a=p,i={id},"))) && !out.contains("a=t"));
+    app.look = Look::Text;
+    assert_eq!(frame(&mut app, &mut p), [HEAD, LIST, FOOT].map(kitty::delete).concat());
+    assert_eq!(frame(&mut app, &mut p), "");
+}
+
+#[test]
 fn a_terminal_without_kitty_graphics_gets_the_text_list_and_a_line_saying_why() {
     let (mut app, mut p) = (board(3), picture());
     let mut out = Vec::new();
