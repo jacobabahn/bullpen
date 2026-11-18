@@ -16,13 +16,13 @@ use crate::accept::left_in_review;
 use crate::accept::rebase::{base_conflict, names_of, send_back_conflict};
 use crate::agents::pane;
 use crate::args::{pos, Arg, Args, Nargs};
+use crate::become_ready::{make_ready, How};
 use crate::jobs::{background, Job};
 use crate::news::{ready_news, say};
 use crate::notes::with_notes;
 use crate::ready::{summary_text, SUMMARY, SUMMARY_FILE};
 use crate::review::{remove_scratch, review_kind, rounds};
 use crate::rex::close_last;
-use crate::saves::save;
 use crate::start::launch::hand_back;
 use crate::stops::stop;
 use bullpen_core::json::{obj, py_str, s, truthy, write_obj, Obj};
@@ -31,7 +31,7 @@ use bullpen_core::proc::run_in;
 use bullpen_core::repo::{repo_root, unindex_block};
 use bullpen_core::settings::WAITING;
 use bullpen_core::task::pr_short;
-use bullpen_core::task::{auto_accepts, clip, commits, set_status, where_};
+use bullpen_core::task::{clip, where_};
 use bullpen_core::{fail, Repo, Res};
 use serde_json::{json, Value};
 
@@ -85,7 +85,6 @@ pub fn cmd_verdict(argv: &[String]) -> Res<i32> {
         r.insert("block".into(), Value::Null);
     }
     let r = obj(&t, "review").clone();
-    let pr = where_(&t);
     t.shift_remove("auto_wait"); // a new verdict decides again
     if tour {
         t.shift_remove("tour_sent"); // reviewed: the next review follows up on this one
@@ -93,33 +92,28 @@ pub fn cmd_verdict(argv: &[String]) -> Res<i32> {
     let n = r.get("round").and_then(Value::as_i64).unwrap_or(0);
     let left_by = left_in_review::take(&mut t); // accepts while it was in review
     if approve {
-        let base_ref = crate::modes::task_base_ref(&repo, &t)?;
-        crate::risk::assess(&repo, &mut t, &base_ref, crate::risk::Said::Approval(&text))?;
-        set_status(&mut t, "ready", None, None);
-        save(&repo, &mut t)?;
-        if !left_in_review::after_approval(&repo, &mut t, &left_by)? {
-            // sent back to rebase, or reviewed again: its news said so
-        } else if auto_accepts(&repo, &t) {
-            start_auto_accept(&repo, &id, true);
+        let why = match r.get("why").filter(|w| truthy(Some(w))) {
+            Some(w) => format!(": {}", py_str(w)), // last, so not in brackets in brackets
+            None => String::new(),
+        };
+        let mut plain = r.clone();
+        plain.insert("why".into(), Value::Null);
+        let notes = with_notes(&t);
+        let said = if rebase {
+            format!("a rebase check approved the conflict resolution{notes}")
         } else {
-            let why = match r.get("why").filter(|w| truthy(Some(w))) {
-                Some(w) => format!(": {}", py_str(w)), // last, so not in brackets in brackets
-                None => String::new(),
-            };
-            let mut plain = r.clone();
-            plain.insert("why".into(), Value::Null);
-            let notes = with_notes(&t);
-            let said = if rebase {
-                format!("a rebase check approved the conflict resolution{notes}")
-            } else {
-                match (why.is_empty(), notes.is_empty()) {
-                    (false, false) => format!("approved by {}{why},{notes}", review_kind(&plain)),
-                    _ => format!("approved by {}{notes}{why}", review_kind(&plain)),
-                }
-            };
-            let done = t.get("commits").and_then(Value::as_i64).unwrap_or(0);
-            ready_news(&repo, &mut t, &[commits(done), pr, said], "", false)?;
-        }
+            match (why.is_empty(), notes.is_empty()) {
+                (false, false) => format!("approved by {}{why},{notes}", review_kind(&plain)),
+                _ => format!("approved by {}{notes}{why}", review_kind(&plain)),
+            }
+        };
+        let base_ref = crate::modes::task_base_ref(&repo, &t)?;
+        let how = How::Approved {
+            text: &text,
+            said,
+            left_by: &left_by,
+        };
+        make_ready(&repo, &mut t, &base_ref, how)?;
     } else if tour || rebase || n < rounds {
         let said = if tour {
             "The reviewer says the person's comments aren't all addressed yet".to_string()
@@ -153,13 +147,12 @@ pub fn cmd_verdict(argv: &[String]) -> Res<i32> {
             stop(&repo, &mut t, "worker", "not_sent", why, &[line], "not-sent")?;
         }
     } else {
-        let why = format!("Review still asks for changes after {rounds} rounds");
         let base_ref = crate::modes::task_base_ref(&repo, &t)?;
-        crate::risk::assess(&repo, &mut t, &base_ref, crate::risk::Said::Nothing)?;
-        set_status(&mut t, "ready", Some(&why), None);
-        save(&repo, &mut t)?;
-        let then = format!(", but review still asks for changes after {rounds} rounds: findings in {findings}");
-        ready_news(&repo, &mut t, &[pr], &then, false)?;
+        let how = How::OutOfRounds {
+            rounds,
+            findings: &findings,
+        };
+        make_ready(&repo, &mut t, &base_ref, how)?;
     }
     println!("verdict recorded: {}", a.arg("verdict").unwrap_or(""));
     close_last(&reviewer.0, &reviewer.1)?; // last: this closes the pane we may be running in
