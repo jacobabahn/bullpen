@@ -100,7 +100,7 @@ pub fn cmd_verdict(argv: &[String]) -> Res<i32> {
         if !left_in_review::after_approval(&repo, &mut t, &left_by)? {
             // sent back to rebase, or reviewed again: its news said so
         } else if auto_accepts(&repo, &t) {
-            auto_accept(&repo, &id);
+            start_auto_accept(&repo, &id, true);
         } else {
             let why = match r.get("why").filter(|w| truthy(Some(w))) {
                 Some(w) => format!(": {}", py_str(w)), // last, so not in brackets in brackets
@@ -167,10 +167,11 @@ pub fn cmd_verdict(argv: &[String]) -> Res<i32> {
 }
 
 /// An approved task with auto-accept: `_auto_accept` accepts it now, or once
-/// its PR's checks pass. It runs here, as a job (its output in jobs.log, a failure it
-/// doesn't say itself in the news), and the verdict waits for it: the verdict closes
-/// the reviewer's pane only after, and the accept closes the worker's, not this one.
-fn auto_accept(repo: &Repo, id: &str) {
+/// its PR's checks pass. It runs as a job (its output in jobs.log, a failure it
+/// doesn't say itself in the news). wait: the caller waits for it (the verdict, which
+/// closes the reviewer's pane only after, while the accept closes the worker's); a
+/// `ready` doesn't, as it runs in the worker's pane, which accepting closes.
+pub fn start_auto_accept(repo: &Repo, id: &str, wait: bool) {
     let log = repo.dir.join("jobs.log");
     let job = Job {
         argv: vec![self_bin().display().to_string(), "_auto_accept".into(), id.into()],
@@ -180,7 +181,7 @@ fn auto_accept(repo: &Repo, id: &str) {
         task: Some(id),
         pass_fds: vec![],
     };
-    background(&job, true);
+    background(&job, wait);
 }
 
 // ---------- auto-accept ----------

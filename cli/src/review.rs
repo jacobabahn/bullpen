@@ -19,7 +19,6 @@ use crate::agents::{pane, running};
 use crate::args::{pos, Arg, Args, Nargs};
 use crate::coordinators::session_for;
 use crate::git_names::{unquote, Changed};
-use crate::jobs::{background, Job};
 use crate::modes::task_base_ref;
 use crate::news::ready_news;
 use crate::rex::{review_label, rex_close};
@@ -103,17 +102,7 @@ pub fn review_at_ready(repo: &Repo, t: &mut Obj, base_ref: &str) -> Res<String> 
         save(repo, t)?;
         let id = s(t, "id").to_string();
         if auto_accepts(repo, t) {
-            // not here: accepting closes the worker's pane, which this runs in
-            let log = repo.dir.join("jobs.log");
-            let job = Job {
-                argv: vec![self_bin().display().to_string(), "_auto_accept".into(), id.clone()],
-                cwd: &repo.root,
-                log: &log,
-                what: format!("{id}'s auto-accept"),
-                task: Some(&id),
-                pass_fds: vec![],
-            };
-            background(&job, false);
+            crate::auto_accept::start_auto_accept(repo, &id, false); // not waited for: it closes this pane
         } else {
             let n = t.get("commits").and_then(Value::as_i64).unwrap_or(0);
             let facts = [commits(n), where_(t), format!("its approval carried over: {kept}")];
