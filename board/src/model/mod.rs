@@ -11,6 +11,7 @@ mod task;
 mod text;
 mod top;
 #[cfg(test)]
+#[path = "tests/testing.rs"]
 pub(crate) mod testing;
 
 pub use backlog::*;

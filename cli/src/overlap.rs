@@ -211,5 +211,5 @@ pub fn overlaps_of(repo: &Repo, tid: &str, tasks: &[Obj]) -> Vec<(String, Vec<St
 }
 
 #[cfg(test)]
-#[path = "test_overlap.rs"]
+#[path = "tests/test_overlap.rs"]
 mod tests;

@@ -371,5 +371,5 @@ pub fn cmd_check(argv: &[String]) -> Res<i32> {
 }
 
 #[cfg(test)]
-#[path = "test_check.rs"]
+#[path = "tests/test_check.rs"]
 mod tests;

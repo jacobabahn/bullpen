@@ -127,5 +127,5 @@ pub fn unquote(text: &str) -> (String, &str) {
 }
 
 #[cfg(test)]
-#[path = "test_git_names.rs"]
+#[path = "tests/test_git_names.rs"]
 mod tests;

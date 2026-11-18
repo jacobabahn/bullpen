@@ -22,7 +22,7 @@ fn limit_phrase_says_when_it_resets() {
 
 #[test]
 fn test_only_the_agent_a_task_waits_on_is_stuck_or_limited() {
-    // (is_stuck and stuck_phrase: core/src/test_words.rs, under this name)
+    // (is_stuck and stuck_phrase: core/src/tests/test_words.rs, under this name)
     let at = day(11, 13, 0);
     let lim = json!({"who": "worker", "resets": iso_seconds(&day(11, 15, 0)), "text": "x"});
     let lim = lim.as_object().unwrap().clone();

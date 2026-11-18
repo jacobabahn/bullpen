@@ -186,5 +186,5 @@ fn review_finished(r0: &Obj, r1: &Obj) -> bool {
 }
 
 #[cfg(test)]
-#[path = "test_timeline.rs"]
+#[path = "tests/test_timeline.rs"]
 mod tests;

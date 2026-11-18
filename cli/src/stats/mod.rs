@@ -530,5 +530,5 @@ fn span_of_opt(v: Option<&Value>) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_stats.rs"]
+#[path = "tests/test_stats.rs"]
 mod tests;

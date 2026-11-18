@@ -490,5 +490,5 @@ fn key_row(m: &Mission, w: usize) -> Line<'static> {
 }
 
 #[cfg(test)]
-#[path = "test_draw.rs"]
+#[path = "tests/test_draw.rs"]
 mod tests;

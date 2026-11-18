@@ -135,5 +135,5 @@ pub fn last_items(log: &Path, n: usize) -> Res<Vec<Record>> {
 }
 
 #[cfg(test)]
-#[path = "test_recent.rs"]
+#[path = "tests/test_recent.rs"]
 mod tests;

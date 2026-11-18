@@ -193,5 +193,5 @@ pub fn commits_of(repo: &Repo, t: &Obj) -> Res<Taken> {
 }
 
 #[cfg(test)]
-#[path = "test_commits.rs"]
+#[path = "tests/test_commits.rs"]
 mod tests;

@@ -170,5 +170,5 @@ pub fn missing(repo: &Repo, t: &Obj) -> Option<String> {
 }
 
 #[cfg(test)]
-#[path = "test_stop_hook.rs"]
+#[path = "tests/test_stop_hook.rs"]
 mod tests;

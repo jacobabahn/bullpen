@@ -37,5 +37,5 @@ pub fn sees_to<'a>(cs: Vec<&'a Obj>, t: &Obj, alive: impl Fn(&Obj) -> Res<bool>)
 }
 
 #[cfg(test)]
-#[path = "test_coordinators.rs"]
+#[path = "tests/test_coordinators.rs"]
 mod tests;

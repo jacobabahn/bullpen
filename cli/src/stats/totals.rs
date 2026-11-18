@@ -192,5 +192,5 @@ pub fn lines(t: &Obj) -> Option<(i64, i64)> {
 }
 
 #[cfg(test)]
-#[path = "test_totals.rs"]
+#[path = "tests/test_totals.rs"]
 mod tests;

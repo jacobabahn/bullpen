@@ -293,5 +293,5 @@ fn send_back(repo: &Repo, t: &mut Obj, lines: &[String], ask: &str) -> Res<()> {
 }
 
 #[cfg(test)]
-#[path = "test_prs.rs"]
+#[path = "tests/test_prs.rs"]
 mod tests;

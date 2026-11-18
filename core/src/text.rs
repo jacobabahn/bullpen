@@ -264,5 +264,5 @@ pub fn printable(s: &str) -> bool {
 }
 
 #[cfg(test)]
-#[path = "test_text.rs"]
+#[path = "tests/test_text.rs"]
 mod tests;

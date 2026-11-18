@@ -1,13 +1,15 @@
 use std::path::{Path, PathBuf};
 
-/// The Rust files under dir, tests left out.
+/// The Rust files under dir, tests (each folder's `tests/`) left out.
 fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
     for e in std::fs::read_dir(dir).expect("a source folder").flatten() {
         let p = e.path();
         let name = e.file_name().to_string_lossy().into_owned();
         if p.is_dir() {
-            sources(&p, out);
-        } else if name.ends_with(".rs") && !name.starts_with("test_") {
+            if name != "tests" {
+                sources(&p, out);
+            }
+        } else if name.ends_with(".rs") {
             out.push(p);
         }
     }

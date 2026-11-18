@@ -419,5 +419,5 @@ pub fn term_size() -> (i64, i64) {
 }
 
 #[cfg(test)]
-#[path = "test_line_edit.rs"]
+#[path = "tests/test_line_edit.rs"]
 mod tests;

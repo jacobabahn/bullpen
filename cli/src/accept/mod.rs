@@ -223,5 +223,5 @@ fn changed_files(repo: &Repo, t: &Obj) -> Res<Option<BTreeSet<String>>> {
 }
 
 #[cfg(test)]
-#[path = "test_accept.rs"]
+#[path = "tests/test_accept.rs"]
 mod tests;

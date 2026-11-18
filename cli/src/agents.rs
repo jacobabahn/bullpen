@@ -52,5 +52,5 @@ pub fn running(t: &Obj, who: Option<&str>) -> Res<bool> {
 }
 
 #[cfg(test)]
-#[path = "test_agents.rs"]
+#[path = "tests/test_agents.rs"]
 mod tests;

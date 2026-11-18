@@ -432,5 +432,5 @@ pub fn program_status(session: &str, block: &str) -> Res<Option<Obj>> {
 }
 
 #[cfg(test)]
-#[path = "test_rex.rs"]
+#[path = "tests/test_rex.rs"]
 mod tests;

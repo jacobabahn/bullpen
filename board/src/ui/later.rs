@@ -87,5 +87,5 @@ pub(super) fn draw_item_detail(buf: &mut Buffer, area: Rect, y: usize, text: &st
 }
 
 #[cfg(test)]
-#[path = "test_later.rs"]
+#[path = "tests/test_later.rs"]
 mod tests;

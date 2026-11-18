@@ -113,5 +113,5 @@ pub fn doing_now(t: &Task, at: Stamp) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_detail.rs"]
+#[path = "tests/test_detail.rs"]
 mod tests;

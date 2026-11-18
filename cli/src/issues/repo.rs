@@ -103,5 +103,5 @@ pub fn gh_json(repo: &Repo, slug: &str, args: &[&str], what: &str) -> Res<Value>
 }
 
 #[cfg(test)]
-#[path = "test_repo.rs"]
+#[path = "tests/test_repo.rs"]
 mod tests;

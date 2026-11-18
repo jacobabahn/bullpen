@@ -8,7 +8,7 @@
 A module's header is its opening comment (`//!` in Rust, `--` in Lua); its first
 paragraph is the file's line in the map. The map is read from the checkout this script
 is in, so a worktree maps its own code, built or not. Tests (`test_*.rs`) are left out:
-each sits beside the module it tests.
+each is in the `tests/` folder beside the module it tests.
 """
 
 import re

@@ -176,5 +176,5 @@ pub fn file_hash(path: impl AsRef<Path>) -> Res<String> {
 }
 
 #[cfg(test)]
-#[path = "test_proc.rs"]
+#[path = "tests/test_proc.rs"]
 mod tests;

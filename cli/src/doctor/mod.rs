@@ -339,5 +339,5 @@ pub fn up_hint() -> Option<String> {
 }
 
 #[cfg(test)]
-#[path = "test_doctor.rs"]
+#[path = "tests/test_doctor.rs"]
 mod tests;

@@ -43,5 +43,5 @@ pub fn news_entry(line: &str) -> Option<(String, Obj)> {
 }
 
 #[cfg(test)]
-#[path = "test_old.rs"]
+#[path = "tests/test_old.rs"]
 mod tests;

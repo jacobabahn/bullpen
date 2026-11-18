@@ -544,5 +544,5 @@ pub fn from_around(t: &Obj, parts: &[&str]) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_words.rs"]
+#[path = "tests/test_words.rs"]
 mod tests;

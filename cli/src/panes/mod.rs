@@ -437,5 +437,5 @@ pub fn gather(repo: &Repo, session: &str) -> Res<()> {
 }
 
 #[cfg(test)]
-#[path = "test_panes.rs"]
+#[path = "tests/test_panes.rs"]
 mod tests;

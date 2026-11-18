@@ -795,5 +795,5 @@ pub fn close_reviewer(t: &mut Obj) -> Res<()> {
 }
 
 #[cfg(test)]
-#[path = "test_review.rs"]
+#[path = "tests/test_review.rs"]
 mod tests;

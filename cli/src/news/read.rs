@@ -376,5 +376,5 @@ fn restore_signals(old: &libc::sigset_t) {
 }
 
 #[cfg(test)]
-#[path = "test_read.rs"]
+#[path = "tests/test_read.rs"]
 mod tests;

@@ -447,5 +447,5 @@ pub fn next_steps(t: &Obj, every: &Every) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_show.rs"]
+#[path = "tests/test_show.rs"]
 mod tests;

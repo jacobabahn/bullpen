@@ -343,5 +343,5 @@ fn str_repr(s: &str) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_json.rs"]
+#[path = "tests/test_json.rs"]
 mod tests;

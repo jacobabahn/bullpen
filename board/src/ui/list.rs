@@ -385,5 +385,5 @@ fn title_line(
 
 
 #[cfg(test)]
-#[path = "test_list.rs"]
+#[path = "tests/test_list.rs"]
 mod tests;

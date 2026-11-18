@@ -473,5 +473,5 @@ pub fn cmd_tell(argv: &[String]) -> Res<i32> {
 }
 
 #[cfg(test)]
-#[path = "test_launch.rs"]
+#[path = "tests/test_launch.rs"]
 mod tests;

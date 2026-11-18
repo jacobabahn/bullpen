@@ -613,5 +613,5 @@ fn instant(when: NaiveDateTime, fold: bool) -> i64 {
 }
 
 #[cfg(test)]
-#[path = "test_limit.rs"]
+#[path = "tests/test_limit.rs"]
 mod tests;

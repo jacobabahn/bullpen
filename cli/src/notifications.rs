@@ -453,5 +453,5 @@ pub fn cmd_flush(argv: &[String]) -> Res<i32> {
 }
 
 #[cfg(test)]
-#[path = "test_notifications.rs"]
+#[path = "tests/test_notifications.rs"]
 mod tests;

@@ -242,5 +242,5 @@ pub fn cmd_revert(argv: &[String]) -> Res<i32> {
 }
 
 #[cfg(test)]
-#[path = "test_revert.rs"]
+#[path = "tests/test_revert.rs"]
 mod tests;

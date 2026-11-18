@@ -117,5 +117,5 @@ fn auto_accept_wait(how: &How) -> Option<bool> {
 }
 
 #[cfg(test)]
-#[path = "test_become_ready.rs"]
+#[path = "tests/test_become_ready.rs"]
 mod tests;

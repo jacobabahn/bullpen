@@ -88,5 +88,5 @@ pub fn label_late(repo: &Repo, tid: &str) -> Res<bool> {
 }
 
 #[cfg(test)]
-#[path = "test_risk_late.rs"]
+#[path = "tests/test_risk_late.rs"]
 mod tests;

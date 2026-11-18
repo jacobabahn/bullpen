@@ -82,5 +82,5 @@ fn is_item(line: &str) -> bool {
 }
 
 #[cfg(test)]
-#[path = "test_notes.rs"]
+#[path = "tests/test_notes.rs"]
 mod tests;

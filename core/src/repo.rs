@@ -435,5 +435,5 @@ pub fn known_repos() -> Res<Vec<Repo>> {
 }
 
 #[cfg(test)]
-#[path = "test_repo.rs"]
+#[path = "tests/test_repo.rs"]
 mod tests;

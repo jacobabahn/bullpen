@@ -92,5 +92,5 @@ pub fn run_later() {
 }
 
 #[cfg(test)]
-#[path = "test_saves.rs"]
+#[path = "tests/test_saves.rs"]
 mod tests;

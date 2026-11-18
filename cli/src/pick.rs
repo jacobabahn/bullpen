@@ -409,5 +409,5 @@ fn pick_pane(from_block: &str, session: &str) -> Res<()> {
 }
 
 #[cfg(test)]
-#[path = "test_pick.rs"]
+#[path = "tests/test_pick.rs"]
 mod tests;

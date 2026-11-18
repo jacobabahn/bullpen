@@ -41,5 +41,5 @@ impl From<&str> for Fail {
 }
 
 #[cfg(test)]
-#[path = "test_fail.rs"]
+#[path = "tests/test_fail.rs"]
 mod tests;

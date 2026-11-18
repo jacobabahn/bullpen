@@ -25,7 +25,7 @@ fn docs_or_tests_alone_are_low() {
     assert_eq!(rules("3\t1\tdocs/review.md\n"), part("low", "docs only"));
     assert_eq!(rules("3\t1\tREADME.md\n"), part("low", "docs only"));
     assert_eq!(
-        rules("90\t0\ttests/test_review.py\n2\t0\tcli/src/test_risk.rs\n"),
+        rules("90\t0\ttests/test_review.py\n2\t0\tcli/src/tests/test_risk.rs\n"),
         part("low", "tests only")
     );
     assert_eq!(
@@ -101,13 +101,13 @@ fn a_high_area_is_high_whatever_its_size_and_says_its_lines() {
     );
     // a test beside the area's code isn't the area: tests alone are low
     assert_eq!(
-        with(&paths, "40\t0\tcli/src/accept/test_rebase.rs\n"),
+        with(&paths, "40\t0\tcli/src/accept/tests/test_rebase.rs\n"),
         part("low", "tests only")
     );
     assert_eq!(
         with(
             &paths,
-            "40\t0\tcli/src/accept/test_rebase.rs\n2\t0\tcli/src/accept/rebase.rs\n"
+            "40\t0\tcli/src/accept/tests/test_rebase.rs\n2\t0\tcli/src/accept/rebase.rs\n"
         ),
         part("high", "changes how accept merges (2 lines)")
     );

@@ -197,5 +197,5 @@ pub fn read_prompt(text: &str) -> Option<Prompt> {
 }
 
 #[cfg(test)]
-#[path = "test_prompt.rs"]
+#[path = "tests/test_prompt.rs"]
 mod tests;

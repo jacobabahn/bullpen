@@ -182,7 +182,7 @@ fn test_a_working_task_only_shows_what_github_sent_it_back_for() {
 
 #[test]
 fn test_only_the_agent_a_task_waits_on_is_stuck() {
-    // (is_limited: core/src/test_task.rs)
+    // (is_limited: core/src/tests/test_task.rs)
     let t = task(json!({"status": "working", "stuck": {"who": "worker", "since": minutes_ago(25)}}));
     assert!(is_stuck(&t));
     assert_eq!(stuck_phrase(&t, None), "no progress for 25 min");

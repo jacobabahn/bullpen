@@ -199,5 +199,5 @@ pub fn main(argv: Vec<String>) {
 }
 
 #[cfg(test)]
-#[path = "test_run.rs"]
+#[path = "tests/test_run.rs"]
 mod tests;

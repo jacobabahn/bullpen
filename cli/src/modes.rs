@@ -436,5 +436,5 @@ fn move_base(repo: &Repo, base: &str, old: &str, new: &str) -> Res<()> {
 }
 
 #[cfg(test)]
-#[path = "test_modes.rs"]
+#[path = "tests/test_modes.rs"]
 mod tests;

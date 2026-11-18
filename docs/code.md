@@ -32,9 +32,9 @@ docs/tests.md); their fake Rex and fake gh are Rust (`tests/fakes/`, BP-138).
   builds it).
   `core` never depends on `cli`; the board depends on `core`. The crates are `serde_json`
   (with `preserve_order`), `chrono`, `libc` and `unicode-width` (the board's too, and
-  ratatui's); ask before adding one. Rust tests sit beside each module as
-  `test_<module>.rs`. rustfmt with `max_width = 120` (`rustfmt.toml`) for `core`,
-  `cli` and `tests/fakes`; the board isn't formatted yet.
+  ratatui's); ask before adding one. A module's Rust tests are in a `tests/` folder
+  beside it, as `test_<module>.rs`. rustfmt with `max_width = 120` (`rustfmt.toml`)
+  for `core`, `cli` and `tests/fakes`; the board isn't formatted yet.
 - The files bullpen writes (tasks, config, news, stamps) are as the Python wrote them:
   JSON as Python's `json` (indent 2, ASCII only, keys in order), stamps as `isoformat`,
   cuts as Python's. Comments that say "as Python's" name what's kept. The width of text
@@ -72,7 +72,7 @@ grouped by crate and folder, a line per file (each header's first paragraph):
 It reads the checkout it's in, so a worktree maps its own code, built or not. There's no
 list to keep: a new module writes its header, and a test (`tests/test_cli.py`) holds
 every module in `core/`, `cli/`, `board/`, `tests/fakes/` and `lua/` to having one.
-A module's tests (`test_<module>.rs`) sit beside it and aren't on the map.
+A module's tests (`tests/test_<module>.rs` in its folder) aren't on the map.
 
 ## Closing a task
 

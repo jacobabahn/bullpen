@@ -159,5 +159,5 @@ pub fn check_news(repo: Option<&Repo>, why_not: Option<&str>) -> Check {
 }
 
 #[cfg(test)]
-#[path = "test_news.rs"]
+#[path = "tests/test_news.rs"]
 mod tests;

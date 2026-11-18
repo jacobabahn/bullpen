@@ -221,5 +221,5 @@ impl App {
 }
 
 #[cfg(test)]
-#[path = "test_jobs.rs"]
+#[path = "tests/test_jobs.rs"]
 mod tests;

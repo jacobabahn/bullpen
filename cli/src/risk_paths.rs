@@ -191,5 +191,5 @@ pub fn check_risk(repo: Option<&Repo>, why_not: Option<&'static str>) -> Res<(&'
 }
 
 #[cfg(test)]
-#[path = "test_risk_paths.rs"]
+#[path = "tests/test_risk_paths.rs"]
 mod tests;

@@ -461,5 +461,5 @@ fn entry(invocation: &str, text: &str, at: usize, width: usize) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_args.rs"]
+#[path = "tests/test_args.rs"]
 mod tests;

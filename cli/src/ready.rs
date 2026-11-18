@@ -251,5 +251,5 @@ pub fn first_line(summary: &str) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_ready.rs"]
+#[path = "tests/test_ready.rs"]
 mod tests;

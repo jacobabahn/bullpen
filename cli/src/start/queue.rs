@@ -101,5 +101,5 @@ pub fn start_queued(repo: &Repo, by: &Obj, how: &str) -> Res<()> {
 }
 
 #[cfg(test)]
-#[path = "test_queue.rs"]
+#[path = "tests/test_queue.rs"]
 mod tests;

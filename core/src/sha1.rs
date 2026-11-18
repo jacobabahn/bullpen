@@ -71,5 +71,5 @@ fn compress(h: &mut [u32; 5], block: &[u8; 64]) {
 }
 
 #[cfg(test)]
-#[path = "test_sha1.rs"]
+#[path = "tests/test_sha1.rs"]
 mod tests;

@@ -488,5 +488,5 @@ fn show_config(repo: Option<&Repo>, as_json: bool) -> Res<()> {
 }
 
 #[cfg(test)]
-#[path = "test_config.rs"]
+#[path = "tests/test_config.rs"]
 mod tests;

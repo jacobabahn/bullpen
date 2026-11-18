@@ -406,5 +406,5 @@ pub fn slug(title: &str, n: usize) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_task.rs"]
+#[path = "tests/test_task.rs"]
 mod tests;

@@ -168,5 +168,5 @@ impl Backlog {
 }
 
 #[cfg(test)]
-#[path = "test_backlog.rs"]
+#[path = "tests/test_backlog.rs"]
 mod tests;

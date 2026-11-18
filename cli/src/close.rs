@@ -201,5 +201,5 @@ pub fn waiting_line(waiting: &[String], id: &str, how: &str) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_close.rs"]
+#[path = "tests/test_close.rs"]
 mod tests;

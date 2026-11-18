@@ -243,5 +243,5 @@ pub fn up_line(said: &[(String, String, String)], fresh: bool) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_up.rs"]
+#[path = "tests/test_up.rs"]
 mod tests;

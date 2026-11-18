@@ -41,5 +41,5 @@ pub fn take(path: &Path, wait: bool) -> io::Result<Option<File>> {
 }
 
 #[cfg(test)]
-#[path = "test_lock.rs"]
+#[path = "tests/test_lock.rs"]
 mod tests;

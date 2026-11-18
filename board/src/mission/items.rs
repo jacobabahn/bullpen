@@ -211,5 +211,5 @@ pub fn tilde(path: &str) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_items.rs"]
+#[path = "tests/test_items.rs"]
 mod tests;

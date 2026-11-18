@@ -472,5 +472,5 @@ pub fn cmd_wake(every: f64, timeout: f64) -> Res<i32> {
 }
 
 #[cfg(test)]
-#[path = "test_waiter.rs"]
+#[path = "tests/test_waiter.rs"]
 mod tests;

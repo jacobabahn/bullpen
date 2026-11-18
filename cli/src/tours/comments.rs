@@ -121,5 +121,5 @@ pub fn add_comment(repo: &Repo, t: &Obj, step: i64, text: &str) -> Res<i64> {
 }
 
 #[cfg(test)]
-#[path = "test_comments.rs"]
+#[path = "tests/test_comments.rs"]
 mod tests;

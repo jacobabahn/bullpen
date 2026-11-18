@@ -7,6 +7,7 @@ mod keys;
 mod later;
 mod restart;
 #[cfg(test)]
+#[path = "tests/testing.rs"]
 pub(crate) mod testing;
 
 pub use jobs::Job;
@@ -353,5 +354,5 @@ impl App {
 }
 
 #[cfg(test)]
-#[path = "test_app.rs"]
+#[path = "tests/test_app.rs"]
 mod tests;

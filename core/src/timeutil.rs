@@ -80,5 +80,5 @@ pub fn clock(when: Stamp, at: Option<Stamp>) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_timeutil.rs"]
+#[path = "tests/test_timeutil.rs"]
 mod tests;

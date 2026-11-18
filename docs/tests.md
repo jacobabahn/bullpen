@@ -77,23 +77,23 @@ help, a setting `bullpen config` doesn't list.
 
 ## The Rust tests
 
-`core` and `cli` keep their tests the board's way, below: beside each module, as
-`test_<module>.rs`.
+`core` and `cli` keep their tests the board's way, below: in a `tests/` folder beside
+each module, as `test_<module>.rs`.
 
 ## The board's tests
 
-The board's tests sit next to the code they test, one file per module:
+The board's tests sit in a `tests/` folder next to the code they test, one file per module:
 `board/src/model/detail.rs` ends with
 
 ```rust
 #[cfg(test)]
-#[path = "test_detail.rs"]
+#[path = "tests/test_detail.rs"]
 mod tests;
 ```
 
-and its tests are in `board/src/model/test_detail.rs`. The test file is a child of its
+and its tests are in `board/src/model/tests/test_detail.rs`. The test file is a child of its
 module, so it can use the module's private items. Helpers several test files share are
-in the folder's `testing.rs` (`board/src/model/testing.rs`: `task()`,
+in the folder's `tests/testing.rs` (`board/src/model/tests/testing.rs`: `task()`,
 `Config::default_for_test()`, ...). A test task is built from JSON, as bullpen writes
 it: `task("BP-1", "ready").with(json!({"pr": "..."}))`. Add a test to the end of its module's
 `test_<module>.rs`. The `test_` name means bullpen treats the file as a test file when
@@ -102,7 +102,7 @@ it rebases: two tasks that both added tests at the end of it keep both.
 `board/src/app/` is the same: `App` and its modes in `mod.rs` (tests in `test_app.rs`),
 the keys in `keys.rs`, the background commands in `jobs.rs` and reloading the board's
 program in `restart.rs`. A test builds a board with `App::for_test(tasks)` (in
-`board/src/app/testing.rs`, with `press()`, `Scratch` and the other shared helpers),
+`board/src/app/tests/testing.rs`, with `press()`, `Scratch` and the other shared helpers),
 so a new field on `App` is set in `App::new` alone.
 
 `board/src/ui/` is the same too: `mod.rs` sizes the board once (`Sizes`) and picks
@@ -110,4 +110,4 @@ what to draw (tests in `test_ui.rs`); the list in `list.rs`, the message and key
 in `bottom.rs`, the full-screen views (a peek, a prompt, a question) in `overlay.rs`
 and the `?` list, with `BOARD_KEYS`, in `help.rs`. Their tests draw the board into a
 test terminal and read it back with `screen()`, `row()` and `tone_of()` (in
-`board/src/ui/testing.rs`).
+`board/src/ui/tests/testing.rs`).

@@ -161,5 +161,5 @@ fn key_row(mut keys: Vec<(&str, &str)>, w: usize) -> Line<'static> {
 }
 
 #[cfg(test)]
-#[path = "test_bottom.rs"]
+#[path = "tests/test_bottom.rs"]
 mod tests;

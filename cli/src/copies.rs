@@ -285,5 +285,5 @@ pub fn check_copy(repo: Option<&Repo>, why_not: Option<&str>) -> Res<(&'static s
 }
 
 #[cfg(test)]
-#[path = "test_copies.rs"]
+#[path = "tests/test_copies.rs"]
 mod tests;

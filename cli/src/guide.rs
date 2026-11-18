@@ -670,5 +670,5 @@ pub fn unified_diff(a: &[&str], b: &[&str], from: &str, to: &str, n: usize) -> V
 }
 
 #[cfg(test)]
-#[path = "test_guide.rs"]
+#[path = "tests/test_guide.rs"]
 mod tests;

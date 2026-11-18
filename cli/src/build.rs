@@ -757,5 +757,5 @@ fn watcher_after(built: &[&Program]) {
 }
 
 #[cfg(test)]
-#[path = "test_build.rs"]
+#[path = "tests/test_build.rs"]
 mod tests;

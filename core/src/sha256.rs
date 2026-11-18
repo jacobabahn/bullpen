@@ -86,5 +86,5 @@ fn compress(h: &mut [u32; 8], block: &[u8; 64]) {
 }
 
 #[cfg(test)]
-#[path = "test_sha256.rs"]
+#[path = "tests/test_sha256.rs"]
 mod tests;

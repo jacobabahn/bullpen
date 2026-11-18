@@ -244,5 +244,5 @@ pub fn human(bytes: u64) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_claude_tmp.rs"]
+#[path = "tests/test_claude_tmp.rs"]
 mod tests;

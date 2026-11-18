@@ -209,5 +209,5 @@ pub fn migrate_layers(repo: &mut Repo) -> Res<()> {
 }
 
 #[cfg(test)]
-#[path = "test_config.rs"]
+#[path = "tests/test_config.rs"]
 mod tests;

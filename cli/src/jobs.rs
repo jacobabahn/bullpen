@@ -253,5 +253,5 @@ fn job_failed(cwd: &Path, tid: Option<&str>, line: &str) -> Res<()> {
 }
 
 #[cfg(test)]
-#[path = "test_jobs.rs"]
+#[path = "tests/test_jobs.rs"]
 mod tests;

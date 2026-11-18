@@ -82,5 +82,5 @@ fn count_words(r: &RepoState) -> Vec<String> {
 }
 
 #[cfg(test)]
-#[path = "test_repos.rs"]
+#[path = "tests/test_repos.rs"]
 mod tests;

@@ -255,5 +255,5 @@ pub fn check_push_seen(repo: Option<&Repo>, why_not: Option<&str>) -> Res<(&'sta
 }
 
 #[cfg(test)]
-#[path = "test_push_remote.rs"]
+#[path = "tests/test_push_remote.rs"]
 mod tests;

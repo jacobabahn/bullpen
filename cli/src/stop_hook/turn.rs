@@ -171,5 +171,5 @@ pub fn ended_line(id: &str, t: &Obj, rec: Option<&Obj>, shell_min: Option<i64>, 
 }
 
 #[cfg(test)]
-#[path = "test_turn.rs"]
+#[path = "tests/test_turn.rs"]
 mod tests;

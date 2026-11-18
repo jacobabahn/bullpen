@@ -89,5 +89,5 @@ pub fn shown_title(t: &Task, cfg: &Config, me: Option<&str>) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_groups.rs"]
+#[path = "tests/test_groups.rs"]
 mod tests;

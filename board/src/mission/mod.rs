@@ -17,6 +17,7 @@ mod draw;
 mod items;
 pub mod run;
 #[cfg(test)]
+#[path = "tests/testing.rs"]
 pub(crate) mod testing;
 
 pub use items::{Item, Row};
@@ -367,5 +368,5 @@ impl Mission {
 }
 
 #[cfg(test)]
-#[path = "test_mission.rs"]
+#[path = "tests/test_mission.rs"]
 mod tests;

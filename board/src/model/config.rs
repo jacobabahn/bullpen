@@ -148,5 +148,5 @@ fn default_gap(text: &dyn Fn(&str) -> String) -> usize {
 }
 
 #[cfg(test)]
-#[path = "test_config.rs"]
+#[path = "tests/test_config.rs"]
 mod tests;

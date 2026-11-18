@@ -115,5 +115,5 @@ pub fn brief_request(i: &Item) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_backlog.rs"]
+#[path = "tests/test_backlog.rs"]
 mod tests;

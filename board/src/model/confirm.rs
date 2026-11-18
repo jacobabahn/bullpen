@@ -136,5 +136,5 @@ pub fn confirm_text(action: Action, t: &Task, cfg: &Config) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_confirm.rs"]
+#[path = "tests/test_confirm.rs"]
 mod tests;

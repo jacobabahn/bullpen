@@ -449,5 +449,5 @@ fn is_risk_heading(line: &str) -> bool {
 }
 
 #[cfg(test)]
-#[path = "test_risk.rs"]
+#[path = "tests/test_risk.rs"]
 mod tests;

@@ -10,6 +10,7 @@ mod later;
 mod list;
 pub(crate) mod overlay;
 #[cfg(test)]
+#[path = "tests/testing.rs"]
 pub(crate) mod testing;
 
 use crate::model::Layout;
@@ -212,5 +213,5 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 }
 
 #[cfg(test)]
-#[path = "test_ui.rs"]
+#[path = "tests/test_ui.rs"]
 mod tests;

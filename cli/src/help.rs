@@ -273,5 +273,5 @@ pub fn close_match<'a>(word: &str, names: impl Iterator<Item = &'a str>) -> Opti
 }
 
 #[cfg(test)]
-#[path = "test_help.rs"]
+#[path = "tests/test_help.rs"]
 mod tests;

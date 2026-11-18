@@ -439,5 +439,5 @@ pub fn cmd_pickup(argv: &[String]) -> Res<i32> {
 }
 
 #[cfg(test)]
-#[path = "test_pickup.rs"]
+#[path = "tests/test_pickup.rs"]
 mod tests;

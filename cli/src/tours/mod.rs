@@ -372,5 +372,5 @@ pub fn step_files(step: &Obj) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_tours.rs"]
+#[path = "tests/test_tours.rs"]
 pub mod tests;

@@ -163,5 +163,5 @@ pub fn cmd_news_log(argv: &[String]) -> Res<i32> {
 }
 
 #[cfg(test)]
-#[path = "test_record.rs"]
+#[path = "tests/test_record.rs"]
 mod tests;

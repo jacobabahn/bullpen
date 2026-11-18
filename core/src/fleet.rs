@@ -433,5 +433,5 @@ impl Coordinator {
 }
 
 #[cfg(test)]
-#[path = "test_fleet.rs"]
+#[path = "tests/test_fleet.rs"]
 mod tests;

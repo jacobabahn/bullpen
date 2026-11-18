@@ -124,5 +124,5 @@ pub fn homes(text: &str) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_paths.rs"]
+#[path = "tests/test_paths.rs"]
 mod tests;

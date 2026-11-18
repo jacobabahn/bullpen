@@ -389,5 +389,5 @@ impl From<Kind> for &'static str {
 }
 
 #[cfg(test)]
-#[path = "test_kind.rs"]
+#[path = "tests/test_kind.rs"]
 mod tests;

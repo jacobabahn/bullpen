@@ -77,5 +77,5 @@ pub fn split_at_width(s: &str, w: usize) -> (String, String) {
 }
 
 #[cfg(test)]
-#[path = "test_text.rs"]
+#[path = "tests/test_text.rs"]
 mod tests;

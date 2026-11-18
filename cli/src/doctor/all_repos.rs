@@ -162,5 +162,5 @@ pub fn doctor_all(as_json: bool) -> Res<i32> {
 }
 
 #[cfg(test)]
-#[path = "test_all_repos.rs"]
+#[path = "tests/test_all_repos.rs"]
 mod tests;

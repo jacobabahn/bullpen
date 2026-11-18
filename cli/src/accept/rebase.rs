@@ -576,5 +576,5 @@ pub fn stale_line(t: &Obj, files: &[String]) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_rebase.rs"]
+#[path = "tests/test_rebase.rs"]
 mod tests;

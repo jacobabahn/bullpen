@@ -467,5 +467,5 @@ pub fn sgr_faint(params: &str, mut faint: bool) -> bool {
 }
 
 #[cfg(test)]
-#[path = "test_news.rs"]
+#[path = "tests/test_news.rs"]
 mod tests;

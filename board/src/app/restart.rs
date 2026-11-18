@@ -110,5 +110,5 @@ pub fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<Args, String
 }
 
 #[cfg(test)]
-#[path = "test_restart.rs"]
+#[path = "tests/test_restart.rs"]
 mod tests;

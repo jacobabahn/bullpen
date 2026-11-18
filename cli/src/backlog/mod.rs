@@ -318,5 +318,5 @@ pub fn from_line(t: &Obj) -> Option<String> {
 }
 
 #[cfg(test)]
-#[path = "test_backlog.rs"]
+#[path = "tests/test_backlog.rs"]
 mod tests;

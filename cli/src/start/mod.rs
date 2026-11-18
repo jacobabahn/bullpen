@@ -378,5 +378,5 @@ pub fn cmd_review_mode(argv: &[String]) -> Res<i32> {
 }
 
 #[cfg(test)]
-#[path = "test_start.rs"]
+#[path = "tests/test_start.rs"]
 mod tests;

@@ -165,5 +165,5 @@ pub fn top_right(needs: usize, ready: usize, others: &[RepoCount], room: usize) 
 }
 
 #[cfg(test)]
-#[path = "test_top.rs"]
+#[path = "tests/test_top.rs"]
 mod tests;

@@ -139,5 +139,5 @@ pub fn screen_state(text: &str) -> Option<&'static str> {
 }
 
 #[cfg(test)]
-#[path = "test_screen.rs"]
+#[path = "tests/test_screen.rs"]
 mod tests;

@@ -317,5 +317,5 @@ pub fn changed_since(t: &Obj, prev: Option<&Obj>) -> String {
 }
 
 #[cfg(test)]
-#[path = "test_brief.rs"]
+#[path = "tests/test_brief.rs"]
 mod tests;

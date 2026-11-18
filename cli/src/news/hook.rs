@@ -304,5 +304,5 @@ pub fn sync(repo: &Repo) -> Res<Option<String>> {
 }
 
 #[cfg(test)]
-#[path = "test_hook.rs"]
+#[path = "tests/test_hook.rs"]
 mod tests;

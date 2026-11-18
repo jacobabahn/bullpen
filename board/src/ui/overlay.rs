@@ -100,5 +100,5 @@ pub(crate) fn draw_answer(buf: &mut Buffer, area: Rect, h: usize, title: &str, p
 }
 
 #[cfg(test)]
-#[path = "test_overlay.rs"]
+#[path = "tests/test_overlay.rs"]
 mod tests;

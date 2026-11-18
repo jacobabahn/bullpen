@@ -570,5 +570,5 @@ pub fn diff_lines(diff: &str, width: i64, delta: Option<&str>) -> Vec<String> {
 }
 
 #[cfg(test)]
-#[path = "test_screen.rs"]
+#[path = "tests/test_screen.rs"]
 mod tests;

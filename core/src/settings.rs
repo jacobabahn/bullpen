@@ -241,5 +241,5 @@ pub fn pattern_matches(pattern: &str, text: &str) -> bool {
 }
 
 #[cfg(test)]
-#[path = "test_settings.rs"]
+#[path = "tests/test_settings.rs"]
 mod tests;

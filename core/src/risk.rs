@@ -46,5 +46,5 @@ pub fn level_sgr(level: &str) -> &'static str {
 }
 
 #[cfg(test)]
-#[path = "test_risk.rs"]
+#[path = "tests/test_risk.rs"]
 mod tests;

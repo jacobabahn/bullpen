@@ -329,5 +329,5 @@ pub fn link_waits(tasks: &mut [Task]) {
 }
 
 #[cfg(test)]
-#[path = "test_task.rs"]
+#[path = "tests/test_task.rs"]
 mod tests;

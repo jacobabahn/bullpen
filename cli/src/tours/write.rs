@@ -643,5 +643,5 @@ fn open_when_written(repo: &Repo, t: &Obj, opener: &Value) {
 }
 
 #[cfg(test)]
-#[path = "test_write.rs"]
+#[path = "tests/test_write.rs"]
 mod tests;

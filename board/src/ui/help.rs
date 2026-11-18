@@ -126,5 +126,5 @@ pub(super) fn draw_help(buf: &mut Buffer, area: Rect, h: usize, top: usize) -> u
 }
 
 #[cfg(test)]
-#[path = "test_help.rs"]
+#[path = "tests/test_help.rs"]
 mod tests;

@@ -110,5 +110,5 @@ fn conflicting(repo: &Repo, t: &Obj) -> Res<Option<String>> {
 }
 
 #[cfg(test)]
-#[path = "test_left_in_review.rs"]
+#[path = "tests/test_left_in_review.rs"]
 mod tests;

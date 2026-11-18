@@ -372,5 +372,5 @@ pub fn checks(pr: &Obj) -> (Option<&'static str>, Vec<String>) {
 }
 
 #[cfg(test)]
-#[path = "test_auto_accept.rs"]
+#[path = "tests/test_auto_accept.rs"]
 mod tests;
