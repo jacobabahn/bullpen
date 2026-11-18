@@ -8,7 +8,7 @@
 //! off screen, and putting back what the key changed (the selection and the message).
 //! Only on the board itself, with nothing asked: there j and k only move the selection.
 
-use super::{fonts, render, wants, Canvas, Grid, Paint, Picture, View};
+use super::{fonts, wants, Canvas, Grid, Paint, Picture, View};
 use crate::{App, Mode};
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -46,9 +46,6 @@ impl Picture {
         let cell = self.cell().ok_or("no cell size")?;
         let canvas = Canvas::new(Grid { cols: view.cols as usize, cell_w: cell.0, cell_h: cell.1 }, app.cfg.text_size, self.theme);
         let fonts = fonts(&mut self.fonts, app.cfg.font.as_deref())?;
-        if view.detail_cols != Some(render::detail_cols(&canvas, fonts)) {
-            return Ok(());
-        }
         let plan = super::meter::time(|| "plan".into(), || super::pieces::plan(view, &canvas, fonts));
         let paint = Paint { canvas, size: app.cfg.text_size, motion: app.cfg.motion, settling: &self.settling, ms: self.ms };
         let wants = wants(view, &plan, &paint, &self.screen, fonts)?;

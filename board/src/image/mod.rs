@@ -344,7 +344,7 @@ fn wants(view: &View, plan: &pieces::Plan, p: &Paint, screen: &Screen, fonts: &m
         wants.push(Want { slot: Slot::Head, key: k, png, places: vec![whole(view, canvas, view.row0, head_n)] });
     }
     let mut list = list::wants(&f, screen, fonts)?;
-    let sprites = list.split_off(list.iter().position(|w| matches!(w.slot, Slot::Sel | Slot::Tail | Slot::Sprite(_))).unwrap_or(list.len()));
+    let sprites = list.split_off(list.iter().position(|w| matches!(w.slot, Slot::Sel | Slot::Tail | Slot::Cap | Slot::Sprite(_))).unwrap_or(list.len()));
     wants.extend(list);
     if let Some(foot) = view.foot.as_ref().filter(|_| foot_n > 0) {
         let k = list::key(&Slot::Foot, &f, (foot, foot_n));

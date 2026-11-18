@@ -59,7 +59,7 @@ fn put_together(view: &View, p: &Plan, c: &Canvas, bare: bool) -> Pixmap {
         put(&base.clone_rect(IntRect::from_xywh(0, from as i32, base.width(), n as u32 * ch).unwrap()).unwrap(), at as u32 * ch);
     }
     let d = |i: usize| is_bare(&view.rows.rows[i]);
-    for (first, n) in [p.sel, p.tail].into_iter().flatten() {
+    for (first, n) in [p.sel, p.tail, p.cap].into_iter().flatten() {
         let cut = Cut { range: p.top..p.end, at: p.at(), y: first as u32 * ch, h: n as u32 * ch, marks: Marks::default(), bare: &d };
         put(&render(&view.rows, &p.laid, cut, c, &mut fonts).unwrap().pixmap, first as u32 * ch);
     }
@@ -140,7 +140,7 @@ fn moving_the_selection_keeps_the_base_image_and_moves_its_crops() {
     let (first, n) = b.sel.unwrap();
     assert!(n < view.rows_n / 2 + 4, "{n} cells");
     let mut covered = vec![0; view.rows_n as usize];
-    for (at, n) in b.crops.iter().map(|&(_, at, n)| (at, n)).chain([(first, n)]).chain(b.tail) {
+    for (at, n) in b.crops.iter().map(|&(_, at, n)| (at, n)).chain([(first, n)]).chain(b.tail).chain(b.cap) {
         (at..at + n).for_each(|k| covered[k as usize] += 1);
     }
     assert!(covered.iter().all(|k| *k <= 1));

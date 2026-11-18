@@ -1,5 +1,5 @@
 //! The list's images for a frame, from its pieces (pieces.rs): the base image placed as
-//! its crops, the selected block's image and the tail's, the scroll marks, and a
+//! its crops, the selected block's image, the tail's and the cap's, the scroll marks, and a
 //! placement of a mark's frames (sprite.rs) for each mark that moves. Each image is
 //! drawn only when what it shows changed (its key); shown.rs writes what changed.
 
@@ -86,8 +86,8 @@ pub fn wants(f: &Frame, screen: &Screen, fonts: &mut Fonts) -> Result<Vec<Want>,
     let places = p.crops.iter().enumerate().map(|(k, &(from, at, n))| across(f, k as u32 + 1, at, n, from)).collect();
     wants.push(Want { slot: Slot::List, key: k, png, places });
 
-    // the selected block's cells and the tail's, drawn from the rows as they are
-    for (slot, cells) in [(Slot::Sel, p.sel), (Slot::Tail, p.tail)] {
+    // the selected block's cells, the tail's and the cap's, drawn from the rows as they are
+    for (slot, cells) in [(Slot::Sel, p.sel), (Slot::Tail, p.tail), (Slot::Cap, p.cap)] {
         let Some((first, n)) = cells.filter(|(_, n)| *n > 0) else { continue };
         let what: Vec<_> = rows_in(p, c, first, n).into_iter().map(|(i, y)| (&v.rows.rows[i], y, (f.bare)(&v.rows.rows[i]))).collect();
         let k = key(&slot, f, (what, p.laid.idw.to_bits(), n));

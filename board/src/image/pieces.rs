@@ -12,7 +12,9 @@
 //! where they are in the whole list (render's `Cut::at`), so they match it to the bit.
 //!
 //! The list shows only whole rows: the crops end at the cell where the last whole row
-//! ends, that cell is an image of its own (the tail), and the cells after it are empty. Everything here is worked out from the rows laid
+//! ends, that cell is an image of its own (the tail), and the cells after it are empty.
+//! With rows scrolled off above, the first cell is one too (the cap), so nothing of
+//! theirs shows. Everything here is worked out from the rows laid
 //! out (render.rs) and a cell's height; nothing touches the terminal.
 
 use super::render::{card_below, fitting, lay, mark_at, Canvas, Laid, Marks};
@@ -46,9 +48,11 @@ pub struct Plan {
     /// the base image's crops: the pixel of it they start at, the list's cell they're
     /// placed on, the cells
     pub crops: Vec<(u32, u16, u16)>,
-    /// the selected block's cells (first, how many), and the tail's, drawn from `laid`
+    /// the selected block's cells (first, how many), the tail's, and the cap's, drawn
+    /// from `laid`
     pub sel: Option<(u16, u16)>,
     pub tail: Option<(u16, u16)>,
+    pub cap: Option<(u16, u16)>,
     /// where each row shown starts, in pixels from the list's top
     pub ys: Vec<u32>,
     pub scroll: Marks,
@@ -102,7 +106,7 @@ pub fn plan(view: &View, c: &Canvas, fonts: &Fonts) -> Plan {
     let (win, win_y, win_h) = window(&base, top, room, ch);
     let win_at = base.tall(0, win.start);
     let at0 = base.tall(0, top) - win_at - win_y;
-    let mut p = Plan { top, end, page, laid, base, whole: in_view.is_none(), win, win_at, win_y, win_h, crops: vec![], sel: None, tail: None, ys, scroll };
+    let mut p = Plan { top, end, page, laid, base, whole: in_view.is_none(), win, win_at, win_y, win_h, crops: vec![], sel: None, tail: None, cap: None, ys, scroll };
     // the cell where the last whole row ends: what's past it mustn't show, and the rest
     // of that cell is an image of its own (the tail)
     let last = (p.laid.tall(top, end) / ch).min(rows_n as u32) as u16;
@@ -117,6 +121,7 @@ pub fn plan(view: &View, c: &Canvas, fonts: &Fonts) -> Plan {
             p.crops.push((at0, 0, last));
         }
         tail(&mut p, 0);
+        cap(&mut p, ch);
         return p;
     };
     let y_s = p.y(s0);
@@ -132,7 +137,24 @@ pub fn plan(view: &View, c: &Canvas, fonts: &Fonts) -> Plan {
         p.crops.push((at0 + (past - shift) as u32 * ch, past, last - past));
     }
     tail(&mut p, past);
+    cap(&mut p, ch);
     p
+}
+
+/// With rows scrolled off above the list, its first cell is an image of its own (the
+/// cap), drawn from the rows shown: the base image has the rows above too, and what of
+/// theirs reaches down (a wash, a bar) mustn't show.
+fn cap(p: &mut Plan, ch: u32) {
+    if p.top == 0 {
+        return;
+    }
+    if let Some(i) = p.crops.iter().position(|&(_, at, _)| at == 0) {
+        let (from, _, n) = p.crops.remove(i);
+        if n > 1 {
+            p.crops.insert(i, (from + ch, 1, n - 1));
+        }
+        p.cap = Some((0, 1));
+    }
 }
 
 /// The base image's window of the rows laid out, for a list scrolled to `top` with

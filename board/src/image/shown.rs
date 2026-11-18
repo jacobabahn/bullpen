@@ -26,9 +26,11 @@ pub enum Slot {
     List,
     /// the bottom rows
     Foot,
-    /// the selected block's cells, and the cell where the last whole row ends
+    /// the selected block's cells, the cell where the last whole row ends, and the
+    /// list's first cell when rows are scrolled off above it
     Sel,
     Tail,
+    Cap,
     /// a small image placed over the list: a mark's frames, the scroll marks
     Sprite(Sprite),
 }
