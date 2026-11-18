@@ -77,12 +77,13 @@ fn every_kind_is_listed() {
             | Kind::Guide
             | Kind::Issues
             | Kind::IssueAsk
+            | Kind::IssueWrite
             | Kind::DroppedDependency
             | Kind::Build
             | Kind::Board => k,
         }
     }
-    assert_eq!(ALL.len(), 45);
+    assert_eq!(ALL.len(), 46);
     assert!(ALL.iter().all(|&k| named(k) == k));
 }
 
