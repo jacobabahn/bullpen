@@ -139,6 +139,9 @@ struct Sizes {
     short: bool,
     /// a narrow one puts one space after the IDs, and (grouped) a task's age on its detail line
     narrow: bool,
+    /// the rows above the list: the top line and a blank one, and on a tall board one
+    /// for the scroll mark (the image look's header takes them all: its status bar)
+    chrome: usize,
     /// the rows under the list: the compact panel, the message and the keys
     footer: usize,
     /// the list's rows
@@ -174,7 +177,7 @@ impl Sizes {
             (false, _) => footer + msg.len().saturating_sub(1),
         };
         let avail = h.saturating_sub(chrome + footer).max(1);
-        (Sizes { w, h, short, narrow, footer, avail, msg_on_keys }, msg)
+        (Sizes { w, h, short, narrow, chrome, footer, avail, msg_on_keys }, msg)
     }
 }
 
@@ -231,7 +234,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 }
 
 /// The whole board as `--render` draws it (image::render_file), `w` columns wide: its
-/// top line, all of its list and its key row.
+/// top line (a tall board's: with its status bar), all of its list and its key row.
 pub(crate) fn whole(app: &App, w: usize, now: rows::Now) -> crate::image::View {
     let groups = app.groups();
     let head = list::head(app, &groups, w);
@@ -240,7 +243,7 @@ pub(crate) fn whole(app: &App, w: usize, now: rows::Now) -> crate::image::View {
     let foot = bottom::Foot { lines: vec![(2, bottom::FootLine::Keys(keys))] };
     let cols = w.saturating_sub(1) as u16;
     let base = rows::unselected(app, w, w < NARROW, now);
-    crate::image::View { rows, base, top: 0, head, foot: Some(foot), col: 0, row0: 0, row: 2, rows_n: 0, foot_n: 3, cols }
+    crate::image::View { rows, base, top: 0, head, foot: Some(foot), col: 0, row0: 0, row: 3, rows_n: 0, foot_n: 3, cols }
 }
 
 #[cfg(test)]

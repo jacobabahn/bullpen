@@ -15,6 +15,7 @@ fn head_of(counts: Vec<(&str, &'static str)>) -> Head {
         others_amber: false,
         counts: counts.into_iter().map(|(t, st)| (t.to_string(), st)).collect(),
         sep: " · ",
+        tallies: Vec::new(),
     }
 }
 
@@ -119,11 +120,37 @@ fn the_headers_counts_are_chips_with_a_rule_under_the_line() {
 }
 
 #[test]
+fn a_three_cell_header_has_the_status_bar_in_the_rules_place_and_only_the_chip_of_what_needs_you() {
+    use crate::ui::list::Tally;
+    let t = Theme::default();
+    let c = canvas(TextSize::Medium);
+    let mut h = head_of(vec![("1 needs you", "needs"), ("2 ready", "ready")]);
+    h.tallies = vec![
+        Tally { n: 1, word: "needs you", status: "needs" },
+        Tally { n: 2, word: "ready", status: "ready" },
+        Tally { n: 1, word: "in review", status: "review" },
+    ];
+    let pm = head(&h, 3, &c, &mut Fonts::builtin()).unwrap();
+    assert_eq!(pm.height(), 60);
+    // the line: the amber chip, not the green one (the counts under the bar say it)
+    assert!(!rows_with(&pm, [t.yellow.0, t.yellow.1, t.yellow.2, 46]).is_empty());
+    assert!(rows_with(&pm, [t.green.0, t.green.1, t.green.2, 46]).is_empty());
+    // the bar, solid in its groups' colours, and no rule (a row of it across the line)
+    let ruled = |pm: &Pixmap| (0..pm.height()).any(|y| block(pm, (10, 380), (y, y + 1)).iter().all(|p| p[3] == t.rule()[3]));
+    assert!(!ruled(&pm));
+    let bar = block(&pm, (0, 400), (30, 35));
+    assert!(has(&bar, t.yellow) && has(&bar, t.green) && has(&bar, t.blue));
+    // with no task open, the rule as before
+    h.tallies.clear();
+    assert!(ruled(&head(&h, 3, &c, &mut Fonts::builtin()).unwrap()));
+}
+
+#[test]
 fn the_counts_are_numbers_only_when_their_words_dont_fit() {
     let (h, f) = (head_of(vec![("3 need you", "needs"), ("4 ready", "ready")]), Fonts::builtin());
-    let words = counts(&h, &f, 15.0, 400.0);
+    let words = counts(h.counts.clone(), &f, 15.0, 400.0);
     assert_eq!(words, h.counts);
-    let numbers = counts(&h, &f, 15.0, 120.0);
+    let numbers = counts(h.counts.clone(), &f, 15.0, 120.0);
     assert_eq!(numbers, vec![("3".to_string(), "needs"), ("4".to_string(), "ready")]);
 }
 

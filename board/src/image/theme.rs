@@ -149,6 +149,21 @@ impl Theme {
         }
     }
 
+    /// A group's colour in the header's status bar, by its first status: what waits on
+    /// you in its status's colour (finished fainter than ready), in review blue, and
+    /// what's under way in the foreground, fainter the further it is from you.
+    pub fn group(&self, status: &str) -> [u8; 4] {
+        match status {
+            "needs" => solid(self.yellow),
+            "ready" => solid(self.green),
+            "finished" => faint(self.green, 0.55),
+            "review" => solid(self.blue),
+            "working" => faint(self.fg, 0.55),
+            "triage" => faint(self.fg, 0.38),
+            _ => faint(self.fg, 0.2),
+        }
+    }
+
     /// A risk level's colour, as ui::risk_style gives it.
     pub fn risk(&self, level: &str) -> [u8; 4] {
         match level {

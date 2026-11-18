@@ -55,11 +55,12 @@ pub(super) fn foot(app: &App, s: &Sizes, msg: &[Span<'static>], cur: Option<&Tas
         return None;
     }
     // a board with no row under its list (too short) keeps them as text
-    if s.h < 3 + s.avail {
+    if s.h < s.chrome + 1 + s.avail {
         return None;
     }
-    // the rows from the list's end (the text's ↓ row on a tall board) to the board's last
-    let last = s.h.saturating_sub(3 + s.avail);
+    // the rows from the list's end to the board's last (the image's header takes the
+    // rows above the list, the text's ↓ row with them: ui::Sizes's chrome)
+    let last = s.h - s.chrome - s.avail - 1;
     let tone = |sp: &Span| match (sp.style.fg, sp.style.add_modifier.contains(Modifier::DIM)) {
         (Some(Color::Red), _) => Tone::Red,
         (Some(Color::Green), _) => Tone::Green,

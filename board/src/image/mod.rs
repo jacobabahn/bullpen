@@ -27,6 +27,7 @@
 //! is text again and the message line says why.
 
 mod ahead;
+mod bar;
 mod chip;
 mod font;
 mod frame;

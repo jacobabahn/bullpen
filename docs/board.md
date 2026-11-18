@@ -166,7 +166,16 @@ review and running marks stand as their first frame), and the board then sends
 nothing while nothing changes. The top line and the bottom rows are drawn too, in the
 list's type and colours, each set off from the list by a faint rule: the repository's
 name, then its counts at the right as chips like the risk's ("3 need you", or only
-their numbers when the words don't fit beside the name); the message, and the keys
+their numbers when the words don't fit beside the name). On a board tall enough for
+the text's blank row under the top line, the header takes that row too for a status
+bar, in the rule's place: a segment for each open task, in its group's colour and the
+board's order (amber needs you, green ready, a fainter green finished, blue in review,
+greys for the coordinator's, working and queued), and under it each group's count
+("● 3 ready"), as many as fit, the rest dropped from the end. The list doesn't lose a
+row for it: the text's ↓ row under the list goes. With the bar, the chips on the line
+are only what needs you; the counts under the bar say the rest. The header is sent
+again only when a count changes, so the bar costs nothing while you move around. Then
+the message, and the keys
 each in a small rounded cap with what it does dim after it, dropping from the end on
 a narrow board as the text's do (`?` is never dropped). The scroll marks are small
 chevrons at the list's right edge. What you type into stays text: while a tell, a y/n

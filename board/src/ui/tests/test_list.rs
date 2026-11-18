@@ -509,3 +509,19 @@ fn a_ready_task_has_its_risk_before_its_age_in_its_colour() {
     let r = s.iter().find(|r| r.contains("BP-5")).unwrap();
     assert!(r.contains('…') && r.ends_with("high"), "{s:#?}");
 }
+
+#[test]
+fn the_header_tallies_the_open_groups_in_the_boards_order_for_the_status_bar() {
+    let mut a = app(
+        vec![task("BP-1", "todo"), ready("BP-2"), asking("BP-3"), task("BP-4", "stopped"), task("BP-5", "done"), ready("BP-6")],
+        0,
+        Layout::Grouped,
+    );
+    a.closed = true; // shown, but not open: no tally
+    let groups = a.groups();
+    let h = crate::ui::list::head(&a, &groups, 42);
+    let t: Vec<(usize, &str, &str)> = h.tallies.iter().map(|t| (t.n, t.word, t.status)).collect();
+    assert_eq!(t, vec![(2, "need you", "needs"), (2, "ready", "ready"), (1, "queued", "todo")]);
+    // the segments add up to the open tasks
+    assert_eq!(h.tallies.iter().map(|t| t.n).sum::<usize>(), 5);
+}

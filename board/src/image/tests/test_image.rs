@@ -121,9 +121,10 @@ fn the_board_is_sent_as_images_placed_in_their_cells_and_its_rows_left_blank() {
     let s = screen(&mut app, 40, 12);
     assert!(s.iter().all(|l| l.is_empty())); // the top line, the rows and the keys are the images'
     let view = app.view.clone().unwrap();
-    assert_eq!((view.row0, view.row, view.col, view.cols, view.rows_n, view.foot_n), (0, 2, 0, 39, 6, 4));
-    // the top line's two rows and the four under the list, 39 columns of 10 pixels
-    for (id, row, rows) in [(HEAD, 1, 2), (FOOT, 9, 4)] {
+    assert_eq!((view.row0, view.row, view.col, view.cols, view.rows_n, view.foot_n), (0, 3, 0, 39, 6, 3));
+    // the header's three rows (the top line and the status bar) and the three under the
+    // list, 39 columns of 10 pixels
+    for (id, row, rows) in [(HEAD, 1, 3), (FOOT, 10, 3)] {
         assert!(out.contains(&format!("a=t,f=100,t=d,i={id},q=2,")));
         let h = rows * 20;
         assert!(out.contains(&format!("\x1b7\x1b[{row};1H\x1b_Ga=p,i={id},p=1,x=0,y=0,w=390,h={h},c=39,r={rows},C=1,q=2")));
@@ -132,7 +133,7 @@ fn the_board_is_sent_as_images_placed_in_their_cells_and_its_rows_left_blank() {
     let mut covered = [0; 6];
     for (id, _, row, rows) in placed(&out) {
         if (LIST..LIST + 4).contains(&id) && id != FOOT {
-            (row..row + rows).for_each(|r| covered[r as usize - 3] += 1);
+            (row..row + rows).for_each(|r| covered[r as usize - 4] += 1);
         }
     }
     assert!(covered.iter().all(|n| *n <= 1) && covered[..4].iter().all(|n| *n == 1), "{covered:?}");
@@ -164,6 +165,23 @@ fn a_change_sends_only_the_images_it_changes_and_places_each_before_the_old_one_
     let view = app.view.clone().unwrap();
     assert!(placed(&out).iter().all(|(_, _, row, _)| *row == view.row + view.rows_n + 1));
     assert!(!out.contains(&kitty::delete(HEAD)) && !out.contains(&kitty::delete(LIST)));
+}
+
+#[test]
+fn the_header_with_its_status_bar_is_sent_again_only_when_a_count_changes() {
+    let (mut app, mut p) = (mixed(), picture());
+    asked(&mut app, &mut p);
+    frame_in(&mut app, &mut p, 40, 40);
+    // a title changes, and the selection: the counts don't
+    app.tasks[2].title = "Working on something else".into();
+    app.sel = Some("BP-4".into());
+    let out = frame_in(&mut app, &mut p, 40, 40);
+    assert!(!out.contains(&format!("i={HEAD},")), "{out}");
+    // a queued task starts: one queued fewer, one more working
+    app.tasks[6] = task("BP-7", "working").with(json!({"title": "Task 7"}));
+    let out = frame_in(&mut app, &mut p, 40, 40);
+    let head = placed(&out).into_iter().find(|(_, _, row, rows)| (*row, *rows) == (1, 3)).map(|(id, ..)| id);
+    assert!(head.is_some_and(|id| id != HEAD && out.contains(&format!("a=t,f=100,t=d,i={id},"))), "{out}");
 }
 
 #[test]

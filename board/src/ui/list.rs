@@ -25,8 +25,10 @@ pub(super) fn draw_list(buf: &mut Buffer, area: Rect, app: &mut App, s: &Sizes, 
         // these blank cells, and scrolls the list by its rows' own heights, from the row
         // shown first last frame (image/ sets `app.top` and `app.page`). Its images take
         // every column but the last, as the text does
-        let (row, rows_n) = (area.y + 2, s.avail as u16);
-        let foot_n = s.h.saturating_sub(2 + s.avail) as u16;
+        // its header takes the rows above the list (three on a tall board, for its
+        // status bar: the text's ↓ row comes off the bottom rows)
+        let (row, rows_n) = (area.y + s.chrome as u16, s.avail as u16);
+        let foot_n = s.h.saturating_sub(s.chrome + s.avail) as u16;
         let cols = w.saturating_sub(1) as u16;
         let rows = Rows { rows, idw };
         let base = meter::time(|| "rows".into(), || rows::unselected(app, w, s.narrow, now));
@@ -141,6 +143,41 @@ pub(crate) struct Head {
     /// colour it takes, and what goes between them
     pub counts: Vec<(String, &'static str)>,
     pub sep: &'static str,
+    /// each open group's count, in the board's order: the image look's status bar
+    pub tallies: Vec<Tally>,
+}
+
+/// A group's count for the image look's status bar (image/bar.rs): a segment per task
+/// in its status's colour, and under the bar the number and the word.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct Tally {
+    pub n: usize,
+    /// what its tasks are, short: "need you", "ready", "in review"
+    pub word: &'static str,
+    /// the group's first status, whose colour it takes
+    pub status: &'static str,
+}
+
+/// The open groups' tallies (Closed isn't one), in the board's order.
+fn tallies(groups: &[(&'static str, Vec<&Task>)]) -> Vec<Tally> {
+    groups
+        .iter()
+        .filter_map(|(heading, ts)| {
+            let status = model::BOARD_GROUPS.iter().find(|(h, _)| h == heading)?.1.first()?;
+            let word = match *status {
+                "needs" if ts.len() == 1 => "needs you",
+                "needs" => "need you",
+                "triage" => "coordinator",
+                "ready" => "ready",
+                "finished" => "finished",
+                "review" => "in review",
+                "working" => "working",
+                "todo" => "queued",
+                _ => return None,
+            };
+            Some(Tally { n: ts.len(), word, status })
+        })
+        .collect()
 }
 
 /// The header: the repository, and what you act on.
@@ -171,7 +208,7 @@ pub(crate) fn head(app: &App, groups: &[(&'static str, Vec<&Task>)], w: usize) -
         right = top(&auto);
     }
     let others_amber = app.others.counts.iter().any(|c| c.needs > 0);
-    Head { name, auto, others: right.others, others_amber, counts: right.counts, sep: right.sep }
+    Head { name, auto, others: right.others, others_amber, counts: right.counts, sep: right.sep, tallies: tallies(groups) }
 }
 
 /// The header as text.

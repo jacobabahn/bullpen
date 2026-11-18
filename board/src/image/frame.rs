@@ -1,8 +1,9 @@
 //! The board's top line and bottom rows drawn as images, in the list's type and colours
 //! (render.rs), so the board reads as one drawn surface: the repository and its counts
-//! (as chips, chip.rs) above the list, the message and the keys (in caps) under it, a
-//! faint rule between each and the list. What's typed or asked there (a tell, a y/n
-//! question) stays text (ui/bottom.rs).
+//! (as chips, chip.rs) above the list, on a tall board over the status bar (bar.rs);
+//! the message and the keys (in caps) under it; a faint rule between each and the list
+//! (the bar in its place). What's typed or asked there (a tell, a y/n question) stays
+//! text (ui/bottom.rs).
 
 use super::font::{Fonts, Weight};
 use super::chip;
@@ -15,9 +16,13 @@ use tiny_skia::Pixmap;
 /// The top line, in an image the grid's columns wide and `rows` cells high: the
 /// repository's name, what's after it and the other repositories, then the counts at
 /// the right edge as chips (in words while they fit beside the name, else their
-/// numbers); with two cells or more, a faint rule under it all. Its line is a little
-/// more than a cell, from a tenth of one down (a cell for a one-cell header).
+/// numbers); with two cells or more, a faint rule under it all. With three (a tall
+/// board's) and tasks open, the status bar (bar.rs) is under it in the rule's place,
+/// and its counts say the rest, so the only chip left is what needs you. Its line is a
+/// little more than a cell, from a tenth of one down (a cell for a one-cell header).
 pub fn head(head: &Head, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pixmap, String> {
+    let bar = rows >= 3 && !head.tallies.is_empty();
+    let chips: Vec<(String, &'static str)> = head.counts.iter().filter(|(_, st)| !bar || *st == "needs").cloned().collect();
     let mut pm = pixmap(c, rows)?;
     let mut d = Draw::new(&mut pm, fonts, c, 0.0);
     let ch = c.grid.cell_h as f32;
@@ -31,7 +36,7 @@ pub fn head(head: &Head, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pix
     let name_w = d.width(&head.name, Weight::Bold);
     let cy = top + line / 2.0;
     let mut x = d.right();
-    for (text, st) in counts(head, d.fonts(), px, d.right() - left - name_w - 0.8 * c.m.title).into_iter().rev() {
+    for (text, st) in counts(chips, d.fonts(), px, d.right() - left - name_w - 0.8 * c.m.title).into_iter().rev() {
         x = chip::chip(&mut d, &text, px, x, cy, theme.status(st).unwrap_or(dim)) - CHIP_GAP * px;
     }
     let left_end = x + CHIP_GAP * px - 0.8 * c.m.title;
@@ -42,7 +47,9 @@ pub fn head(head: &Head, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pix
         let tone = if head.others_amber { solid(theme.yellow) } else { dim };
         d.text(&head.others, Weight::Regular, end, top, left_end - end, tone);
     }
-    if rows >= 2 {
+    if bar {
+        super::bar::draw(&mut d, c, &head.tallies);
+    } else if rows >= 2 {
         rule(&mut d, c, (1.55 * ch).round());
     }
     Ok(pm)
@@ -53,9 +60,8 @@ const CHIP_GAP: f32 = 0.4;
 
 /// The header's counts as its chips say them: in words when they fit in `room` pixels
 /// in type `px`, else their numbers alone (their colours say which is which).
-fn counts(head: &Head, fonts: &Fonts, px: f32, room: f32) -> Vec<(String, &'static str)> {
+fn counts(words: Vec<(String, &'static str)>, fonts: &Fonts, px: f32, room: f32) -> Vec<(String, &'static str)> {
     let wide = |parts: &[(String, &str)]| -> f32 { parts.iter().map(|(t, _)| chip::width(fonts, t, px) + CHIP_GAP * px).sum() };
-    let words = head.counts.clone();
     if wide(&words) <= room {
         return words;
     }
