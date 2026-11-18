@@ -1,12 +1,14 @@
 //! Running programs as core.run does: stdin from /dev/null (or the input given),
-//! output read as text, \r\n and \r read as \n (Python's text=True); and git,
+//! output read as text, \r\n and \r read as \n (Python's text=True); `quiet`, which
+//! runs one away from any terminal with a timeout (git on the network, gh); and git,
 //! finding a program on PATH, and a file's hash.
 
 use crate::fail::{fail, Res};
-use std::io::Write;
-use std::os::unix::process::ExitStatusExt;
+use std::io::{Read, Write};
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 /// A program's run: its exit code (minus the signal, when one killed it, as Python's
 /// returncode) and its output.
@@ -94,6 +96,58 @@ fn spawn(mut cmd: Command, input: Option<&str>) -> std::io::Result<Output> {
         let _ = w.join();
     }
     out
+}
+
+/// Run cmd away from any terminal (stdin from /dev/null, in a session of its own), so
+/// nothing it runs can prompt the person; after timeout seconds it is killed and says so.
+/// For a program on the network (git push, gh): cmd's own environment says not to ask.
+pub fn quiet(mut cmd: Command, timeout: u64) -> Res<Done> {
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // SAFETY: only setsid between fork and exec
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+    let mut child = cmd.spawn()?;
+    let (mut out, mut err) = (child.stdout.take(), child.stderr.take());
+    let read_out = std::thread::spawn(move || read_all(out.as_mut()));
+    let read_err = std::thread::spawn(move || read_all(err.as_mut()));
+    let deadline = Instant::now() + Duration::from_secs(timeout);
+    let status = loop {
+        if let Some(st) = child.try_wait()? {
+            break Some(st);
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let stdout = read_out.join().unwrap_or_default();
+    let stderr = read_err.join().unwrap_or_default();
+    Ok(match status {
+        None => Done {
+            code: 1,
+            stdout: String::new(),
+            stderr: format!("no answer from the remote in {timeout}s"),
+        },
+        Some(st) => Done {
+            code: st.code().unwrap_or_else(|| -st.signal().unwrap_or(0)),
+            stdout: text(&stdout),
+            stderr: text(&stderr),
+        },
+    })
+}
+
+fn read_all(r: Option<&mut impl Read>) -> Vec<u8> {
+    let mut buf = Vec::new();
+    if let Some(r) = r {
+        let _ = r.read_to_end(&mut buf);
+    }
+    buf
 }
 
 /// Output as Python's text mode reads it: UTF-8 (a bad byte as U+FFFD), with \r\n

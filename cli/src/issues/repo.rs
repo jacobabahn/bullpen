@@ -1,13 +1,15 @@
 //! Which GitHub repository a repo's issues are read from (`issues_repo`, `slug`), and the
 //! one way gh is asked about them (`gh_json`): always with `-R <repo>`, so gh's own guess
 //! among remotes never matters; and `gh api`, which takes the repository in its path
-//! (`gh_api_pages`), and the signed-in account's login (`gh_login`).
+//! (`gh_api_pages`), and the signed-in account's login (`gh_login`). gh runs one way for
+//! reads and writes (`gh_quiet`): with no terminal, no prompt and a timeout.
 
-use bullpen_core::proc::{git, run_in};
+use bullpen_core::proc::{git, quiet, Done};
 use bullpen_core::task::clip;
 use bullpen_core::text::{splitlines, strip};
 use bullpen_core::{fail, Repo, Res};
 use serde_json::Value;
+use std::process::Command;
 
 /// The GitHub repository a remote's URL names, as gh's `-R` takes it (`owner/repo`):
 /// `git@github.com:owner/repo.git`, `https://github.com/owner/repo`, `ssh://...`. None
@@ -120,25 +122,38 @@ pub fn gh_login(repo: &Repo) -> Res<String> {
     }
 }
 
+/// How long one gh read may take (every page of it) before it is given up.
+const READ_TIMEOUT: u64 = 120;
+
+/// The one way bullpen runs gh about issues, to read (`gh_out`) or to write (write.rs's
+/// `gh_write`): in the repo, away from any terminal and with gh's prompts off, so nothing
+/// can wait for the person; killed after timeout seconds.
+pub fn gh_quiet<S: AsRef<std::ffi::OsStr>>(repo: &Repo, args: &[S], timeout: u64) -> Res<Done> {
+    let mut cmd = Command::new(repo.gh());
+    cmd.args(args).current_dir(&repo.root);
+    cmd.env("GH_PROMPT_DISABLED", "1").env("GH_NO_UPDATE_NOTIFIER", "1");
+    quiet(cmd, timeout)
+}
+
+/// What a gh that failed said, in a line (None: nothing).
+pub fn gh_said(done: &Done) -> Option<&str> {
+    let out = if strip(&done.stderr).is_empty() {
+        &done.stdout
+    } else {
+        &done.stderr
+    };
+    splitlines(out).into_iter().map(strip).find(|l| !l.is_empty())
+}
+
 /// Run gh with args in the repo; what it printed. `what` says what it was for, when it fails.
 fn gh_out(repo: &Repo, args: &[String], what: &str) -> Res<String> {
-    let mut argv = vec![repo.gh()];
-    argv.extend(args.iter().cloned());
-    let done = match run_in(&argv, &repo.root, false) {
+    let done = match gh_quiet(repo, args, READ_TIMEOUT) {
         Ok(d) => d,
         Err(e) => return fail(format!("gh couldn't {what}: it didn't run ({})", e.0)),
     };
     if !done.ok() {
-        let out = if strip(&done.stderr).is_empty() {
-            &done.stdout
-        } else {
-            &done.stderr
-        };
-        let said = splitlines(out).into_iter().map(strip).find(|l| !l.is_empty());
-        return fail(format!(
-            "gh couldn't {what}: {}",
-            clip(said.unwrap_or("it failed"), 200)
-        ));
+        let said = gh_said(&done).unwrap_or("it failed");
+        return fail(format!("gh couldn't {what}: {}", clip(said, 200)));
     }
     Ok(done.stdout)
 }

@@ -71,3 +71,17 @@ fn file_hash_is_sha256_hex() {
     );
     let _ = std::fs::remove_file(&path);
 }
+
+#[test]
+fn quiet_reads_nothing_from_a_terminal_and_gives_up_at_its_timeout() {
+    let mut cat = Command::new("sh");
+    cat.args(["-c", "cat; echo done; tty || true"]);
+    let d = quiet(cat, 10).unwrap();
+    assert_eq!(d.stdout, "done\nnot a tty\n");
+    let started = std::time::Instant::now();
+    let mut sleep = Command::new("sleep");
+    sleep.arg("30");
+    let d = quiet(sleep, 1).unwrap();
+    assert!(started.elapsed().as_secs() < 10);
+    assert_eq!((d.code, d.stderr.as_str()), (1, "no answer from the remote in 1s"));
+}

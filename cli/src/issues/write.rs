@@ -13,15 +13,12 @@
 //! words, the task's ID, the commit and the person's own reason for a no: never a name,
 //! a brief, a diff or anything an agent wrote. A write that fails is one news line.
 
-use super::repo::issues_repo;
-use crate::modes::quiet;
+use super::repo::{gh_quiet, gh_said, issues_repo};
 use crate::news::kind::Kind;
 use crate::news::{news, tell_coordinator, Opts};
 use bullpen_core::json::{obj, s, truthy, Obj};
-use bullpen_core::text::{splitlines, strip};
 use bullpen_core::{Repo, Res};
 use serde_json::{json, Value};
-use std::process::Command;
 
 pub const STARTED: &str = "bullpen: started";
 pub const DECLINED: &str = "bullpen: declined";
@@ -74,19 +71,13 @@ fn gh_write(repo: &Repo, slug: &str, args: &[&str]) -> Result<(), String> {
     if !writes(repo) {
         return Ok(());
     }
-    let mut cmd = Command::new(repo.gh());
-    cmd.args(args).args(["-R", slug]).current_dir(&repo.root);
-    cmd.env("GH_PROMPT_DISABLED", "1").env("GH_NO_UPDATE_NOTIFIER", "1");
-    let done = quiet(cmd, TIMEOUT).map_err(|e| format!("gh didn't run ({})", e.0))?;
+    let mut argv = args.to_vec();
+    argv.extend(["-R", slug]);
+    let done = gh_quiet(repo, &argv, TIMEOUT).map_err(|e| format!("gh didn't run ({})", e.0))?;
     if done.ok() {
         return Ok(());
     }
-    let out = if strip(&done.stderr).is_empty() {
-        &done.stdout
-    } else {
-        &done.stderr
-    };
-    let said = splitlines(out).into_iter().map(strip).find(|l| !l.is_empty());
+    let said = gh_said(&done);
     Err(super::text::line(said.unwrap_or("gh failed"), 200))
 }
 

@@ -136,7 +136,9 @@ remote), with the same verbs: `publish` (at ready), `merge`, `after_merge`, `wit
 `local`, true or false), else the repo's as it is now. Code doesn't ask
 `repo.has_origin()` about a task; that's only for the repo itself (doctor, the push
 remote, the base new work starts from). Every push goes through `quiet_git`, which
-never lets git wait on a prompt.
+never lets git wait on a prompt. It runs git through core's `proc::quiet` (no terminal,
+a session of its own, a timeout), as `issues/repo.rs`'s `gh_quiet` runs gh for every
+issue read and write.
 
 ## Start-up
 

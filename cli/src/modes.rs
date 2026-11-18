@@ -10,15 +10,12 @@
 use crate::jobs::{background, Job};
 use bullpen_core::json::{get, obj, py_str, s, truthy, Obj};
 use bullpen_core::paths::self_bin;
-use bullpen_core::proc::{git, run_in, run_input, text, Done};
+use bullpen_core::proc::{git, quiet, run_in, run_input, Done};
 use bullpen_core::text::{split, splitlines, squash, strip};
 use bullpen_core::{fail, Repo, Res};
 use serde_json::{json, Value};
-use std::io::Read;
-use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::process::Command;
 
 /// Is the task in local mode? Its record from when it was published, else the repo's.
 pub fn is_local(repo: &Repo, t: &Obj) -> Res<bool> {
@@ -103,57 +100,6 @@ pub fn quiet_git_in(repo: &Repo, cwd: &Path, args: &[&str], timeout: u64) -> Res
     cmd.arg("-C").arg(cwd).args(args);
     push_env(repo, &mut cmd)?;
     quiet(cmd, timeout)
-}
-
-/// Run cmd away from any terminal (stdin from /dev/null, in a session of its own), so
-/// nothing it runs can prompt the person; after timeout seconds it is killed and says so.
-pub fn quiet(mut cmd: Command, timeout: u64) -> Res<Done> {
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    // SAFETY: only setsid between fork and exec
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::setsid();
-            Ok(())
-        });
-    }
-    let mut child = cmd.spawn()?;
-    let (mut out, mut err) = (child.stdout.take(), child.stderr.take());
-    let read_out = std::thread::spawn(move || read_all(out.as_mut()));
-    let read_err = std::thread::spawn(move || read_all(err.as_mut()));
-    let deadline = Instant::now() + Duration::from_secs(timeout);
-    let status = loop {
-        if let Some(st) = child.try_wait()? {
-            break Some(st);
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            break None;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    let stdout = read_out.join().unwrap_or_default();
-    let stderr = read_err.join().unwrap_or_default();
-    Ok(match status {
-        None => Done {
-            code: 1,
-            stdout: String::new(),
-            stderr: format!("no answer from the remote in {timeout}s"),
-        },
-        Some(st) => Done {
-            code: st.code().unwrap_or_else(|| -st.signal().unwrap_or(0)),
-            stdout: text(&stdout),
-            stderr: text(&stderr),
-        },
-    })
-}
-
-fn read_all(r: Option<&mut impl Read>) -> Vec<u8> {
-    let mut buf = Vec::new();
-    if let Some(r) = r {
-        let _ = r.read_to_end(&mut buf);
-    }
-    buf
 }
 
 /// The remote accept pushes the base branch to in local mode, or None (unset, or the

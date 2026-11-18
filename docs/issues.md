@@ -302,7 +302,8 @@ get a line with the `gh issue reopen` command in case it should be open again.
 What bullpen writes is only its own fixed words, the task's ID, the commit and your
 reason for a no: never a name, a brief, a diff or anything a worker or reviewer wrote.
 Every write is one call, `gh ... -R <repo>`, away from any terminal so gh can never
-prompt (`GH_PROMPT_DISABLED`), and none is made while issues or `issues_write` are off.
+prompt (`GH_PROMPT_DISABLED`), given up after a minute (gh's reads run the same way,
+with two), and none is made while issues or `issues_write` are off.
 A write that fails is one news line (`issue-write`) and changes nothing else: a task
 starts, a no is recorded, an accept stands. `bullpen config --issues on` says once what
 bullpen will write to which repository, and how to turn it off.
