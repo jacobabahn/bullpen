@@ -503,3 +503,79 @@ fn a_board_too_short_for_rows_under_its_list_keeps_them_as_text() {
     assert!(s.iter().any(|l| l.contains("keys")));
 }
 
+
+/// The image a mark's frames are in: the image placed at z 1 that isn't the scroll marks'.
+fn marks_placed(out: &str) -> Vec<String> {
+    commands(out).into_iter().filter(|c| c.starts_with("a=p") && c.contains(",z=1,") && !c.contains(",c=1,")).collect()
+}
+
+#[test]
+fn a_working_tasks_mark_turns_by_placing_another_frame_not_sending_the_list() {
+    let (mut app, mut p) = (board(0), picture());
+    app.tasks = vec![task("BP-1", "working").with(json!({"title": "Working"})), task("BP-2", "todo")];
+    asked(&mut app, &mut p);
+    let first = frame(&mut app, &mut p);
+    let marks = marks_placed(&first);
+    assert_eq!(marks.len(), 1, "{marks:?}"); // BP-1's, over the list
+    // a frame later: the same placement, cropped to the next frame; nothing else
+    p.clock = Some(200);
+    let out = frame(&mut app, &mut p);
+    let next = commands(&out);
+    assert_eq!(next.len(), 1, "{next:?}");
+    assert!(next[0].starts_with("a=p") && next[0] != marks[0]);
+    assert!(out.len() < 100, "{} bytes", out.len());
+    // within the frame: nothing
+    p.clock = Some(399);
+    assert_eq!(frame(&mut app, &mut p), "");
+    // round again: the first frame's placement
+    p.clock = Some(2000);
+    assert_eq!(commands(&frame(&mut app, &mut p)), marks);
+}
+
+#[test]
+fn with_motion_off_the_marks_are_still_in_the_list_and_time_sends_nothing() {
+    let (mut app, mut p) = (board(0), picture());
+    app.tasks = vec![task("BP-1", "working").with(json!({"title": "Working"})), task("BP-2", "review")];
+    app.cfg = app.cfg.with(json!({"board_motion": false}));
+    asked(&mut app, &mut p);
+    assert!(marks_placed(&frame(&mut app, &mut p)).is_empty());
+    p.clock = Some(1000);
+    assert_eq!(frame(&mut app, &mut p), "");
+    // a status changes: drawn in the list as it is, nothing settles in
+    app.tasks[1] = task("BP-2", "ready");
+    assert!(marks_placed(&frame(&mut app, &mut p)).is_empty());
+    assert_eq!(p.tick(), None);
+}
+
+#[test]
+fn a_mark_settles_in_when_its_task_changes_status_then_goes_back_in_the_list() {
+    let (mut app, mut p) = (board(3), picture());
+    asked(&mut app, &mut p);
+    frame(&mut app, &mut p);
+    assert_eq!(p.tick(), None);
+    // BP-2 is ready: its mark is placed over the list, small, and the board redraws soon
+    p.clock = Some(1000);
+    app.tasks[1] = task("BP-2", "ready").with(json!({"title": "Task 2"}));
+    let out = frame(&mut app, &mut p);
+    let first = marks_placed(&out);
+    assert_eq!(first.len(), 1, "{first:?}");
+    assert_eq!(p.tick(), Some(Duration::from_millis(40)));
+    // it grows: only its placement changes, each 40 ms, and then it stands
+    let mut crops = vec![first[0].clone()];
+    for ms in [1040, 1080, 1120] {
+        p.clock = Some(ms);
+        let next = commands(&frame(&mut app, &mut p));
+        assert_eq!(next.len(), 1, "{ms}: {next:?}");
+        crops.push(next[0].clone());
+    }
+    assert!(crops.windows(2).all(|w| w[0] != w[1]));
+    p.clock = Some(1160);
+    assert_eq!(frame(&mut app, &mut p), "");
+    assert_eq!(p.tick(), None);
+    // the list is drawn again for something else: the mark is back in it, its placement gone
+    app.tasks[1] = task("BP-2", "ready").with(json!({"title": "Task 2, renamed"}));
+    let out = frame(&mut app, &mut p);
+    assert!(marks_placed(&out).is_empty());
+    let mark = placed(&out).len(); // the list's crops and the block, placed again
+    assert!(mark > 0 && commands(&out).iter().any(|c| c.starts_with("a=d,d=i,") && !c.contains("p=")), "{:?}", commands(&out));
+}

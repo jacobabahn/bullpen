@@ -87,10 +87,17 @@ leaves its cells blank and hands image/ a `View`: the same rows, the top line
 cells each has. After ratatui's frame, and through the same output, image/ lays the
 rows out (`render.rs`: each row's height from the text size, the selected title
 wrapped), scrolls them by those heights (`list::scroll_by`, which the text list's
-`scroll` is with every row 1 high; it sets `app.top` and `app.page`), draws the rows
-that fit, the top line and the bottom rows (`frame.rs`) as three images, all with no
-terminal, and sends and places each that changed with the kitty graphics protocol
-(`kitty.rs`, `mod.rs`). The image's detail type is narrower than a cell, so image/
+`scroll` is with every row 1 high; it sets `app.top` and `app.page`), and draws the
+top line and the bottom rows (`frame.rs`) and the list, all with no terminal. The list
+is pieces (`pieces.rs`): the rows that fit drawn with nothing selected (the `View`
+has them too, `rows::unselected`), placed as two crops above and under the selected
+block, which is an image of its own; the block grows by whole cells, so the rows under
+it are the same image placed lower, and a j or k sends only the block. The marks that
+move and the scroll marks are small images sent once (`sprite.rs`): a mark on screen
+is a placement of its strip of frames, and a tick changes which frame it crops; the
+list's images leave those marks out. `list.rs` says which images a frame wants, each
+with a key for what it shows and its placements, and `shown.rs` sends, places, moves
+and hides only what changed, with the kitty graphics protocol (`kitty.rs`). The image's detail type is narrower than a cell, so image/
 says how many columns a detail line holds (`app.detail_cols`) and the rows are
 wrapped to that while the board is an image. Asking the terminal (`term.rs`) needs its
 input, so the board asks only when the image look starts or comes back and on a

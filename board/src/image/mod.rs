@@ -4,13 +4,17 @@
 //! list's rows are the text list's (ui/rows.rs), drawn by render.rs; the top line and
 //! the bottom rows are ui's values too, drawn by frame.rs.
 //!
-//! The board is three images, each pinned to its block of cells: the top line, the
-//! rows of the list shown (scrolled by the rows' own heights, which the type size sets),
-//! and the bottom rows. Each is drawn at the terminal's cell size and sent only when what
-//! it shows changes; the list scrolls only to follow the selection, which changes it
-//! anyway. A client with other cell sizes scales them rather than overflowing. A new
-//! image is placed before the old one is deleted, so an update doesn't flicker; the
-//! images are deleted when the board is text again and when it quits.
+//! The board is images, each pinned to its block of cells: the top line, the rows of
+//! the list shown (scrolled by the rows' own heights, which the type size sets) and the
+//! bottom rows. The list is pieces (pieces.rs): its rows with nothing selected, and the
+//! selected block over them, so moving the selection sends a small image; the marks that
+//! move and the scroll marks are small images sent once and placed (sprite.rs), so a
+//! tick sends a few placements. Each image is drawn at the terminal's cell size and sent
+//! only when what it shows changes (list.rs, shown.rs). A client with other cell sizes
+//! scales them rather than overflowing. A new image is placed before the old one is
+//! deleted, so an update doesn't flicker; the images are deleted when the board is text
+//! again and when it quits. With motion on (`board_motion`), a task whose mark changes
+//! to a still one has it settle in; the board redraws every 40 ms meanwhile (`tick`).
 //!
 //! Before the first image the board asks the terminal whether it draws images, and
 //! its colours and cell size (term.rs). It asks for the colours and cell size again

@@ -4,9 +4,11 @@
 //! image itself is the list's block of cells. The type is real (font.rs), the marks
 //! are drawn shapes in the status colours (rings, a check, a diamond), the selected
 //! task sits on a rounded tint with its ID in a pill and its whole title, and a task
-//! that needs you has a bar at its left. The marks that turn on the text board stand
-//! still here. The list's last column has the scroll marks. Nothing here touches the
-//! terminal: given rows and a size in pixels, it lays them out and returns an image.
+//! that needs you has a bar at its left. The marks that move are left out when the
+//! image look places them over the list (sprite.rs draws their frames with `Draw`). The
+//! list's last column has the scroll marks. Nothing here touches the terminal: given
+//! rows and a size in pixels, it lays them out and returns an image, or a window of
+//! pixels of them (pieces.rs), drawn as that part of the whole would be.
 
 use super::font::{Fonts, Weight};
 use super::theme::{solid, Theme};

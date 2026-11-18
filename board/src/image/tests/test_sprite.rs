@@ -64,3 +64,4 @@ fn a_frame_is_placed_on_the_cells_its_mark_covers_wherever_it_falls_in_one() {
     assert_eq!(a.row + a.rows, 18);
     assert_eq!(at(&c, 18 * 20 + 3 * t.reach, 0, 18), None);
 }
+

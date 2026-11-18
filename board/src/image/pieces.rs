@@ -110,7 +110,7 @@ pub fn plan(view: &View, c: &Canvas, fonts: &Fonts) -> Plan {
     }
     // the cell where the last whole row ends: the rows past it are the base image's
     // next ones, which mustn't show
-    let last = (p.laid.tall(top, end) / ch) as u16;
+    let last = (p.laid.tall(top, end) / ch).min(rows_n as u32) as u16;
     if last > past {
         p.crops.push((past - shift, past, last - past));
     }

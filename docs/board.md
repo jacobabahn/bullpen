@@ -147,10 +147,14 @@ check, a diamond) in the status colours, the selected task on a rounded tint wit
 its ID in a pill and its whole title (wrapped to three lines at most; another task's
 is cut to its line), and the amber or red bar beside a task that needs you. The
 list says everything the text list does, row for row: each task's ID, title, mark,
-risk, age and lines, the groups and the Later group. The marks stand still: a
-working task's is a ring with a third of it drawn, a task in review's a half-filled
-blue ring, and a running command's (or a tour being written) an arc most of the way
-round. The top line (the repository and its counts) and the bottom rows (the message
+risk, age and lines, the groups and the Later group. The marks move as the text
+board's do, at the same pace: a working task's is a faint ring with a short arc going
+round it, a task in review's a blue ring with a filled half that turns, and a running
+command's (or a tour being written) half a ring turning faster. When a task's status
+changes, its new mark settles in: it grows a little past its size and back, in 160
+ms. `bullpen config --board-motion off` stills them all (the working, review and
+running marks stand as their first frame), and the board then sends nothing while
+nothing changes. The top line (the repository and its counts) and the bottom rows (the message
 and the keys) are drawn too, in the list's type and colours, and the scroll marks
 are small chevrons at the list's right edge. What you type into stays text: while a
 tell, a y/n question (an accept's, a drop's, `q`'s) or the stale tour's question is
@@ -186,12 +190,20 @@ tenth of a second (an answer that was cut right after its own esc gives the boar
 License); `bullpen config --board-font PATH` draws with another font file (TTF or
 OTF) instead, with Inter for the characters it lacks.
 
-The board is three images: the top line, the list's rows shown and the bottom rows,
-each drawn at the terminal's cell size and sent only when what it shows changes (the
-selection, a task's status or age on screen, the message), so a change to the list
-doesn't send the top line again. The list scrolls only to follow the selection,
-which changes its image anyway. Each image is pinned to its block of cells, so a
-client with other cell sizes (Rex on a phone) scales it to fit.
+The board is images: the top line, the list's rows shown and the bottom rows, each
+drawn at the terminal's cell size and sent only when what it shows changes (a task's
+status or age on screen, the message), so a change to the list doesn't send the top
+line again. The list is drawn with nothing selected, and the selected task's block
+(its tint, its ID's pill, its whole title and all its lines) is a small image of its
+own over the cells it takes: the rows under it move down by whole cells to make room,
+by placing the list's image again lower, not sending it. So `j` and `k` send that
+small image and a few placements, a fraction of the list; the list is sent again only
+when what it shows changes or it scrolls. The marks that move and the
+scroll marks are small images too, sent once: a tick only places another frame of a
+mark (a few dozen bytes a mark), never the list. The kitty protocol's own animation
+(the terminal turning the frames itself) would send nothing at all, but Rex's support
+for it isn't reliable yet, so the board doesn't use it. Each image is pinned to its
+block of cells, so a client with other cell sizes (Rex on a phone) scales it to fit.
 
 `bullpen-board --dir <state dir> --root <repo> --bullpen <program> --render FILE
 --cols N` writes the board as the image look draws it to FILE: its top line, its whole
