@@ -107,7 +107,12 @@ pub fn close_task(repo: &Repo, t: &mut Obj, auto: bool, first: &str) -> Res<()> 
             news(repo, t, Kind::AutoClosed, &line, Opts::default())
         } else {
             println!("{id} closed");
-            tell_coordinator(repo, t, "closed", &format!("{id} closed (finished, nothing to merge)"))
+            tell_coordinator(
+                repo,
+                t,
+                Kind::Closed,
+                &format!("{id} closed (finished, nothing to merge)"),
+            )
         }
     };
     let fields = [("closed", json!(true)), ("auto_accepted", json!(auto))];
@@ -133,7 +138,7 @@ pub fn cmd_drop(argv: &[String]) -> Res<i32> {
     let said = |t: &Obj| -> Res<()> {
         let id = s(t, "id");
         println!("{id} dropped");
-        tell_coordinator(&repo, t, "dropped", &format!("{id} dropped"))?;
+        tell_coordinator(&repo, t, Kind::Dropped, &format!("{id} dropped"))?;
         dropped_dep(&repo, t)
     };
     close(&repo, &mut t, "dropped", said, true, force, &[])?;
@@ -161,7 +166,7 @@ pub fn waiting_dep(repo: &Repo, t: &Obj, how: &str) -> Res<()> {
     news(
         repo,
         t,
-        "dropped-dependency",
+        Kind::DroppedDependency,
         &waiting_line(&waiting, id, how),
         Opts {
             everyone: true,

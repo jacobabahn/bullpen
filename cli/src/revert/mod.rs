@@ -8,6 +8,7 @@
 pub mod commits;
 
 use crate::args::{pos, value, Arg, Args, Nargs};
+use crate::news::kind::Kind;
 use crate::news::tell_coordinator;
 use crate::start::launch::py_format;
 use bullpen_core::json::{py_str, s, truthy, Obj};
@@ -216,7 +217,7 @@ pub fn cmd_revert(argv: &[String]) -> Res<i32> {
     let stays = |why: &str| -> Res<()> {
         println!("{tid} stays todo ({why}): `bullpen start {tid}` starts it");
         let line = format!("{tid} was added to revert {id} but isn't started ({why}): `bullpen start {tid}` starts it");
-        tell_coordinator(&repo, &repo.task(&tid)?, "queue", &line)
+        tell_coordinator(&repo, &repo.task(&tid)?, Kind::Queue, &line)
     };
     if let Some(why) = no_room(&repo)? {
         stays(&why)?;
@@ -230,7 +231,7 @@ pub fn cmd_revert(argv: &[String]) -> Res<i32> {
                 s(&new, "branch"),
                 s(&new, "block")
             );
-            tell_coordinator(&repo, &new, "started", &format!("{tid} started (it reverts {id})"))?;
+            tell_coordinator(&repo, &new, Kind::Started, &format!("{tid} started (it reverts {id})"))?;
             Ok(0)
         }
         Err(e) => {

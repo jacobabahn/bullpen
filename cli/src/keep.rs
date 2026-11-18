@@ -6,6 +6,7 @@
 
 use crate::close::{close, waiting_dep};
 use crate::modes::{push_branch, push_remote, task_base_ref, withdraw};
+use crate::news::kind::Kind;
 use crate::news::tell_coordinator;
 use crate::push_remote::push_reason;
 use bullpen_core::json::{obj, s, Obj};
@@ -80,7 +81,7 @@ pub fn keep_branch(repo: &Repo, t: &mut Obj, name: Option<&str>) -> Res<()> {
                 "{id} closed. {kept} There's no remote to push it to: `bullpen config --push-remote <remote>` sets one"
             ),
         }
-        tell_coordinator(repo, t, "kept", &format!("{id} closed without merging. {kept}"))?;
+        tell_coordinator(repo, t, Kind::Kept, &format!("{id} closed without merging. {kept}"))?;
         waiting_dep(repo, t, "closed with its branch kept, not merged")
     };
     close(repo, t, "done", said, false, false, &[])
