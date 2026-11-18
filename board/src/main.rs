@@ -128,7 +128,7 @@ fn main() {
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
-        stale = !matches!(m, Msg::Parked | Msg::Answered(_)); // a key may have changed a task, and a file event says one did
+        stale = !matches!(m, Msg::Parked); // a key may have changed a task, and a file event says one did
         if !handle(&mut app, &mut picture, term.backend_mut(), m) {
             break;
         }
@@ -189,11 +189,21 @@ fn read_keys(keys: mpsc::Sender<Msg>, gate: Arc<image::term::Gate>) {
                 return;
             }
             gate.park();
-            let answers = image::term::read_answers(Some(image::PROBE));
-            gate.done();
+            let (answers, left) = image::term::read_answers(&mut image::term::Stdin, Some(image::PROBE));
+            let late = !answers.done;
             if keys.send(Msg::Answered(answers)).is_err() {
                 return;
             }
+            // what didn't come in time mustn't reach crossterm as keys: read it here
+            if late {
+                image::term::drain(&mut image::term::Stdin, left, Some(image::PROBE), |typed| {
+                    let _ = keys.send(match typed {
+                        image::term::Typed::Key(k) => Msg::Key(k),
+                        image::term::Typed::Paste(text) => Msg::Paste(text),
+                    });
+                });
+            }
+            gate.done();
             continue;
         }
         // look for a key a tenth of a second at a time, so a wish to ask is seen soon

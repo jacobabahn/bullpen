@@ -29,6 +29,7 @@ fn asked(app: &mut App, p: &mut Picture) -> String {
     assert!(!p.show(app, &mut out));
     assert!(out.is_empty() && p.gate.wanted()); // the key reader is to stop first
     p.parked(&mut out); // it has
+    p.gate.done(); // and has read the answers
     p.answered(&answer(true));
     assert!(p.drawing(app));
     String::from_utf8(out).unwrap()
@@ -210,4 +211,19 @@ fn after_a_resize_the_image_is_sent_again() {
     p.resized();
     let out = frame(&mut app, &mut p);
     assert!(out.contains(&format!("a=t,f=100,t=d,i={}", FIRST + 1)) && out.ends_with(&kitty::delete(FIRST)));
+}
+
+#[test]
+fn colours_are_asked_again_every_few_seconds_unless_the_answers_came_late() {
+    let (mut app, mut p) = (board(3), picture());
+    asked(&mut app, &mut p);
+    frame(&mut app, &mut p);
+    p.asked_at = Instant::now() - RECHECK * 2;
+    frame(&mut app, &mut p);
+    assert!(p.gate.wanted()); // asked again
+    p.gate.done();
+    p.answered(&term::Answers { cell: Some((10, 20)), ..Default::default() }); // late: no attributes
+    p.asked_at = Instant::now() - RECHECK * 2;
+    frame(&mut app, &mut p);
+    assert!(!p.gate.wanted());
 }

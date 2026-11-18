@@ -35,7 +35,8 @@ pub fn upload(id: u32, png: &[u8]) -> String {
     let mut out = String::with_capacity(data.len() + chunks.len() * 32);
     for (k, chunk) in chunks.iter().enumerate() {
         let more = u8::from(k + 1 < chunks.len());
-        let control = if k == 0 { format!("a=t,f=100,t=d,i={id},q=2,m={more}") } else { format!("m={more}") };
+        // q=2 on each chunk: kitty takes it from the first, another terminal may not
+        let control = if k == 0 { format!("a=t,f=100,t=d,i={id},q=2,m={more}") } else { format!("q=2,m={more}") };
         out.push_str(&apc(&control, chunk));
     }
     out

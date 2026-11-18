@@ -11,7 +11,8 @@
 //!
 //! Before the first image the board asks the terminal whether it draws images, and
 //! its colours and cell size (term.rs); it asks for the colours again every few
-//! seconds, so the image follows a change of theme. When the terminal doesn't draw
+//! seconds, so the image follows a change of theme (not once its answers have come
+//! late: they would hold up the keys). When the terminal doesn't draw
 //! images, the font can't be loaded or drawing fails, the list is text again and the
 //! message line says why.
 
@@ -84,6 +85,8 @@ pub struct Picture {
     probe: Probe,
     /// the questions written are waiting for answers; with the graphics query
     asking: Option<bool>,
+    /// the terminal's answers came late once: its colours aren't asked again
+    slow: bool,
     asked_at: Instant,
     theme: Theme,
     cell: Option<(u32, u32)>,
@@ -101,6 +104,7 @@ impl Picture {
             gate,
             probe: Probe::Unasked,
             asking: None,
+            slow: false,
             asked_at: Instant::now(),
             theme: Theme::default(),
             cell: None,
@@ -138,7 +142,7 @@ impl Picture {
             self.hide(out);
             return false;
         };
-        if self.asked_at.elapsed() >= RECHECK {
+        if self.asked_at.elapsed() >= RECHECK && !self.slow {
             self.ask(false);
         }
         match self.draw(view, app.cfg.font.as_deref(), out) {
@@ -173,6 +177,7 @@ impl Picture {
     pub fn answered(&mut self, a: &term::Answers) {
         let graphics = self.asking.take().unwrap_or(false);
         self.asked_at = Instant::now();
+        self.slow |= !a.done;
         self.theme = Theme::default().with(&a.said);
         if a.cell.is_some() {
             self.cell = a.cell;

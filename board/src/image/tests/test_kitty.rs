@@ -13,7 +13,7 @@ fn an_upload_is_png_in_base64_chunks_the_last_saying_so() {
     let parts: Vec<&str> = big.split("\x1b\\").filter(|p| !p.is_empty()).collect();
     assert_eq!(parts.len(), 2);
     assert!(parts[0].starts_with("\x1b_Ga=t,f=100,t=d,i=5,q=2,m=1;"));
-    assert!(parts[1].starts_with("\x1b_Gm=0;"));
+    assert!(parts[1].starts_with("\x1b_Gq=2,m=0;"));
     assert_eq!(parts[0].len() - "\x1b_Ga=t,f=100,t=d,i=5,q=2,m=1;".len(), 4096);
 }
 

@@ -6,7 +6,14 @@
 //! while the board asks (`Gate`): the reader parks and says so, the board writes the
 //! questions between frames, and the reader reads the answers itself, then goes back
 //! to keys. A key typed meanwhile is read with the answers and passed on as a key
-//! (`keys`): letters, ⏎, esc, backspace, tab, ctrl+letter, the arrows and paste.
+//! (`keys`): letters, ⏎, esc, backspace, delete, tab, ctrl and alt with a key, the
+//! arrows (with ctrl, alt or shift), Home, End, PgUp, PgDn and paste.
+//!
+//! An answer is never taken for keys. One cut off is held until the rest of it comes.
+//! When the answers don't all come in `WAIT`, the board goes on without them, but the
+//! reader keeps reading (`drain`), passing keys on, until the device attributes come
+//! (or `LATE` passes), so a late answer doesn't reach crossterm either; and the board
+//! doesn't ask that terminal again.
 
 use super::theme::{parse_color, Said};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -15,6 +22,8 @@ use std::time::{Duration, Instant};
 
 /// How long the board waits for the terminal's answers.
 pub const WAIT: Duration = Duration::from_secs(2);
+/// How long the reader keeps reading answers that came late, before it goes back to keys.
+pub const LATE: Duration = Duration::from_secs(10);
 
 /// The questions: the graphics query (with `graphics`), the colours, the cell size,
 /// and last the device attributes, whose answer ends the answers.
@@ -37,15 +46,21 @@ pub struct Answers {
     pub done: bool,
     /// what wasn't an answer: keys typed meanwhile
     pub rest: Vec<u8>,
+    /// the bytes read whole: from here on is an escape sequence cut off at the end
+    /// (an answer, or a key, whose rest hasn't come), in neither `rest` nor the answers
+    pub whole: usize,
 }
 
 /// Read the answers in `bytes` (to the graphics query with ID `graphics`). An escape
-/// sequence cut off at the end is left for more bytes (`done` is false).
+/// sequence cut off at the end, or a lone escape there, is left for more bytes (`whole`).
 pub fn parse(bytes: &[u8], graphics: Option<u32>) -> Answers {
     let mut a = Answers::default();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] != 0x1b || i + 1 >= bytes.len() {
+        if bytes[i] == 0x1b && i + 1 >= bytes.len() {
+            break;
+        }
+        if bytes[i] != 0x1b {
             a.rest.push(bytes[i]);
             i += 1;
             continue;
@@ -61,9 +76,7 @@ pub fn parse(bytes: &[u8], graphics: Option<u32>) -> Answers {
             }
         };
         let Some((body_end, next)) = end else {
-            // cut off: the rest of it hasn't come
-            a.rest.extend_from_slice(&bytes[i..]);
-            break;
+            break; // cut off: the rest of it hasn't come
         };
         let body = String::from_utf8_lossy(&bytes[start..body_end]).into_owned();
         let known = match kind {
@@ -85,6 +98,7 @@ pub fn parse(bytes: &[u8], graphics: Option<u32>) -> Answers {
         }
         i = next;
     }
+    a.whole = i;
     a
 }
 
@@ -149,32 +163,81 @@ fn csi(body: &str, a: &mut Answers) -> bool {
 }
 
 /// Read the terminal's answers from standard input until its device attributes come,
-/// or `WAIT` passes.
-pub fn read_answers(graphics: Option<u32>) -> Answers {
-    let deadline = Instant::now() + WAIT;
+/// or `WAIT` passes. With them, what's left unread: an answer cut off when the time
+/// ran out, which `drain` reads to its end. Keys typed after the answers are in `rest`.
+pub fn read_answers(input: &mut impl Input, graphics: Option<u32>) -> (Answers, Vec<u8>) {
     let mut buf = Vec::new();
+    let mut a = read_until(input, &mut buf, graphics, Instant::now() + WAIT);
+    let left = buf.split_off(a.whole);
+    if a.done {
+        // after the last answer, a cut-off sequence is a key's (a lone esc)
+        a.rest.extend(left);
+        return (a, Vec::new());
+    }
+    (a, left)
+}
+
+/// After answers that didn't all come in time: read on until the device attributes
+/// come (the terminal's last answer) or `LATE` passes, passing the keys typed meanwhile
+/// to `typed` and dropping the answers. `left` is the cut-off answer read already.
+pub fn drain(input: &mut impl Input, left: Vec<u8>, graphics: Option<u32>, mut typed: impl FnMut(Typed)) {
+    let deadline = Instant::now() + LATE;
+    let mut buf = left;
     loop {
-        let a = parse(&buf, graphics);
+        let a = read_until(input, &mut buf, graphics, deadline.min(Instant::now() + Duration::from_millis(100)));
+        keys(&a.rest).into_iter().for_each(&mut typed);
+        let left = buf.split_off(a.whole);
+        if a.done {
+            keys(&left).into_iter().for_each(&mut typed);
+            return;
+        }
+        if Instant::now() >= deadline {
+            return; // what's left is the start of an answer: dropped
+        }
+        buf = left;
+    }
+}
+
+/// Read input into buf until the device attributes come or `deadline`; the answers in it.
+fn read_until(input: &mut impl Input, buf: &mut Vec<u8>, graphics: Option<u32>, deadline: Instant) -> Answers {
+    loop {
+        let a = parse(buf, graphics);
         let left = deadline.saturating_duration_since(Instant::now());
         if a.done || left.is_zero() {
             return a;
         }
-        let mut fds = libc::pollfd { fd: 0, events: libc::POLLIN, revents: 0 };
-        // SAFETY: one pollfd, on standard input, which outlives the call
-        let n = unsafe { libc::poll(&mut fds, 1, left.as_millis().max(1) as libc::c_int) };
-        if n < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
-            continue;
+        match input.next(left) {
+            Some(bytes) => buf.extend(bytes),
+            None => return a,
         }
-        if n <= 0 {
-            return parse(&buf, graphics);
+    }
+}
+
+/// Where the answers are read from: what comes within `wait`, None when nothing does.
+pub trait Input {
+    fn next(&mut self, wait: Duration) -> Option<Vec<u8>>;
+}
+
+/// Standard input, which the key reader reads too.
+pub struct Stdin;
+
+impl Input for Stdin {
+    fn next(&mut self, wait: Duration) -> Option<Vec<u8>> {
+        loop {
+            let mut fds = libc::pollfd { fd: 0, events: libc::POLLIN, revents: 0 };
+            // SAFETY: one pollfd, on standard input, which outlives the call
+            let n = unsafe { libc::poll(&mut fds, 1, wait.as_millis().max(1) as libc::c_int) };
+            if n < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            if n <= 0 {
+                return None;
+            }
+            let mut chunk = [0u8; 4096];
+            // SAFETY: reads at most chunk's length into chunk
+            let got = unsafe { libc::read(0, chunk.as_mut_ptr().cast(), chunk.len()) };
+            return (got > 0).then(|| chunk[..got as usize].to_vec());
         }
-        let mut chunk = [0u8; 4096];
-        // SAFETY: reads at most chunk's length into chunk
-        let got = unsafe { libc::read(0, chunk.as_mut_ptr().cast(), chunk.len()) };
-        if got <= 0 {
-            return parse(&buf, graphics);
-        }
-        buf.extend_from_slice(&chunk[..got as usize]);
     }
 }
 
@@ -186,56 +249,105 @@ pub enum Typed {
 }
 
 /// The keys in bytes typed while the reader was away: letters (UTF-8), ⏎, tab,
-/// backspace, esc, ctrl+letter, the arrows, Home, End, PgUp, PgDn, and a bracketed
-/// paste. Anything else is dropped.
+/// backspace, esc, ctrl+letter, alt with any of these (esc first), the arrows, Home and
+/// End (with shift, alt or ctrl), PgUp, PgDn, Delete, shift+tab, and a bracketed paste.
+/// Anything else is dropped.
 pub fn keys(bytes: &[u8]) -> Vec<Typed> {
-    let key = |code: KeyCode, m: KeyModifiers| Typed::Key(KeyEvent::new(code, m));
-    let none = KeyModifiers::NONE;
     let mut out = Vec::new();
     let text = String::from_utf8_lossy(bytes);
     let mut rest: &str = &text;
-    while let Some(c) = rest.chars().next() {
+    while !rest.is_empty() {
         if let Some(after) = rest.strip_prefix("\x1b[200~") {
             let (pasted, tail) = after.split_once("\x1b[201~").unwrap_or((after, ""));
             out.push(Typed::Paste(pasted.to_string()));
             rest = tail;
             continue;
         }
-        let seq = [
-            ("\x1b[A", KeyCode::Up), ("\x1b[B", KeyCode::Down), ("\x1b[C", KeyCode::Right), ("\x1b[D", KeyCode::Left),
-            ("\x1bOA", KeyCode::Up), ("\x1bOB", KeyCode::Down), ("\x1bOC", KeyCode::Right), ("\x1bOD", KeyCode::Left),
-            ("\x1b[H", KeyCode::Home), ("\x1b[F", KeyCode::End), ("\x1b[1~", KeyCode::Home), ("\x1b[4~", KeyCode::End),
-            ("\x1b[5~", KeyCode::PageUp), ("\x1b[6~", KeyCode::PageDown),
-        ]
-        .into_iter()
-        .find(|(s, _)| rest.starts_with(s));
-        if let Some((s, code)) = seq {
-            out.push(key(code, none));
-            rest = &rest[s.len()..];
-            continue;
-        }
-        if c == '\x1b' && rest.len() > 1 && rest.as_bytes()[1] == b'[' {
-            // another sequence: skip it whole
-            let end = rest[2..].find(|ch: char| ('\x40'..='\x7e').contains(&ch)).map_or(rest.len(), |j| j + 3);
-            rest = &rest[end..];
-            continue;
-        }
-        let typed = match c {
-            '\r' | '\n' => key(KeyCode::Enter, none),
-            '\t' => key(KeyCode::Tab, none),
-            '\x7f' | '\x08' => key(KeyCode::Backspace, none),
-            '\x1b' => key(KeyCode::Esc, none),
-            '\x01'..='\x1a' => key(KeyCode::Char((c as u8 - 1 + b'a') as char), KeyModifiers::CONTROL),
-            c if !c.is_control() => key(KeyCode::Char(c), if c.is_uppercase() { KeyModifiers::SHIFT } else { none }),
-            _ => {
-                rest = &rest[c.len_utf8()..];
-                continue;
-            }
-        };
-        out.push(typed);
-        rest = &rest[c.len_utf8()..];
+        let (key, len) = one_key(rest);
+        out.extend(key.map(Typed::Key));
+        rest = &rest[len..];
     }
     out
+}
+
+/// The key at the start of text, if it's one `keys` knows, and how many bytes it takes.
+fn one_key(text: &str) -> (Option<KeyEvent>, usize) {
+    let key = |code: KeyCode, m: KeyModifiers| Some(KeyEvent::new(code, m));
+    let none = KeyModifiers::NONE;
+    let c = text.chars().next().expect("text isn't empty");
+    if c == '\x1b' {
+        let after = &text[1..];
+        if let Some(csi) = after.strip_prefix('[') {
+            return csi_key(csi);
+        }
+        if let Some(ss3) = after.strip_prefix('O') {
+            let code = ss3.chars().next().and_then(arrow);
+            return (code.and_then(|code| key(code, none)), 2 + usize::from(code.is_some()));
+        }
+        // esc then a key: alt with that key, unless it's esc too (or nothing follows)
+        if !after.is_empty() && !after.starts_with('\x1b') {
+            let (k, len) = one_key(after);
+            return (k.map(|mut k| {
+                k.modifiers |= KeyModifiers::ALT;
+                k
+            }), 1 + len);
+        }
+        return (key(KeyCode::Esc, none), 1);
+    }
+    let k = match c {
+        '\r' | '\n' => key(KeyCode::Enter, none),
+        '\t' => key(KeyCode::Tab, none),
+        '\x7f' | '\x08' => key(KeyCode::Backspace, none),
+        '\x01'..='\x1a' => key(KeyCode::Char((c as u8 - 1 + b'a') as char), KeyModifiers::CONTROL),
+        c if !c.is_control() => key(KeyCode::Char(c), if c.is_uppercase() { KeyModifiers::SHIFT } else { none }),
+        _ => None,
+    };
+    (k, c.len_utf8())
+}
+
+fn arrow(c: char) -> Option<KeyCode> {
+    match c {
+        'A' => Some(KeyCode::Up),
+        'B' => Some(KeyCode::Down),
+        'C' => Some(KeyCode::Right),
+        'D' => Some(KeyCode::Left),
+        'H' => Some(KeyCode::Home),
+        'F' => Some(KeyCode::End),
+        _ => None,
+    }
+}
+
+/// A key sent as CSI (after `ESC [`): `A`…`D`, `H`, `F` (`1;3D` with alt, …), `N~`
+/// (Home, Delete, End, PgUp, PgDn), `Z` (shift+tab). Its length counts the `ESC [`.
+fn csi_key(csi: &str) -> (Option<KeyEvent>, usize) {
+    let Some(end) = csi.find(|ch: char| ('\x40'..='\x7e').contains(&ch)) else {
+        return (None, 2 + csi.len()); // cut off: dropped
+    };
+    let (params, last) = (&csi[..end], csi.as_bytes()[end] as char);
+    let len = 2 + end + 1;
+    let mut nums = params.split(';').map(|n| n.parse::<u8>().unwrap_or(1));
+    let first = nums.next().unwrap_or(1);
+    // xterm's modifier: 1 + shift 1, alt 2, ctrl 4
+    let m = nums.next().unwrap_or(1).saturating_sub(1);
+    let mut mods = KeyModifiers::NONE;
+    for (bit, flag) in [(1, KeyModifiers::SHIFT), (2, KeyModifiers::ALT), (4, KeyModifiers::CONTROL)] {
+        if m & bit != 0 {
+            mods |= flag;
+        }
+    }
+    let code = match last {
+        '~' => match first {
+            1 | 7 => Some(KeyCode::Home),
+            3 => Some(KeyCode::Delete),
+            4 | 8 => Some(KeyCode::End),
+            5 => Some(KeyCode::PageUp),
+            6 => Some(KeyCode::PageDown),
+            _ => None,
+        },
+        'Z' => Some(KeyCode::BackTab),
+        c => arrow(c),
+    };
+    (code.map(|code| KeyEvent::new(code, mods)), len)
 }
 
 /// Where the key reader is, while the board asks the terminal something.

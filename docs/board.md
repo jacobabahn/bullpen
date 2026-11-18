@@ -162,8 +162,10 @@ tries again.
 
 The image follows the terminal's theme: its colours are the terminal's own
 foreground, background, red, green, yellow and blue, asked when the board starts
-drawing images and again every three seconds, and its background is clear, so the
-pane's shows through. The type is Inter (built into the board, SIL Open Font
+drawing images and again every three seconds (not once the terminal's answers have
+come late, after two seconds), and its background is clear, so the pane's shows
+through. While the board waits for those answers it reads the keys itself and passes
+them on; a late answer is read to its end, never taken for keys. The type is Inter (built into the board, SIL Open Font
 License); `bullpen config --board-font PATH` draws with another font file (TTF or
 OTF) instead, with Inter for the characters it lacks.
 
