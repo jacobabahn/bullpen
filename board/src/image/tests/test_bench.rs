@@ -157,8 +157,13 @@ impl Board {
         tally.ms.insert("after".into(), t.elapsed().as_secs_f64() * 1000.0);
         // the board waits for the next key: it draws what a j or k would want next
         let (t, before) = (Instant::now(), self.out.bytes.get());
+        meter::take();
         while self.ahead() {}
+        let parts = meter::take();
         meter::stop();
+        for (k, v) in parts.ms {
+            tally.ms.insert(format!("ahead: {k}"), v);
+        }
         tally.ms.insert("ahead".into(), t.elapsed().as_secs_f64() * 1000.0);
         tally.bytes.insert("ahead".into(), self.out.bytes.get() - before);
         tally.ms.insert("total".into(), ms);
@@ -169,7 +174,7 @@ impl Board {
     /// Draw ahead one key's images, as the board does while it waits: more to draw?
     fn ahead(&mut self) -> bool {
         let area = self.term.get_frame().area();
-        self.picture.ahead(&mut self.app, area, self.term.backend_mut())
+        meter::time(|| "all".into(), || self.picture.ahead(&mut self.app, area, self.term.backend_mut()))
     }
 
     /// The tasks and items j moves through.

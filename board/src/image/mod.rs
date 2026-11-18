@@ -294,6 +294,7 @@ impl Picture {
     pub fn resized(&mut self) {
         self.due = true;
         self.screen.forget();
+        self.ahead_of = None;
     }
 
     /// Take the images off the screen, keeping them for when the board shows again.
@@ -307,6 +308,7 @@ impl Picture {
         self.screen.clear(out);
         self.seen.clear();
         self.settling.clear();
+        self.ahead_of = None;
     }
 }
 

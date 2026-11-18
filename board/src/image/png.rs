@@ -7,10 +7,15 @@ use tiny_skia::Pixmap;
 /// The image as PNG bytes.
 pub fn encode(pm: &Pixmap) -> Vec<u8> {
     let (w, h) = (pm.width() as usize, pm.height() as usize);
+    let un = unmultiplied();
     let mut rgba = Vec::with_capacity(w * h * 4);
-    for p in pm.pixels() {
-        let c = p.demultiply();
-        rgba.extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
+    for p in pm.data().chunks_exact(4) {
+        let a = p[3] as usize;
+        match a {
+            0 => rgba.extend_from_slice(&[0, 0, 0, 0]),
+            255 => rgba.extend_from_slice(p),
+            _ => rgba.extend_from_slice(&[un[a << 8 | p[0] as usize], un[a << 8 | p[1] as usize], un[a << 8 | p[2] as usize], p[3]]),
+        }
     }
     let stride = w * 4;
     let mut raw = vec![0; (stride + 1) * h];
@@ -28,6 +33,22 @@ pub fn encode(pm: &Pixmap) -> Vec<u8> {
     chunk(&mut out, b"IDAT", &miniz_oxide::deflate::compress_to_vec_zlib(&raw, 6));
     chunk(&mut out, b"IEND", &[]);
     out
+}
+
+/// Each premultiplied channel `v` at alpha `a`, straight (at `a << 8 | v`): as
+/// tiny-skia's `demultiply` makes it, worked out once.
+fn unmultiplied() -> &'static [u8] {
+    static TABLE: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut t = vec![0; 256 * 256];
+        for a in 1..=255u8 {
+            for v in 0..=a {
+                let c = tiny_skia::PremultipliedColorU8::from_rgba(v, v, v, a).expect("v <= a").demultiply();
+                t[(a as usize) << 8 | v as usize] = c.red();
+            }
+        }
+        t
+    })
 }
 
 /// A row filtered into `into` (the filter's number, then the bytes): by Sub (each byte

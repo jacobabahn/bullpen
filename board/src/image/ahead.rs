@@ -34,7 +34,7 @@ impl Picture {
             self.todo.clear();
             return false;
         }
-        if let Some(view) = moved(app, key, area) {
+        if let Some(view) = super::meter::time(|| "view".into(), || moved(app, key, area)) {
             // a key that comes anyway draws what this couldn't
             let _ = self.preload(&view, app, out);
         }
@@ -49,7 +49,7 @@ impl Picture {
         if view.detail_cols != Some(render::detail_cols(&canvas, fonts)) {
             return Ok(());
         }
-        let plan = super::pieces::plan(view, &canvas, fonts);
+        let plan = super::meter::time(|| "plan".into(), || super::pieces::plan(view, &canvas, fonts));
         let paint = Paint { canvas, size: app.cfg.text_size, motion: app.cfg.motion, settling: &self.settling, ms: self.ms };
         let wants = wants(view, &plan, &paint, &self.screen, fonts)?;
         self.screen.preload(wants, out).map_err(|e| e.to_string())
