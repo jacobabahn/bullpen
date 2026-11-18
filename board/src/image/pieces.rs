@@ -1,7 +1,7 @@
 //! The list as pieces, so moving the selection sends a small image, not the list. The
 //! list's rows are drawn once with nothing selected (the base image, ui/rows.rs's
-//! `unselected`), and the selected task's block (its tint, its ID's pill, its whole
-//! title and all its lines) is an image of its own over the cells it takes. The base
+//! `unselected`), and the selected task's block (its card, its whole title and all its
+//! lines) is an image of its own over the cells it takes. The base
 //! image is placed twice, as crops: the cells above the selected block, and the cells
 //! under it, moved down by the whole cells the block grew by (the rows under it start
 //! that many cells lower; the space left over is under the block). So the base image is
@@ -13,7 +13,7 @@
 //! and the cells after it are empty. Everything here is worked out from the rows laid
 //! out (render.rs) and a cell's height; nothing touches the terminal.
 
-use super::render::{fitting, lay, mark_at, Canvas, Laid, Marks};
+use super::render::{card_below, fitting, lay, mark_at, Canvas, Laid, Marks};
 use super::sprite::turns;
 use super::font::Fonts;
 use super::View;
@@ -71,10 +71,10 @@ pub fn plan(view: &View, c: &Canvas, fonts: &Fonts) -> Plan {
     let mut laid = lay(&view.rows, c, fonts);
     let base = lay(&view.base, c, fonts);
     let block = block(&view.rows, &view.base);
-    // the block grows by whole cells, with room under it for its tint's rounded corners
+    // the block grows by whole cells, with room under it for its card's edge
     let mut grew = 0;
     if let Some((s0, s1, b1)) = block {
-        let (hs, hb) = (laid.tall(s0, s1) + (0.4 * c.m.pad).ceil() as u32 + 1, base.tall(s0, b1));
+        let (hs, hb) = (laid.tall(s0, s1) + card_below(c), base.tall(s0, b1));
         grew = hs.saturating_sub(hb).div_ceil(ch);
         laid.after[s1 - 1] = hb + grew * ch - laid.tall(s0, s1);
     }
@@ -150,7 +150,7 @@ pub fn mark_y(p: &Plan, i: usize, c: &Canvas) -> u32 {
 pub fn rows_in(p: &Plan, c: &Canvas, first: u16, n: u16) -> Vec<(usize, i64)> {
     let ch = c.grid.cell_h as i64;
     let (y0, y1) = (first as i64 * ch, (first + n) as i64 * ch);
-    // a little past a row's end: the selected block's tint reaches into the next row
+    // a little past a row's end: the selected block's card reaches into the next row
     let reach = c.m.pad as i64 + 1;
     (p.top..p.end)
         .map(|i| (i, p.y(i) as i64))

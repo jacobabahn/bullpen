@@ -3,8 +3,8 @@
 //! for small type, more for medium and large), so a row needn't be a whole cell; the
 //! image itself is the list's block of cells. The type is real (font.rs), the marks
 //! are drawn shapes in the status colours (rings, a check, a diamond), the selected
-//! task sits on a rounded tint with its ID in a pill and its whole title, and a task
-//! that needs you has a bar at its left. The marks that move are left out when the
+//! task sits on a card (a faint fill and edge, its mark inside) with its whole title,
+//! and a task that needs you has a bar at its left. The marks that move are left out when the
 //! image look places them over the list (sprite.rs draws their frames with `Draw`). The
 //! list's last column has the scroll marks. Nothing here touches the terminal: given
 //! rows and a size in pixels, it lays them out and returns an image, or a window of
@@ -47,12 +47,19 @@ pub struct Metrics {
     pub head_pad: f32,
     /// the space between groups
     pub gap: f32,
+    /// the space between a title's last line and the task's first detail line
+    pub title_gap: f32,
+    /// how far the selected card reaches past its first and last lines (a pixel inside
+    /// them for small type, whose rows are a cell each)
+    pub inset: f32,
 }
 
 impl Metrics {
     /// Small is the terminal's row: every row a cell, as the text list's. Medium and large
     /// set the type larger than a cell holds and give the rows the height it needs, a
-    /// detail smaller than a title, and space between the tasks.
+    /// detail smaller than a title, and room: about three quarters of a title's size
+    /// above each task, a little between its title and its lines, and the selected card
+    /// a quarter of it clear of the type.
     pub fn of(size: TextSize, cell_h: u32) -> Metrics {
         let ch = cell_h as f32;
         let (t, d) = match size {
@@ -63,16 +70,19 @@ impl Metrics {
         };
         let (title, detail) = ((t * ch).max(6.0), (d * ch).max(6.0));
         if size == TextSize::Small {
-            return Metrics { title, detail, line: ch, detail_line: ch, pad: 0.0, head_pad: 0.0, gap: ch };
+            let (line, detail_line, gap) = (ch, ch, ch);
+            return Metrics { title, detail, line, detail_line, pad: 0.0, head_pad: 0.0, gap, title_gap: 0.0, inset: -1.0 };
         }
         Metrics {
             title,
             detail,
-            line: (1.45 * title).round(),
-            detail_line: (1.38 * detail).round(),
-            pad: (0.35 * title).round(),
+            line: (1.40 * title).round(),
+            detail_line: (1.42 * detail).round(),
+            pad: (0.74 * title).round(),
             head_pad: (0.5 * title).round(),
             gap: (0.45 * ch).round(),
+            title_gap: (0.06 * title).round(),
+            inset: (0.28 * title).round(),
         }
     }
 }
@@ -205,6 +215,12 @@ pub fn fitting(laid: &Laid, top: usize, room: u32) -> usize {
     end
 }
 
+/// How far the selected card reaches under its block's last row, in whole pixels with
+/// one for its smoothed edge: pieces.rs leaves this room under the block.
+pub fn card_below(c: &Canvas) -> u32 {
+    c.m.inset.max(0.0).ceil() as u32 + 1
+}
+
 /// Whether there are rows above the image's (↑ at its top right) and below (↓ at its bottom).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Marks {
@@ -259,15 +275,15 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
     // (whole pixels), so a row's edges fall on the same fractions of a pixel in any image
     d.shift = cut.y as f32 - EDGE as f32;
     let at = |p: &Place| p.y as f32;
-    // the selected task's block (its row and its details) sits on one rounded tint
+    // the selected task's block (its row and its details) sits on one card
     let mut block: Option<(f32, f32)> = None;
     for p in &places {
         let row = &rows.rows[p.row];
         let (y, bottom) = (at(p), at(p) + p.h as f32);
         let tinted = match row {
-            Row::Task(t) => t.selected && t.asked.is_none(),
+            Row::Task(t) => t.selected,
             Row::Detail(dr) => dr.selected,
-            Row::Item(it) => it.selected && !it.asked,
+            Row::Item(it) => it.selected,
             Row::ItemDetail(_) => true,
             _ => false,
         };
@@ -377,7 +393,7 @@ impl Geo {
         let m = &self.c.m;
         let h = match row {
             Row::Head { .. } => m.head_pad + m.line,
-            Row::Task(_) | Row::Item(_) => m.pad + lines as f32 * m.line,
+            Row::Task(_) | Row::Item(_) => m.pad + lines as f32 * m.line + m.title_gap,
             Row::Later { .. } => m.pad + m.line,
             Row::Detail(_) | Row::ItemDetail(_) => m.detail_line,
             Row::Gap => m.gap,
@@ -467,17 +483,27 @@ impl<'a> Draw<'a> {
         self.pm.stroke_path(path, &paint(color), &stroke, t, None);
     }
 
-    /// The selected task's (or item's) block: a rounded tint from its ID to the right edge.
+    /// The selected task's (or item's) block, from its first line's top to its last
+    /// line's bottom: a card, a faint fill with a faint edge, from a quarter of a cell in
+    /// (its mark inside it) to half a cell past where text ends, clear of the type above
+    /// and below by `inset`, its last into the space above the next task.
     fn tint(&mut self, block: Option<(f32, f32)>) {
         let Some((top, bottom)) = block else { return };
-        // a little past its last line, into the space above the next task
-        let bottom = bottom + 0.4 * self.m().pad;
-        let px = self.m().title;
-        let x = self.text_x() - 0.35 * px;
-        let color = self.theme.tint();
-        let r = 0.28 * self.m().line.min(self.g.c.grid.cell_h as f32 * 1.2);
-        if let Some(p) = rounded(x, top + 1.0, self.right() + 0.35 * px - x, bottom - top - 2.0, r) {
-            self.fill(&p, color);
+        let m = self.m();
+        let (top, bottom) = (top - m.inset, bottom + m.inset);
+        let (x, w) = (0.25 * self.c(), self.right() + 0.25 * self.c());
+        let r = 0.35 * m.title;
+        if let Some(p) = rounded(x, top, w, bottom - top, r) {
+            let fill = self.theme.tint();
+            self.fill(&p, fill);
+        }
+        // the edge, drawn inside the card's own rectangle
+        let lw = 1.5;
+        if let Some(p) = rounded(x + lw / 2.0, top + lw / 2.0, w - lw, bottom - top - lw, r - lw / 2.0) {
+            let edge = self.theme.edge();
+            let t = Transform::from_translate(0.0, -self.shift);
+            let stroke = Stroke { width: lw, ..Stroke::default() };
+            self.pm.stroke_path(&p, &paint(edge), &stroke, t, None);
         }
     }
 
@@ -553,7 +579,7 @@ impl<'a> Draw<'a> {
             self.mark(&t.mark, cx, cy, 0.0);
         }
         let tone = t.asked.map(|risky| solid(if risky { self.theme.red } else { self.theme.green }));
-        let id_end = self.id(&t.id, t.selected || tone.is_some(), tone, y);
+        let id_end = self.id(&t.id, t.selected, tone, y);
         if t.from_backlog {
             let r = 0.2 * self.px();
             self.backlog_mark(id_end + 0.25 * self.px() + r, cy, r);
@@ -595,23 +621,17 @@ impl<'a> Draw<'a> {
         }
     }
 
-    /// An ID: dim, or (selected, or asked about in `tone`) in a pill. Returns where it ends.
-    fn id(&mut self, id: &str, pill: bool, tone: Option<[u8; 4]>, y: f32) -> f32 {
-        let px = self.px();
+    /// An ID: dim, or in the foreground when selected, or in `tone` when it's asked
+    /// about. Returns where it ends.
+    fn id(&mut self, id: &str, selected: bool, tone: Option<[u8; 4]>, y: f32) -> f32 {
         let x = self.text_x();
         let w = self.width(id, Weight::Bold);
-        if !pill {
-            let dim = self.theme.dim();
-            return self.text(id, Weight::Bold, x, y, w + 1.0, dim);
-        }
-        let (padx, h) = (0.35 * px, (self.h() * 0.78).min(px * 1.45));
-        let color = tone.unwrap_or(self.theme.text());
-        if let Some(p) = rounded(x - padx, y + (self.h() - h) / 2.0, w + 2.0 * padx, h, h / 2.0) {
-            self.fill(&p, color);
-        }
-        let ink = solid(self.theme.bg);
-        self.text(id, Weight::Bold, x, y, w + 1.0, ink);
-        x + w + padx
+        let color = match tone {
+            Some(c) => c,
+            None if selected => self.theme.text(),
+            None => self.theme.dim(),
+        };
+        self.text(id, Weight::Bold, x, y, w + 1.0, color)
     }
 
     /// An item's row, from its first line's top y.
@@ -631,7 +651,7 @@ impl<'a> Draw<'a> {
             self.stroke(&p, self.line(), dim);
         }
         let red = solid(self.theme.red);
-        self.id(&i.id, i.selected || i.asked, i.asked.then_some(red), y);
+        self.id(&i.id, i.selected, i.asked.then_some(red), y);
         let color = if i.asked { red } else { self.theme.text() };
         let right = self.right();
         self.title(lines, title_weight(i.asked), right, y, color);

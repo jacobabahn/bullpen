@@ -120,9 +120,10 @@ fn the_marks_placed_over_the_list_are_where_it_draws_them() {
         // BP-3's working mark and BP-5's review mark (above it) are sprites; their first
         // frame is the still mark
         assert!(view.rows.rows[p.top..p.end].iter().filter(|r| bare(r, true, &|_| false)).count() >= 2);
-        // a mark laid over the image is smoothed a shade differently from one drawn in it;
+        // a mark laid over the image is smoothed a shade differently from one drawn in it
+        // (at most one of the 16 samples the drawing takes of a pixel's edge, 16 levels);
         // one a pixel out would be hundreds of levels apart
-        assert!(most_apart(&put_together(&view, &p, &c, true), &whole(&view, &p, &c)) <= 8, "{size:?}");
+        assert!(most_apart(&put_together(&view, &p, &c, true), &whole(&view, &p, &c)) <= 16, "{size:?}");
     }
 }
 

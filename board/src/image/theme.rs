@@ -3,7 +3,7 @@
 //! follows the Rex theme; the colours the terminal doesn't say are xterm's. What each
 //! colour means is the text board's (ui/mod.rs): amber needs you, red stopped or high
 //! risk, green ready or low risk, blue in review. The image's background is clear, so
-//! the pane's own shows through; dim text and the selection's tint are the foreground,
+//! the pane's own shows through; dim text and the selected card are the foreground,
 //! faint.
 
 /// A colour as the terminal says it.
@@ -93,9 +93,14 @@ impl Theme {
         faint(self.fg, 0.66)
     }
 
-    /// The selection's tint: the foreground, faintly.
+    /// The selected card's fill: the foreground, faintly.
     pub fn tint(&self) -> [u8; 4] {
-        faint(self.fg, 0.11)
+        faint(self.fg, 0.085)
+    }
+
+    /// The selected card's edge: the foreground, a little stronger than its fill.
+    pub fn edge(&self) -> [u8; 4] {
+        faint(self.fg, 0.22)
     }
 
     /// A status's colour, as ui::mark_style gives it; None for the dim ones.

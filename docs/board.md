@@ -143,8 +143,9 @@ Tasks that waited on the accepted one start by themselves (see
 
 `bullpen config --board-look image` (or `I` on the board, for this run) draws the
 board as images instead of text: real type, the marks drawn as shapes (rings, a
-check, a diamond) in the status colours, the selected task on a rounded tint with
-its ID in a pill and its whole title (wrapped to three lines at most; another task's
+check, a diamond) in the status colours, the selected task on a card (a faint fill
+with a faint edge, its mark inside it, clear of its type on every side) with its ID
+in the foreground and its whole title (wrapped to three lines at most; another task's
 is cut to its line), and the amber or red bar beside a task that needs you. The
 list says everything the text list does, row for row: each task's ID, title, mark,
 risk, age and lines, the groups and the Later group. The marks move as the text
@@ -163,8 +164,9 @@ again after. `?`, peeks, answers and mission control stay text, and so does the
 compact layout (`l`): with it the board is text whatever the look.
 
 `bullpen config --board-text-size` sets the type: `medium` (the default) is the
-terminal's own text size, with a detail line smaller and dim under each title and
-space between the tasks, so a row is a little more than a cell; `large` is larger
+terminal's own text size, with a detail line smaller and dim under each title, a
+little space between them and about three quarters of a line between the tasks, so a
+row is a little more than a cell; `large` is larger
 still, for a pane read from further away, and cuts titles sooner; `small` is a
 cell a row, as the text list. The list scrolls by its rows' own heights, keeping the
 selected task and its lines in view and showing only whole rows, so a page (`PgDn`)
@@ -194,7 +196,7 @@ The board is images: the top line, the list's rows shown and the bottom rows, ea
 drawn at the terminal's cell size and sent only when what it shows changes (a task's
 status or age on screen, the message), so a change to the list doesn't send the top
 line again. The list is drawn with nothing selected, and the selected task's block
-(its tint, its ID's pill, its whole title and all its lines) is a small image of its
+(its card, its whole title and all its lines) is a small image of its
 own over the cells it takes: the rows under it move down by whole cells to make room,
 by placing the list's image again lower, not sending it. So `j` and `k` send that
 small image and a few placements, a fraction of the list; the list is sent again only

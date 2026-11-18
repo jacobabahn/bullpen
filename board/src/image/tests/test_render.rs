@@ -137,7 +137,7 @@ fn larger_type_makes_taller_rows_with_space_between_tasks_and_a_smaller_detail()
     }
     let (laid, sheet) = draw_in(&r, TextSize::Medium);
     let task_h = laid.heights[1];
-    assert_eq!(task_h, (medium.pad + medium.line) as u32);
+    assert_eq!(task_h, (medium.pad + medium.line + medium.title_gap) as u32);
     assert!(task_h > 20 && task_h % 20 != 0); // not a whole number of cells
     assert!(laid.heights[2] < task_h);
     assert_eq!(sheet.places[2].y, laid.heights[0] + task_h);
@@ -156,7 +156,7 @@ fn the_selected_tasks_title_wraps_and_another_is_cut_to_its_row() {
     assert_eq!(laid.titles[0].len(), 1);
     assert!(laid.titles[0][0].ends_with('…'));
     assert!(laid.titles[1].len() > 1 && laid.titles[1].len() <= TITLE_LINES);
-    assert_eq!(laid.heights[1], (m.pad + laid.titles[1].len() as f32 * m.line) as u32);
+    assert_eq!(laid.heights[1], (m.pad + laid.titles[1].len() as f32 * m.line + m.title_gap) as u32);
     let joined = laid.titles[1].join(" ");
     assert!(long.starts_with(joined.trim_end_matches('…')));
 }
@@ -220,4 +220,50 @@ fn a_title_wraps_at_its_spaces_and_its_last_line_is_cut() {
     assert!(lines[1..].iter().all(|l| f.width(l, Weight::Regular, 12.0) <= 90.0));
     assert!(lines[2].ends_with('…') && !lines[0].ends_with('…'));
     assert_eq!(f.wrap("short", Weight::Regular, 12.0, (60.0, 90.0), 3), vec!["short"]);
+}
+
+/// The straight RGBA of pixel (x, y).
+fn px_at(s: &Sheet, x: u32, y: u32) -> [u8; 4] {
+    let c = s.pixmap.pixel(x, y).unwrap().demultiply();
+    [c.red(), c.green(), c.blue(), c.alpha()]
+}
+
+#[test]
+fn the_selected_card_holds_its_mark_and_clears_its_type() {
+    let r = rows(vec![Row::Task(TaskRow { selected: true, ..task("BP-1", "todo") }), detail("what it does", true), Row::Task(task("BP-2", "todo"))]);
+    let (laid, s) = draw_in(&r, TextSize::Medium);
+    let m = canvas(TextSize::Medium).m;
+    let (first, last) = (m.pad as u32, laid.heights[0] + laid.heights[1]);
+    // its mark is inside it: the card starts a quarter of a cell in, left of the mark
+    let mid = first + m.line as u32 / 2;
+    assert!(px_at(&s, 4, mid)[3] > 0, "the card at its left edge");
+    assert_eq!(px_at(&s, 1, mid)[3], 0, "nothing left of the card");
+    // it reaches past its first and last lines by `inset`, and no further
+    let (top, bottom) = (first - m.inset as u32, last + m.inset as u32);
+    assert!(m.inset >= (0.28 * m.title).floor());
+    let x = 100;
+    assert!(px_at(&s, x, top + 1)[3] > 0 && px_at(&s, x, bottom - 2)[3] > 0);
+    assert_eq!((px_at(&s, x, top - 2)[3], px_at(&s, x, bottom + 1)[3]), (0, 0));
+}
+
+#[test]
+fn the_selected_id_has_no_pill_but_is_in_the_foreground() {
+    let theme = Theme::default();
+    let s = draw(&rows(vec![Row::Task(TaskRow { selected: true, ..task("BP-1", "todo") })]));
+    let id = |s: &Sheet| row_px(s, 0).iter().enumerate().filter(|(i, _)| (30..52).contains(&(i % 400))).map(|(_, p)| *p).collect::<Vec<_>>();
+    // the pill was the foreground behind the ID's letters in the background's colour
+    assert!(!has(&id(&s), theme.bg));
+    assert!(has(&id(&s), theme.fg));
+    let plain = draw(&rows(vec![Row::Task(task("BP-1", "todo"))]));
+    assert!(!has(&id(&plain), theme.fg));
+}
+
+#[test]
+fn medium_type_has_room_above_each_task_and_between_its_title_and_lines() {
+    let m = Metrics::of(TextSize::Medium, 34);
+    assert!(m.pad >= 0.7 * m.title && m.title_gap > 0.0);
+    assert!(m.line >= 1.35 * m.title && m.detail_line >= 1.4 * m.detail);
+    // small stays a cell a row, its card a pixel inside its rows
+    let s = Metrics::of(TextSize::Small, 34);
+    assert_eq!((s.pad, s.title_gap, s.line, s.inset), (0.0, 0.0, 34.0, -1.0));
 }
