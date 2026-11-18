@@ -1,8 +1,9 @@
 //! Drawing the board. It sits in a narrow pane, so every line is cut to fit.
 //!
 //! `draw` picks what the mode shows, sizes the board once (`Sizes`), then draws the
-//! list (`list`, its Later group `later`), the bottom rows (`bottom`), a full-screen view (`overlay`) or the
-//! `?` list (`help`).
+//! list (`list`, its Later group `later`, the rows of both `rows`), the bottom rows (`bottom`), a full-screen view (`overlay`) or the
+//! `?` list (`help`). With the image look the list's rows are left blank and handed to
+//! image/, which draws them over that space.
 
 pub(crate) mod bottom;
 mod help;
@@ -113,7 +114,7 @@ fn bottom_gap(app: &App, h: usize, need: usize) -> usize {
 /// A board with fewer rows than this is short: the list gets the rows of space.
 const SHORT: usize = 12;
 /// A board with fewer columns than this is narrow: the titles get the room.
-const NARROW: usize = 36;
+pub(crate) const NARROW: usize = 36;
 
 /// The board's sizes, worked out once per frame: the list, the bottom rows and the
 /// compact panel all draw from them.
@@ -170,6 +171,8 @@ impl Sizes {
 pub fn draw(f: &mut Frame, app: &mut App) {
     let full = f.area();
     let buf = f.buffer_mut();
+    // only the list sets it, when it's drawn as an image
+    app.view = None;
 
     if matches!(app.mode, Mode::Overlay { .. } | Mode::Answer { .. } | Mode::Help { .. } | Mode::Tell { reply: true, .. }) {
         // the title, a blank line, at least one line and the foot

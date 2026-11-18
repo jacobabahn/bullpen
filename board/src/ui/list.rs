@@ -6,6 +6,7 @@ use super::later::{draw_item, draw_item_detail, draw_later_line};
 use super::rows::{self, DetailRow, Flag, Mark, Now, Row, Rows, TaskRow};
 use super::{bold, dim, mark_style, put, rev, review_mark, risk_style, span, spinner, working_mark, Sizes, AMBER, TINT};
 use crate::model::{self, fit, pad, width, Layout, Task};
+use crate::image::View;
 use crate::App;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -23,11 +24,25 @@ pub(super) fn draw_list(buf: &mut Buffer, area: Rect, app: &mut App, s: &Sizes, 
     app.top = top;
     // a page, for PgDn and PgUp: the tasks (and items) this list has room for
     app.page = rows.iter().skip(top).take(s.avail).filter(|r| r.is_entry()).count().max(1);
+    if app.image {
+        // the image covers the columns the rows use, up to where the scroll marks go
+        let (row, cols) = (area.y + 2, w.saturating_sub(2) as u16);
+        app.view = Some(View { rows: Rows { rows, idw }, top, row, col: area.x, rows_n: s.avail as u16, cols });
+        draw_marks(buf, area, s, top, app.view.as_ref().map_or(0, |v| v.rows.rows.len()));
+        return;
+    }
     let app = &*app;
     for (j, row) in rows.iter().skip(top).take(s.avail).enumerate() {
         draw_row(buf, area, app, s, 2 + j, row, idw);
     }
-    if top + s.avail < rows.len() {
+    draw_marks(buf, area, s, top, rows.len());
+}
+
+/// The scroll marks: ↑ above the list when rows are above, ↓ under it (a short board's
+/// at the end of its last row) when rows are below.
+fn draw_marks(buf: &mut Buffer, area: Rect, s: &Sizes, top: usize, len: usize) {
+    let w = s.w;
+    if top + s.avail < len {
         // a short board's goes at the end of the list's last row, past the ages
         let (y, x) = if s.short { (1 + s.avail, w.saturating_sub(2)) } else { (2 + s.avail, w.saturating_sub(3)) };
         put(buf, area, y, x, span("↓", dim()));

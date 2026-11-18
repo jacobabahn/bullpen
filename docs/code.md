@@ -32,7 +32,9 @@ docs/tests.md); their fake Rex and fake gh are Rust (`tests/fakes/`, BP-138).
   builds it).
   `core` never depends on `cli`; the board depends on `core`. The crates are `serde_json`
   (with `preserve_order`), `chrono`, `libc` and `unicode-width` (the board's too, and
-  ratatui's); ask before adding one. A module's Rust tests are in a `tests/` folder
+  ratatui's); ask before adding one. The board has ratatui's and its own besides, the
+  image look's among them: `tiny-skia` (drawing), `ttf-parser` (fonts) and
+  `miniz_oxide` (its PNGs' zlib). A module's Rust tests are in a `tests/` folder
   beside it, as `test_<module>.rs`. rustfmt with `max_width = 120` (`rustfmt.toml`)
   for `core`, `cli` and `tests/fakes`; the board isn't formatted yet.
 - The files bullpen writes (tasks, config, news, stamps) are as the Python wrote them:
@@ -73,6 +75,19 @@ It reads the checkout it's in, so a worktree maps its own code, built or not. Th
 list to keep: a new module writes its header, and a test (`tests/test_cli.py`) holds
 every module in `core/`, `cli/`, `board/`, `tests/fakes/` and `lua/` to having one.
 A module's tests (`tests/test_<module>.rs` in its folder) aren't on the map.
+
+## The board's drawing
+
+The board (`board/src/`) draws with ratatui. `ui/rows.rs` works out the list's rows
+from the board's state once a frame, as values: each row's text, its mark, whether
+it's selected, asked about, dim, its risk and age. The text list (`ui/list.rs`,
+`ui/later.rs`) draws them as cells. With the image look (docs/board.md) the list
+leaves its cells blank and hands the same rows to `image/`, which draws them as one
+image (`render.rs`, given rows and a size in pixels, with no terminal) and, after
+ratatui's frame and through the same output, sends and places it with the kitty
+graphics protocol (`kitty.rs`, `mod.rs`). Asking the terminal (`term.rs`) needs its
+input: the key reader (`main.rs`) stops while the board asks, and reads the answers
+itself. The rest of the board stays text.
 
 ## Closing a task
 

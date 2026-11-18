@@ -62,6 +62,7 @@ fn a_reload_keeps_the_selection_f_and_the_coordinator() {
             select: Some("BP-2".into()),
             closed: true,
             reloaded: true,
+            ..Default::default()
         }
     );
     a.closed = false;
@@ -82,4 +83,20 @@ fn f_says_whether_closed_tasks_show_and_an_old_boards_finished_still_works() {
     // a board from before --closed restarts the new one with --finished
     let argv = ["--dir", "d", "--root", "r", "--bullpen", "b", "--finished", "on"].map(String::from);
     assert!(parse_args(argv).unwrap().closed);
+}
+
+#[test]
+fn a_reload_keeps_the_look_i_switched_to() {
+    let mut a = App::for_test(vec![task("BP-1", "ready")]);
+    assert!(!a.restart_args().contains(&"--look".to_string()));
+    press(&mut a, 'I');
+    let args = parse_args(a.restart_args()).unwrap();
+    assert_eq!(args.look, Some(crate::model::Look::Image));
+}
+
+#[test]
+fn render_takes_a_file_and_a_width() {
+    let args = parse_args(["--dir", "d", "--root", "r", "--bullpen", "b", "--render", "out.png", "--cols", "50"].map(String::from)).unwrap();
+    assert_eq!((args.render, args.cols), (Some("out.png".into()), Some(50)));
+    assert!(parse_args(["--dir", "d", "--root", "r", "--bullpen", "b", "--cols", "wide"].map(String::from)).is_err());
 }

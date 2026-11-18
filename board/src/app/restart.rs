@@ -1,7 +1,8 @@
 //! Reloading the board when its program is replaced: telling one program file from
-//! another, and the command line the new one starts with.
+//! another, and the command line the new one starts with (and `--render`'s).
 
 use super::{App, Mode};
+use crate::model::Look;
 use std::path::{Path, PathBuf};
 
 /// What tells one program file from another: a rebuild renames a new file into place,
@@ -66,6 +67,9 @@ impl App {
         if self.closed {
             a.extend(["--closed".into(), "on".into()]);
         }
+        if self.look != self.cfg.look {
+            a.extend(["--look".into(), self.look.name().into()]);
+        }
         a.extend(["--reloaded".into(), "on".into()]);
         a
     }
@@ -81,6 +85,12 @@ pub struct Args {
     pub(super) select: Option<String>,
     pub(super) closed: bool,
     pub(super) reloaded: bool,
+    /// the look `I` switched to, over the setting's
+    pub(super) look: Option<Look>,
+    /// `--render FILE`: write the list as an image to FILE and quit (image/)
+    pub render: Option<PathBuf>,
+    /// `--cols N`: how wide a list `--render` draws
+    pub cols: Option<usize>,
 }
 
 pub fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<Args, String> {
@@ -98,6 +108,9 @@ pub fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<Args, String
             // --finished: what a board from before it was renamed restarts with
             "--closed" | "--finished" => out.closed = v == "on",
             "--reloaded" => out.reloaded = v == "on",
+            "--look" => out.look = Some(if v == "image" { Look::Image } else { Look::Text }),
+            "--render" => out.render = Some(PathBuf::from(v)),
+            "--cols" => out.cols = Some(v.parse().map_err(|_| format!("--cols needs a number, not {v}"))?),
             _ => return Err(format!("unknown argument {a}")),
         }
     }

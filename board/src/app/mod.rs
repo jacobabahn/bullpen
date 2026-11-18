@@ -21,7 +21,7 @@ pub fn run_bullpen(bullpen: &std::path::Path, cwd: &std::path::Path, args: &[&st
 pub use restart::{parse_args, Args, ExeId};
 
 use crate::edit::LineEdit;
-use crate::model::{self, Action, Config, Item, Prompt, Task};
+use crate::model::{self, Action, Config, Item, Look, Prompt, Task};
 use bullpen_core::fleet::Reader;
 use ratatui::crossterm::event::KeyEvent;
 use std::path::PathBuf;
@@ -148,6 +148,15 @@ pub struct App {
     /// ⏎ also has the Rex app show the pane's session (`go --switch`): mission control
     /// sets it, since it lives in a session of its own and the pane can't come to it
     pub go_switch: bool,
+    /// how the list is drawn this run: the board_look setting, until `I` switches it
+    pub look: Look,
+    /// the board_look setting as last read: a change to it changes `look`
+    look_set: Look,
+    /// the list is drawn as an image this frame (image/): the text list leaves its rows
+    /// blank and puts them in `view`
+    pub image: bool,
+    /// the list as drawn this frame, for the image
+    pub view: Option<crate::image::View>,
 }
 
 pub enum Msg {
@@ -159,16 +168,25 @@ pub enum Msg {
     Done { id: String, job: Job, ok: bool, out: String },
     Peeked { id: String, text: String, ok: bool },
     Prompted { id: String, prompt: Option<Prompt>, out: String },
+    /// the key reader has stopped so the board can ask the terminal something (image/term.rs)
+    Parked,
+    /// what the terminal answered
+    Answered(crate::image::term::Answers),
 }
 
 impl App {
     /// The board as the command line starts it; `exe` is its own program, to reload
     /// when that's replaced.
     pub fn new(args: Args, exe: Option<PathBuf>, tx: Sender<Msg>) -> App {
-        let Args { dir, root, bullpen, me, select, closed, reloaded } = args;
+        let Args { dir, root, bullpen, me, select, closed, reloaded, look, .. } = args;
         let repo_name = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let cfg = Config::load(&dir);
         App {
-            cfg: Config::load(&dir),
+            look: look.unwrap_or(cfg.look),
+            look_set: cfg.look,
+            image: false,
+            view: None,
+            cfg,
             tasks: Vec::new(),
             reader: Reader::default(),
             later: Vec::new(),
@@ -209,9 +227,11 @@ impl App {
     }
 
     pub fn reload(&mut self) {
-        self.cfg = Config::load(&self.dir);
-        self.tasks = model::load_tasks(&mut self.reader, &self.dir);
-        self.later = model::load_later(&self.dir);
+        self.read();
+        if self.cfg.look != self.look_set {
+            self.look = self.cfg.look;
+            self.look_set = self.cfg.look;
+        }
         // the backlog emptied: the next item added shows as the folded line again
         if self.later.is_empty() {
             self.later_open = false;
@@ -228,6 +248,14 @@ impl App {
             self.others = Default::default();
         }
         self.take_select();
+    }
+
+    /// Read the settings, the tasks and the backlog, and nothing else (`--render` does
+    /// only this).
+    pub fn read(&mut self) {
+        self.cfg = Config::load(&self.dir);
+        self.tasks = model::load_tasks(&mut self.reader, &self.dir);
+        self.later = model::load_later(&self.dir);
     }
 
     /// Select the task `bullpen go <id> --board` asked this board to (the picker does,
@@ -262,6 +290,17 @@ impl App {
     /// The tasks in the order the board shows them.
     pub fn order(&self) -> Vec<&Task> {
         self.groups().into_iter().flat_map(|(_, ts)| ts).collect()
+    }
+
+    /// `I`: draw the list as an image, or as text again, for this run (the board_look
+    /// setting is what a board starts with).
+    fn switch_look(&mut self) {
+        self.look = self.look.other();
+        self.msg = Note::info(match (self.look, self.cfg.layout) {
+            (Look::Text, _) => "Drawing the list as text.",
+            (Look::Image, model::Layout::Compact) => "The compact layout stays text: l switches to grouped.",
+            (Look::Image, model::Layout::Grouped) => "Drawing the list as an image.",
+        });
     }
 
     /// Show or hide the other coordinators' tasks, and remember it for this board.
@@ -347,7 +386,7 @@ impl App {
             Msg::Done { id, job, ok, out } => self.done(id, job, ok, out),
             Msg::Peeked { id, text, ok } => self.peeked(id, text, ok),
             Msg::Prompted { id, prompt, out } => self.prompted(id, prompt, out),
-            Msg::Redraw | Msg::Changed => {}
+            Msg::Redraw | Msg::Changed | Msg::Parked | Msg::Answered(_) => {}
         }
         true
     }

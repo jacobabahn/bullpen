@@ -104,6 +104,7 @@ in the order `?` lists them:
 | `s` | start it |
 | `r` | resume a stopped worker |
 | `l` | switch layout: compact, one line a task, or back |
+| `I` | draw the list as an image, or as text again, for as long as the board runs (see [The image look](#the-image-look)) |
 | `f` | show the closed tasks too |
 | `o` | show other coordinators' tasks too (see [Several coordinators](several-coordinators.md)) |
 | `esc` | put a red message away (see below) |
@@ -137,6 +138,45 @@ Accepting or dropping from the board (or a shell) is news to the coordinator:
 coordinator's own pane, `accept` and `drop` post nothing: it already knows.
 Tasks that waited on the accepted one start by themselves (see
 [Dependencies](dependencies.md)).
+
+## The image look
+
+`bullpen config --board-look image` (or `I` on the board, for this run) draws the
+list of tasks as one image instead of text: real type, the marks drawn as shapes
+(rings, a check, a diamond) in the status colours, the selected task on a rounded
+tint with its ID in a pill, and the amber or red bar beside a task that needs you.
+It says everything the text list does, row for row: each task's ID, title, mark,
+risk, age and lines, the groups and the Later group. The marks stand still: a
+working task's is a ring with a third of it drawn, a task in review's a half-filled
+blue ring, and a running command's (or a tour being written) an arc most of the way
+round. Only the list is an image; the top line, the message and key rows, `?`,
+peeks, answers, the line you type and mission control stay text, and so does the
+compact layout (`l`): with it the list is text whatever the look.
+
+It needs a terminal that draws kitty graphics, as Rex does. The board asks the
+terminal first and draws text until it answers; when it doesn't draw images (or
+doesn't answer in two seconds), doesn't say its cell size in pixels, the font
+can't be read or drawing fails, the list is text again and the message line says
+why ("Drawing the list as text: the terminal doesn't draw kitty graphics."). `I`
+tries again.
+
+The image follows the terminal's theme: its colours are the terminal's own
+foreground, background, red, green, yellow and blue, asked when the board starts
+drawing images and again every three seconds, and its background is clear, so the
+pane's shows through. The type is Inter (built into the board, SIL Open Font
+License); `bullpen config --board-font PATH` draws with another font file (TTF or
+OTF) instead, with Inter for the characters it lacks.
+
+The list is drawn whole, at the terminal's cell size, as one tall image sent once
+each time what it shows changes (a task's status or age, the selection), and
+scrolling moves the part of it shown, which costs a few bytes: cheap over a remote
+connection. The image is pinned to the list's columns and rows, so a client with
+other cell sizes (Rex on a phone) scales it to fit. A list taller than 16,000
+pixels is sent a window of rows at a time.
+
+`bullpen-board --dir <state dir> --root <repo> --bullpen <program> --render FILE
+--cols N` writes the list as the image look draws it to FILE, a PNG N columns wide
+(60 by default), on the default dark colours, without a terminal.
 
 ## The Later group
 

@@ -33,6 +33,7 @@ pub const BOARD_KEYS: &[(&str, &[(&str, &str)])] = &[
     ]),
     ("The board", &[
         ("l", "switch layout"),
+        ("I", "draw the list as an image, or text"),
         ("f", "show closed tasks too"),
         ("o", "other coordinators' tasks too"),
         ("esc", "put a red message away"),

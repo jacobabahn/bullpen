@@ -13,10 +13,12 @@
 //! Usage: bullpen-board --dir <repo state dir> --root <repo> --bullpen <bullpen program>
 //!
 //! With `--mission` first it's mission control instead, every repo on one screen
-//! (mission/; `bullpen mission` runs it).
+//! (mission/; `bullpen mission` runs it). With `--render FILE` it writes its list as the
+//! image look draws it to FILE (a PNG) and quits.
 
 mod app;
 mod edit;
+mod image;
 mod mission;
 mod model;
 mod ui;
@@ -25,9 +27,10 @@ mod ui;
 use app::{parse_args, App, Kind, Mode, Msg, Note};
 use notify::{RecursiveMode, Watcher};
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 /// Take the terminal, with bracketed paste on: a paste arrives whole, so a newline
@@ -62,6 +65,9 @@ fn main() {
             std::process::exit(2);
         }
     };
+    if let Some(path) = args.render.clone() {
+        return render(args, &path);
+    }
     let (tx, rx) = mpsc::channel();
     // The program as `bullpen board` named it: a rebuild replaces that file.
     let exe = std::env::args_os().next().map(PathBuf::from).filter(|p| p.is_absolute());
@@ -80,19 +86,10 @@ fn main() {
         let _ = w.watch(&app.dir, RecursiveMode::Recursive);
     }
 
-    let keys = tx;
-    std::thread::spawn(move || loop {
-        let m = match event::read() {
-            Ok(Event::Key(k)) if k.kind == KeyEventKind::Press => Msg::Key(k),
-            Ok(Event::Paste(text)) => Msg::Paste(text),
-            Ok(Event::Resize(..)) => Msg::Redraw,
-            Ok(_) => continue,
-            Err(_) => return,
-        };
-        if keys.send(m).is_err() {
-            return;
-        }
-    });
+    // the key reader; it stops while the image look asks the terminal something
+    let gate = Arc::new(image::term::Gate::default());
+    read_keys(tx, gate.clone());
+    let mut picture = image::Picture::new(gate);
 
     // Rex picks a pane's icon by the program in it and doesn't know this one. A
     // program can say what it is (OSC 7501's app): "rust" gets Rust's icon.
@@ -108,6 +105,7 @@ fn main() {
             (stale, read) = (false, Instant::now());
             if let Some(exe) = app.replaced() {
                 use std::os::unix::process::CommandExt;
+                picture.clear(term.backend_mut());
                 term_restore();
                 let err = Command::new(&exe).args(app.restart_args()).exec(); // returns only if it failed
                 term = term_init();
@@ -117,21 +115,26 @@ fn main() {
         }
         app.settle();
         app.peek();
+        app.image = picture.drawing(&app);
         if term.draw(|f| ui::draw(f, &mut app)).is_err() {
             break;
+        }
+        // the image after the frame, through the same output, never in the middle of one
+        if picture.show(&mut app, term.backend_mut()) {
+            continue; // the list is text again: draw it now
         }
         let m = match rx.recv_timeout(app.tick()) {
             Ok(m) => m,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
-        stale = true; // a key may have changed a task, and a file event says one did
-        if !app.handle(m) {
+        stale = !matches!(m, Msg::Parked | Msg::Answered(_)); // a key may have changed a task, and a file event says one did
+        if !handle(&mut app, &mut picture, term.backend_mut(), m) {
             break;
         }
         // a burst of file events is one redraw
         while let Ok(m) = rx.try_recv() {
-            if !app.handle(m) {
+            if !handle(&mut app, &mut picture, term.backend_mut(), m) {
                 break 'main;
             }
         }
@@ -146,6 +149,82 @@ fn main() {
             _ => {}
         }
     }
+    picture.clear(term.backend_mut());
     term_restore();
     status("state=clear");
+}
+
+/// One message: the image look's own (the terminal's answers), else the board's.
+fn handle(app: &mut App, picture: &mut image::Picture, out: &mut impl Write, m: Msg) -> bool {
+    match m {
+        Msg::Parked => picture.parked(out),
+        Msg::Redraw => {
+            picture.resized();
+            return app.handle(m);
+        }
+        Msg::Answered(a) => {
+            picture.answered(&a);
+            // what was typed while the board read the answers
+            for typed in image::term::keys(&a.rest) {
+                let m = match typed {
+                    image::term::Typed::Key(k) => Msg::Key(k),
+                    image::term::Typed::Paste(text) => Msg::Paste(text),
+                };
+                if !app.handle(m) {
+                    return false;
+                }
+            }
+        }
+        m => return app.handle(m),
+    }
+    true
+}
+
+/// Read keys on a thread of their own, sending them to the board. While the image look
+/// asks the terminal something the reader stops, and reads the answers instead (image/term.rs).
+fn read_keys(keys: mpsc::Sender<Msg>, gate: Arc<image::term::Gate>) {
+    std::thread::spawn(move || loop {
+        if gate.wanted() {
+            if keys.send(Msg::Parked).is_err() {
+                return;
+            }
+            gate.park();
+            let answers = image::term::read_answers(Some(image::PROBE));
+            gate.done();
+            if keys.send(Msg::Answered(answers)).is_err() {
+                return;
+            }
+            continue;
+        }
+        // look for a key a tenth of a second at a time, so a wish to ask is seen soon
+        match event::poll(Duration::from_millis(100)) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(_) => return,
+        }
+        let m = match event::read() {
+            Ok(Event::Key(k)) if k.kind == KeyEventKind::Press => Msg::Key(k),
+            Ok(Event::Paste(text)) => Msg::Paste(text),
+            Ok(Event::Resize(..)) => Msg::Redraw,
+            Ok(_) => continue,
+            Err(_) => return,
+        };
+        if keys.send(m).is_err() {
+            return;
+        }
+    });
+}
+
+/// `--render FILE`: the board's list as the image look draws it, written to FILE.
+fn render(args: app::Args, path: &std::path::Path) {
+    let (tx, _rx) = mpsc::channel();
+    let cols = args.cols.unwrap_or(60).max(20);
+    let mut app = App::new(args, None, tx);
+    app.read();
+    app.settle();
+    let rows = ui::rows::build(&app, cols + 2, cols + 2 < ui::NARROW, model::now());
+    if let Err(e) = image::render_file(&rows, cols, (16, 34), app.cfg.font.as_deref(), path) {
+        eprintln!("bullpen-board: {e}");
+        std::process::exit(1);
+    }
 }

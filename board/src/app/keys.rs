@@ -300,6 +300,7 @@ impl App {
                 };
                 self.msg = if ok { Note::info(said) } else { Note::failed(out) };
             }
+            (_, Some('I')) => self.switch_look(),
             (_, Some('f')) => {
                 self.closed = !self.closed;
                 self.top = 0;
