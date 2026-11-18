@@ -144,7 +144,7 @@ fn the_other_repos_get_the_room_before_this_ones_counts() {
 #[test]
 fn the_top_line_counts_in_the_order_of_the_groups() {
     // what the top line counts, in the order the board lists their groups
-    let groups: Vec<&str> = GROUPS.iter().flat_map(|(_, sts)| sts.iter().copied()).collect();
+    let groups: Vec<&str> = BOARD_GROUPS.iter().flat_map(|(_, sts)| sts.iter().copied()).collect();
     let counted: Vec<&str> = act_parts(1, 1, true).into_iter().map(|(_, st)| st).collect();
     let at: Vec<usize> = counted.iter().map(|st| groups.iter().position(|g| g == st).unwrap()).collect();
     assert!(at.windows(2).all(|w| w[0] < w[1]), "{counted:?} against {groups:?}");

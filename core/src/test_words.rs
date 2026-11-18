@@ -21,6 +21,37 @@ pub fn minutes_ago(minutes: i64) -> String {
 }
 
 #[test]
+fn every_status_has_one_board_group() {
+    for st in MARKED {
+        let n = BOARD_GROUPS.iter().filter(|(_, sts)| sts.contains(&st)).count();
+        assert_eq!(n, 1, "{st} is in {n} groups");
+    }
+    let statuses: usize = BOARD_GROUPS.iter().map(|(_, sts)| sts.len()).sum();
+    assert_eq!(statuses, MARKED.len(), "a group holds a status without a mark");
+    let heads: Vec<&str> = BOARD_GROUPS.iter().map(|(h, _)| *h).collect();
+    assert_eq!(heads.first(), Some(&"Needs you"));
+    assert_eq!(heads.last(), Some(&"Closed"));
+}
+
+#[test]
+fn board_order_follows_the_groups_and_puts_the_unknown_last() {
+    // numbered in the table's order, handed over backwards
+    let statuses: Vec<&str> = BOARD_GROUPS
+        .iter()
+        .flat_map(|(_, sts)| sts.iter().copied())
+        .chain(["odd"])
+        .collect();
+    let mut ts: Vec<Obj> = statuses
+        .iter()
+        .enumerate()
+        .map(|(i, st)| task(json!({"id": format!("BP-{}", i + 1), "status": st})))
+        .collect();
+    ts.reverse();
+    let order: Vec<String> = board_order(ts).iter().map(|t| s(t, "status").to_string()).collect();
+    assert_eq!(order, statuses);
+}
+
+#[test]
 fn test_board_order_puts_what_you_do_next_first() {
     let statuses = [
         "todo", "working", "ready", "stopped", "needs", "triage", "done", "review", "finished",

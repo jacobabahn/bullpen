@@ -1,6 +1,7 @@
-//! What the board says about a task, for `ls`, `show` and the board: its mark, the board's order, its
-//! age, and the board's sentence for where it stands. The board (board/src/model/detail.rs)
-//! says these too, and keeps its own words only where they differ on purpose.
+//! What the board says about a task, for `ls`, `show` and the board: its mark, the
+//! board's groups (`BOARD_GROUPS`) and order, its age, and the board's sentence for where
+//! it stands. The board (board/src/model/detail.rs) says these too, and keeps its own
+//! words only where they differ on purpose.
 //!
 //! A backlog task's `↻` (`from_mark`, `from_detail`); the board's sentence is `board_detail`,
 //! made of `status_detail`, `with_gh`, `auto_detail`, `model_detail` and `doing_said`.
@@ -61,19 +62,25 @@ pub fn count_phrase(n: usize, what: &str) -> String {
     }
 }
 
-/// The board's groups, in order: what you do next first.
-fn board_group(status: &str) -> u8 {
-    match status {
-        "needs" | "stopped" => 0,
-        "triage" => 1,
-        "ready" => 2,
-        "finished" => 3,
-        "review" => 4,
-        "working" => 5,
-        "todo" => 6,
-        "done" | "dropped" => 7,
-        _ => 8,
-    }
+/// The board's groups, in order, each heading with its statuses: what the person does
+/// next comes first. The board shows them, and `ls` and mission control list tasks in
+/// their order (board_order). A task its coordinator sees to (triage) sits below what
+/// needs you: it isn't yours yet.
+pub const BOARD_GROUPS: &[(&str, &[&str])] = &[
+    ("Needs you", &["needs", "stopped"]),
+    ("Coordinator on it", &["triage"]),
+    ("Ready to accept", &["ready"]),
+    ("Finished", &["finished"]),
+    ("In review", &["review"]),
+    ("Working", &["working"]),
+    ("Queued", &["todo"]),
+    ("Closed", &["done", "dropped"]),
+];
+
+/// Where a status's group comes in BOARD_GROUPS; a status in none comes after them all.
+fn board_group(status: &str) -> usize {
+    let at = BOARD_GROUPS.iter().position(|(_, sts)| sts.contains(&status));
+    at.unwrap_or(BOARD_GROUPS.len())
 }
 
 /// Tasks as the board lists them: by group (needs you first), then by number.

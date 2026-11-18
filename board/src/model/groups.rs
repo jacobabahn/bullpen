@@ -1,21 +1,12 @@
-//! The board's groups and marks, and what it hides.
+//! The board's groups (core's table) and marks, and what it hides.
 
 use super::*;
 
-// The board groups tasks by what the person does next. Colour only marks status;
-// the one loud thing is the amber bar beside a task that needs you. A task its
-// coordinator sees to (triage) sits dimmed below, with no bar: it isn't yours yet.
+// The board groups tasks by what the person does next (core's BOARD_GROUPS). Colour
+// only marks status; the one loud thing is the amber bar beside a task that needs you.
+// A task its coordinator sees to (triage) sits dimmed below, with no bar.
 
-pub const GROUPS: &[(&str, &[&str])] = &[
-    ("Needs you", &["needs", "stopped"]),
-    ("Coordinator on it", &["triage"]),
-    ("Ready to accept", &["ready"]),
-    ("Finished", &["finished"]),
-    ("In review", &["review"]),
-    ("Working", &["working"]),
-    ("Queued", &["todo"]),
-    ("Closed", &["done", "dropped"]),
-];
+pub use bullpen_core::words::BOARD_GROUPS;
 
 /// Seconds a task can need you before its age turns red; each status's mark. `ls`
 /// shows the same marks.
@@ -23,7 +14,7 @@ pub use bullpen_core::words::{mark, STALE};
 
 /// The groups that have tasks, each sorted by ID; the closed ones only with `closed`.
 pub fn board_groups(tasks: &[Task], closed: bool) -> Vec<(&'static str, Vec<&Task>)> {
-    GROUPS
+    BOARD_GROUPS
         .iter()
         .filter(|(heading, _)| closed || *heading != "Closed")
         .filter_map(|(heading, statuses)| {
