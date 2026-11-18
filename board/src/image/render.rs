@@ -258,11 +258,14 @@ pub struct Marks {
 /// The pixels drawn past a window's edges, and cut off (render).
 const EDGE: u32 = 4;
 
-/// What of the laid-out rows an image shows: rows[range], the first at the top of the
-/// layout, of which the pixels [y, y + h); the scroll marks; and the rows whose marks
-/// are left out (`bare`), for sprite.rs to place over them.
+/// What of the laid-out rows an image shows: rows[range], the first `at` pixels down the
+/// layout (where it is in the whole list, so a row is drawn at the same place in every
+/// image of it, to the bit), of which the pixels [y, y + h) from the first one's top;
+/// the scroll marks; and the rows whose marks are left out (`bare`), for sprite.rs to
+/// place over them.
 pub struct Cut<'a> {
     pub range: Range<usize>,
+    pub at: u32,
     pub y: u32,
     pub h: u32,
     pub marks: Marks,
@@ -272,7 +275,7 @@ pub struct Cut<'a> {
 impl Cut<'_> {
     /// All of rows[range], from their top, in an image `h` high, every mark drawn.
     pub fn rows(range: Range<usize>, h: u32) -> Cut<'static> {
-        Cut { range, y: 0, h, marks: Marks::default(), bare: &|_| false }
+        Cut { range, at: 0, y: 0, h, marks: Marks::default(), bare: &|_| false }
     }
 }
 
@@ -288,7 +291,7 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
     let mut pm = Pixmap::new(width, height + 2 * EDGE).ok_or_else(made)?;
     let mut d = Draw::new(&mut pm, fonts, c, laid.idw);
     let mut places = Vec::new();
-    let mut y = 0;
+    let mut y = cut.at;
     for i in range.clone() {
         let id = match &rows.rows[i] {
             Row::Task(t) => Some(t.id.clone()),
@@ -300,7 +303,7 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
     }
     // the window: the rows are drawn where they are in the layout, moved up by its top
     // (whole pixels), so a row's edges fall on the same fractions of a pixel in any image
-    d.shift = cut.y as f32 - EDGE as f32;
+    d.shift = (cut.at + cut.y) as f32 - EDGE as f32;
     // behind each task's block (its row and its lines): the selected one's card, or the
     // wash of one that needs you, and that one's bar
     for b in blocks(rows, &places, c.m.pad) {
@@ -317,7 +320,8 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
     for p in &places {
         let (y, h) = (at(p), p.h as f32);
         // a row outside the window draws nothing (its card, wash and bar may reach in, above)
-        if y + h + c.m.pad + EDGE as f32 >= cut.y as f32 && y <= (cut.y + height + EDGE) as f32 {
+        let top = (cut.at + cut.y) as f32;
+        if y + h + c.m.pad + EDGE as f32 >= top && y <= top + (height + EDGE) as f32 {
             d.row(&rows.rows[p.row], &laid.lines[p.row], y, (cut.bare)(p.row));
         }
     }

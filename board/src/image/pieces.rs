@@ -19,6 +19,7 @@ use super::font::Fonts;
 use super::View;
 use crate::ui::list::scroll_by;
 use crate::ui::rows::{Mark, Row, Rows};
+use std::ops::Range;
 
 /// The list's block of cells, as pieces.
 #[derive(Debug, Clone, PartialEq)]
@@ -30,13 +31,19 @@ pub struct Plan {
     /// the rows laid out, the selected block with the space after it that makes the rows
     /// under it whole cells lower than in the base image
     pub laid: Laid,
-    /// the rows with nothing selected, laid out; the base image draws [top, base_end)
+    /// the rows with nothing selected, laid out
     pub base: Laid,
-    pub base_end: usize,
     /// the base image draws the rows as they are (`laid`): nothing selected is shown
     pub whole: bool,
-    /// the base image's crops: its first cell, the list's cell it's placed on, the cells
-    pub crops: Vec<(u16, u16, u16)>,
+    /// the base image: of the rows `win`, the first `win_at` pixels down the list, the
+    /// pixels [win_y, win_y + win_h) from the first one's top (window)
+    pub win: Range<usize>,
+    pub win_at: u32,
+    pub win_y: u32,
+    pub win_h: u32,
+    /// the base image's crops: the pixel of it they start at, the list's cell they're
+    /// placed on, the cells
+    pub crops: Vec<(u32, u16, u16)>,
     /// the selected block's cells (first, how many), and the tail's, drawn from `laid`
     pub sel: Option<(u16, u16)>,
     pub tail: Option<(u16, u16)>,
@@ -49,6 +56,11 @@ impl Plan {
     /// Where row i starts, in pixels from the list's top (a row shown).
     pub fn y(&self, i: usize) -> u32 {
         self.ys[i - self.top]
+    }
+
+    /// How far the first row shown is from the whole list's first (render's `Cut::at`).
+    pub fn at(&self) -> u32 {
+        self.laid.tall(0, self.top)
     }
 }
 
@@ -83,41 +95,58 @@ pub fn plan(view: &View, c: &Canvas, fonts: &Fonts) -> Plan {
     let page = view.rows.rows[top..end].iter().filter(|r| r.is_entry()).count().max(1);
     let ys = (top..end).scan(0, |y, i| Some(std::mem::replace(y, *y + laid.span(i)))).collect();
     let scroll = Marks { up: top > 0, down: end < view.rows.rows.len() };
-    let mut p = Plan { top, end, page, base_end: top, whole: false, laid, base, crops: vec![], sel: None, tail: None, ys, scroll };
-    let Some((s0, _, b1)) = block.filter(|(s0, ..)| (top..end).contains(s0)) else {
+    let in_view = block.filter(|(s0, ..)| (top..end).contains(s0));
+    let base = if in_view.is_some() { base } else { laid.clone() };
+    let (win, win_y, win_h) = window(&base, top, room, ch);
+    let win_at = base.tall(0, win.start);
+    let at0 = base.tall(0, top) - win_at - win_y;
+    let mut p = Plan { top, end, page, laid, base, whole: in_view.is_none(), win, win_at, win_y, win_h, crops: vec![], sel: None, tail: None, ys, scroll };
+    // the cell where the last whole row ends: what's past it mustn't show, and the rest
+    // of that cell is an image of its own (the tail)
+    let last = (p.laid.tall(top, end) / ch).min(rows_n as u32) as u16;
+    let tail = |p: &mut Plan, past: u16| {
+        if last >= past && last < rows_n {
+            p.tail = Some((last, 1));
+        }
+    };
+    let Some((s0, _, b1)) = in_view else {
         // nothing selected in view: the base image is the list
-        p.base = p.laid.clone();
-        (p.base_end, p.whole) = (end, true);
-        p.crops.push((0, 0, rows_n));
+        if last > 0 {
+            p.crops.push((at0, 0, last));
+        }
+        tail(&mut p, 0);
         return p;
     };
-    p.base_end = fitting(&p.base, top, room);
     let y_s = p.y(s0);
     let first = y_s / ch;
     let past = ((y_s + p.base.tall(s0, b1)).div_ceil(ch) + grew).min(rows_n as u32);
     if first > 0 {
-        p.crops.push((0, 0, first as u16));
+        p.crops.push((at0, 0, first as u16));
     }
     p.sel = Some((first as u16, (past - first) as u16));
-    let shift = grew as u16;
-    let past = past as u16;
-    if grew == 0 {
-        // the rows under it are where the base image has them, and end as it does
-        if past < rows_n {
-            p.crops.push((past, past, rows_n - past));
-        }
-        return p;
-    }
-    // the cell where the last whole row ends: the rows past it are the base image's
-    // next ones, which mustn't show
-    let last = (p.laid.tall(top, end) / ch).min(rows_n as u32) as u16;
+    let (shift, past) = (grew as u16, past as u16);
+    // the rows under it are the base image's, as many whole cells lower as it grew
     if last > past {
-        p.crops.push((past - shift, past, last - past));
+        p.crops.push((at0 + (past - shift) as u32 * ch, past, last - past));
     }
-    if last >= past && last < rows_n {
-        p.tail = Some((last, 1));
-    }
+    tail(&mut p, past);
     p
+}
+
+/// The base image's window of the rows laid out, for a list scrolled to `top` with
+/// `room` pixels: its rows, and the pixels from the first one's top it shows. The whole
+/// list when it's under three pages; else two pages, at a page's steps, so scrolling
+/// a row moves the crops and sends nothing, and a page sends the image again.
+fn window(base: &Laid, top: usize, room: u32, ch: u32) -> (Range<usize>, u32, u32) {
+    let n = base.heights.len();
+    let total = base.tall(0, n);
+    let (y, h) = if total <= 3 * room { (0, total.max(ch)) } else { (base.tall(0, top) / room * room, 2 * room) };
+    // the rows it draws: those it shows, and one more each way for what reaches in
+    let starts: Vec<u32> = (0..n).scan(0, |at, i| Some(std::mem::replace(at, *at + base.span(i)))).collect();
+    let first = (0..n).find(|&i| starts[i] + base.span(i) > y).unwrap_or(n).saturating_sub(1);
+    let past = (0..n).find(|&i| starts[i] >= y + h).map_or(n, |i| (i + 1).min(n));
+    let from = starts.get(first).copied().unwrap_or(0);
+    (first..past, y - from, h)
 }
 
 /// Is a row's mark left out of the list's images, for a sprite to place: one that turns

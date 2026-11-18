@@ -112,6 +112,12 @@ impl Screen {
         Ok(())
     }
 
+    /// The ID of the image the slot shows.
+    #[cfg(test)]
+    pub fn id(&self, slot: &Slot) -> Option<u32> {
+        self.shown.get(slot).map(|s| s.id)
+    }
+
     /// The terminal may have cleared the screen and the images with it (a resize): the
     /// next frame sends each again (the old one is deleted after, if it's there).
     pub fn forget(&mut self) {

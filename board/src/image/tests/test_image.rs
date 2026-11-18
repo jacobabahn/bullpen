@@ -611,3 +611,29 @@ fn under_an_overlay_a_mark_settling_doesnt_keep_the_board_waking() {
     frame(&mut app, &mut p);
     assert_eq!(p.tick(), None);
 }
+
+#[test]
+fn scrolling_a_row_moves_the_lists_crops_and_sends_the_list_again_only_a_page_on() {
+    // the list's image is sent again when its ID changes
+    let walk = |n: usize| {
+        let (mut app, mut p) = (board(n), picture());
+        asked(&mut app, &mut p);
+        frame(&mut app, &mut p);
+        let (mut ids, mut tops) = (vec![p.screen.id(&Slot::List)], vec![]);
+        for k in 2..=n {
+            app.sel = Some(format!("BP-{k}"));
+            frame(&mut app, &mut p);
+            ids.push(p.screen.id(&Slot::List));
+            tops.push(app.top);
+        }
+        ids.dedup();
+        assert!(tops.last() > tops.first(), "the list scrolled: {tops:?}");
+        ids.len()
+    };
+    // six tasks are under three pages of a six-row list: its image is all of them
+    assert_eq!(walk(6), 1);
+    // thirty, about twelve pages: two pages at a time, sent again a page on (a task
+    // or two takes a page here), not at each of the 29 moves
+    let sent = walk(30);
+    assert!(sent > 1 && sent <= 13, "{sent}");
+}

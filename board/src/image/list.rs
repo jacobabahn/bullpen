@@ -36,17 +36,18 @@ pub fn key(slot: &Slot, f: &Frame, what: impl Hash) -> u64 {
     h.finish()
 }
 
-/// The rows the base image draws: those with nothing selected, or the rows as they are.
+/// The rows the base image draws: those with nothing selected, or the rows as they are;
+/// of them, its window's.
 fn base_rows<'a>(f: &Frame<'a>) -> &'a [Row] {
     let rows = if f.plan.whole { &f.view.rows } else { &f.view.base };
-    &rows.rows
+    &rows.rows[f.plan.win.clone()]
 }
 
 /// What the base image shows, but for which of its marks are left out: when this
 /// changes, the image is drawn again anyway (marks done settling go back in it).
 pub fn base_shows(f: &Frame) -> u64 {
     let p = f.plan;
-    key(&Slot::List, f, (&base_rows(f)[p.top..p.base_end], p.base.idw.to_bits(), f.view.rows_n))
+    key(&Slot::List, f, (base_rows(f), p.win_y, p.win_h, p.base.idw.to_bits()))
 }
 
 /// The slot's image drawn and made a PNG, or why it couldn't be drawn, as the message
@@ -72,18 +73,17 @@ pub fn wants(f: &Frame, screen: &Screen, fonts: &mut Fonts) -> Result<Vec<Want>,
 
     // the base image, as its crops
     let rows = base_rows(f);
-    let range = p.top..p.base_end;
-    let flags: Vec<bool> = rows[range.clone()].iter().map(f.bare).collect();
+    let flags: Vec<bool> = rows.iter().map(f.bare).collect();
     let k = key(&Slot::List, f, (base_shows(f), flags));
     let png = if screen.has(&Slot::List, k) {
         None
     } else {
         let rs = if p.whole { &v.rows } else { &v.base };
-        let bare = |i: usize| (f.bare)(&rows[i]);
-        let cut = Cut { range, y: 0, h: v.rows_n as u32 * ch, marks: Marks::default(), bare: &bare };
+        let bare = |i: usize| (f.bare)(&rs.rows[i]);
+        let cut = Cut { range: p.win.clone(), at: p.win_at, y: p.win_y, h: p.win_h, marks: Marks::default(), bare: &bare };
         Some(encode(&Slot::List, || render(rs, &p.base, cut, c, fonts).map(|s| s.pixmap))?)
     };
-    let places = p.crops.iter().enumerate().map(|(k, &(from, at, n))| across(f, k as u32 + 1, at, n, from as u32 * ch)).collect();
+    let places = p.crops.iter().enumerate().map(|(k, &(from, at, n))| across(f, k as u32 + 1, at, n, from)).collect();
     wants.push(Want { slot: Slot::List, key: k, png, places });
 
     // the selected block's cells and the tail's, drawn from the rows as they are
@@ -95,7 +95,7 @@ pub fn wants(f: &Frame, screen: &Screen, fonts: &mut Fonts) -> Result<Vec<Want>,
             None
         } else {
             let bare = |i: usize| (f.bare)(&v.rows.rows[i]);
-            let cut = Cut { range: p.top..p.end, y: first as u32 * ch, h: n as u32 * ch, marks: Marks::default(), bare: &bare };
+            let cut = Cut { range: p.top..p.end, at: p.at(), y: first as u32 * ch, h: n as u32 * ch, marks: Marks::default(), bare: &bare };
             Some(encode(&slot, || render(&v.rows, &p.laid, cut, c, fonts).map(|s| s.pixmap))?)
         };
         wants.push(Want { slot, key: k, png, places: vec![across(f, 1, first, n, 0)] });

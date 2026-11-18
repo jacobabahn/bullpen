@@ -43,11 +43,6 @@ fn view_of(app: &mut App, sel: &str) -> View {
     app.view.clone().unwrap()
 }
 
-/// Rows [from, from + n) of cells of an image.
-fn cells(pm: &Pixmap, from: u32, n: u32, ch: u32) -> Pixmap {
-    pm.clone_rect(IntRect::from_xywh(0, (from * ch) as i32, pm.width(), n * ch).unwrap()).unwrap()
-}
-
 /// The list as the terminal shows it: the base image's crops, the selected block's
 /// image, the tail's, and (`bare`) each mark's frame placed over them.
 fn put_together(view: &View, p: &Plan, c: &Canvas, bare: bool) -> Pixmap {
@@ -59,13 +54,13 @@ fn put_together(view: &View, p: &Plan, c: &Canvas, bare: bool) -> Pixmap {
     let mut put = |img: &Pixmap, y: u32| pm.draw_pixmap(0, y as i32, img.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
     let rows = if p.whole { &view.rows } else { &view.base };
     let b = |i: usize| is_bare(&rows.rows[i]);
-    let base = render(rows, &p.base, Cut { range: p.top..p.base_end, y: 0, h: room, marks: Marks::default(), bare: &b }, c, &mut fonts).unwrap().pixmap;
+    let base = render(rows, &p.base, Cut { range: p.win.clone(), at: p.win_at, y: p.win_y, h: p.win_h, marks: Marks::default(), bare: &b }, c, &mut fonts).unwrap().pixmap;
     for &(from, at, n) in &p.crops {
-        put(&cells(&base, from as u32, n as u32, ch), at as u32 * ch);
+        put(&base.clone_rect(IntRect::from_xywh(0, from as i32, base.width(), n as u32 * ch).unwrap()).unwrap(), at as u32 * ch);
     }
     let d = |i: usize| is_bare(&view.rows.rows[i]);
     for (first, n) in [p.sel, p.tail].into_iter().flatten() {
-        let cut = Cut { range: p.top..p.end, y: first as u32 * ch, h: n as u32 * ch, marks: Marks::default(), bare: &d };
+        let cut = Cut { range: p.top..p.end, at: p.at(), y: first as u32 * ch, h: n as u32 * ch, marks: Marks::default(), bare: &d };
         put(&render(&view.rows, &p.laid, cut, c, &mut fonts).unwrap().pixmap, first as u32 * ch);
     }
     for i in p.top..p.end {
@@ -86,7 +81,7 @@ fn put_together(view: &View, p: &Plan, c: &Canvas, bare: bool) -> Pixmap {
 /// The list drawn whole, as one image: what the pieces must come to.
 fn whole(view: &View, p: &Plan, c: &Canvas) -> Pixmap {
     let room = view.rows_n as u32 * c.grid.cell_h;
-    render(&view.rows, &p.laid, Cut::rows(p.top..p.end, room), c, &mut Fonts::builtin()).unwrap().pixmap
+    render(&view.rows, &p.laid, Cut { at: p.at(), ..Cut::rows(p.top..p.end, room) }, c, &mut Fonts::builtin()).unwrap().pixmap
 }
 
 /// The most two images' channels differ by.
@@ -120,9 +115,11 @@ fn the_marks_placed_over_the_list_are_where_it_draws_them() {
         // frame is the still mark
         assert!(view.rows.rows[p.top..p.end].iter().filter(|r| bare(r, true, &|_| false)).count() >= 2);
         // a mark laid over the image is smoothed a shade differently from one drawn in it
-        // (at most one of the 16 samples the drawing takes of a pixel's edge, 16 levels);
-        // one a pixel out would be hundreds of levels apart
-        assert!(most_apart(&put_together(&view, &p, &c, true), &whole(&view, &p, &c)) <= 16, "{size:?}");
+        // (at most one of the 16 samples the drawing takes of a pixel's edge, 16 levels,
+        // and the list draws a row where it is in the whole list, maybe far down, which
+        // can round a sample more); one a pixel out would be hundreds of levels apart
+        let d = most_apart(&put_together(&view, &p, &c, true), &whole(&view, &p, &c));
+        assert!(d <= 24, "{size:?}: {d}");
     }
 }
 
@@ -135,7 +132,7 @@ fn moving_the_selection_keeps_the_base_image_and_moves_its_crops() {
     // the next task down (the board groups them: BP-2 is under BP-4), still on the page
     let view = view_of(&mut app, "BP-2");
     let b = plan(&view, &c, &Fonts::builtin());
-    assert_eq!((a.top, a.base_end, &a.base), (b.top, b.base_end, &b.base));
+    assert_eq!((a.top, &a.win, a.win_y, a.win_h, &a.base), (b.top, &b.win, b.win_y, b.win_h, &b.base));
     assert!(!a.whole && !b.whole);
     assert_ne!(a.crops, b.crops);
     assert_ne!(a.sel, b.sel);
@@ -171,8 +168,11 @@ fn with_nothing_selected_in_view_the_base_image_is_the_list() {
     app.look = Look::Image;
     let view = view_of(&mut app, "BP-1");
     let p = plan(&view, &c, &Fonts::builtin());
-    assert!(p.whole && p.sel.is_none() && p.tail.is_none());
-    assert_eq!(p.crops, vec![(0, 0, view.rows_n)]);
+    assert!(p.whole && p.sel.is_none());
+    // its crop, down to the cell where the last whole row ends, and the rest of that cell
+    let last = p.laid.tall(p.top, p.end) / c.grid.cell_h;
+    assert_eq!(p.crops, vec![(0, 0, last as u16)]);
+    assert_eq!(p.tail, Some((last as u16, 1)));
 }
 
 
