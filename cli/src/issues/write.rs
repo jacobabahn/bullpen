@@ -4,10 +4,10 @@
 //! comment at each; `off` writes nothing. Unless off, an accepted issue's task closes it:
 //! `Closes #N` at the end of its PR (remote mode, `closes_line`), or after the push to the
 //! push remote (local mode, `close_fixed`, which `_push` calls; `close_after_push` is
-//! what a push job that dies first says). A task closed or dropped
-//! unmerged takes `bullpen: started` off again (`unstarted`, which the one close step
-//! calls). A task made from an issue records the issue's number and repository (`issue`),
-//! and its writes go there.
+//! what a push job that dies first says). A task closed or dropped unmerged takes
+//! `bullpen: started` off again (`unstarted`, which the one close step calls). A task
+//! made from an issue records the issue's number and repository (`issue`), and its
+//! writes go there.
 //!
 //! The labels made are noted in `issue-labels`, by repository and label, and one is
 //! forgotten when gh says it isn't there (deleted on GitHub), so the next write makes it.
@@ -253,7 +253,8 @@ pub fn started(repo: &Repo, t: &mut Obj) -> Res<()> {
 }
 
 /// The person said no to an issue's item (`later L --drop`, through `decided`):
-/// `bullpen: declined` on the issue, and with comments, a comment with their reason if they gave one.
+/// `bullpen: declined` on the issue, and with comments, a comment with their reason if
+/// they gave one.
 pub fn declined(repo: &Repo, item: &Obj, why: Option<&str>) -> Res<()> {
     let Some(n) = number_of_item(item).filter(|_| writes(repo)) else {
         return Ok(());
