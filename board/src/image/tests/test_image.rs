@@ -150,9 +150,10 @@ fn a_change_sends_only_the_images_it_changes_and_places_each_before_the_old_one_
     let out = frame_in(&mut app, &mut p, 40, 40);
     assert!(!out.contains(&format!("i={HEAD}")) && !out.contains(&format!("a=t,f=100,t=d,i={LIST},")));
     let new = commands(&out).iter().find_map(|c| c.strip_prefix("a=t,f=100,t=d,i=").map(|r| r.split(',').next().unwrap().parse::<u32>().unwrap())).unwrap();
-    let (sent, put, deleted) =
-        (out.find(&format!("a=t,f=100,t=d,i={new}")).unwrap(), out.find(&format!("a=p,i={new}")).unwrap(), out.find(&kitty::delete(SEL)).unwrap());
-    assert!(sent < put && put < deleted);
+    let (sent, put, off) =
+        (out.find(&format!("a=t,f=100,t=d,i={new}")).unwrap(), out.find(&format!("a=p,i={new}")).unwrap(), out.find(&kitty::hide(SEL)).unwrap());
+    assert!(sent < put && put < off);
+    assert!(p.screen.kept().contains(&SEL)); // taken off, kept to place again
     // the list's crops move: placed again, not sent
     assert!(out.contains(&format!("a=p,i={LIST},")));
     // a message changes the bottom rows' image alone
@@ -335,7 +336,8 @@ fn colours_asked_again_change_the_image() {
     light.said.fg = Some(theme::Rgb(0, 0, 0));
     p.answered(&light);
     let out = frame(&mut app, &mut p);
-    assert!([HEAD, LIST, FOOT, SEL].iter().all(|id| out.contains(&kitty::delete(*id))));
+    // each sent again, the old ones taken off and kept a while
+    assert!([HEAD, LIST, FOOT, SEL].iter().all(|id| out.contains(&kitty::hide(*id)) && p.screen.kept().contains(id)));
 }
 
 #[test]
@@ -581,7 +583,7 @@ fn a_mark_settles_in_when_its_task_changes_status_then_goes_back_in_the_list() {
 }
 
 #[test]
-fn a_j_or_k_sends_its_new_images_before_anything_moves_and_deletes_the_old_after() {
+fn a_j_or_k_sends_its_new_images_before_anything_moves_and_takes_the_old_off_after() {
     let (mut app, mut p) = (mixed(), picture());
     asked(&mut app, &mut p);
     frame_in(&mut app, &mut p, 40, 40);
@@ -590,9 +592,11 @@ fn a_j_or_k_sends_its_new_images_before_anything_moves_and_deletes_the_old_after
         let c = commands(&frame_in(&mut app, &mut p, 40, 40));
         let last = |pre: &str| c.iter().rposition(|x| x.starts_with(pre));
         let first = |pre: &str| c.iter().position(|x| x.starts_with(pre));
-        // no cell is left without its image while the new block is on its way
-        assert!(last("a=t").is_some() && last("a=t") < first("a=p"), "{sel}: {c:?}");
-        assert!(last("a=p") < first("a=d,d=I"), "{sel}: {c:?}");
+        // no cell is left without its image while the new block is on its way (BP-1's
+        // was kept: it's only placed)
+        assert!((sel == "BP-1" || last("a=t").is_some()) && last("a=t") < first("a=p"), "{sel}: {c:?}");
+        let off = c.iter().position(|x| (x.starts_with("a=d,d=i,") && !x.contains("p=")) || x.starts_with("a=d,d=I"));
+        assert!(last("a=p") < off, "{sel}: {c:?}");
     }
 }
 
@@ -636,4 +640,38 @@ fn scrolling_a_row_moves_the_lists_crops_and_sends_the_list_again_only_a_page_on
     // or two takes a page here), not at each of the 29 moves
     let sent = walk(30);
     assert!(sent > 1 && sent <= 13, "{sent}");
+}
+
+#[test]
+fn going_back_to_a_task_places_its_block_again_and_sends_nothing() {
+    let (mut app, mut p) = (mixed(), picture());
+    asked(&mut app, &mut p);
+    frame_in(&mut app, &mut p, 40, 40);
+    let first = p.screen.id(&Slot::Sel);
+    app.sel = Some("BP-4".into());
+    frame_in(&mut app, &mut p, 40, 40);
+    app.sel = Some("BP-1".into());
+    let out = frame_in(&mut app, &mut p, 40, 40);
+    assert!(!out.contains("a=t,"), "{:?}", commands(&out));
+    assert_eq!(p.screen.id(&Slot::Sel), first);
+    assert!(out.contains(&format!("a=p,i={},p=1,", first.unwrap())));
+}
+
+#[test]
+fn the_images_kept_are_bounded_and_deleted_with_the_rest() {
+    let (mut app, mut p) = (board(30), picture());
+    asked(&mut app, &mut p);
+    frame(&mut app, &mut p);
+    let mut all = vec![];
+    for k in 2..=30 {
+        app.sel = Some(format!("BP-{k}"));
+        let out = frame(&mut app, &mut p);
+        all.extend(commands(&out).into_iter().filter_map(|c| c.strip_prefix("a=t,f=100,t=d,i=").map(|r| r.split(',').next().unwrap().to_string())));
+        assert!(p.screen.kept().len() <= 16);
+    }
+    // the oldest were deleted as more were kept; the rest go when the board is text again
+    app.look = Look::Text;
+    let out = frame(&mut app, &mut p);
+    let deleted: Vec<&String> = all.iter().filter(|id| out.contains(&format!("a=d,d=I,i={id},"))).collect();
+    assert!(p.screen.kept().is_empty() && deleted.len() >= 16, "{}", deleted.len());
 }
