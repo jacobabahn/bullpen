@@ -143,7 +143,8 @@ impl Board {
 
     /// A key, as the main loop takes it: handled and its frame drawn (the time and bytes
     /// counted, to the frame's last byte), then the tasks read again and drawn (the time
-    /// noted as "after").
+    /// noted as "after"), then what the next key would want drawn ahead ("ahead", its time
+/// and bytes).
     fn key(&mut self, c: char) -> Tally {
         meter::start();
         let t = Instant::now();
@@ -153,11 +154,22 @@ impl Board {
         let mut tally = meter::take();
         let t = Instant::now();
         self.frame();
-        meter::stop();
         tally.ms.insert("after".into(), t.elapsed().as_secs_f64() * 1000.0);
+        // the board waits for the next key: it draws what a j or k would want next
+        let (t, before) = (Instant::now(), self.out.bytes.get());
+        while self.ahead() {}
+        meter::stop();
+        tally.ms.insert("ahead".into(), t.elapsed().as_secs_f64() * 1000.0);
+        tally.bytes.insert("ahead".into(), self.out.bytes.get() - before);
         tally.ms.insert("total".into(), ms);
         tally.bytes.insert("total".into(), n);
         tally
+    }
+
+    /// Draw ahead one key's images, as the board does while it waits: more to draw?
+    fn ahead(&mut self) -> bool {
+        let area = self.term.get_frame().area();
+        self.picture.ahead(&mut self.app, area, self.term.backend_mut())
     }
 
     /// The tasks and items j moves through.
@@ -228,7 +240,8 @@ fn report(case: Case, tallies: &[Tally]) -> String {
 
 /// A held-down j: `keys` keys `gap` apart from a thread, as the key reader sends them,
 /// and the board's loop as main.rs runs it (a key's handled with every one waiting, then
-/// its frame, then the tasks read again and drawn; a tick draws a frame too). The frames
+/// its frame, then the tasks read again and drawn, then what the next key would want
+/// drawn ahead, a key's images at a time while none is waiting; a tick draws a frame too). The frames
 /// drawn, the time from the first key to the last key's frame, and how long after the
 /// last key that frame ended.
 fn held(b: &mut Board, keys: usize, gap: Duration) -> (usize, f64, f64) {
@@ -247,7 +260,14 @@ fn held(b: &mut Board, keys: usize, gap: Duration) -> (usize, f64, f64) {
     let (mut got, mut frames, mut last, mut read) = (0, 0, Instant::now(), Instant::now());
     while got < keys {
         let tick = b.picture.tick().map_or(b.app.tick(), |t| t.min(b.app.tick()));
-        match rx.recv_timeout(tick) {
+        let next = loop {
+            match rx.try_recv() {
+                Err(mpsc::TryRecvError::Empty) if b.ahead() => continue,
+                Ok(m) => break Ok(m),
+                Err(_) => break rx.recv_timeout(tick),
+            }
+        };
+        match next {
             Ok(m) => {
                 got += 1;
                 b.app.handle(m);

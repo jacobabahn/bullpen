@@ -128,7 +128,17 @@ fn main() {
         }
         // a mark settling in redraws sooner; a key never waits for it
         let tick = picture.tick().map_or(app.tick(), |t| t.min(app.tick()));
-        let m = match rx.recv_timeout(tick) {
+        // nothing waiting: draw what a j or a k would want next, looking for a key between
+        let area = term.get_frame().area();
+        let got = loop {
+            match rx.try_recv() {
+                Err(mpsc::TryRecvError::Empty) if picture.ahead(&mut app, area, term.backend_mut()) => continue,
+                Ok(m) => break Ok(m),
+                Err(mpsc::TryRecvError::Disconnected) => break Err(mpsc::RecvTimeoutError::Disconnected),
+                Err(mpsc::TryRecvError::Empty) => break rx.recv_timeout(tick),
+            }
+        };
+        let m = match got {
             Ok(m) => m,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,

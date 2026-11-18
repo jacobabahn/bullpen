@@ -24,6 +24,7 @@
 //! terminal doesn't draw images, the font can't be loaded or drawing fails, the list
 //! is text again and the message line says why.
 
+mod ahead;
 mod chip;
 mod font;
 mod frame;
@@ -128,6 +129,10 @@ pub struct Picture {
     clock: Option<u128>,
     /// a cell's size from the terminal's window size (tests have none)
     window: fn() -> Option<(u32, u32)>,
+    /// the view last drawn, and the keys whose images are still to be drawn ahead for
+    /// it (ahead.rs)
+    ahead_of: Option<View>,
+    todo: Vec<char>,
 }
 
 impl Picture {
@@ -148,6 +153,8 @@ impl Picture {
             ms: 0,
             clock: None,
             window: window_cell,
+            ahead_of: None,
+            todo: Vec::new(),
         }
     }
 
@@ -189,6 +196,7 @@ impl Picture {
         match self.draw(&view, app.cfg.text_size, app.cfg.font.as_deref(), app.cfg.motion, out) {
             Ok(Drawn { top, page }) => {
                 (app.top, app.page) = (top, page);
+                self.plan_ahead(Some(&view));
                 false
             }
             Err(why) => {
@@ -261,39 +269,15 @@ impl Picture {
         let ms = self.ms;
         settle(&mut self.seen, &mut self.settling, &view.rows, motion, ms);
         let plan = meter::time(|| "plan".into(), || pieces::plan(view, &canvas, fonts));
-        let mut f = list::Frame { view, plan: &plan, c: &canvas, size, bare: &|_| false, began: &|_| 0, ms };
+        let f = list::Frame { view, plan: &plan, c: &canvas, size, bare: &|_| false, began: &|_| 0, ms };
         // the list's image is drawn again: the marks done settling go back in it
         let shows = list::base_shows(&f);
         if shows != self.base_shows {
             self.base_shows = shows;
             self.settling.retain(|_, t| ms.saturating_sub(*t) < sprite::settling_ms());
         }
-        let settling = &self.settling;
-        let bare = |row: &Row| pieces::bare(row, motion, &|id| settling.contains_key(id));
-        // a turning mark turns with the text board's, from the board's start
-        let began = |row: &Row| match row {
-            Row::Task(t) if !sprite::turns(&t.mark) => settling.get(&t.id).copied().unwrap_or(0),
-            _ => 0,
-        };
-        (f.bare, f.began) = (&bare, &began);
-
-        let head_n = view.row - view.row0;
-        let foot_n = if view.foot.is_some() { view.foot_n } else { 0 };
-        let mut wants = Vec::new();
-        let k = list::key(&Slot::Head, &f, (&view.head, head_n));
-        if head_n > 0 {
-            let png = (!self.screen.has(&Slot::Head, k)).then(|| list::encode(&Slot::Head, || frame::head(&view.head, head_n, &canvas, fonts))).transpose()?;
-            wants.push(Want { slot: Slot::Head, key: k, png, places: vec![whole(view, &canvas, view.row0, head_n)] });
-        }
-        let mut list = list::wants(&f, &self.screen, fonts)?;
-        let sprites = list.split_off(list.iter().position(|w| matches!(w.slot, Slot::Sel | Slot::Tail | Slot::Sprite(_))).unwrap_or(list.len()));
-        wants.extend(list);
-        if let Some(foot) = view.foot.as_ref().filter(|_| foot_n > 0) {
-            let k = list::key(&Slot::Foot, &f, (foot, foot_n));
-            let png = (!self.screen.has(&Slot::Foot, k)).then(|| list::encode(&Slot::Foot, || frame::foot(foot, foot_n, &canvas, fonts))).transpose()?;
-            wants.push(Want { slot: Slot::Foot, key: k, png, places: vec![whole(view, &canvas, view.row + view.rows_n, foot_n)] });
-        }
-        wants.extend(sprites);
+        let paint = Paint { canvas, size, motion, settling: &self.settling, ms };
+        let wants = wants(view, &plan, &paint, &self.screen, fonts)?;
         self.screen.show(wants, out).map_err(|e| format!("Drawing the list as text: {e}."))?;
         Ok(Drawn { top: plan.top, page: plan.page })
     }
@@ -324,6 +308,47 @@ impl Picture {
         self.seen.clear();
         self.settling.clear();
     }
+}
+
+/// What a frame's images are drawn with, besides its view and plan: the canvas, the
+/// type size, motion, the tasks whose marks are settling in (and since when) and the time.
+struct Paint<'a> {
+    canvas: Canvas,
+    size: TextSize,
+    motion: bool,
+    settling: &'a HashMap<String, u128>,
+    ms: u128,
+}
+
+/// The images a frame of `view` wants, in the order they're sent, each drawn when the
+/// screen doesn't have it.
+fn wants(view: &View, plan: &pieces::Plan, p: &Paint, screen: &Screen, fonts: &mut Fonts) -> Result<Vec<Want>, String> {
+    let (canvas, settling, motion) = (&p.canvas, p.settling, p.motion);
+    let bare = |row: &Row| pieces::bare(row, motion, &|id| settling.contains_key(id));
+    // a turning mark turns with the text board's, from the board's start
+    let began = |row: &Row| match row {
+        Row::Task(t) if !sprite::turns(&t.mark) => settling.get(&t.id).copied().unwrap_or(0),
+        _ => 0,
+    };
+    let f = list::Frame { view, plan, c: canvas, size: p.size, bare: &bare, began: &began, ms: p.ms };
+    let head_n = view.row - view.row0;
+    let foot_n = if view.foot.is_some() { view.foot_n } else { 0 };
+    let mut wants = Vec::new();
+    let k = list::key(&Slot::Head, &f, (&view.head, head_n));
+    if head_n > 0 {
+        let png = (!screen.has(&Slot::Head, k)).then(|| list::encode(&Slot::Head, || frame::head(&view.head, head_n, canvas, fonts))).transpose()?;
+        wants.push(Want { slot: Slot::Head, key: k, png, places: vec![whole(view, canvas, view.row0, head_n)] });
+    }
+    let mut list = list::wants(&f, screen, fonts)?;
+    let sprites = list.split_off(list.iter().position(|w| matches!(w.slot, Slot::Sel | Slot::Tail | Slot::Sprite(_))).unwrap_or(list.len()));
+    wants.extend(list);
+    if let Some(foot) = view.foot.as_ref().filter(|_| foot_n > 0) {
+        let k = list::key(&Slot::Foot, &f, (foot, foot_n));
+        let png = (!screen.has(&Slot::Foot, k)).then(|| list::encode(&Slot::Foot, || frame::foot(foot, foot_n, canvas, fonts))).transpose()?;
+        wants.push(Want { slot: Slot::Foot, key: k, png, places: vec![whole(view, canvas, view.row + view.rows_n, foot_n)] });
+    }
+    wants.extend(sprites);
+    Ok(wants)
 }
 
 /// Note the tasks' marks: one that changed to a still mark settles in from now (`ms`).
