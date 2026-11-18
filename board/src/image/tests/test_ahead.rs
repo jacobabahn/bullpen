@@ -73,3 +73,4 @@ fn nothing_is_drawn_ahead_twice_or_while_a_question_is_asked() {
     assert_eq!(ahead(&mut app, &mut p), "");
     assert!(app.pending.is_some());
 }
+

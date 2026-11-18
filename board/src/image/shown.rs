@@ -123,6 +123,13 @@ impl Screen {
     /// Send the images a frame may want next (a j's or a k's), not placed: kept, so that
     /// frame only places them.
     pub fn preload(&mut self, wants: Vec<Want>, out: &mut impl Write) -> std::io::Result<()> {
+        // those kept already are the latest now, so sending the others doesn't drop them
+        for w in &wants {
+            if let Some(i) = self.kept.iter().position(|(k, s)| *k == w.slot && s.key == w.key) {
+                let it = self.kept.remove(i);
+                self.kept.insert(0, it);
+            }
+        }
         for w in wants {
             if let Some(png) = w.png.filter(|_| !self.has(&w.slot, w.key)) {
                 let s = self.send(&png, w.key, out, &w.slot)?;
@@ -227,3 +234,7 @@ fn put(out: &mut impl Write, part: impl FnOnce() -> String, cmd: &str) -> std::i
     meter::bytes(part, cmd.len());
     meter::time(|| "write".into(), || out.write_all(cmd.as_bytes()))
 }
+
+#[cfg(test)]
+#[path = "tests/test_shown.rs"]
+mod tests;

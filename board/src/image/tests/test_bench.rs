@@ -6,7 +6,8 @@
 //!
 //!     bin/bullpen-cargo test -p bullpen-board --release bench -- --ignored --nocapture --test-threads 1
 //!
-//! BENCH_ONLY="80×45 32px,text" runs only the cases whose names have one of those in them.
+//! BENCH_ONLY="80×45 32px,text" runs only the cases whose names have one of those in them;
+//! BENCH_DEBUG=1 says each key that sent over 2 KB, and what.
 
 use super::meter::{self, Tally};
 use super::*;
@@ -196,7 +197,11 @@ fn sweep(b: &mut Board) -> Vec<Tally> {
     let mut out = Vec::new();
     for pass in 0..3 {
         for c in std::iter::repeat_n('j', n).chain(std::iter::repeat_n('k', n)) {
+            let from = b.app.sel.clone();
             let t = b.key(c);
+            if pass > 0 && t.bytes["total"] > 2000 && std::env::var("BENCH_DEBUG").is_ok() {
+                eprintln!("miss {c} {from:?} -> {:?}: {:?}", b.app.sel, t.bytes);
+            }
             if pass > 0 {
                 out.push(t);
             }
