@@ -332,6 +332,13 @@ impl Kind {
     }
 }
 
+/// For call sites not moved to a kind yet: the kind an event names.
+impl From<&str> for Kind {
+    fn from(event: &str) -> Kind {
+        Kind::of_event(event).unwrap_or_else(|| panic!("no kind of news has the event {event:?}"))
+    }
+}
+
 impl From<Kind> for &'static str {
     fn from(k: Kind) -> &'static str {
         k.event()

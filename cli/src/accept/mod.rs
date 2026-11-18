@@ -108,7 +108,7 @@ fn accepted(
                 if auto {
                     let notes = crate::notes::with_notes(t);
                     let line = format!("{id} approved by review{notes} and auto-accepted ({how})");
-                    news(repo, t, Kind::AutoAccepted.into(), &line, Opts::default())
+                    news(repo, t, Kind::AutoAccepted, &line, Opts::default())
                 } else {
                     tell_coordinator(repo, t, "accepted", &format!("{id} accepted ({how})"))
                 }

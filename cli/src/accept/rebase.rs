@@ -63,7 +63,7 @@ pub fn rebase_others(repo: &Repo, accepted: &Obj, touched: Option<&BTreeSet<Stri
     news(
         repo,
         accepted,
-        after_kind(&said).into(),
+        after_kind(&said),
         &format!("After {aid}: {}.", said.join("; ")),
         everyone,
     )

@@ -18,6 +18,7 @@ use bullpen_core::paths::{safe, state};
 use bullpen_core::text::{splitlines, squash, strip};
 use bullpen_core::timeutil::iso_now;
 use bullpen_core::{Repo, Res};
+use kind::Kind;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -48,7 +49,8 @@ pub struct Opts<'a> {
 /// One line of news, `bullpen · <what happened>`, for the coordinator that owns the
 /// task (with everyone: for all of them): logged, and typed into their prompts unless
 /// they follow the log (config --news monitor).
-pub fn news(repo: &Repo, task: &Obj, event: &str, text: &str, o: Opts) -> Res<()> {
+pub fn news(repo: &Repo, task: &Obj, kind: impl Into<Kind>, text: &str, o: Opts) -> Res<()> {
+    let kind = kind.into();
     let line = format!("{NEWS_MARK}{}", squash(text)); // one line: a newline would send it early
     let (mut to, waits) = match o.to {
         Some(to) if !to.is_empty() => (to, false),
@@ -69,13 +71,13 @@ pub fn news(repo: &Repo, task: &Obj, event: &str, text: &str, o: Opts) -> Res<()
     } else {
         format!(" [{}]", to.join(","))
     };
-    let mut record = format!("{}{whom} {} {event}: {line}\n", iso_now(), s(task, "id"));
+    let mut record = format!("{}{whom} {} {}: {line}\n", iso_now(), s(task, "id"), kind.event());
     for l in &o.more {
         record += &format!("\t{l}\n");
     }
     // one write: a reader never sees half
     append(&repo.dir.join("news.log"), &record)?;
-    wake::after_logged(repo, event)?;
+    wake::after_logged(repo, kind)?;
     if wake::typed(repo) {
         // With no coordinator alive the line waits once, in the shared outbox: one copy
         // per coordinator would reach the first to come back once for each.
@@ -87,8 +89,8 @@ pub fn news(repo: &Repo, task: &Obj, event: &str, text: &str, o: Opts) -> Res<()
 }
 
 /// news() with nothing but its words.
-pub fn say(repo: &Repo, task: &Obj, event: &str, text: &str) -> Res<()> {
-    news(repo, task, event, text, Opts::default())
+pub fn say(repo: &Repo, task: &Obj, kind: impl Into<Kind>, text: &str) -> Res<()> {
+    news(repo, task, kind, text, Opts::default())
 }
 
 /// (IDs, waits): the coordinators a line of news is for, those who see to the task
@@ -191,13 +193,13 @@ fn id_and_said(rest: &str) -> Option<(&str, &str)> {
 
 /// News of something the person may have done elsewhere (the board, a shell). The
 /// coordinator whose pane ran it isn't told: it would only repeat what it just ran.
-pub fn tell_coordinator(repo: &Repo, task: &Obj, event: &str, text: &str) -> Res<()> {
+pub fn tell_coordinator(repo: &Repo, task: &Obj, kind: impl Into<Kind>, text: &str) -> Res<()> {
     let me = calling_coordinator(repo).map(|c| s(c, "id").to_string());
     let skip = me.as_deref().filter(|m| !m.is_empty());
     news(
         repo,
         task,
-        event,
+        kind,
         text,
         Opts {
             skip,

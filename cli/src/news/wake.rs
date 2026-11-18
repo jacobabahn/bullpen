@@ -88,8 +88,8 @@ pub fn before_logged(repo: &Repo, to: &[String]) -> Res<()> {
 }
 
 /// After news() logged a line that isn't typed: the watcher looks for unread news.
-pub fn after_logged(repo: &Repo, event: &str) -> Res<()> {
-    if !typed(repo) && wakes(event) {
+pub fn after_logged(repo: &Repo, kind: Kind) -> Res<()> {
+    if !typed(repo) && kind.wakes() {
         touch(&wake_due_path())?;
     }
     Ok(())

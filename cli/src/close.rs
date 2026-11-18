@@ -104,7 +104,7 @@ pub fn close_task(repo: &Repo, t: &mut Obj, auto: bool, first: &str) -> Res<()> 
         let id = s(t, "id");
         if auto {
             let line = format!("{id} finished (nothing to merge) and was closed by auto-accept: {first}");
-            news(repo, t, Kind::AutoClosed.into(), &line, Opts::default())
+            news(repo, t, Kind::AutoClosed, &line, Opts::default())
         } else {
             println!("{id} closed");
             tell_coordinator(repo, t, "closed", &format!("{id} closed (finished, nothing to merge)"))

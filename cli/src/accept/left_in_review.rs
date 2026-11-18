@@ -84,7 +84,7 @@ pub fn after_approval(repo: &Repo, t: &mut Obj, by: &[String]) -> Res<bool> {
         ..Opts::default()
     };
     let kind = after_kind(std::slice::from_ref(&line));
-    news(repo, t, kind.into(), &format!("After {words}: {line}."), everyone)?;
+    news(repo, t, kind, &format!("After {words}: {line}."), everyone)?;
     Ok(s(t, "status") == "ready")
 }
 

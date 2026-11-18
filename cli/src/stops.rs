@@ -10,6 +10,7 @@
 //! running, it needs the person ("needs"), as prompts and `ask` do at once.
 
 use crate::coordinators::sees_to;
+use crate::news::kind::Kind;
 use crate::news::say;
 use crate::saves::save;
 use bullpen_core::json::{py_str, s, Obj};
@@ -33,8 +34,9 @@ pub fn stop(
     kind: &str,
     why: &str,
     lines: &[String],
-    event: &str,
+    event: impl Into<Kind>,
 ) -> Res<&'static str> {
+    let event = event.into();
     let m = py_str(triage_minutes(repo));
     let (status, say_it): (&'static str, Say) = if kind == "prompt" {
         t.shift_remove("ask"); // the prompt is what it needs the person for now

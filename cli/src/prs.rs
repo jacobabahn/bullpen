@@ -150,11 +150,15 @@ fn follow_pr(repo: &Repo, t: &Obj) -> Res<()> {
     if state == "merged" || state == "closed" {
         gh(&mut t).insert("state".into(), json!(state));
         write_obj(&path, &t)?;
-        let verb = if state == "merged" { "accept" } else { "drop" };
+        let (verb, kind) = if state == "merged" {
+            ("accept", Kind::PrMerged)
+        } else {
+            ("drop", Kind::PrClosed)
+        };
         let line = format!(
             "{id}'s {pr_name} was {state} outside bullpen: tell the person; `bullpen {verb} {id}` cleans up when they say so"
         );
-        return news(repo, &t, &format!("pr-{state}"), &line, Opts::default());
+        return news(repo, &t, kind, &line, Opts::default());
     }
     let (summary, failed) = checks(&pr);
     let head = first_of(&pr, &["headRefOid"], "");
@@ -191,7 +195,7 @@ fn follow_pr(repo: &Repo, t: &Obj) -> Res<()> {
         news(
             repo,
             &t,
-            Kind::NotAutoAccepted.into(),
+            Kind::NotAutoAccepted,
             &format!("{id} not auto-accepted: {why} (nothing to do: the news about that follows)"),
             Opts::default(),
         )?;

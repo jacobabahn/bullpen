@@ -89,7 +89,7 @@ pub fn start_queued(repo: &Repo, by: &Obj, how: &str) -> Res<()> {
             Err(Fail(e)) => say(
                 repo,
                 &t,
-                Kind::QueueFailed.into(),
+                Kind::QueueFailed,
                 &format!(
                     "{id} couldn't start ({why}): {}. `bullpen start {id}` tries again",
                     clip(&e, 200)
