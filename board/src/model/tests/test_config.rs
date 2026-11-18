@@ -31,3 +31,13 @@ fn the_bottom_gap_is_a_row_only_while_something_floats() {
     assert_eq!(gap(json!({"workers": "tabs", "board_bottom_gap": 2})), 2); // a setting wins
     assert_eq!(gap(json!({"board_bottom_gap": 0})), 0);
 }
+
+#[test]
+fn the_look_is_text_unless_the_setting_says_image_and_the_font_is_a_path_when_set() {
+    let c = config(json!({}));
+    assert_eq!((c.look, c.font.clone()), (Look::Text, None));
+    let c = config(json!({"board_look": "image", "board_font": "/fonts/A.ttf"}));
+    assert_eq!((c.look, c.font.as_deref()), (Look::Image, Some(std::path::Path::new("/fonts/A.ttf"))));
+    assert_eq!(config(json!({"board_look": "pictures", "board_font": ""})).font, None);
+    assert_eq!(config(json!({"board_look": "pictures"})).look, Look::Text);
+}

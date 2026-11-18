@@ -16,6 +16,10 @@ pub struct Config {
     /// every setting, for bullpen-core's sentences
     obj: Obj,
     pub layout: Layout,
+    /// how the list is drawn: text, or one image (`bullpen config --board-look`)
+    pub look: Look,
+    /// the font file the image look draws with, over the built-in one (`--board-font`)
+    pub font: Option<std::path::PathBuf>,
     pub merge: String,
     /// approved tasks accept themselves (`bullpen config --auto-accept on`)
     pub auto_accept: bool,
@@ -86,6 +90,29 @@ impl Layout {
     }
 }
 
+/// How the board draws its list: as text, or as one image (image/).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Look {
+    Text,
+    Image,
+}
+
+impl Look {
+    pub fn name(self) -> &'static str {
+        match self {
+            Look::Text => "text",
+            Look::Image => "image",
+        }
+    }
+
+    pub fn other(self) -> Look {
+        match self {
+            Look::Text => Look::Image,
+            Look::Image => Look::Text,
+        }
+    }
+}
+
 impl Config {
     /// The repo's settings. A config.json that doesn't parse counts as empty: the board
     /// shows what it can (bullpen's commands say what's wrong).
@@ -115,6 +142,8 @@ impl Config {
         };
         Config {
             layout: if text("board_layout") == "compact" { Layout::Compact } else { Layout::Grouped },
+            look: if text("board_look") == "image" { Look::Image } else { Look::Text },
+            font: Some(text("board_font")).filter(|f| !f.is_empty()).map(std::path::PathBuf::from),
             merge: text("merge"),
             auto_accept: flag("auto_accept"),
             coordinators: ids(false),
