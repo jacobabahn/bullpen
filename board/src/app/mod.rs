@@ -21,6 +21,7 @@ pub use restart::{parse_args, Args, ExeId};
 
 use crate::edit::LineEdit;
 use crate::model::{self, Action, Config, Item, Prompt, Task};
+use bullpen_core::fleet::Reader;
 use ratatui::crossterm::event::KeyEvent;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
@@ -103,6 +104,9 @@ pub struct App {
     pub repo_name: String,
     pub cfg: Config,
     pub tasks: Vec<Task>,
+    /// reads the tasks (core's fleet reader, as mission control's): kept between reloads,
+    /// it reads a task file again only when it changed
+    reader: Reader,
     /// the backlog's open items, in list order: the Later group
     pub later: Vec<Item>,
     /// `L`: the Later group shows a row per item, not its one line
@@ -165,6 +169,7 @@ impl App {
         App {
             cfg: Config::load(&dir),
             tasks: Vec::new(),
+            reader: Reader::default(),
             later: Vec::new(),
             later_open: false,
             others: Default::default(),
@@ -204,7 +209,7 @@ impl App {
 
     pub fn reload(&mut self) {
         self.cfg = Config::load(&self.dir);
-        self.tasks = model::load_tasks(&self.dir);
+        self.tasks = model::load_tasks(&mut self.reader, &self.dir);
         self.later = model::load_later(&self.dir);
         // the backlog emptied: the next item added shows as the folded line again
         if self.later.is_empty() {

@@ -6,8 +6,9 @@
 //!
 //! Only files are read, and only these: <state>/repos/*/config.json, each repo's tasks,
 //! and doing/ for the panes they name. A `Reader` kept between snapshots (a long-running
-//! program's) reads a file again only when its time or size changed. Whether a
-//! coordinator's pane is alive is Rex's to say, so it's asked apart (`Fleet::ask_alive`).
+//! program's) reads a file again only when its time or size changed. Its `read_repo` reads
+//! one repo's tasks the same way, for that repo's board. Whether a coordinator's pane is
+//! alive is Rex's to say, so it's asked apart (`Fleet::ask_alive`).
 
 use crate::config::{load_config, read_own, task_files};
 use crate::coordinators;
@@ -96,6 +97,18 @@ pub struct TaskState {
     pub doing: String,
 }
 
+/// One repo's tasks alone, as its board reads them (Reader::read_repo).
+#[derive(Debug, Clone, Default)]
+pub struct RepoTasks {
+    /// every task, closed ones too, by number
+    pub all: Vec<Obj>,
+    /// task files that don't parse (maybe caught half-written), each with why: left out
+    pub broken: Vec<String>,
+    /// what the watcher last noted the agent each task waits on doing, by its pane
+    /// (agent_block); a note that's missing or doesn't parse isn't here
+    pub doing: HashMap<String, Obj>,
+}
+
 /// A file read once, kept with the time and size it had.
 #[derive(Debug, Clone)]
 struct Seen {
@@ -124,14 +137,38 @@ impl Reader {
         for repo in repos(state)? {
             out.push(self.repo_state(state, repo));
         }
-        self.files.retain(|p, _| self.used.contains(p));
+        self.forget_unused();
         Ok(Fleet { repos: out })
     }
 
-    fn repo_state(&mut self, state: &Path, repo: Repo) -> RepoState {
+    /// One repo's tasks and what their agents are doing, from its state folder (dir,
+    /// <state>/repos/<repo>; the notes are in <state>/doing): what a repo's board reads.
+    /// Its settings aren't read: the board reads them its own way.
+    pub fn read_repo(&mut self, dir: &Path) -> RepoTasks {
+        self.used.clear();
+        let (all, broken) = self.tasks(dir);
+        let mut doing = HashMap::new();
+        if let Some(state) = dir.parent().and_then(Path::parent) {
+            for block in all.iter().filter_map(agent_block) {
+                if let Some(d) = self.doing(state, &block) {
+                    doing.insert(block, d);
+                }
+            }
+        }
+        self.forget_unused();
+        RepoTasks { all, broken, doing }
+    }
+
+    /// Forget the files the read just done didn't use.
+    fn forget_unused(&mut self) {
+        self.files.retain(|p, _| self.used.contains(p));
+    }
+
+    /// A repo's tasks by number, and the files that don't parse, each with why.
+    fn tasks(&mut self, dir: &Path) -> (Vec<Obj>, Vec<String>) {
         let mut all = Vec::new();
         let mut broken = Vec::new();
-        for p in task_files(&repo.dir) {
+        for p in task_files(dir) {
             match self.obj(&p) {
                 Ok(Some(t)) => all.push(t),
                 Ok(None) => {}
@@ -139,6 +176,11 @@ impl Reader {
             }
         }
         all.sort_by_key(task_num);
+        (all, broken)
+    }
+
+    fn repo_state(&mut self, state: &Path, repo: Repo) -> RepoState {
+        let (all, broken) = self.tasks(&repo.dir);
         let every = every(&all);
         let open = board_order(all.iter().filter(|t| !is_closed(s(t, "status"))).cloned().collect());
         let open: Vec<TaskState> = open

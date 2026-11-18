@@ -234,7 +234,7 @@ fn the_board_reads_the_doing_of_the_agent_a_task_waits_on() {
     say("block_w2", "Worker two");
     say("block_rev", "Reviewing");
     say("block_w3", "Worker three");
-    let tasks = load_tasks(&dir);
+    let tasks = load_tasks(&mut Default::default(), &dir);
     let text = |i: usize| tasks[i].doing.as_ref().map(|d| d["text"].as_str().unwrap_or("").to_string());
     assert_eq!(text(0).as_deref(), Some("Worker one"));
     assert_eq!(text(1).as_deref(), Some("Reviewing")); // in review: its reviewer's

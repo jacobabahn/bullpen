@@ -261,3 +261,34 @@ fn a_broken_global_config_fails_the_snapshot_and_each_repo_is_unread() {
     let root = env.dir.join("checkouts").join("shop");
     assert_eq!(unread(&env.state()), [Unread { dir, root: Some(root) }]);
 }
+
+#[test]
+fn one_repos_tasks_with_what_their_agents_are_doing_and_a_half_written_file_left_out() {
+    let env = Env::new();
+    let dir = repo(&env, "shop", false, json!([]), &[]);
+    task(&dir, json!({"id": "BP-10", "status": "working", "block": "block:w"}));
+    task(
+        &dir,
+        json!({"id": "BP-9", "status": "review", "block": "block:w9", "review": {"block": "block:r"}}),
+    );
+    task(&dir, json!({"id": "BP-8", "status": "done", "block": "block:d"}));
+    std::fs::write(dir.join("tasks/BP-7.json"), "{\"id\": ").unwrap();
+    doing(&env, "block:w", json!({"text": "Worker"}));
+    doing(&env, "block:r", json!({"text": "Reviewer"}));
+    doing(&env, "block:d", json!({"text": "Closed long ago"}));
+    std::fs::write(env.state().join("doing/block_w9.json"), "{").unwrap();
+    let mut r = Reader::default();
+    let got = r.read_repo(&dir);
+    let ids: Vec<&str> = got.all.iter().map(|t| s(t, "id")).collect();
+    assert_eq!(ids, ["BP-8", "BP-9", "BP-10"]);
+    assert_eq!(got.broken.len(), 1);
+    let said = |b: &str| got.doing.get(b).map(|d| s(d, "text").to_string());
+    assert_eq!(said("block:w").as_deref(), Some("Worker"));
+    // in review: its reviewer's; closed: nobody's
+    assert_eq!(said("block:r").as_deref(), Some("Reviewer"));
+    assert_eq!(got.doing.len(), 2);
+    // the file written in full is read next time
+    task(&dir, json!({"id": "BP-7", "status": "todo"}));
+    let got = r.read_repo(&dir);
+    assert_eq!((got.all.len(), got.broken.len()), (4, 0));
+}

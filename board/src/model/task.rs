@@ -1,11 +1,12 @@
 //! Tasks as bullpen-core reads them, with the board's typed view of each, what a
 //! task is waiting on, and loading a repo's tasks. A `Task` is the object core read
 //! (`obj()`, which core's sentences read) and the board's typed view of the fields it
-//! reads itself; `load_tasks` (core's `task_files`); what a queued task waits on and
+//! reads itself; `load_tasks` (core's fleet reader, as mission control's); what a queued task waits on and
 //! what its agent is doing.
 
-use bullpen_core::json::{self, Obj};
-use bullpen_core::{config, paths, task as core, words};
+use bullpen_core::json::Obj;
+use bullpen_core::fleet::Reader;
+use bullpen_core::{task as core, words};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer};
 use std::path::Path;
@@ -299,28 +300,24 @@ impl Task {
     }
 }
 
-/// The repo's tasks, by ID. A file caught half-written is skipped until next time.
-pub fn load_tasks(dir: &Path) -> Vec<Task> {
-    let mut out: Vec<Task> = config::task_files(dir)
-        .iter()
-        .filter_map(|p| json::read_obj(p).ok().flatten())
-        .filter_map(Task::from_obj)
-        .collect();
-    out.sort_by_key(Task::num);
-    link_waits(&mut out);
-    // the repo's folder is <state>/repos/<repo>: doing/ is beside repos/
-    if let Some(state) = dir.parent().and_then(Path::parent) {
-        link_doing(&mut out, &state.join("doing"));
+/// The repo's tasks, by ID, through core's fleet reader (kept by the caller between
+/// loads), each with what the agent it waits on last said. A file caught half-written
+/// is left out until next time.
+pub fn load_tasks(reader: &mut Reader, dir: &Path) -> Vec<Task> {
+    let read = reader.read_repo(dir);
+    let mut out = tasks_of(read.all);
+    for t in out.iter_mut() {
+        t.doing = t.agent_block().and_then(|b| read.doing.get(&b).cloned());
     }
     out
 }
 
-/// Fill in what the agent each working or in-review task waits on last said.
-pub fn link_doing(tasks: &mut [Task], dir: &Path) {
-    for t in tasks.iter_mut() {
-        let note = t.agent_block().map(|b| dir.join(format!("{}.json", paths::safe(&b))));
-        t.doing = note.and_then(|p| json::read_obj(&p).ok().flatten());
-    }
+/// These tasks as the board shows them, each with what it waits on; one that has no
+/// id or status (or one of the wrong shape) is left out.
+pub fn tasks_of(all: Vec<Obj>) -> Vec<Task> {
+    let mut out: Vec<Task> = all.into_iter().filter_map(Task::from_obj).collect();
+    link_waits(&mut out);
+    out
 }
 
 /// Fill in what each task waits on: the tasks in its `after` that aren't done.

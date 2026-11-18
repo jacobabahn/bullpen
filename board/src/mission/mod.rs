@@ -119,9 +119,7 @@ impl Mission {
             }
             let app = self.boards.get_mut(&dir).expect("just made");
             app.cfg = Config::from_obj(r.repo.cfg.clone());
-            let mut tasks: Vec<Task> = r.all.iter().cloned().filter_map(Task::from_obj).collect();
-            model::link_waits(&mut tasks);
-            app.tasks = tasks;
+            app.tasks = model::tasks_of(r.all.clone());
         }
         // a repo gone from the snapshot takes its board along, unless it's busy
         self.boards.retain(|d, app| app.busy() || fleet.repos.iter().any(|r| r.repo.dir == *d));
