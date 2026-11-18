@@ -3,13 +3,12 @@
 //! writing) note how long they took and what they wrote, while a test has the meter
 //! on. In the board itself it notes nothing: each note is the work alone.
 
-use std::collections::BTreeMap;
-
 /// What was noted: milliseconds and bytes, by part ("png Sel", "write").
+#[cfg(test)]
 #[derive(Debug, Clone, Default)]
 pub struct Tally {
-    pub ms: BTreeMap<String, f64>,
-    pub bytes: BTreeMap<String, usize>,
+    pub ms: std::collections::BTreeMap<String, f64>,
+    pub bytes: std::collections::BTreeMap<String, usize>,
 }
 
 #[cfg(test)]
