@@ -115,6 +115,8 @@ pub struct Totals {
     pub running: usize,
     pub open: usize,
     pub repos: usize,
+    /// coordinators blocked on a question in their panes
+    pub blocked: usize,
 }
 
 pub fn totals(fleet: &Fleet) -> Totals {
@@ -124,15 +126,26 @@ pub fn totals(fleet: &Fleet) -> Totals {
         t.ready += r.counts.ready;
         t.running += r.counts.running;
         t.open += r.open.len();
+        t.blocked += r.coordinators.iter().filter(|c| c.word() == "blocked").count();
     }
     t
 }
 
-/// The top line's totals in words: "3 need you · 2 ready · 4 of 9 running · 2 repos";
-/// what's 0 is left out, but the repos always show.
+/// Is one of a repo's coordinators blocked on a question in its pane: it waits on you.
+pub fn coordinator_blocked(r: &RepoState) -> bool {
+    r.coordinators.iter().any(|c| c.word() == "blocked")
+}
+
+/// The top line's totals in words: "1 coordinator blocked · 3 need you · 2 ready · 4
+/// of 9 running · 2 repos"; what's 0 is left out, but the repos always show.
 pub fn totals_words(t: Totals) -> String {
-    let mut parts: Vec<String> =
-        [(t.needs, "needs"), (t.ready, "ready")].into_iter().filter(|(n, _)| *n > 0).map(|(n, what)| count_phrase(n, what)).collect();
+    let mut parts: Vec<String> = match t.blocked {
+        0 => Vec::new(),
+        1 => vec!["1 coordinator blocked".into()],
+        n => vec![format!("{n} coordinators blocked")],
+    };
+    let counts = [(t.needs, "needs"), (t.ready, "ready")].into_iter().filter(|(n, _)| *n > 0);
+    parts.extend(counts.map(|(n, what)| count_phrase(n, what)));
     if t.running > 0 {
         parts.push(format!("{} of {} running", t.running, t.open));
     } else if t.open > 0 {
@@ -145,9 +158,12 @@ pub fn totals_words(t: Totals) -> String {
     parts.join(" · ")
 }
 
-/// The same in marks, for a narrow screen: "●3 ✔2 4/9".
+/// The same in marks, for a narrow screen: "c●1 ●3 ✔2 4/9".
 pub fn totals_marks(t: Totals) -> String {
     let mut parts = Vec::new();
+    if t.blocked > 0 {
+        parts.push(format!("c●{}", t.blocked));
+    }
     if t.needs > 0 {
         parts.push(format!("●{}", t.needs));
     }

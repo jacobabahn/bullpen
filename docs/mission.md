@@ -43,20 +43,23 @@ it doesn't come to you), and its agent isn't touched.
  i answer  ⏎ open  t tell  p peek  n next  / find  q quit
 ```
 
-- **The top line**: what needs you (needs you or stopped), what's ready (ready to
-  accept, or finished), how many of the open tasks have an agent on them (working or
-  in review), and how many repositories; amber while something needs you.
+- **The top line**: how many coordinators are blocked (`c●` and the count, on a narrow
+  screen), what needs you (needs you or stopped), what's ready (ready to accept, or
+  finished), how many of the open tasks have an agent on them (working or in review),
+  and how many repositories; amber while a task needs you or a coordinator is blocked.
 - **The inbox**: every repository's tasks that need you, then those that are ready,
   each with its repository, the one that has waited longest first: the order
   `bullpen go --next --all-repos` takes. Each has the board's marks, its age (red
   once it has needed you 5 minutes) and the amber bar, as on the board.
 - **The repositories**: each one's line, with its folder, its coordinators and how many
   tasks are open; then its other open tasks (its coordinator on it, in review, working,
-  queued) in the board's order. A coordinator is `●` working (or blocked on a question
-  in its pane), `○` idle, `✕` gone (its pane closed: `bullpen up` there starts one), or
-  `?` when the watcher's note on it can't be read. With no coordinator the line says
-  so, in amber, as it does for one that's gone. A repository with task files that
-  don't parse says how many after its count.
+  queued) in the board's order. A coordinator is `●` working, `●` blocked (waiting on
+  a permission prompt or a question in its pane: in bold amber, with the amber bar
+  beside its repository's line, as a task that needs you has), `○` idle, `✕` gone (its
+  pane closed: `bullpen up` there starts one), or `?` when the watcher's note on it
+  can't be read. With no coordinator the line says so, in amber, as it does for one
+  that's gone. A repository with task files that don't parse says how many after its
+  count.
 - **Under each task** (in the inbox, and every task on a wide screen): what its agent
   is doing now, else where it stands, in the board's words. When the watcher's note on
   an agent can't be read, the task says where it stands, as with no note.
@@ -98,7 +101,10 @@ in the background; their spinner turns on the task's mark meanwhile.
 ## How it stays current
 
 It reads the same snapshot as `bullpen repos` (core's `fleet.rs`): every repository's
-settings, coordinators, tasks and the watcher's notes. It watches the whole state
+settings, coordinators, tasks and the watcher's notes. The watcher notes Rex's status
+of each coordinator's pane (working, blocked or idle) as it does a worker's, in
+`doing/` (a coordinator made with `bullpen up --here` too), so a coordinator's state
+is as current as a task's. It watches the whole state
 folder and reads the snapshot again when anything there changes, and once a second in
 case a change was missed; a file is read again only when its time or size changed.
 Whether each coordinator's pane is alive is Rex's to say: `bullpen repos --json` asks

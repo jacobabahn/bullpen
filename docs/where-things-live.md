@@ -27,5 +27,6 @@
 - Overlaps told so far (two open tasks that change the same file): `overlaps.json`
   beside the tasks. See [Accept](accept.md#overlap-warning).
 - Notifications: `notify.log` beside the tasks. See [Notifications](notifications.md).
-- What each worker and reviewer is doing, for the board: `~/.local/state/bullpen/doing/<pane>.json`,
-  written by the watcher (at most every 3 seconds a pane, no news) and removed with the pane.
+- What each worker, reviewer and coordinator is doing, for the board and mission control:
+  `~/.local/state/bullpen/doing/<pane>.json`, written by the watcher (at most every 3
+  seconds a pane, no news) and removed with the pane.

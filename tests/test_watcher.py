@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from support import setUpModule, tearDownModule, ROOT  # a temp folder for each module
+from support import setUpModule, tearDownModule, ROOT, BullpenTest  # a temp folder for each module
 
 
 STUCK_LUA = """
@@ -108,19 +108,24 @@ return table.concat(calls, "|")
 """
 
 
+def run_lua(test, script, **args):
+    """What script returns, run by `rex do` with these args; skips the test where it can't run."""
+    if subprocess.run(["rex", "do", "-e", "return 1"], capture_output=True).returncode != 0:
+        test.skipTest("rex do doesn't run here")
+    tmp = tempfile.mkdtemp()
+    test.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+    path = Path(tmp) / "test.lua"
+    path.write_text(script)
+    p = subprocess.run(["rex", "do", str(path), *(f"{k}={v}" for k, v in args.items())],
+                       text=True, capture_output=True)
+    test.assertEqual(p.returncode, 0, p.stderr)
+    return json.loads(p.stdout)
+
+
 @unittest.skipUnless(shutil.which("rex"), "needs Rex, to run Lua")
 class WatcherTest(unittest.TestCase):
     def lua(self, script, **args):
-        if subprocess.run(["rex", "do", "-e", "return 1"], capture_output=True).returncode != 0:
-            self.skipTest("rex do doesn't run here")
-        tmp = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        path = Path(tmp) / "test.lua"
-        path.write_text(script)
-        p = subprocess.run(["rex", "do", str(path), *(f"{k}={v}" for k, v in args.items())],
-                           text=True, capture_output=True)
-        self.assertEqual(p.returncode, 0, p.stderr)
-        return json.loads(p.stdout)
+        return run_lua(self, script, **args)
 
     def test_a_quiet_spell_is_due_once(self):
         self.assertEqual(self.lua(STUCK_LUA, lib=ROOT / "lua" / "stuck.lua"), "ok")
@@ -167,12 +172,12 @@ return table.concat(calls, "|")
             "_wake_check",
         ])
 
-    def test_the_watcher_keeps_what_a_worker_is_doing_for_the_board(self):
+    def test_the_watcher_keeps_what_an_agent_is_doing_for_the_board(self):
         state = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, state, ignore_errors=True)
         (state / "blocks").mkdir()
         (state / "doing").mkdir()
-        for block, role in (("blk1", "BP-1"), ("rev1", "BP-1 review"), ("co", "coordinator")):
+        for block, role in (("blk1", "BP-1"), ("rev1", "BP-1 review"), ("co", "coordinator"), ("bd", "board")):
             (state / "blocks" / f"{block}.json").write_text(json.dumps({"repo": "/r", "role": role}))
         # rex.after waits for run_due(); each step returns what the doing files say
         script = WATCH_LUA.split("print = function() end")[0].replace(
@@ -194,7 +199,7 @@ end
 local seen = {}
 local function look()
   local out = {}
-  for _, b in ipairs({ "blk1", "rev1", "co" }) do
+  for _, b in ipairs({ "blk1", "rev1", "co", "bd" }) do
     local f = io.open(args.state .. "/doing/" .. b .. ".json")
     if f then out[#out + 1] = b .. "=" .. f:read("*a"):gsub("\\n$", "") f:close() end
   end
@@ -206,7 +211,9 @@ status("blk1", "working", "Testing", 102) look()           -- still waiting, lat
 run_due(103) look()
 status("blk1", "blocked", "Allow?", 103) look()            -- a new state is written at once
 status("rev1", "working", "Reviewing", 104)
-status("co", "working", "Thinking", 104) look()            -- not a task's pane
+status("co", "working", "Thinking", 104)                  -- a coordinator's too
+status("bd", "working", "Drawing", 104) look()             -- not a board's: it runs no agent
+status("co", "blocked", "Allow?", 105) look()
 handlers["block_closed"]({}, { block_id = "blk1" }) look()
 return table.concat(seen, "|")
 """
@@ -218,6 +225,40 @@ return table.concat(seen, "|")
             f"blk1={line('working', 'Reading \"a.py\"', 100)}",
             f"blk1={line('working', 'Testing', 103)}",
             f"blk1={line('blocked', 'Allow?', 103)}",
-            f"blk1={line('blocked', 'Allow?', 103)} rev1={line('working', 'Reviewing', 104)}",
-            f"rev1={line('working', 'Reviewing', 104)}",
+            f"blk1={line('blocked', 'Allow?', 103)} rev1={line('working', 'Reviewing', 104)} "
+            f"co={line('working', 'Thinking', 104)}",
+            f"blk1={line('blocked', 'Allow?', 103)} rev1={line('working', 'Reviewing', 104)} "
+            f"co={line('blocked', 'Allow?', 105)}",
+            f"rev1={line('working', 'Reviewing', 104)} co={line('blocked', 'Allow?', 105)}",
         ])
+
+
+# One status event for a pane, through the watcher, as Rex would send it.
+ONE_EVENT_LUA = WATCH_LUA.split("print = function() end")[0] + """
+print = function() end
+dofile(args.watch)
+handlers["terminal.program_status_changed"]({ block_id = args.block }, { id = "", record = { state = args.st, msg = args.msg } })
+return "ok"
+"""
+
+
+@unittest.skipUnless(shutil.which("rex"), "needs Rex, to run Lua")
+class CoordinatorStateTest(BullpenTest):
+    def test_a_coordinator_made_by_up_here_is_working_blocked_or_idle_as_its_pane_is(self):
+        self.healthy()
+        here = self.two_coordinators()  # c2, made with `up --here`
+        state = self.tmp / "state"
+
+        def event(st, msg=""):
+            run_lua(self, ONE_EVENT_LUA, watch=ROOT / "lua" / "watch.lua", state=state, block=here, st=st, msg=msg)
+            c2 = json.loads(self.bp("repos", "--json").stdout)["repos"][0]["coordinators"][1]
+            return c2["id"], c2["word"], c2["text"]
+
+        self.assertEqual(event("working", "Reading the news"), ("c2", "working", "Reading the news"))
+        self.assertEqual(event("blocked", "Allow `rm -r build`?"), ("c2", "blocked", "Allow `rm -r build`?"))
+        self.assertIn("c2 blocked", self.bp("repos").stdout)
+        self.assertEqual(event("idle"), ("c2", "idle", ""))
+        p, lines = self.doctor()
+        self.assertEqual(p.returncode, 0, p.stdout)
+        self.bp_in(here, "up", "--here")  # again, with its note there
+        self.assertEqual(event("working", "Planning"), ("c2", "working", "Planning"))

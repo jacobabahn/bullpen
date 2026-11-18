@@ -7,9 +7,10 @@
 -- updates costs one call, not hundreds. A pane that says it's working but sends
 -- no event for the repo's `stuck_after` minutes is reported once (stuck.lua).
 --
--- What a worker or reviewer says it's doing (the text of "working: ...") goes to
--- <state>/doing/<block>.json for the board, at most every `doing` seconds a pane
--- (default 3): a file write, no bullpen call and no news.
+-- What a worker, reviewer or coordinator says it's doing (Rex's state of its pane and
+-- the text of "working: ...") goes to <state>/doing/<block>.json for the board and
+-- mission control, at most every `doing` seconds a pane (default 3): a file write, no
+-- bullpen call and no news.
 
 local bin = rex.args.bin
 local state_dir = rex.args.state
@@ -96,7 +97,7 @@ local function note_doing(block, state, text)
   if d and d.state == state and d.text == text then return end
   if not d then
     local r = role(block)
-    if r == "" or r == "coordinator" or r == "board" then return end
+    if r == "" or r == "board" then return end -- a board's pane runs no agent
     d = { written = os.time() - doing_every }
     doing[block] = d
   end

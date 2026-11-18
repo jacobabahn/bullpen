@@ -154,3 +154,39 @@ fn a_ready_tasks_risk_shows_before_its_age_in_the_inbox() {
     assert!(row.contains("bullpen stats") && row.contains("high  22m"), "{row}");
     assert!(has(&s, "High risk: changes how accept merges."), "{}", s.join("\n"));
 }
+
+#[test]
+fn a_coordinator_says_whether_it_is_working_idle_or_blocked_and_blocked_stands_out() {
+    use ratatui::backend::TestBackend;
+    let st = State::new("coordstates");
+    std::fs::create_dir_all(st.0.join("doing")).unwrap();
+    for (name, state) in [("busy", "working"), ("quiet", "idle"), ("waits", "blocked")] {
+        st.repo(name, json!([{"id": "c1", "block": format!("block:{name}"), "session": "s"}]), &[t("BP-1", "todo", "a", 1)]);
+        let note = json!({"state": state, "text": "Allow `rm -r build`?", "at": 0});
+        std::fs::write(st.0.join(format!("doing/block_{name}.json")), note.to_string()).unwrap();
+    }
+    let mut m = st.mission();
+    let s = screen(&mut m, 150, 30);
+    assert!(s[0].starts_with(" MISSION CONTROL   1 coordinator blocked · 3 open · 3 repos"), "{}", s[0]);
+    assert!(line_with(&s, "busy").contains("c1 ● working") && !line_with(&s, "busy").contains("▌"));
+    assert!(line_with(&s, "quiet").contains("c1 ○ idle") && !line_with(&s, "quiet").contains("▌"));
+    assert!(line_with(&s, "waits").contains("│▌waits") && line_with(&s, "waits").contains("c1 ● blocked"));
+    // the blocked one in amber, as a task that needs you; the others dim, and the top line amber
+    let mut term = ratatui::Terminal::new(TestBackend::new(150, 30)).unwrap();
+    term.draw(|f| crate::mission::draw::draw(f, &mut m)).unwrap();
+    let buf = term.backend().buffer();
+    let fg = |word: &str, line: &str| {
+        let y = s.iter().position(|l| l.contains(line)).unwrap();
+        let x = s[y].chars().take(s[y].find(word).map(|b| s[y][..b].chars().count()).unwrap()).count();
+        buf[(x as u16, y as u16)].fg
+    };
+    assert_eq!(fg("blocked", "waits"), crate::ui::AMBER);
+    assert_eq!(fg("▌", "waits"), crate::ui::AMBER);
+    assert_ne!(fg("working", "busy"), crate::ui::AMBER);
+    assert_ne!(fg("idle", "quiet"), crate::ui::AMBER);
+    assert_eq!(fg("1 coordinator blocked", "MISSION"), crate::ui::AMBER);
+    // narrow, marks only: the top line still counts it
+    let s = screen(&mut m, 60, 22);
+    assert!(s[0].starts_with(" MISSION   c●1 0/3"), "{}", s[0]);
+    assert!(line_with(&s, "waits").starts_with("▌waits") && line_with(&s, "waits").contains("c1 ●"));
+}

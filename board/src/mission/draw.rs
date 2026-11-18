@@ -124,7 +124,7 @@ fn top_line(buf: &mut Buffer, area: Rect, m: &Mission, size: Size, now: Now) {
     put(buf, area, 0, 1, span(name, bold()));
     let x = 1 + width(name) + 3;
     let room = w.saturating_sub(x + width(&clock) + 4);
-    let style = if t.needs > 0 { Style::new().fg(AMBER) } else { dim() };
+    let style = if t.needs > 0 || t.blocked > 0 { Style::new().fg(AMBER) } else { dim() };
     put(buf, area, 0, x, span(fit(&totals, room), style));
     put(buf, area, 0, w.saturating_sub(2 + width(&clock)), span(clock, dim()));
 }
@@ -223,7 +223,12 @@ fn draw_list(buf: &mut Buffer, area: Rect, m: &mut Mission, size: Size, now: Now
         match line {
             Drawn::Head(h) => put(buf, area, y, 1, span(*h, bold())),
             Drawn::Gap => {}
-            Drawn::Repo(r) => put(buf, area, y, 0, repo_line(m, *r, w, size)),
+            Drawn::Repo(r) => {
+                put(buf, area, y, 0, repo_line(m, *r, w, size));
+                if items::coordinator_blocked(&m.fleet.repos[*r]) {
+                    put(buf, area, y, 0, span("▌", Style::new().fg(AMBER)));
+                }
+            }
             Drawn::Title(i, inbox) => {
                 let t = items::task(&m.fleet, *i);
                 bar(buf, area, y, t);
@@ -326,7 +331,9 @@ fn title_line(m: &Mission, i: Item, t: &TaskState, repo: &str, repow: usize, idw
 
 /// A repo's line: its name, its root, its coordinators, and how many tasks are open at
 /// the right ("bullpen  ~/dev/bullpen   c3 ● working   5 open"). Without room the root
-/// goes, then the coordinators' words become marks.
+/// goes, then the coordinators' words become marks. A coordinator blocked on a question
+/// is in bold amber (and the line gets the amber bar, as a task that needs you does);
+/// one that's gone, or none, in amber.
 fn repo_line(m: &Mission, r: usize, w: usize, size: Size) -> Line<'static> {
     let rs = &m.fleet.repos[r];
     let name = rs.repo.name();
@@ -337,7 +344,13 @@ fn repo_line(m: &Mission, r: usize, w: usize, size: Size) -> Line<'static> {
     let coords = if width(&full) <= room && size != Size::One { full } else { items::coordinators_words(rs, true) };
     let root = if width(&root) + 3 + width(&coords) <= room { root } else { String::new() };
     let gone = rs.coordinators.is_empty() || rs.coordinators.iter().any(|c| c.word() == "gone");
-    let cstyle = if gone { Style::new().fg(AMBER) } else { dim() };
+    let cstyle = if items::coordinator_blocked(rs) {
+        bold().fg(AMBER)
+    } else if gone {
+        Style::new().fg(AMBER)
+    } else {
+        dim()
+    };
     let mid = if root.is_empty() { String::new() } else { format!("  {root}") };
     let fill = w.saturating_sub(1 + width(&name) + width(&mid) + 3 + width(&coords) + width(&open) + 1);
     Line::from(vec![

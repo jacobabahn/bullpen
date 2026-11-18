@@ -45,8 +45,8 @@ fn too_old(repo: &Repo) -> Option<String> {
 const PARKS_WITHIN: f64 = 10.0;
 
 /// Has the coordinator in this pane been idle a moment, by Rex's status of its program
-/// (as `check` asks it)? With no status it isn't known, so not said. The watcher keeps
-/// no `doing/` note for a coordinator's pane.
+/// (as `check` asks it)? With no status it isn't known, so not said. Rex is asked, not
+/// the watcher's `doing/` note, which may lag it by a few seconds.
 fn idle(session: &str, block: &str) -> bool {
     let Some(status) = crate::rex::program_status(session, block).ok().flatten() else {
         return false;

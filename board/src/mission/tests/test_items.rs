@@ -59,12 +59,15 @@ fn the_totals_in_words_and_in_marks() {
     st.repo("shop", json!([]), &[t("BP-1", "working", "a", 1), t("BP-2", "needs", "b", 1), t("BP-3", "todo", "c", 1)]);
     st.repo("web", json!([]), &[t("BP-1", "ready", "d", 1), t("BP-2", "review", "e", 1)]);
     let all = totals(&st.mission().fleet);
-    assert_eq!(all, Totals { needs: 1, ready: 1, running: 2, open: 5, repos: 2 });
+    assert_eq!(all, Totals { needs: 1, ready: 1, running: 2, open: 5, repos: 2, blocked: 0 });
     assert_eq!(totals_words(all), "1 needs you · 1 ready · 2 of 5 running · 2 repos");
     assert_eq!(totals_marks(all), "●1 ✔1 2/5");
     let quiet = Totals { open: 2, repos: 1, ..Default::default() };
     assert_eq!(totals_words(quiet), "2 open · 1 repo");
     assert_eq!(totals_words(Totals::default()), "0 repos");
+    let waits = Totals { needs: 1, open: 2, repos: 1, blocked: 2, ..Default::default() };
+    assert_eq!(totals_words(waits), "2 coordinators blocked · 1 needs you · 2 open · 1 repo");
+    assert_eq!(totals_marks(waits), "c●2 ●1 0/2");
 }
 
 #[test]
