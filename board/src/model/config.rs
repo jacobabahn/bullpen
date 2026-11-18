@@ -94,7 +94,8 @@ impl Layout {
     }
 }
 
-/// How the board draws its list: as text, or as images (image/).
+/// How the board is drawn: as text, or as images (image/): the list, the top line and
+/// the bottom rows, and small ones for the marks and the selected block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Look {
     Text,

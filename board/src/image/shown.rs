@@ -1,9 +1,10 @@
 //! The images on the terminal, and where each is placed: a frame says the images it
 //! wants (what each shows, as a key, and its placements), and only what changed is
 //! written. The frame's new images are all sent before any placement moves, and the
-//! old ones deleted after, so an update doesn't flicker or leave cells blank; a placement that moved is placed again (a few dozen bytes, the image
-//! isn't sent); one no longer wanted is taken off, and an image the frame doesn't want
-//! is hidden, its data kept to place again.
+//! old ones deleted after, so an update doesn't flicker or leave cells blank; a
+//! placement that moved is placed again (a few dozen bytes, the image isn't sent); one
+//! no longer wanted is taken off, and an image the frame doesn't want is hidden, its
+//! data kept to place again.
 
 use super::kitty;
 use super::sprite::Sprite;

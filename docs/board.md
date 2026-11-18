@@ -155,12 +155,12 @@ changes, its new mark settles in: it grows a little past its size and back, in 1
 ms. `bullpen config --board-motion off` stills them all (the working, review and
 running marks stand as their first frame), and the board then sends nothing while
 nothing changes. The top line (the repository and its counts) and the bottom rows
-(the message and the keys) are drawn too, in the list's type and colours, and the scroll marks
-are small chevrons at the list's right edge. What you type into stays text: while a
-tell, a y/n question (an accept's, a drop's, `q`'s) or the stale tour's question is
-open, the bottom rows are text, cursor and all, and are drawn again after. `?`,
-peeks, answers and mission control stay text, and so does the compact layout (`l`):
-with it the board is text whatever the look.
+(the message and the keys) are drawn too, in the list's type and colours, and the
+scroll marks are small chevrons at the list's right edge. What you type into stays
+text: while a tell, a y/n question (an accept's, a drop's, `q`'s) or the stale
+tour's question is open, the bottom rows are text, cursor and all, and are drawn
+again after. `?`, peeks, answers and mission control stay text, and so does the
+compact layout (`l`): with it the board is text whatever the look.
 
 `bullpen config --board-text-size` sets the type: `medium` (the default) is the
 terminal's own text size, with a detail line smaller and dim under each title and
