@@ -109,7 +109,8 @@ itself (killed, or a traceback) is one news line: `Pushing main to backup failed
 A verdict's auto-accept is a job too (`_auto_accept`, its output in `jobs.log`), but the
 verdict waits for it: the accept closes the worker's pane, not the reviewer's, and the
 verdict closes the reviewer's only once the accept is done. An approval carried over at
-`ready` starts it in the background, since that accept closes the pane `ready` runs in.
+`ready` starts it in the background, since that accept closes the pane `ready` runs in,
+and so does a worker's turn that leaves a ready task's code as approved.
 
 ## Auto-accept
 
@@ -126,7 +127,10 @@ findings open, or any task while review is off. With a PR, it waits for the PR's
 checks: still running, the task stays ready and accepts once they pass; failing, or
 new comments from people, it isn't accepted and the news says why. A merge that is
 refused (a conflict, an uncommitted change in the way) leaves the task ready, with
-the reason as news, except a conflict with its base (below). `bullpen add` or `start` with `--no-auto-accept` keeps one task
+the reason as news, except a conflict with its base (below). An approval kept without
+a new review auto-accepts too: at `ready` (the same commit, or only the base moved),
+and when a ready task's worker takes a turn that leaves the code as approved (you
+typed to it, say). `bullpen add` or `start` with `--no-auto-accept` keeps one task
 for you while it's on (and `--auto-accept` auto-accepts one task while it's off).
 The board shows `· auto-accept` beside the repo's name while it's on, and a task
 held back says "Kept for you: no auto-accept."

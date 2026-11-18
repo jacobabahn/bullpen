@@ -66,7 +66,7 @@ A ready task whose worker starts working again (you typed to it, say) goes back 
 working, with a news line, and has to run `ready` again. Its approval is dropped
 only if the code changes: if that turn ends with the code as it was approved
 (committed, the same patch), the task is ready again with its approval, and news
-says so; `ready` keeps it too.
+says so (or, with auto-accept on, it is auto-accepted); `ready` keeps it too.
 
 Tasks that needed you before triage existed are sorted out once, the first time
 bullpen runs after the update: those stopped for one of the triage reasons above

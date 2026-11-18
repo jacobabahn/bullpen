@@ -24,6 +24,9 @@ pub enum How<'a> {
     /// `ready` with review on, an approval kept as the code is as approved: what kept it
     /// ("the same commit")
     Kept(&'a str),
+    /// A ready task whose worker took a turn and left the code as approved (`ready_again`):
+    /// what kept its approval. It auto-accepts as a kept approval at `ready` does.
+    Again(&'a str),
     /// `ready` on a branch with no commits: no label, and nothing to merge
     Nothing,
     /// A reviewer's approve verdict: its text (`text`, which the label reads), what the
@@ -43,7 +46,7 @@ pub enum How<'a> {
 pub fn make_ready(repo: &Repo, t: &mut Obj, base_ref: &str, how: How) -> Res<()> {
     match &how {
         How::Plain | How::OutOfRounds { .. } => assess(repo, t, base_ref, Said::Nothing)?,
-        How::Kept(_) => assess(repo, t, base_ref, Said::Kept)?,
+        How::Kept(_) | How::Again(_) => assess(repo, t, base_ref, Said::Kept)?,
         How::Approved { text, .. } => assess(repo, t, base_ref, Said::Approval(text))?,
         How::Nothing => {
             t.insert("risk".into(), Value::Null);
@@ -74,11 +77,16 @@ pub fn make_ready(repo: &Repo, t: &mut Obj, base_ref: &str, how: How) -> Res<()>
         }
     }
     let n = t.get("commits").and_then(Value::as_i64).unwrap_or(0);
+    let again = matches!(how, How::Again(_));
     let (facts, then) = match how {
         How::Plain => (vec![commits(n), where_(t)], String::new()),
         How::Kept(kept) => (
             vec![commits(n), where_(t), format!("its approval carried over: {kept}")],
             String::new(),
+        ),
+        How::Again(kept) => (
+            vec![format!("its worker's turn left the code as approved: {kept}")],
+            format!(". `bullpen peek {}` if it said something", s(t, "id")),
         ),
         How::Nothing => (vec!["nothing to merge".into()], String::new()),
         How::Approved { said, .. } => (vec![commits(n), where_(t), said], String::new()),
@@ -87,16 +95,17 @@ pub fn make_ready(repo: &Repo, t: &mut Obj, base_ref: &str, how: How) -> Res<()>
             format!(", but review still asks for changes after {rounds} rounds: findings in {findings}"),
         ),
     };
-    ready_news(repo, t, &facts, &then, false)
+    ready_news(repo, t, &facts, &then, again)
 }
 
 /// Whether this way into ready can auto-accept (auto-accept takes only an approval), and
 /// if so whether to wait for the job: the verdict does, as it closes the reviewer's pane
-/// only after; a `ready` doesn't, as it runs in the worker's pane, which accepting closes.
+/// only after; a `ready` doesn't, as it runs in the worker's pane, which accepting closes,
+/// and nor does a turn's end (`ready_again`), which the watcher's event runs.
 fn auto_accept_wait(how: &How) -> Option<bool> {
     match how {
         How::Approved { .. } => Some(true),
-        How::Kept(_) => Some(false),
+        How::Kept(_) | How::Again(_) => Some(false),
         How::Plain | How::Nothing | How::OutOfRounds { .. } => None,
     }
 }

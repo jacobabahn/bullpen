@@ -6,10 +6,11 @@ pub mod stuck;
 
 use crate::agents::pane;
 use crate::args::{pos, Arg, Args, Nargs};
+use crate::become_ready::{make_ready, How};
 use crate::coordinators::{coordinator_at, coordinator_gone};
 use crate::limit::{limit_hit, limit_over, limited, LIMIT_STATES};
 use crate::modes::task_base_ref;
-use crate::news::{ready_news, say};
+use crate::news::say;
 use crate::review::{keep_approval, rebase_check, Check};
 use crate::rex::screen;
 use crate::saves::save;
@@ -250,8 +251,8 @@ pub fn prompt_news(who: &str, kind: &str, msg: &str) -> String {
 }
 
 /// A ready task's worker took a turn and ended it without ready. If the code is as it
-/// was approved (committed, the same patch), it is ready again with its approval. True
-/// if so.
+/// was approved (committed, the same patch), it is ready again with its approval, and
+/// auto-accepts as a kept approval at `ready` does. True if so.
 fn ready_again(repo: &Repo, t: &mut Obj) -> Res<bool> {
     if !truthy(t.shift_remove("from_ready").as_ref()) || !worktree_clean(t)? {
         return Ok(false);
@@ -261,17 +262,7 @@ fn ready_again(repo: &Repo, t: &mut Obj) -> Res<bool> {
         return Ok(false);
     };
     keep_approval(t, &base_ref)?;
-    crate::risk::assess(repo, t, &base_ref, crate::risk::Said::Kept)?;
-    set_status(t, "ready", None, None);
-    save(repo, t)?;
-    let then = format!(". `bullpen peek {}` if it said something", s(t, "id"));
-    ready_news(
-        repo,
-        t,
-        &[format!("its worker's turn left the code as approved: {kept}")],
-        &then,
-        true,
-    )?;
+    make_ready(repo, t, &base_ref, How::Again(&kept))?;
     Ok(true)
 }
 

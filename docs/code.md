@@ -86,15 +86,18 @@ moves it.
 
 ## Making a task ready
 
-`ready` (review off, or a branch with no commits) and an approval kept at `ready` make
-the task ready through one step, `make_ready` in `cli/src/become_ready.rs`, told how it
+`ready` (review off, or a branch with no commits), an approval kept at `ready`, the
+verdict (an approval, or findings after the last round) and a worker's turn that leaves
+a ready task's code as approved (`ready_again`) make the task ready through one step, `make_ready` in `cli/src/become_ready.rs`, told how it
 became ready (`How`): the risk label, the status, the save, then auto-accept (only for
 an approval, as a job started one way, `start_auto_accept`) or the ready news. A branch
 with no commits is recorded there as `nothing_to_merge`, the field core's
 `nothing_to_merge` reads, and it goes when the worker is back at work (`back_to_work`)
-or runs `ready` again; a task made ready before that field is read by its why. The
-verdict, a worker's turn that leaves a ready task's code as approved, and a rebase that
-keeps an approval still make it ready on their own.
+or runs `ready` again; a task made ready before that field is read by its why. A
+verdict's approval is checked against its base first when accepts left it in review
+(`left_in_review::after_approval`), before auto-accept or the news; the verdict waits
+for its auto-accept, the others don't. A rebase that keeps an approval still makes it
+ready on its own.
 
 ## Where a pane lives
 

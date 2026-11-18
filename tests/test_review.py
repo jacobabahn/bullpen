@@ -665,6 +665,41 @@ class ReviewTest(BullpenTest):
         self.assertEqual(self.show(tid)["status"], "done")
 
 
+    def ready_again_with_auto_accept(self, on):
+        """An approved task left ready (its PR's checks failed), then a turn of its
+        worker's that leaves the code as approved, with auto-accept on or off."""
+        self.bp("config", "--auto-accept", "on" if on else "off")
+        tid = self.start_task()
+        blk = self.block(tid)
+        self.bp("_event", blk, "working", "", "Fixing")
+        (self.fake / "pr.json").write_text(json.dumps({"state": "OPEN", "statusCheckRollup": [
+            {"name": "test", "status": "COMPLETED", "conclusion": "FAILURE"}]}))
+        self.commit_and_ready(tid)
+        self.verdict(tid, "approve")
+        self.assertEqual(self.show(tid)["status"], "ready")  # its checks failed, or auto-accept is off
+        (self.fake / "pr.json").write_text(json.dumps({"state": "OPEN"}))
+        self.bp("_event", blk, "idle", "", "")
+        self.bp("_event", blk, "working", "", "Answering a question")
+        self.bp("_event", blk, "idle", "", "")  # ready again, its code as approved
+        return tid
+
+    def test_a_turn_that_leaves_the_code_as_approved_auto_accepts(self):
+        tid = self.ready_again_with_auto_accept(True)
+        for _ in range(100):
+            if self.show(tid)["status"] == "done":
+                break
+            time.sleep(0.1)
+        self.assertEqual(self.show(tid)["status"], "done")
+        self.assertNotIn("left the code as approved", " ".join(self.news()))  # accepted, not "ready again"
+
+    def test_a_turn_that_leaves_the_code_as_approved_waits_for_the_person_without_auto_accept(self):
+        tid = self.ready_again_with_auto_accept(False)
+        time.sleep(0.5)  # an auto-accept job, if one were started, has had time to accept
+        t = self.show(tid)
+        self.assertEqual((t["status"], t["review"]["verdict"]), ("ready", "approved"))
+        self.assertIn("BP-1 is ready again: Fix the thing (its worker's turn left the code as approved: the same "
+                      "commit). `bullpen peek BP-1` if it said something", self.news()[-1])
+
 NOTES = ("## Findings\n\nRan the parser tests; the empty case is covered.\n\n"
          "## Notes\n\n- `docs/x.md` still names the old flag.\n- The retry loop deserves its own task.\n")
 
