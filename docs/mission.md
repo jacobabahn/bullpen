@@ -101,15 +101,16 @@ in the background; their spinner turns on the task's mark meanwhile.
 ## How it stays current
 
 It reads the same snapshot as `bullpen repos` (core's `fleet.rs`): every repository's
-settings, coordinators, tasks and the watcher's notes. The watcher notes Rex's status
-of each coordinator's pane (working, blocked or idle) as it does a worker's, in
-`doing/` (a coordinator made with `bullpen up --here` too), so a coordinator's state
-is as current as a task's. It watches the whole state
+settings, coordinators, tasks and the watcher's notes. It watches the whole state
 folder and reads the snapshot again when anything there changes, and once a second in
 case a change was missed; a file is read again only when its time or size changed.
 Whether each coordinator's pane is alive is Rex's to say: `bullpen repos --json` asks
 it every 5 seconds, in the background. When its program is rebuilt it reloads itself,
 keeping the selection, as the board does.
+
+The watcher notes Rex's status of each coordinator's pane (working, blocked or idle)
+in `doing/`, as it does a worker's, a coordinator made with `bullpen up --here` too,
+so a coordinator's state is as current as a task's.
 
 Still to come: a panel for the coordinators,
 news and health panels, zoom, and a repository's whole board as a drill-in.

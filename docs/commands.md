@@ -17,7 +17,7 @@ bullpen review-mode BP-2 full  # its first review: full, light or auto (by the s
 bullpen start BP-1    # worktree + branch + a Rex pane running the worker
 bullpen ls            # open tasks as the board says them, in its order (--json: the raw status)
 bullpen ls --all-repos  # the same for every repository bullpen knows, by repository
-bullpen repos         # every repository, a line each: its coordinators (alive or gone, working or idle),
+bullpen repos         # every repository, a line each: its coordinators (working, idle, blocked or gone),
                       #   what needs you, what's ready, what's running (--json: the whole snapshot)
 bullpen peek BP-1     # the end of the worker's screen (`--review`: its reviewer's)
 bullpen prompt BP-1   # the prompt its worker (or reviewer) is at, and its screen, as JSON
