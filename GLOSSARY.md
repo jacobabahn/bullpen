@@ -18,7 +18,7 @@ _Avoid_: window, block (Rex's API word for it).
 
 **Capsule**: a worker's or reviewer's pane minimized, shown at the bottom right of the coordinator's tab (or of its workers tab, with `--workers tab`). `bullpen go` brings it up; `bullpen hide` (ctrl+escape) puts it back.
 
-**Board**: the live task list beside the coordinator (`bullpen board`). It groups tasks by what you do next; `ls` uses its words for each status.
+**Board**: the live task list beside the coordinator (`bullpen board`). It groups tasks by what you do next (one table, `BOARD_GROUPS` in `core/src/words.rs`, whose order `ls` and mission control list tasks in too); `ls` uses its words for each status.
 
 **News**: lines starting `bullpen · ` that tell a coordinator what its tasks did: typed into its pane, or followed with `bullpen news --follow`. A **note** (`bullpen note`) is a line on the board, not news.
 
