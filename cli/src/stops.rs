@@ -34,9 +34,8 @@ pub fn stop(
     kind: &str,
     why: &str,
     lines: &[String],
-    event: impl Into<Kind>,
+    event: Kind,
 ) -> Res<&'static str> {
-    let event = event.into();
     let m = py_str(triage_minutes(repo));
     let (status, say_it): (&'static str, Say) = if kind == "prompt" {
         t.shift_remove("ask"); // the prompt is what it needs the person for now

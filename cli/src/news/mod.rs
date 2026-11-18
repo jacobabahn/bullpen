@@ -49,8 +49,7 @@ pub struct Opts<'a> {
 /// One line of news, `bullpen · <what happened>`, for the coordinator that owns the
 /// task (with everyone: for all of them): logged, and typed into their prompts unless
 /// they follow the log (config --news monitor).
-pub fn news(repo: &Repo, task: &Obj, kind: impl Into<Kind>, text: &str, o: Opts) -> Res<()> {
-    let kind = kind.into();
+pub fn news(repo: &Repo, task: &Obj, kind: Kind, text: &str, o: Opts) -> Res<()> {
     let line = format!("{NEWS_MARK}{}", squash(text)); // one line: a newline would send it early
     let (mut to, waits) = match o.to {
         Some(to) if !to.is_empty() => (to, false),
@@ -89,7 +88,7 @@ pub fn news(repo: &Repo, task: &Obj, kind: impl Into<Kind>, text: &str, o: Opts)
 }
 
 /// news() with nothing but its words.
-pub fn say(repo: &Repo, task: &Obj, kind: impl Into<Kind>, text: &str) -> Res<()> {
+pub fn say(repo: &Repo, task: &Obj, kind: Kind, text: &str) -> Res<()> {
     news(repo, task, kind, text, Opts::default())
 }
 
@@ -193,7 +192,7 @@ fn id_and_said(rest: &str) -> Option<(&str, &str)> {
 
 /// News of something the person may have done elsewhere (the board, a shell). The
 /// coordinator whose pane ran it isn't told: it would only repeat what it just ran.
-pub fn tell_coordinator(repo: &Repo, task: &Obj, kind: impl Into<Kind>, text: &str) -> Res<()> {
+pub fn tell_coordinator(repo: &Repo, task: &Obj, kind: Kind, text: &str) -> Res<()> {
     let me = calling_coordinator(repo).map(|c| s(c, "id").to_string());
     let skip = me.as_deref().filter(|m| !m.is_empty());
     news(

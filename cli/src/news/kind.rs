@@ -4,9 +4,9 @@
 //! coordinator to act wakes it; one that needs nothing rides along with the next line
 //! that does (test_kind.rs holds that, but for the few its NOT_YET names).
 //!
-//! Call sites still pass the event as a word (`Kind::Keys.into()` gives it); an event
-//! no kind has (an old log's, or a new line's) wakes, so a new kind of line can't go
-//! unheard.
+//! Every call that writes news (`news`, `say`, `tell_coordinator`, `stop`) passes a
+//! kind, so a new line can't be written without one. An event no kind has (an old
+//! log's) still wakes when read back.
 
 /// A kind of news line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -329,13 +329,6 @@ impl Kind {
             | Kind::Build
             | Kind::Board => true,
         }
-    }
-}
-
-/// For call sites not moved to a kind yet: the kind an event names.
-impl From<&str> for Kind {
-    fn from(event: &str) -> Kind {
-        Kind::of_event(event).unwrap_or_else(|| panic!("no kind of news has the event {event:?}"))
     }
 }
 

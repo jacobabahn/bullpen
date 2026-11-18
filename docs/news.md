@@ -82,8 +82,8 @@ table it belongs to, and that row decides. What rides along: `accepted`, `closed
 every task was brought up to date (event `rebased`); `not auto-accepted (nothing to
 do ...)`; pickup's "started its 4 for today, nothing to do" (`pickup`); the queue's
 "can start, but the usage limit is reached" and revert's "isn't started" (`queue`);
-and a worker's backlog item (`later`). Everything else wakes, a line of a kind
-bullpen doesn't know too: among them the keys-changed line (`keys`), pickup's
+and a worker's backlog item (`later`). Everything else wakes (bullpen writes no
+line without a kind; an event it doesn't know, in an old log, wakes too): among them the keys-changed line (`keys`), pickup's
 asks (`pickup-ask`), the queue's "couldn't start" (`queue-failed`), an `After`
 line with a task not rebased, whose push failed or that a message didn't reach
 (`not-rebased`), and auto-accept's "approved by review and auto-accepted" and

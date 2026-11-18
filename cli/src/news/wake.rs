@@ -33,7 +33,7 @@ pub const UNREAD_FOR: f64 = 60.0;
 pub const DRAFT_FOR: f64 = 600.0;
 
 /// Is news of this event worth waking a coordinator for? Its kind says (kind.rs); an
-/// event no kind has wakes, so a new kind of line can't go unheard.
+/// event no kind has (news() writes none, but an old log may have one) wakes.
 pub fn wakes(event: &str) -> bool {
     Kind::of_event(event).is_none_or(Kind::wakes)
 }
