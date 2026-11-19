@@ -353,7 +353,7 @@ fn the_title_leads_its_row_the_id_and_age_are_a_details_size() {
     assert_eq!(laid.idw, fonts.width("BP-123", Weight::Bold, c.m.detail));
     let g = Geo { c, idw: laid.idw };
     let t = task("BP-123", "todo");
-    assert_eq!(g.right_side(&t, &fonts), fonts.width(&t.age, Weight::Bold, c.m.detail));
+    assert_eq!(g.right_side(&t, &fonts), fonts.width("00m", Weight::Bold, c.m.detail));
     // an unselected ID is dim, never the foreground
     let s = draw(&r);
     let id: Vec<_> = row_px(&s, 0).iter().enumerate().filter(|(i, _)| (30..52).contains(&(i % 400))).map(|(_, p)| *p).collect();
@@ -435,24 +435,30 @@ fn the_selected_card_keeps_its_wash_and_its_bar_with_an_edge_of_its_flags_colour
 }
 
 #[test]
-fn a_risk_is_a_chip_its_colour_on_its_colour_faintly() {
+fn a_risk_is_a_chip_its_word_in_its_colour_inside_a_line_of_it_before_the_age_column() {
     let theme = Theme::default();
     let c = canvas(TextSize::Medium);
     let r = rows(vec![Row::Task(TaskRow { risk: Some("high".into()), ..task("BP-1", "ready") })]);
     let (_, s) = draw_in(&r, TextSize::Medium);
-    let fill = [theme.red.0, theme.red.1, theme.red.2, 46];
+    // its line: red at 45%, a word and a half from its top to its bottom; no fill
+    let line = [theme.red.0, theme.red.1, theme.red.2, 115];
     let (w, h) = (s.pixmap.width(), s.pixmap.height());
-    let filled: Vec<(u32, u32)> = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).filter(|&(x, y)| faintly(px_at(&s, x, y), fill)).collect();
-    let ys = filled.iter().map(|p| p.1);
-    let tall = ys.clone().max().unwrap() - ys.min().unwrap() + 1;
-    // a word and a half high (less its round ends' smoothed rows), its word in its colour
+    let lined: Vec<(u32, u32)> = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).filter(|&(x, y)| faintly(px_at(&s, x, y), line)).collect();
+    let ys = lined.iter().map(|p| p.1);
+    let (top, bottom) = (ys.clone().min().unwrap(), ys.max().unwrap());
+    let tall = bottom - top + 1;
     assert!(tall as f32 >= 1.5 * c.m.label - 2.0 && tall as f32 <= 1.5 * c.m.label, "{tall}");
+    let x0 = lined.iter().map(|p| p.0).min().unwrap();
+    assert_eq!(px_at(&s, x0 + 3, (top + bottom) / 2)[3], 0, "no fill inside the line");
     assert!(has(&row_px(&draw(&r), 0), theme.red));
     // the title makes room for it: the chip's width and the age's
     let g = Geo { c, idw: 0.0 };
     let fonts = Fonts::builtin();
     let t = TaskRow { risk: Some("high".into()), ..task("BP-1", "ready") };
-    let want = fonts.width("3m", Weight::Bold, c.m.detail) + 0.5 * c.m.detail + chip::width(&fonts, "high", c.m.label);
+    // the age's column is two figures wide, so chips line up whatever the ages
+    let want = fonts.width("00m", Weight::Bold, c.m.detail) + 0.5 * c.m.detail + chip::width(&fonts, "high", c.m.label);
+    let wide = TaskRow { age: "100m".into(), ..t.clone() };
+    assert!(g.right_side(&wide, &fonts) > want);
     assert_eq!(g.right_side(&t, &fonts), want);
 }
 

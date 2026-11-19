@@ -1,5 +1,6 @@
 //! Chips and keycaps, drawn with render.rs's `Draw`: a word in its colour on a fully
-//! round pill of that colour, faint (a ready task's risk, the header's counts), and a
+//! round pill of that colour, faint (the header's counts), or inside a line of it (a
+//! ready task's risk), and a
 //! key in a small rounded cap with what it does after it, dim (the key row). Each is
 //! measured first, so what's beside it can make room.
 
@@ -22,6 +23,18 @@ pub fn chip(d: &mut Draw, text: &str, px: f32, right: f32, cy: f32, color: [u8; 
     let (x, top) = (right - w, (cy - h / 2.0).round());
     let fill = [color[0], color[1], color[2], (0.18 * 255.0f32).round() as u8];
     d.rounded_fill(x, top, w, h, h / 2.0, fill);
+    d.boxed(px, text, Weight::Bold, x + SIDE * px, top, h, color);
+    x
+}
+
+/// A chip as `chip`'s, quieter: the word in its colour inside a line of that colour at
+/// 45%, with no fill (a ready task's risk, which mustn't read as a status).
+pub fn outlined(d: &mut Draw, text: &str, px: f32, right: f32, cy: f32, color: [u8; 4]) -> f32 {
+    let w = width(d.fonts(), text, px);
+    let h = (1.5 * px).round();
+    let (x, top) = (right - w, (cy - h / 2.0).round());
+    let line = [color[0], color[1], color[2], (0.45 * 255.0f32).round() as u8];
+    d.rounded_edge(x, top, w, h, h / 2.0, 1.25, line);
     d.boxed(px, text, Weight::Bold, x + SIDE * px, top, h, color);
     x
 }

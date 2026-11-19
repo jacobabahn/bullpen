@@ -486,9 +486,19 @@ impl Geo {
         chip::keycap_width(fonts, key, what, px) + 0.8 * px
     }
 
+    /// The age column's width: an age of two figures', so the risks' chips before it
+    /// line up down the list whatever the ages are (a wider one takes its own).
+    fn age_width(&self, age: &str, fonts: &Fonts) -> f32 {
+        if age.is_empty() {
+            return 0.0;
+        }
+        let px = self.c.m.detail;
+        fonts.width(age, Weight::Bold, px).max(fonts.width("00m", Weight::Bold, px))
+    }
+
     /// The width a task's age (and risk) take at the right, as `task` draws them.
     fn right_side(&self, t: &TaskRow, fonts: &Fonts) -> f32 {
-        let mut w = fonts.width(&t.age, Weight::Bold, self.c.m.detail);
+        let mut w = self.age_width(&t.age, fonts);
         if let Some(level) = &t.risk {
             let gap = if t.age.is_empty() { 0.0 } else { 0.5 * self.c.m.detail };
             w += gap + chip::width(fonts, level, self.c.m.label);
@@ -766,7 +776,7 @@ impl<'a> Draw<'a> {
         // the right side: the risk as a chip, then the age at a detail's size
         let small = self.m().detail;
         let mut right = self.right();
-        let age_w = self.fonts.width(&t.age, Weight::Bold, small);
+        let age_w = self.g.age_width(&t.age, self.fonts);
         let age_color = match tone {
             Some(c) => c,
             None if t.stale => solid(self.theme.red),
@@ -779,7 +789,7 @@ impl<'a> Draw<'a> {
         if let Some(level) = &t.risk {
             let gap = if t.age.is_empty() { 0.0 } else { 0.5 * small };
             let color = self.theme.risk(level);
-            chip::chip(self, level, self.m().label, right - gap, cy, color);
+            chip::outlined(self, level, self.m().label, right - gap, cy, color);
         }
         let color = match tone {
             Some(c) => c,
