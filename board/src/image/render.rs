@@ -634,7 +634,7 @@ impl<'a> Draw<'a> {
     /// Text in type `px` on the baseline of the line being drawn (its type's), whose top
     /// is y: an ID or an age beside a title.
     #[allow(clippy::too_many_arguments)]
-    fn text_in(&mut self, px: f32, s: &str, weight: Weight, x: f32, y: f32, max: f32, color: [u8; 4]) -> f32 {
+    pub(super) fn text_in(&mut self, px: f32, s: &str, weight: Weight, x: f32, y: f32, max: f32, color: [u8; 4]) -> f32 {
         let s = self.fonts.fit(s, weight, px, max.max(0.0));
         let base = self.baseline(y) - self.shift;
         self.fonts.draw(self.pm, &s, weight, px, (x, base), color)

@@ -93,8 +93,8 @@ fn the_counts_under_the_bar_are_the_groups_that_fit_then_how_many_tasks_the_rest
     let all = fixture();
     let groups: Vec<&Tally> = all.iter().filter(|t| t.status != "needs").collect();
     let (shown, more) = fitting(&d, &groups, c.right() - c.left(), c.m.label);
-    assert!(shown >= 2 && shown < groups.len(), "{shown}");
-    assert_eq!(more, format!("+{}", groups[shown..].iter().map(|t| t.n).sum::<usize>()));
+    assert!(shown >= 1 && shown < groups.len(), "{shown}");
+    assert_eq!(more, format!("+{} more", groups[shown..].iter().map(|t| t.n).sum::<usize>()));
     assert_eq!(fitting(&d, &groups, 4000.0, c.m.label), (groups.len(), String::new()));
     assert!(end(&pm) > 200);
 }

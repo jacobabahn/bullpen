@@ -1,7 +1,7 @@
 //! The header's status bar, on a tall board: under the top line, a segment for each open
 //! task, in its group's colour (theme.rs's `group`) and the board's order, and under it
 //! each group's count and word (but what needs you, the top line's chip), as many as
-//! fit, then "+N" for the tasks of the rest. It says
+//! fit, then "+N more" for the tasks of the rest. It says
 //! the whole repository at a glance, however the list is scrolled. It shows counts
 //! only (ui/list.rs's `Tally`), so the header's image changes, and is sent again, only
 //! when a count does.
@@ -66,8 +66,8 @@ pub fn segments(tallies: &[Tally], l: f32, r: f32, gap: f32) -> Vec<(f32, f32, &
 
 /// The counts' line, whose top is y, `h` high, in type `px`: each group's dot in its
 /// colour, its number and its word, dim, but what needs you, which the chip on the top
-/// line says. The groups that don't fit before r go from the end, and "+N" says how
-/// many tasks they have.
+/// line says. The groups that don't fit before r go from the end, and "+N more" says
+/// how many tasks they have.
 fn counts(d: &mut Draw, tallies: &[Tally], l: f32, r: f32, y: f32, h: f32, px: f32) {
     let theme = d.theme();
     let tallies: Vec<&Tally> = tallies.iter().filter(|t| t.status != "needs").collect();
@@ -86,14 +86,14 @@ fn counts(d: &mut Draw, tallies: &[Tally], l: f32, r: f32, y: f32, h: f32, px: f
     }
 }
 
-/// How many of the groups' counts fit in `room` pixels, and what says the rest ("+N",
-/// their tasks; empty when all fit).
+/// How many of the groups' counts fit in `room` pixels, and what says the rest ("+N
+/// more", their tasks; empty when all fit).
 fn fitting(d: &Draw, tallies: &[&Tally], room: f32, px: f32) -> (usize, String) {
     let fonts = d.fonts();
     let pair = |t: &Tally| DOT * px + fonts.width(&t.n.to_string(), Weight::Bold, px) + fonts.width(&format!(" {}", t.word), Weight::Regular, px);
     for shown in (0..=tallies.len()).rev() {
         let rest: usize = tallies[shown..].iter().map(|t| t.n).sum();
-        let more = if rest == 0 { String::new() } else { format!("+{rest}") };
+        let more = if rest == 0 { String::new() } else { format!("+{rest} more") };
         let parts = shown + usize::from(rest > 0);
         let w: f32 = tallies[..shown].iter().map(|t| pair(t)).sum::<f32>() + fonts.width(&more, Weight::Regular, px);
         if shown == 0 || w + PAIR * px * parts.saturating_sub(1) as f32 <= room {

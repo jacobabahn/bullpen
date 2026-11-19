@@ -186,18 +186,26 @@ impl Theme {
     }
 
     /// A group's colour in the header's status bar, by its first status: what waits on
-    /// you in its status's colour (finished fainter than ready), in review blue, and
-    /// what's under way in the foreground, fainter the further it is from you.
+    /// you in its status's colour (finished fainter than ready), in review blue, the
+    /// coordinator's a violet of its own, and what's working or queued in the
+    /// foreground, the queued fainter.
     pub fn group(&self, status: &str) -> [u8; 4] {
         match status {
             "needs" => solid(self.yellow),
             "ready" => solid(self.green),
             "finished" => faint(self.green, 0.7),
             "review" => solid(self.blue),
-            "working" => faint(self.fg, 0.66),
-            "triage" => faint(self.fg, 0.52),
-            _ => faint(self.fg, 0.4),
+            "working" => faint(self.fg, 0.7),
+            "triage" => solid(self.between()),
+            _ => faint(self.fg, 0.36),
         }
+    }
+
+    /// A violet between the terminal's red and blue, toward the foreground: the
+    /// coordinator's tasks in the status bar, which are neither yours nor a worker's.
+    fn between(&self) -> Rgb {
+        let mix = |a: u8, b: u8, c: u8| ((a as u16 * 3 + b as u16 * 4 + c as u16) / 8) as u8;
+        Rgb(mix(self.red.0, self.blue.0, self.fg.0), mix(self.red.1, self.blue.1, self.fg.1), mix(self.red.2, self.blue.2, self.fg.2))
     }
 
     /// A risk level's colour, as ui::risk_style gives it.

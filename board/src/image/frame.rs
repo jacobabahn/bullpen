@@ -27,7 +27,9 @@ pub fn head(head: &Head, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pix
     let mut d = Draw::new(&mut pm, fonts, c, 0.0);
     let ch = c.grid.cell_h as f32;
     let (top, line) = if rows >= 2 { ((0.1 * ch).round(), (1.3 * ch).round()) } else { (0.0, ch) };
-    d.set(c.m.title, line);
+    // the repository's name is the pane's largest type
+    let name_px = (NAME * c.m.title).round();
+    d.set(name_px, line);
     let theme = d.theme();
     let (fg, dim) = (theme.text(), theme.dim());
     let left = c.left();
@@ -41,11 +43,13 @@ pub fn head(head: &Head, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pix
     }
     let left_end = x + CHIP_GAP * px - 0.8 * c.m.title;
     let end = d.text(&head.name, Weight::Bold, left, top, left_end - left, fg);
-    let end = d.text(&head.auto, Weight::Regular, end, top, left_end - end, dim);
+    // what's after it at a title's size, on the name's baseline
+    let px = c.m.title;
+    let end = d.text_in(px, &head.auto, Weight::Regular, end, top, left_end - end, dim);
     if !head.others.is_empty() {
-        let end = d.text(" · ", Weight::Regular, end, top, left_end - end, dim);
+        let end = d.text_in(px, " · ", Weight::Regular, end, top, left_end - end, dim);
         let tone = if head.others_amber { solid(theme.yellow) } else { dim };
-        d.text(&head.others, Weight::Regular, end, top, left_end - end, tone);
+        d.text_in(px, &head.others, Weight::Regular, end, top, left_end - end, tone);
     }
     if bar {
         super::bar::draw(&mut d, c, &head.tallies);
@@ -54,6 +58,9 @@ pub fn head(head: &Head, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pix
     }
     Ok(pm)
 }
+
+/// The repository's name's size, of a title's.
+const NAME: f32 = 1.15;
 
 /// The space between the header's chips, of their type.
 const CHIP_GAP: f32 = 0.4;
