@@ -501,7 +501,7 @@ impl Geo {
         let mut w = self.age_width(&t.age, fonts);
         if let Some(level) = &t.risk {
             let gap = if t.age.is_empty() { 0.0 } else { 0.5 * self.c.m.detail };
-            w += gap + chip::width(fonts, level, self.c.m.label);
+            w += gap + chip::risk_width(fonts, level, self.c.m.label);
         }
         w
     }
@@ -792,7 +792,7 @@ impl<'a> Draw<'a> {
         if let Some(level) = &t.risk {
             let gap = if t.age.is_empty() { 0.0 } else { 0.5 * small };
             let color = self.theme.risk(level);
-            chip::outlined(self, level, self.m().label, right - gap, cy, color);
+            chip::risk(self, level, self.m().label, right - gap, cy, color);
         }
         let color = match tone {
             Some(c) => c,
