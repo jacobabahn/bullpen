@@ -543,3 +543,25 @@ fn the_selected_task_carries_its_first_key_for_the_image_looks_card_unless_its_a
     a.pending = Some((model::Action::Accept, "BP-1".into()));
     assert_eq!(keys(&a)[1], ("BP-1".into(), None));
 }
+
+#[test]
+fn on_the_image_board_what_a_task_needs_from_you_gets_four_lines_unselected() {
+    use crate::ui::rows::Row;
+    let mut a = app(vec![asking("BP-1"), ready("BP-2")], 0, Layout::Grouped);
+    a.sel = Some("BP-2".into());
+    let most = |a: &App, id: &str| -> usize {
+        let r = crate::ui::rows::build(a, 42, false, model::now());
+        let at = r.rows.iter().position(|r| matches!(r, Row::Task(t) if t.id == id)).unwrap();
+        match &r.rows[at + 1] {
+            Row::Detail(d) => d.lines,
+            _ => 0,
+        }
+    };
+    a.image = true;
+    assert_eq!(most(&a, "BP-1"), 4);
+    // the text list's rows are wrapped already, a row a line, two at most as before
+    a.image = false;
+    let r = crate::ui::rows::build(&a, 42, false, model::now());
+    let at = r.rows.iter().position(|r| matches!(r, Row::Task(t) if t.id == "BP-1")).unwrap();
+    assert!(r.rows[at + 1..].iter().take_while(|r| r.is_detail()).count() <= 3);
+}

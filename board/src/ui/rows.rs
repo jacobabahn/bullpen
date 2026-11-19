@@ -201,6 +201,9 @@ fn build_as(app: &App, w: usize, narrow: bool, now: Now, selection: bool) -> Row
     Rows { rows, idw }
 }
 
+/// The most lines the image board gives what a task needs from you, unselected.
+const ASKED_LINES: usize = 4;
+
 /// A task's detail lines (the grouped layout's): what its agent is doing now, or
 /// what there is to say about it; then its stat line.
 fn details(rows: &mut Vec<Row>, app: &App, t: &Task, cur: bool, age_on_detail: bool, detail_w: usize, now: Now) {
@@ -209,8 +212,12 @@ fn details(rows: &mut Vec<Row>, app: &App, t: &Task, cur: bool, age_on_detail: b
     // what a task needs from you, GitHub said, or the usage limit gets two lines,
     // as does one its coordinator is on (when it comes to you); anything else
     // one; the selected task all it has to say, up to SELECTED_LINES
+    // (on the image board what a task needs from you is never cut short of ASKED_LINES:
+    // it's what you have to answer)
     let lines = if cur {
         SELECTED_LINES
+    } else if app.image && t.flagged() {
+        ASKED_LINES
     } else if !doing.is_empty() {
         1
     } else if t.flagged() || t.is_limited() || t.triage() || t.status == "finished" || !model::pr_phrase(t).is_empty() {

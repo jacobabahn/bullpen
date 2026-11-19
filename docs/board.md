@@ -178,7 +178,8 @@ coordinator's, and a closed one's, a step further), so yours lead the list. A cu
 after the last whole word that fits, never after a comma or a full stop (in a word
 only when that would leave under half the room, as with a path). A detail line wraps
 where the type runs out of room, measured in pixels, and its last line isn't left a
-word or two; it's dim, but the selected task's and what a task that needs you says.
+word or two; it's dim, but the selected task's and what a task that needs you says,
+which gets up to four lines unselected, so a question isn't cut.
 A key a line names ("Its agent exited. `r` resumes it.") is in a small cap, as the
 keys at the bottom. A ready task's risk is a quiet chip: a dot of its colour, then
 the word dim, inside a faint line (on a board under 44 columns, its first letter: H,
