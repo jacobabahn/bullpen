@@ -224,23 +224,50 @@ fn detail_row(text: &str) -> DetailRow {
 }
 
 #[test]
-fn on_a_narrow_board_a_title_thats_yours_takes_two_lines() {
+fn a_title_thats_yours_takes_two_lines_at_any_width() {
     let fonts = Fonts::builtin();
     let long = "Mission control: show each repo's coordinator question in the inbox";
     let r = rows(vec![
         Row::Task(TaskRow { title: long.into(), yours: true, ..task("BP-1", "needs") }),
         Row::Task(TaskRow { title: long.into(), ..task("BP-2", "working") }),
     ]);
-    for (cols, two) in [(35, true), (42, true), (43, false), (59, false)] {
+    for cols in [35, 42, 43, 47] {
         let c = Canvas::new(Grid { cols, cell_w: 16, cell_h: 34 }, TextSize::Medium, Theme::default());
         let laid = lay(&r, &c, &fonts);
-        assert_eq!(laid.lines[0].len(), if two { 2 } else { 1 }, "{cols}");
+        assert_eq!(laid.lines[0].len(), 2, "{cols}");
         assert_eq!(laid.lines[1].len(), 1, "{cols}: another's is cut to one");
-        assert!(laid.heights[0] > laid.heights[1] || !two);
+        assert!(laid.heights[0] > laid.heights[1]);
     }
+    // with room for it on one line, one
+    let c = Canvas::new(Grid { cols: 79, cell_w: 16, cell_h: 34 }, TextSize::Medium, Theme::default());
+    assert_eq!(lay(&r, &c, &fonts).lines[0], vec![long.to_string()]);
     // small type keeps a cell a row, as the text list
     let c = Canvas::new(Grid { cols: 35, cell_w: 16, cell_h: 34 }, TextSize::Small, Theme::default());
     assert_eq!(lay(&r, &c, &fonts).lines[0].len(), 1);
+}
+
+#[test]
+fn a_cut_leaves_no_stub_of_a_word_and_no_comma_before_its_ellipsis() {
+    let f = Fonts::builtin();
+    let w = |s: &str| f.width(s, Weight::Regular, 12.0);
+    // room for "one two, t" and the ellipsis: the cut goes back to the word before, and its comma goes
+    assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two, t…") + 0.5), "one two…");
+    // most of a long word fits: it's cut in the word
+    assert_eq!(f.fit("one background jobs", Weight::Regular, 12.0, w("one backgrou…") + 0.5), "one backgrou…");
+    // a single word is cut where it must be
+    assert_eq!(f.fit("background", Weight::Regular, 12.0, w("bac…") + 0.5), "bac…");
+}
+
+#[test]
+fn a_wrapped_texts_last_word_isnt_left_alone() {
+    let f = Fonts::builtin();
+    let w = |s: &str| f.width(s, Weight::Regular, 12.0);
+    let room = w("probably with a question. p shows its") + 0.5;
+    let lines = f.wrap("probably with a question. p shows its screen.", Weight::Regular, 12.0, (room, room), 3);
+    assert_eq!(lines, vec!["probably with a question. p shows", "its screen."]);
+    // a line of two words keeps both
+    let room = w("shows its") + 0.5;
+    assert_eq!(f.wrap("shows its screen.", Weight::Regular, 12.0, (room, room), 3), vec!["shows its", "screen."]);
 }
 
 #[test]
@@ -461,6 +488,29 @@ fn the_selected_tasks_key_is_in_a_cap_at_its_cards_lower_right_and_its_last_line
         let cy = bottom - c.m.detail_line as u32 / 2;
         assert!(px_at(&s, at.0 + 3, cy)[3] > px_at(&bare, at.0 + 3, cy)[3], "{size:?}");
     }
+}
+
+#[test]
+fn a_last_line_the_key_would_cut_keeps_its_text_and_the_key_goes_under_it() {
+    let fonts = Fonts::builtin();
+    let c = canvas(TextSize::Medium);
+    let g = Geo { c, idw: 0.0 };
+    // one line, as wide as its room: the key beside it would cut it
+    let mut text = String::from("14 files");
+    while fonts.width(&format!("{text} more"), Weight::Regular, c.m.detail) <= g.detail_room() {
+        text.push_str(" more");
+    }
+    let with = |key: Option<(String, String)>, size| {
+        let t = TaskRow { selected: true, key, ..task("BP-1", "ready") };
+        lay(&rows(vec![Row::Task(t), Row::Detail(DetailRow { selected: true, ..detail_row(&text) })]), &canvas(size), &fonts)
+    };
+    let key = || Some(("a".to_string(), "accept".to_string()));
+    let (laid, bare) = (with(key(), TextSize::Medium), with(None, TextSize::Medium));
+    assert_eq!(laid.lines[1], vec![text.clone(), String::new()]);
+    assert_eq!(laid.heights[1], bare.heights[1] + c.m.detail_line as u32);
+    // small type keeps its rows a cell each: the line is cut
+    let small = with(key(), TextSize::Small);
+    assert_eq!(small.lines[1].len(), 1);
 }
 
 #[test]

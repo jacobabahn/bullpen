@@ -180,9 +180,9 @@ impl Laid {
     }
 }
 
-/// The most lines the selected task's title wraps to; on a narrow board, one that's
-/// yours (it waits on you) wraps to two, but in small type, a cell a row as the text
-/// list's; any other title is cut to one.
+/// The most lines the selected task's title wraps to; one that's yours (it waits on
+/// you) wraps to two, but in small type, a cell a row as the text list's; any other
+/// title is cut to one.
 const TITLE_LINES: usize = 3;
 const YOURS_LINES: usize = 2;
 
@@ -200,7 +200,7 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
         let (title, most, weight, right) = match row {
             Row::Task(t) => {
                 key_w = t.key.as_ref().map_or(0.0, |(k, what)| g.key_width(k, what, fonts));
-                let two = t.yours && g.narrow() && !c.m.cells;
+                let two = t.yours && !c.m.cells;
                 let most = if t.selected { TITLE_LINES } else if two { YOURS_LINES } else { 1 };
                 (&t.title, most, title_weight(t.asked.is_some()), g.task_right(t, fonts))
             }
@@ -211,9 +211,16 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
                 let bolder = if d.stale { fonts.width(&age, Weight::Bold, c.m.detail) - fonts.width(&age, Weight::Regular, c.m.detail) } else { 0.0 };
                 let mut lines = g.detail_lines(&d.text, d.lines, bolder, 0.0, fonts);
                 let last = !rows.rows.get(i + 1).is_some_and(Row::is_detail);
-                // the key goes after its last line, which makes room when it must
+                // the key goes after its last line, which makes room when it must; when
+                // that would cut its text, the key gets a line of its own under it
                 if last && key_w > 0.0 && lines.last().is_some_and(|l| fonts.width(l, Weight::Regular, c.m.detail) > g.detail_room() - key_w) {
-                    lines = g.detail_lines(&d.text, d.lines, bolder, key_w, fonts);
+                    let narrower = g.detail_lines(&d.text, d.lines, bolder, key_w, fonts);
+                    let cut = |l: &[String]| l.last().is_some_and(|l| l.ends_with('…'));
+                    if cut(&narrower) && !cut(&lines) && !c.m.cells {
+                        lines.push(String::new());
+                    } else {
+                        lines = narrower;
+                    }
                 }
                 heights.push(g.height(row, lines.len()));
                 all.push(lines);

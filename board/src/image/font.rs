@@ -37,6 +37,9 @@ pub struct Fonts {
     cache: HashMap<(Weight, bool, u16, u32, u8), Glyph>,
 }
 
+/// The fewest letters of a word a cut leaves (with the space before them).
+const STUB: usize = 5;
+
 impl Fonts {
     /// Inter, built in.
     pub fn builtin() -> Fonts {
@@ -97,7 +100,9 @@ impl Fonts {
         f.capital_height().unwrap_or(f.ascender()) as f32 * px / f.units_per_em() as f32
     }
 
-    /// Text cut to `max` pixels wide, with "…" when it was cut.
+    /// Text cut to `max` pixels wide, with "…" when it was cut: in a word when STUB
+    /// letters of it or more fit, else after the word before (and not after a full stop,
+    /// a comma or a colon).
     pub fn fit(&self, text: &str, weight: Weight, px: f32, max: f32) -> String {
         if self.width(text, weight, px) <= max {
             return text.to_string();
@@ -113,8 +118,17 @@ impl Fonts {
             w += a;
             out.push(c);
         }
-        let out = out.trim_end().to_string();
-        if room <= 0.0 { String::new() } else { out + "…" }
+        if room <= 0.0 {
+            return String::new();
+        }
+        let in_word = text[out.len()..].chars().next().is_some_and(|c| !c.is_whitespace()) && !out.ends_with(char::is_whitespace);
+        // a few letters of a word say nothing: the cut goes back to the word before
+        if let (true, Some(space)) = (in_word, out.rfind(char::is_whitespace)) {
+            if out[space..].chars().count() <= STUB {
+                out.truncate(space);
+            }
+        }
+        out.trim_end().trim_end_matches(['.', ',', ':', ';', '·', '-', '(']).trim_end().to_string() + "…"
     }
 
     /// Text wrapped at its spaces: a first line `first` pixels wide, then lines `rest`
@@ -142,7 +156,22 @@ impl Fonts {
             }
             lines.push(line);
         }
+        self.no_widow(&mut lines, weight, px, rest);
         lines
+    }
+
+    /// A last line of one word takes the last word of the line above it, when that line
+    /// has three or more and the two fit: a word isn't left alone under a full line.
+    fn no_widow(&self, lines: &mut [String], weight: Weight, px: f32, max: f32) {
+        let [.., above, last] = lines else { return };
+        if last.contains(' ') || last.ends_with('…') || above.split(' ').count() < 3 {
+            return;
+        }
+        let Some((rest, word)) = above.rsplit_once(' ') else { return };
+        let moved = format!("{word} {last}");
+        if self.width(&moved, weight, px) <= max {
+            (*above, *last) = (rest.to_string(), moved);
+        }
     }
 
     /// A line's first word and its width: all of it, or as much as fits in `max` with the
