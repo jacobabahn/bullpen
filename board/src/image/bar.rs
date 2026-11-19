@@ -1,6 +1,7 @@
 //! The header's status bar, on a tall board: under the top line, a segment for each open
 //! task, in its group's colour (theme.rs's `group`) and the board's order, and under it
-//! each group's count and word (the counts alone when the words don't all fit). It says
+//! each group's count and word (but what needs you, the top line's chip), as many as
+//! fit, then "+N" for the tasks of the rest. It says
 //! the whole repository at a glance, however the list is scrolled. It shows counts
 //! only (ui/list.rs's `Tally`), so the header's image changes, and is sent again, only
 //! when a count does.
@@ -64,38 +65,42 @@ pub fn segments(tallies: &[Tally], l: f32, r: f32, gap: f32) -> Vec<(f32, f32, &
 }
 
 /// The counts' line, whose top is y, `h` high, in type `px`: each group's dot in its
-/// colour, its number and its word, dim. When they don't all fit before r the words go,
-/// so every colour in the bar still has its count (the groups' names are in the list);
-/// counts that don't fit even so are dropped from the end.
+/// colour, its number and its word, dim, but what needs you, which the chip on the top
+/// line says. The groups that don't fit before r go from the end, and "+N" says how
+/// many tasks they have.
 fn counts(d: &mut Draw, tallies: &[Tally], l: f32, r: f32, y: f32, h: f32, px: f32) {
     let theme = d.theme();
-    let words = fits(d, tallies, r - l, px, true);
+    let tallies: Vec<&Tally> = tallies.iter().filter(|t| t.status != "needs").collect();
+    let (shown, more) = fitting(d, &tallies, r - l, px);
     let mut x = l;
-    for (i, t) in tallies.iter().enumerate() {
-        let num = t.n.to_string();
-        let word = if words { format!(" {}", t.word) } else { String::new() };
+    for (i, t) in tallies[..shown].iter().enumerate() {
         let start = if i == 0 { x } else { x + PAIR * px };
-        if start + pair_width(d, t, px, words) > r {
-            break;
-        }
         let dot = (DOT_R * 2.0 * px).round();
         d.rounded_fill(start, (y + (h - dot) / 2.0).round(), dot, dot, dot / 2.0, theme.group(t.status));
-        let end = d.boxed(px, &num, Weight::Bold, start + DOT * px, y, h, theme.text());
-        x = d.boxed(px, &word, Weight::Regular, end, y, h, theme.dim());
+        let end = d.boxed(px, &t.n.to_string(), Weight::Bold, start + DOT * px, y, h, theme.text());
+        x = d.boxed(px, &format!(" {}", t.word), Weight::Regular, end, y, h, theme.dim());
+    }
+    if !more.is_empty() {
+        let start = if shown == 0 { x } else { x + PAIR * px };
+        d.boxed(px, &more, Weight::Regular, start, y, h, theme.dim());
     }
 }
 
-/// How wide a group's dot, number and (with `words`) word are.
-fn pair_width(d: &Draw, t: &Tally, px: f32, words: bool) -> f32 {
+/// How many of the groups' counts fit in `room` pixels, and what says the rest ("+N",
+/// their tasks; empty when all fit).
+fn fitting(d: &Draw, tallies: &[&Tally], room: f32, px: f32) -> (usize, String) {
     let fonts = d.fonts();
-    let word = if words { fonts.width(&format!(" {}", t.word), Weight::Regular, px) } else { 0.0 };
-    DOT * px + fonts.width(&t.n.to_string(), Weight::Bold, px) + word
-}
-
-/// Whether every group's count fits in `room` pixels.
-fn fits(d: &Draw, tallies: &[Tally], room: f32, px: f32, words: bool) -> bool {
-    let all: f32 = tallies.iter().map(|t| pair_width(d, t, px, words)).sum();
-    all + PAIR * px * tallies.len().saturating_sub(1) as f32 <= room
+    let pair = |t: &Tally| DOT * px + fonts.width(&t.n.to_string(), Weight::Bold, px) + fonts.width(&format!(" {}", t.word), Weight::Regular, px);
+    for shown in (0..=tallies.len()).rev() {
+        let rest: usize = tallies[shown..].iter().map(|t| t.n).sum();
+        let more = if rest == 0 { String::new() } else { format!("+{rest}") };
+        let parts = shown + usize::from(rest > 0);
+        let w: f32 = tallies[..shown].iter().map(|t| pair(t)).sum::<f32>() + fonts.width(&more, Weight::Regular, px);
+        if shown == 0 || w + PAIR * px * parts.saturating_sub(1) as f32 <= room {
+            return (shown, more);
+        }
+    }
+    (0, String::new())
 }
 
 /// A dot's radius, and how far its number starts from its left, of the type's size.
