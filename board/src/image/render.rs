@@ -245,7 +245,9 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
         let x = g.title_x();
         let first = right - x;
         let lines = if most > 1 {
-            fonts.wrap(title, weight, px, (first, c.right() - x), most)
+            let mut lines = fonts.wrap(title, weight, px, (first, c.right() - x), most);
+            fonts.balance(&mut lines, weight, px, c.right() - x);
+            lines
         } else {
             vec![fonts.fit(title, weight, px, first)]
         };
@@ -510,10 +512,9 @@ impl Geo {
         chip::keycap_width(fonts, key, what, px) + 0.8 * px
     }
 
-    /// The type of the selected task's key: a little under a label's, so its cap is
-    /// clear of the card's edge by as much as the card's type is.
+    /// The type of the selected task's key: a label's, as the key row's.
     fn key_px(&self) -> f32 {
-        (0.9 * self.c.m.label).round()
+        self.c.m.label
     }
 
     /// The age column's width: an age of two figures', so the risks' chips before it

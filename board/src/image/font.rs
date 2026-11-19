@@ -37,6 +37,9 @@ pub struct Fonts {
     cache: HashMap<(Weight, bool, u16, u32, u8), Glyph>,
 }
 
+/// The words a cut doesn't end on.
+const SMALL: [&str; 16] = ["a", "an", "the", "of", "for", "in", "as", "to", "and", "or", "with", "on", "at", "by", "from", "its"];
+
 /// The least of its room a text cut at a word's end fills: under it, it's cut in the word.
 const FILL: f32 = 0.6;
 
@@ -128,6 +131,13 @@ impl Fonts {
         if let (true, Some(space)) = (in_word, out.rfind(char::is_whitespace)) {
             if self.width(&out[..space], weight, px) >= FILL * room {
                 out.truncate(space);
+                // and not after a small word that leads nowhere ("a…", "for the…")
+                while let Some((rest, word)) = out.trim_end().rsplit_once(char::is_whitespace) {
+                    if !SMALL.contains(&word.to_lowercase().as_str()) || self.width(rest, weight, px) < FILL * room {
+                        break;
+                    }
+                    out.truncate(rest.len());
+                }
             }
         }
         out.trim_end().trim_end_matches(['.', ',', ':', ';', '·', '-', '(']).trim_end().to_string() + "…"
@@ -173,6 +183,25 @@ impl Fonts {
         let moved = format!("{word} {last}");
         if self.width(&moved, weight, px) <= max {
             (*above, *last) = (rest.to_string(), moved);
+        }
+    }
+
+    /// A title on two lines, neither cut: words go from the first line's end to the
+    /// second's start while that leaves the two closer in width, so the second isn't a
+    /// word or two under a full line.
+    pub fn balance(&self, lines: &mut [String], weight: Weight, px: f32, max: f32) {
+        let [first, second] = lines else { return };
+        if second.ends_with('…') {
+            return;
+        }
+        let w = |s: &str| self.width(s, weight, px);
+        while let Some((rest, word)) = first.rsplit_once(' ') {
+            let moved = format!("{word} {second}");
+            let (now, then) = ((w(first) - w(second)).abs(), (w(rest) - w(&moved)).abs());
+            if w(&moved) > max || then >= now {
+                break;
+            }
+            (*first, *second) = (rest.to_string(), moved);
         }
     }
 

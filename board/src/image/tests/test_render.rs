@@ -254,12 +254,31 @@ fn a_cut_is_at_a_words_end_with_no_comma_before_its_ellipsis() {
     assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two, three fo…") + 0.5), "one two, three…");
     // and its comma goes
     assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two, thr…") + 0.5), "one two…");
+    // nor does it end on a small word that leads nowhere
+    assert_eq!(f.fit("one two three for the best", Weight::Regular, 12.0, w("one two three for the b…") + 0.5), "one two three…");
     // a word whose comma alone doesn't fit is whole
     assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two…") + 0.5), "one two…");
     // a long word after a short one: cutting before it would leave most of the room empty
     assert_eq!(f.fit("in board/src/image/shown.rs", Weight::Regular, 12.0, w("in board/src/ima…") + 0.5), "in board/src/ima…");
     // a single word is cut where it must be
     assert_eq!(f.fit("background", Weight::Regular, 12.0, w("bac…") + 0.5), "bac…");
+}
+
+#[test]
+fn a_title_on_two_lines_is_balanced() {
+    let f = Fonts::builtin();
+    let w = |s: &str| f.width(s, Weight::Regular, 12.0);
+    let mut lines = vec!["Accept: merge a stack of ready tasks in dependency order, one".to_string(), "rebase each".to_string()];
+    f.balance(&mut lines, Weight::Regular, 12.0, 1000.0);
+    assert!((w(&lines[0]) - w(&lines[1])).abs() < w("dependency "), "{lines:?}");
+    assert_eq!(lines.join(" "), "Accept: merge a stack of ready tasks in dependency order, one rebase each");
+    // the second line never passes its room, and a cut title stays as it is
+    let mut tight = vec!["one two three four".to_string(), "five".to_string()];
+    f.balance(&mut tight, Weight::Regular, 12.0, w("four five") - 1.0);
+    assert_eq!(tight, vec!["one two three four", "five"]);
+    let mut cut = vec!["one two three four".to_string(), "five…".to_string()];
+    f.balance(&mut cut, Weight::Regular, 12.0, 1000.0);
+    assert_eq!(cut, vec!["one two three four", "five…"]);
 }
 
 #[test]
