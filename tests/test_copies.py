@@ -124,7 +124,7 @@ class CopiesTest(unittest.TestCase):
         self.assertIn("accepted()", self.board("bullpen"))
         self.assertNotIn("half_done()", self.board())
         self.assertEqual(len(self.board_news()), 1)
-        self.assertIn(f"The board wasn't rebuilt: {self.home} has uncommitted changes to core, board",
+        self.assertIn(f"The board wasn't rebuilt: {self.home} has uncommitted changes to core, draw, board",
                       self.board_news()[0])
         self.assertEqual(self.stamp(self.home).keys(), {"source"})
         self.assertIn("skipped", json.loads((self.target / "bullpen-board.json").read_text()))
