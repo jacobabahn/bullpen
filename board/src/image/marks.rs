@@ -69,7 +69,7 @@ impl Draw<'_> {
         let r = self.mark_r();
         let lw = self.line();
         let (fg, dim) = (self.theme.text(), self.theme.dim());
-        let color = |st: &str| self.theme.status(st).unwrap_or(dim);
+        let color = |st: &str| self.theme.shape(st).unwrap_or(dim);
         let a0 = -0.5 * PI + 2.0 * PI * turn;
         match mark {
             // a command running, or a tour being written: an arc half the way round
@@ -78,7 +78,7 @@ impl Draw<'_> {
                 let c = color(st);
                 self.arc(cx, cy, r, a0, 1.0 * PI, lw * 1.2, c)
             }
-            Mark::Stuck(st) => self.status_mark(st, cx, cy, Some(solid(self.theme.yellow)), 0.0),
+            Mark::Stuck(st) => self.status_mark(st, cx, cy, self.theme.shape("needs"), 0.0),
             // working: a faint ring with a quarter of it drawn
             Mark::Working => {
                 self.arc(cx, cy, r, 0.0, 2.0 * PI, lw, self.theme.tint_strong());
@@ -94,7 +94,7 @@ impl Draw<'_> {
         let r = self.mark_r();
         let lw = self.line();
         let dim = self.theme.dim();
-        let color = over.or(self.theme.status(st)).unwrap_or(dim);
+        let color = over.or(self.theme.shape(st)).unwrap_or(dim);
         let ink = solid(self.theme.bg);
         match st {
             // (a disc and a diamond look larger than a ring their size: a little under it)

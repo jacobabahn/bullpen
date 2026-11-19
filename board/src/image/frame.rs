@@ -98,7 +98,7 @@ pub fn foot(foot: &Foot, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pix
     // above the message's row, there or not, so the rule stays put when a message comes
     if let Some(first) = foot.lines.iter().map(|(row, _)| *row).min() {
         let first = first.min(rows.saturating_sub(2));
-        rule(&mut d, c, (first as f32 * ch - 0.45 * ch - up).round().max(0.0));
+        rule(&mut d, c, (first as f32 * ch - RULE * ch).round().max(0.0));
     }
     d.set(c.m.detail, ch);
     let theme = d.theme();
@@ -126,6 +126,10 @@ fn pixmap(c: &Canvas, rows: u16) -> Result<Pixmap, String> {
     let (w, h) = (c.grid.width(), rows as u32 * c.grid.cell_h);
     Pixmap::new(w.max(1), h.max(1)).ok_or_else(|| format!("can't make an image {w}×{h} pixels"))
 }
+
+/// How far over the message's row the rule is, of a cell's height: between the list
+/// and the keys when there's no message, and clear of one when there is.
+const RULE: f32 = 0.4;
 
 /// How far up in their rows the bottom lines sit, of a cell's height.
 const LIFT: f32 = 0.2;

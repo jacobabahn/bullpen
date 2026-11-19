@@ -487,11 +487,17 @@ fn fall_back(app: &mut App, why: String) -> bool {
 pub fn render_file(view: &View, size: TextSize, cell: (u32, u32), theme: Theme, font: Option<&Path>, path: &Path) -> Result<(), String> {
     let mut fonts = Fonts::load(font)?;
     let canvas = Canvas::new(Grid { cols: view.cols as usize, cell_w: cell.0, cell_h: cell.1 }, size, theme);
-    let laid = render::lay(&view.rows, &canvas, &fonts);
+    let mut laid = render::lay(&view.rows, &canvas, &fonts);
+    // the space under the selected block that the board leaves for its card (there
+    // it's rounded up to whole cells: pieces.rs)
+    if let Some(s0) = view.rows.rows.iter().position(Row::is_selected) {
+        let last = s0 + view.rows.rows[s0 + 1..].iter().take_while(|r| r.is_detail()).count();
+        laid.after[last] = 2 * render::card_below(&canvas);
+    }
     // (the list as tall as its rows, not rounded up to cells as on a terminal, where
     // it's cut to the pane: the space a short list leaves isn't the look's)
-    let list_h = laid.heights.iter().sum::<u32>();
     let n = view.rows.rows.len();
+    let list_h = laid.tall(0, n);
     let parts = [
         frame::head(&view.head, view.row - view.row0, &canvas, &mut fonts)?,
         render(&view.rows, &laid, render::Cut::rows(0..n, list_h), &canvas, &mut fonts)?.pixmap,

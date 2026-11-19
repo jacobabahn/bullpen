@@ -40,7 +40,11 @@ pub struct Fonts {
 /// The words a cut doesn't end on.
 const SMALL: [&str; 16] = ["a", "an", "the", "of", "for", "in", "as", "to", "and", "or", "with", "on", "at", "by", "from", "its"];
 
-/// The least of its room a text cut at a word's end fills: under it, it's cut in the word.
+/// The most letters of a word (with the space before them) a cut gives up to end at a
+/// word's end, whatever room that leaves.
+const STUB: usize = 7;
+
+/// The least of its room a text cut at a word's end fills, when it gives up more.
 const FILL: f32 = 0.8;
 
 impl Fonts {
@@ -104,8 +108,9 @@ impl Fonts {
     }
 
     /// Text cut to `max` pixels wide, with "…" when it was cut: after its last whole
-    /// word that fits (and not after a full stop, a comma or a colon), or in a word when
-    /// that would leave under FILL of the room used (one long word, a path).
+    /// word that fits (and not after a full stop, a comma or a colon), when that loses
+    /// STUB letters at most or keeps FILL of the room used; else in the word (a long
+    /// word, a path).
     pub fn fit(&self, text: &str, weight: Weight, px: f32, max: f32) -> String {
         if self.width(text, weight, px) <= max {
             return text.to_string();
@@ -129,11 +134,11 @@ impl Fonts {
         let in_word = left.chars().any(char::is_alphanumeric) && !out.ends_with(char::is_whitespace);
         // a piece of a word says little: the cut goes back to the word before
         if let (true, Some(space)) = (in_word, out.rfind(char::is_whitespace)) {
-            if self.width(&out[..space], weight, px) >= FILL * room {
+            if out[space..].chars().count() <= STUB || self.width(&out[..space], weight, px) >= FILL * room {
                 out.truncate(space);
                 // and not after a small word that leads nowhere ("a…", "for the…")
                 while let Some((rest, word)) = out.trim_end().rsplit_once(char::is_whitespace) {
-                    if !SMALL.contains(&word.to_lowercase().as_str()) || self.width(rest, weight, px) < (FILL - 0.1) * room {
+                    if !SMALL.contains(&word.to_lowercase().as_str()) || self.width(rest, weight, px) < (FILL - 0.2) * room {
                         break;
                     }
                     out.truncate(rest.len());

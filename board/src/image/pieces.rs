@@ -96,7 +96,8 @@ pub fn plan(view: &View, c: &Canvas, fonts: &Fonts, prev: Option<(u32, u32)>) ->
     // the block grows by whole cells, with room under it for its card's edge
     let mut grew = 0;
     if let Some((s0, s1, b1)) = block {
-        let (hs, hb) = (laid.tall(s0, s1) + card_below(c), base.tall(s0, b1));
+        // (and as much again clear under the card, so it isn't pressed on the next task)
+        let (hs, hb) = (laid.tall(s0, s1) + 2 * card_below(c), base.tall(s0, b1));
         grew = hs.saturating_sub(hb).div_ceil(ch);
         laid.after[s1 - 1] = hb + grew * ch - laid.tall(s0, s1);
     }

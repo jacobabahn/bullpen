@@ -125,9 +125,9 @@ impl Theme {
     }
 
     /// The selected card's fill when its task needs you or stopped: its flag's colour,
-    /// twice as strong as its wash.
+    /// well over twice as strong as its wash.
     pub fn flag_tint(&self, flag: Flag) -> [u8; 4] {
-        faint(bright(self.flag(flag)), 0.2)
+        faint(bright(self.flag(flag)), 0.26)
     }
 
 
@@ -161,6 +161,12 @@ impl Theme {
         faint(bright(self.flag(flag)), 0.1)
     }
 
+    /// A status's colour for a shape (a mark, a segment of the status bar, a dot): its
+    /// colour, lifted (`lit`); None for the dim ones.
+    pub fn shape(&self, status: &str) -> Option<[u8; 4]> {
+        self.status(status).map(|c| solid(lit(Rgb(c[0], c[1], c[2]))))
+    }
+
     /// A status's colour, as ui::mark_style gives it; None for the dim ones.
     pub fn status(&self, status: &str) -> Option<[u8; 4]> {
         match status {
@@ -178,11 +184,7 @@ impl Theme {
     /// foreground, the queued fainter.
     pub fn group(&self, status: &str) -> [u8; 4] {
         match status {
-            "needs" => solid(self.yellow),
-            "stopped" => solid(self.red),
-            "ready" => solid(self.green),
-            "finished" => solid(self.green),
-            "review" => solid(self.blue),
+            "needs" | "stopped" | "ready" | "finished" | "review" => self.shape(status).unwrap_or(self.text()),
             "working" => faint(self.fg, 0.7),
             "triage" => solid(self.between()),
             _ => faint(self.fg, 0.36),
@@ -204,6 +206,18 @@ impl Theme {
             _ => solid(self.green),
         }
     }
+}
+
+/// A colour for a shape: a light theme's colours are dark, to read as text on white,
+/// and a mark or a bar in them is dull (its amber is brown), so a colour whose
+/// strongest part is under 200 is scaled up to that. A dark theme's are left as they are.
+pub fn lit(c: Rgb) -> Rgb {
+    let most = c.0.max(c.1).max(c.2).max(1) as u32;
+    if most >= 200 {
+        return c;
+    }
+    let up = |v: u8| (v as u32 * 200 / most) as u8;
+    Rgb(up(c.0), up(c.1), up(c.2))
 }
 
 /// A colour at its brightest: its hue, scaled so its strongest part is whole. What a

@@ -256,14 +256,33 @@ fn a_cut_is_at_a_words_end_with_no_comma_before_its_ellipsis() {
     assert_eq!(f.fit("one two three four, five six", Weight::Regular, 12.0, w("one two three four, fi…") + 0.5), "one two three four…");
     // nor does it end on a small word that leads nowhere
     assert_eq!(f.fit("one two three four five six seven of bestowals", Weight::Regular, 12.0, w("one two three four five six seven of best…") + 0.5), "one two three four five six seven…");
-    // going back would leave too much of the room empty: it's cut in the word
-    assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two, thr…") + 0.5), "one two, thr…");
+    // a few letters are given up whatever room that leaves
+    assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two, thr…") + 0.5), "one two…");
+    // more than a few, with most of the room left empty: it's cut in the word
+    assert_eq!(f.fit("one background jobs", Weight::Regular, 12.0, w("one backgrou…") + 0.5), "one backgrou…");
     // a word whose comma alone doesn't fit is whole
     assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two…") + 0.5), "one two…");
     // a long word after a short one: cutting before it would leave most of the room empty
     assert_eq!(f.fit("in board/src/image/shown.rs", Weight::Regular, 12.0, w("in board/src/ima…") + 0.5), "in board/src/ima…");
     // a single word is cut where it must be
     assert_eq!(f.fit("background", Weight::Regular, 12.0, w("bac…") + 0.5), "bac…");
+}
+
+#[test]
+fn a_titles_lines_after_its_first_stop_short_of_the_ages_column() {
+    let fonts = Fonts::builtin();
+    let long = "Accept: merge a stack of ready tasks in dependency order, one rebase each and then some more of it";
+    let c = Canvas::new(Grid { cols: 47, cell_w: 16, cell_h: 34 }, TextSize::Medium, Theme::default());
+    let t = TaskRow { title: long.into(), selected: true, ..task("BP-1", "todo") };
+    let r = rows(vec![Row::Task(t.clone())]);
+    let laid = lay(&r, &c, &fonts);
+    let g = Geo { c, idw: laid.idw };
+    let room = g.title_right(&t, &fonts) - g.title_x();
+    assert!(room < c.right() - g.title_x() - fonts.width("00m", Weight::Bold, c.m.detail));
+    assert!(laid.lines[0].len() == 3 && laid.lines[0][1..].iter().all(|l| fonts.width(l, Weight::Regular, c.m.title) <= room), "{:?}", laid.lines[0]);
+    // with its age on its line under it (a narrow board's), they run to the right edge
+    let no_age = TaskRow { age: String::new(), ..t };
+    assert_eq!(g.title_right(&no_age, &fonts), c.right());
 }
 
 #[test]
@@ -423,12 +442,26 @@ fn a_key_a_line_names_is_semibold_in_the_foreground() {
 }
 
 #[test]
-fn an_age_that_has_waited_too_long_is_semibold_in_the_foreground() {
+fn an_age_that_has_waited_too_long_is_a_chip_of_its_tasks_flags_colour() {
     let theme = Theme::default();
-    let aged = |stale| draw(&rows(vec![Row::Task(TaskRow { stale, age: "12m".into(), ..task("BP-1", "todo") })]));
-    let all = |s: &Sheet| -> Vec<[u8; 4]> { (0..s.pixmap.height()).flat_map(|y| (0..s.pixmap.width()).map(move |x| (x, y))).map(|(x, y)| px_at(s, x, y)).collect() };
-    assert!(has(&all(&aged(true)), theme.fg) && !has(&all(&aged(true)), theme.red));
-    assert!(!has(&all(&aged(false)), theme.fg));
+    let (c, fonts) = (canvas(TextSize::Medium), Fonts::builtin());
+    let aged = |stale, flag| TaskRow { stale, flag, age: "12m".into(), ..task("BP-1", "todo") };
+    let all = |t: TaskRow| -> Vec<[u8; 4]> {
+        let s = draw_in(&rows(vec![Row::Task(t)]), TextSize::Medium).1;
+        (0..s.pixmap.height()).flat_map(|y| (0..s.pixmap.width()).map(move |x| (x, y))).map(|(x, y)| px_at(&s, x, y)).collect()
+    };
+    // its word in its colour, on that colour faintly: amber on a task that needs you, red with no flag
+    let chip = |c: theme::Rgb| { let b = theme::bright(c); [b.0, b.1, b.2, 46] };
+    let amber = all(aged(true, Some(Flag::Needs)));
+    assert!(has(&amber, theme.yellow) && !has(&amber, theme.red));
+    assert!(has(&all(aged(true, None)), theme.red) && all(aged(true, None)).iter().any(|p| faintly(*p, chip(theme.red))));
+    assert!(!has(&all(aged(false, None)), theme.red));
+    // and the title makes room for the chip
+    let g = Geo { c, idw: 0.0 };
+    assert_eq!(g.right_side(&aged(true, None), &fonts), chip::width(&fonts, "12m", c.m.label));
+    assert!(g.right_side(&aged(true, None), &fonts) > g.right_side(&aged(false, None), &fonts));
+    // not while it's asked about: its age is the question's y / n
+    assert!(!g.overdue(&TaskRow { asked: Some(false), ..aged(true, None) }));
 }
 
 #[test]
@@ -487,7 +520,7 @@ fn a_task_that_needs_you_is_washed_in_its_colour_over_the_cards_rectangle_with_a
 }
 
 #[test]
-fn the_selected_card_has_a_blue_edge_whatever_its_fill_and_a_task_that_needs_you_keeps_its_colour_and_bar() {
+fn the_selected_card_has_a_blue_edge_whatever_its_fill_and_a_task_that_needs_you_keeps_its_colour() {
     let theme = Theme::default();
     let (_, s) = draw_in(&flagged(Flag::Needs, true), TextSize::Medium);
     let (x0, x1, y0, y1) = drawn_box(&s);
@@ -495,11 +528,11 @@ fn the_selected_card_has_a_blue_edge_whatever_its_fill_and_a_task_that_needs_you
     // its fill: amber, stronger than the wash
     let (inside, wash) = (px_at(&s, x1 - 4, y1 / 2), px_at(&washed, x1 - 4, y1 / 2));
     assert!(faintly(inside, theme.flag_tint(Flag::Needs)) && inside[3] > wash[3] + 20, "{inside:?} {wash:?}");
-    assert_eq!(px_at(&s, 6, y1 / 2), solid(theme.yellow));
-    // its edge: the terminal's blue, two pixels of it
+    // its edge: the terminal's blue, three pixels of it, in the bar's place at its left
     let mid = (x0 + x1) / 2;
-    assert_eq!((px_at(&s, mid, y0), px_at(&s, mid, y0 + 1)), (solid(theme.blue), solid(theme.blue)));
-    assert_ne!(px_at(&s, mid, y0 + 3), solid(theme.blue));
+    assert!((0..3).all(|k| px_at(&s, mid, y0 + k) == solid(theme.blue)));
+    assert_ne!(px_at(&s, mid, y0 + 4), solid(theme.blue));
+    assert_eq!(px_at(&s, 6, y1 / 2), solid(theme.blue));
     // the same on a selected task that doesn't need you, round the foreground's faint fill
     let plain = rows(vec![Row::Task(TaskRow { selected: true, ..task("BP-1", "todo") }), detail("what it does", true)]);
     let (_, p) = draw_in(&plain, TextSize::Medium);
@@ -575,31 +608,6 @@ fn the_selected_tasks_key_is_in_a_cap_at_its_cards_lower_right_and_its_last_line
         let cy = bottom - c.m.detail_line as u32 / 2;
         assert!(px_at(&s, at.0 + 3, cy)[3] > px_at(&bare, at.0 + 3, cy)[3], "{size:?}");
     }
-}
-
-#[test]
-fn a_last_line_with_no_room_beside_it_keeps_its_text_and_the_key_goes_under_it() {
-    let fonts = Fonts::builtin();
-    let c = canvas(TextSize::Medium);
-    let g = Geo { c, idw: 0.0 };
-    // one line, as wide as its room: no room for the key beside it
-    let mut text = String::from("14 files");
-    while fonts.width(&format!("{text} more"), Weight::Regular, c.m.detail) <= g.detail_room() {
-        text.push_str(" more");
-    }
-    let with = |key: Option<(String, String)>, size| {
-        let t = TaskRow { selected: true, key, ..task("BP-1", "ready") };
-        lay(&rows(vec![Row::Task(t), Row::Detail(DetailRow { selected: true, ..detail_row(&text) })]), &canvas(size), &fonts)
-    };
-    let key = || Some(("a".to_string(), "accept".to_string()));
-    let (laid, bare) = (with(key(), TextSize::Medium), with(None, TextSize::Medium));
-    // the text is laid out as with no key, and a line is added for the key
-    assert_eq!(laid.lines[1], vec![text.clone(), String::new()]);
-    assert_eq!(laid.heights[1], bare.heights[1] + c.m.detail_line as u32);
-    // small type keeps its rows a cell each: the line makes room, cut
-    let small = with(key(), TextSize::Small);
-    assert_eq!(small.lines[1].len(), 1);
-    assert!(small.lines[1][0].ends_with('…'));
 }
 
 #[test]
