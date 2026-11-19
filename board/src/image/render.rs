@@ -91,11 +91,11 @@ impl Metrics {
             label,
             line: (1.40 * title).round(),
             detail_line: (1.42 * detail).round(),
-            pad: (0.74 * title).round(),
+            pad: (0.8 * title).round(),
             head_pad: (0.5 * title).round(),
             gap: (0.45 * ch).round(),
             title_gap: (0.06 * title).round(),
-            inset: (0.28 * title).round(),
+            inset: (0.25 * title).round(),
             cells: false,
         }
     }
@@ -118,9 +118,16 @@ impl Canvas {
         self.grid.cell_w as f32
     }
 
-    /// Where text ends: short of the last column, which has the list's scroll marks.
+    /// Where text starts (a group's name, the top line, the keys) and ends: a column in
+    /// from the left, and a column and a quarter from the right, whose last part has the
+    /// list's scroll marks. The rules and the status bar run between the two, and a
+    /// card reaches half a column past each.
+    pub fn left(&self) -> f32 {
+        self.c()
+    }
+
     pub fn right(&self) -> f32 {
-        self.grid.width() as f32 - 1.6 * self.c()
+        self.grid.width() as f32 - 1.25 * self.c()
     }
 }
 
@@ -401,7 +408,7 @@ fn id_width(rows: &Rows, fonts: &Fonts, px: f32) -> f32 {
 /// Where a task's (or item's) mark is in its row: across from the image's left edge,
 /// down from the row's top.
 pub(super) fn mark_at(c: &Canvas) -> (f32, f32) {
-    (1.5 * c.c(), c.m.pad + c.m.line / 2.0)
+    (Geo { c: *c, idw: 0.0 }.mark_x(), c.m.pad + c.m.line / 2.0)
 }
 
 /// How far a mark reaches from its centre at `scale` (Geo::mark_reach).
@@ -421,9 +428,18 @@ struct Geo {
 }
 
 impl Geo {
-    /// A mark's radius.
+    /// A mark's radius, to half a pixel: a little under the title's capital's height
+    /// across (small type's, whose title is a detail's size, a little more).
     fn mark_r(&self) -> f32 {
-        (0.27 / 0.62 * self.c.m.title).min(0.95 * self.c.c())
+        let m = &self.c.m;
+        let of = if m.cells { 0.87 } else { 0.76 };
+        ((of * m.title).round() / 2.0).min(0.8 * self.c.c())
+    }
+
+    /// A mark's centre, on a whole pixel (so a mark placed over the list is smoothed as
+    /// one drawn in it): its left edge is where a group's name starts.
+    fn mark_x(&self) -> f32 {
+        (self.c.left() + self.mark_r()).round()
     }
 
     /// How far a mark reaches from its centre, at `scale` (a mark settling in grows past
@@ -436,7 +452,7 @@ impl Geo {
     /// type's mark and a little space).
     fn text_x(&self) -> f32 {
         let c = self.c.c();
-        (3.0 * c).max(1.5 * c + self.mark_r() + 0.4 * self.c.m.title)
+        (3.0 * c).max(self.mark_x() + self.mark_r() + 0.4 * self.c.m.title)
     }
 
     /// Where a title starts: past the ID column and a gap, narrower on a board under 44
@@ -590,12 +606,13 @@ impl<'a> Draw<'a> {
         self.pm.stroke_path(path, &paint(color), &stroke, t, None);
     }
 
-    /// What a block from `top` to `bottom` sits on (Block): from a quarter of a cell in
-    /// (its mark inside it) to half a cell past where text ends, clear of the type above
-    /// and below by `inset`, the last into the space above the next task. As x, y, w, h.
+    /// What a block from `top` to `bottom` sits on (Block): half a cell past where text
+    /// starts and ends, on each side (its mark inside it), clear of the type above and
+    /// below by `inset`, the last into the space above the next task. As x, y, w, h.
     fn panel(&self, top: f32, bottom: f32) -> (f32, f32, f32, f32) {
-        let inset = self.m().inset;
-        (0.25 * self.c(), top - inset, self.right() + 0.25 * self.c(), bottom - top + 2.0 * inset)
+        let (inset, out) = (self.m().inset, 0.5 * self.c());
+        let x = self.g.c.left() - out;
+        (x, top - inset, self.right() + out - x, bottom - top + 2.0 * inset)
     }
 
     /// The selected task's (or item's) card: a faint fill with a faint edge.
@@ -619,7 +636,7 @@ impl<'a> Draw<'a> {
     /// as its wash (or its card), with round ends.
     fn bar(&mut self, top: f32, bottom: f32, flag: Flag) {
         let (x, y, _, h) = self.panel(top, bottom);
-        let w = (0.26 * self.c()).max(3.0);
+        let w = (0.25 * self.c()).max(3.0);
         let color = solid(self.theme.flag(flag));
         self.rounded_fill(x, y, w, h, w / 2.0, color);
     }
@@ -667,7 +684,7 @@ impl<'a> Draw<'a> {
     fn row(&mut self, row: &Row, lines: &[String], y: f32, bare: bool) {
         let m = self.m();
         let (fg, dim) = (self.theme.text(), self.theme.dim());
-        let left = self.c();
+        let left = self.g.c.left();
         let full = self.right() - left;
         match row {
             Row::Detail(_) | Row::ItemDetail(..) => self.set(m.detail, m.detail_line),
@@ -726,7 +743,7 @@ impl<'a> Draw<'a> {
     /// line (the mark, ID, title, risk and age), then the rest of its title's lines.
     fn task(&mut self, t: &TaskRow, lines: &[String], y: f32, bare: bool) {
         let y = y + self.m().pad;
-        let (cx, cy) = (1.5 * self.c(), y + self.h() / 2.0);
+        let (cx, cy) = (self.g.mark_x(), y + self.h() / 2.0);
         if !bare {
             self.mark(&t.mark, cx, cy, 0.0);
         }
@@ -787,7 +804,7 @@ impl<'a> Draw<'a> {
 
     /// An item's row, from its first line's top y.
     fn item(&mut self, i: &ItemRow, lines: &[String], y: f32, bare: bool) {
-        let (cx, cy) = (1.5 * self.c(), y + self.h() / 2.0);
+        let (cx, cy) = (self.g.mark_x(), y + self.h() / 2.0);
         let r = self.mark_r();
         if i.job {
             if !bare {
@@ -811,7 +828,7 @@ impl<'a> Draw<'a> {
     /// The scroll marks in the last column: ↑ at the top when rows are above, ↓ at the
     /// bottom of an image `height` high when rows are below.
     pub(super) fn scroll_marks(&mut self, marks: Marks, height: f32) {
-        let cx = self.g.c.grid.width() as f32 - 0.6 * self.c();
+        let cx = self.g.c.grid.width() as f32 - 0.4 * self.c();
         let half = 0.5 * self.m().line.min(self.g.c.grid.cell_h as f32);
         if marks.up {
             self.chevron(cx, half, -1.0);
@@ -823,7 +840,7 @@ impl<'a> Draw<'a> {
 
     /// A small chevron at (cx, cy), pointing down (dir 1) or up (-1).
     fn chevron(&mut self, cx: f32, cy: f32, dir: f32) {
-        let r = 0.28 * self.c();
+        let r = 0.26 * self.c();
         let mut pb = PathBuilder::new();
         pb.move_to(cx - r, cy - dir * r / 2.0);
         pb.line_to(cx, cy + dir * r / 2.0);
@@ -867,10 +884,10 @@ impl<'a> Draw<'a> {
                 self.arc(cx, cy, r, a0, 1.0 * PI, lw * 1.2, c)
             }
             Mark::Stuck(st) => self.status_mark(st, cx, cy, Some(solid(self.theme.yellow)), 0.0),
-            // working: a faint ring with a third of it drawn
+            // working: a faint ring with a quarter of it drawn
             Mark::Working => {
                 self.arc(cx, cy, r, 0.0, 2.0 * PI, lw, self.theme.tint_strong());
-                self.arc(cx, cy, r, a0, 0.17 * PI, lw, fg);
+                self.arc(cx, cy, r, a0, 0.5 * PI, lw, fg);
             }
             Mark::Review => self.status_mark("review", cx, cy, None, turn),
             Mark::Still(st) => self.status_mark(st, cx, cy, None, 0.0),
@@ -887,7 +904,7 @@ impl<'a> Draw<'a> {
         match st {
             "needs" => self.disc(cx, cy, r, color),
             "stopped" => {
-                if let Some(p) = rounded(cx - r * 0.85, cy - r * 0.85, r * 1.7, r * 1.7, r * 0.35) {
+                if let Some(p) = rounded(cx - r * 0.9, cy - r * 0.9, r * 1.8, r * 1.8, r * 0.35) {
                     self.fill(&p, color);
                 }
             }

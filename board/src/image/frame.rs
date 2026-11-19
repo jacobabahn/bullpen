@@ -30,7 +30,7 @@ pub fn head(head: &Head, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pix
     d.set(c.m.title, line);
     let theme = d.theme();
     let (fg, dim) = (theme.text(), theme.dim());
-    let left = c.grid.cell_w as f32;
+    let left = c.left();
     // the counts first, at the right edge: the rest gets what's left
     let px = c.m.label + 1.0;
     let name_w = d.width(&head.name, Weight::Bold);
@@ -69,9 +69,9 @@ fn counts(words: Vec<(String, &'static str)>, fonts: &Fonts, px: f32, room: f32)
 }
 
 /// The rule under the top line and over the bottom rows: 1.5 pixels of the foreground,
-/// faint, from the first column to the last but one, whose top is at y.
+/// faint, from where text starts to where it ends, whose top is at y.
 fn rule(d: &mut Draw, c: &Canvas, y: f32) {
-    let (l, r) = (c.grid.cell_w as f32, (c.grid.width() - c.grid.cell_w) as f32);
+    let (l, r) = (c.left(), c.right());
     let color = d.theme().rule();
     d.rounded_fill(l, y, r - l, 1.5, 0.0, color);
 }
@@ -89,7 +89,7 @@ pub fn foot(foot: &Foot, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pix
     }
     d.set(c.m.detail, ch);
     let theme = d.theme();
-    let left = c.grid.cell_w as f32;
+    let left = c.left();
     for (row, line) in &foot.lines {
         let y = *row as f32 * ch;
         match line {

@@ -284,13 +284,13 @@ fn the_selected_card_holds_its_mark_and_clears_its_type() {
     let (laid, s) = draw_in(&r, TextSize::Medium);
     let m = canvas(TextSize::Medium).m;
     let (first, last) = (m.pad as u32, laid.heights[0] + laid.heights[1]);
-    // its mark is inside it: the card starts a quarter of a cell in, left of the mark
+    // its mark is inside it: the card starts half a cell in, left of the mark
     let mid = first + m.line as u32 / 2;
-    assert!(px_at(&s, 4, mid)[3] > 0, "the card at its left edge");
-    assert_eq!(px_at(&s, 1, mid)[3], 0, "nothing left of the card");
+    assert!(px_at(&s, 6, mid)[3] > 0, "the card at its left edge");
+    assert_eq!(px_at(&s, 3, mid)[3], 0, "nothing left of the card");
     // it reaches past its first and last lines by `inset`, and no further
     let (top, bottom) = (first - m.inset as u32, last + m.inset as u32);
-    assert!(m.inset >= (0.28 * m.title).floor());
+    assert!(m.inset >= (0.25 * m.title).floor());
     let x = 100;
     assert!(px_at(&s, x, top + 1)[3] > 0 && px_at(&s, x, bottom - 2)[3] > 0);
     assert_eq!((px_at(&s, x, top - 2)[3], px_at(&s, x, bottom + 1)[3]), (0, 0));
@@ -375,10 +375,10 @@ fn a_task_that_needs_you_is_washed_in_its_colour_over_the_cards_rectangle_with_a
         let wash = px_at(&washed, x1 - 4, y1 / 2);
         assert!(faintly(wash, theme.wash(Flag::Needs)), "{size:?}: {wash:?}");
         let (_, _, top, _) = drawn_box(&washed);
-        // the bar: 3 pixels of amber across (a quarter of a cell in, two of them whole), its ends round
+        // the bar: 3 pixels of amber across, half a cell in, its ends round
         let mid = y1 / 2;
-        assert!((3..5).all(|x| px_at(&washed, x, mid) == solid(theme.yellow)) && px_at(&washed, 2, mid)[3] > 100, "{size:?}");
-        assert!(px_at(&washed, 4, top)[3] < 255, "{size:?}: the bar's end is round");
+        assert!((5..8).all(|x| px_at(&washed, x, mid) == solid(theme.yellow)) && px_at(&washed, 4, mid)[3] == 0, "{size:?}");
+        assert!(px_at(&washed, 5, top)[3] < 255, "{size:?}: the bar's end is round");
     }
     let (_, stopped) = draw_in(&flagged(Flag::Stopped, false), TextSize::Medium);
     let (_, x1, _, y1) = drawn_box(&stopped);
@@ -391,7 +391,7 @@ fn the_selected_card_replaces_the_wash_and_the_bar_stays() {
     let (_, s) = draw_in(&flagged(Flag::Needs, true), TextSize::Medium);
     let (_, x1, _, y1) = drawn_box(&s);
     assert!(faintly(px_at(&s, x1 - 4, y1 / 2), theme.tint()));
-    assert_eq!(px_at(&s, 4, y1 / 2), solid(theme.yellow));
+    assert_eq!(px_at(&s, 6, y1 / 2), solid(theme.yellow));
 }
 
 #[test]

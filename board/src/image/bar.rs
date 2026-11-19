@@ -15,11 +15,11 @@ const HEIGHT: f32 = 0.24;
 /// The space between the bar and its counts' line, of a cell's height.
 const UNDER: f32 = 0.2;
 
-/// The bar and its counts, from the first column to the last but one, as the rule
-/// under a shorter header is.
+/// The bar and its counts, from where text starts to where it ends, as the rule under
+/// a shorter header is.
 pub fn draw(d: &mut Draw, c: &Canvas, tallies: &[Tally]) {
     let ch = c.grid.cell_h as f32;
-    let (l, r) = (c.grid.cell_w as f32, (c.grid.width() - c.grid.cell_w) as f32);
+    let (l, r) = (c.left(), c.right());
     let (top, h) = ((TOP * ch).round(), (HEIGHT * ch).round().max(2.0));
     let theme = d.theme();
     for (x, w, status) in segments(tallies, l, r, gap(c)) {
