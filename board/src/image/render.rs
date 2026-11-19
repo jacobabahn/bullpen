@@ -16,7 +16,7 @@
 
 use super::chip;
 use super::font::{Fonts, Weight};
-use super::shape::{diamond, paint, rounded};
+use super::shape::{diamond, left_slice, paint, rounded};
 use super::theme::{lit, solid, Rgb, Theme};
 use crate::model::TextSize;
 use crate::ui::rows::{Flag, ItemRow, Mark, Row, Rows, TaskRow};
@@ -216,11 +216,13 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
                 // a stale age is semibold: the first line has that much less room
                 let (age, _) = crate::model::split_at_width(&d.text, d.lead);
                 let bolder = if d.stale { fonts.width(&age, Weight::Bold, c.m.detail) - fonts.width(&age, Weight::Regular, c.m.detail) } else { 0.0 };
-                let mut lines = g.detail_lines(&d.text, d.lines, bolder, 0.0, fonts);
+                // (each key the text names is in a cap: room for their sides on every line)
+                let caps = key_letters(&d.text, d.lead).len() as f32 * 2.0 * KEY_SIDE * c.m.detail;
+                let mut lines = g.detail_lines(&d.text, d.lines, bolder, caps, fonts);
                 let last = !rows.rows.get(i + 1).is_some_and(Row::is_detail);
                 // the key goes after its last line, which makes room when it must
                 if last && key_w > 0.0 && lines.last().is_some_and(|l| fonts.width(l, Weight::Regular, c.m.detail) > g.detail_room() - key_w) {
-                    lines = g.detail_lines(&d.text, d.lines, bolder, key_w, fonts);
+                    lines = g.detail_lines(&d.text, d.lines, bolder, key_w + caps, fonts);
                 }
                 heights.push(g.height(row, lines.len()));
                 all.push(lines);
@@ -408,6 +410,9 @@ fn blocks<'r>(rows: &'r Rows, places: &[Place], pad: f32) -> Vec<Block<'r>> {
     out
 }
 
+/// The room each side of a key a detail's text names, inside its cap, of the type's size.
+const KEY_SIDE: f32 = 0.28;
+
 /// The keys a detail's text names ("Its agent exited. r resumes it."), as which of its
 /// letters they are, spaces not counted (so they're found on its wrapped lines): a
 /// lowercase letter alone, first or after a full stop, with a word after it. The first
@@ -506,7 +511,7 @@ impl Geo {
     fn detail_lines(&self, text: &str, most: usize, less: f32, key: f32, fonts: &Fonts) -> Vec<String> {
         let room = self.detail_room() - key;
         let mut lines = fonts.wrap(text, Weight::Regular, self.c.m.detail, (room - less, room), most);
-        fonts.no_widow(&mut lines, Weight::Regular, self.c.m.detail, room);
+        fonts.fill_last(&mut lines, Weight::Regular, self.c.m.detail, room);
         if lines.is_empty() { vec![String::new()] } else { lines }
     }
 
@@ -715,13 +720,15 @@ impl<'a> Draw<'a> {
         self.rounded_fill(x, y, w, h, r, color);
     }
 
-    /// The bar at the left of a task that needs you or stopped, in its colour, as tall
-    /// as its wash (or its card), with round ends.
+    /// The bar at the left of a task that needs you or stopped, in its colour: its
+    /// wash's left edge, following its corners.
     fn bar(&mut self, top: f32, bottom: f32, flag: Flag) {
         let (x, y, _, h) = self.panel(top, bottom);
         let w = (0.25 * self.c()).max(3.0);
         let color = solid(lit(self.theme.flag(flag)));
-        self.rounded_fill(x, y, w, h, w / 2.0, color);
+        if let Some(p) = left_slice(x, y, w, h, self.radius()) {
+            self.fill(&p, color);
+        }
     }
 
     /// A task's key in a cap and what it does, at the right of its block's last line,
@@ -830,7 +837,7 @@ impl<'a> Draw<'a> {
 
     /// A detail's line from x, on the line whose top is y: its text in `color`, the
     /// keys it names (`keys`: which of the text's letters, `seen` of them drawn on the
-    /// lines before) semibold in the foreground.
+    /// lines before) semibold in the foreground, each in a small cap.
     fn said(&mut self, line: &str, x: f32, y: f32, color: [u8; 4], keys: &[usize], seen: &mut usize) {
         let fg = self.theme.text();
         let (mut x, mut run, mut key) = (x, String::new(), false);
@@ -838,7 +845,18 @@ impl<'a> Draw<'a> {
             let is_key = !c.is_whitespace() && keys.contains(seen);
             if (is_key != key || c == '\0') && !run.is_empty() {
                 let (weight, color) = if key { (Weight::Bold, fg) } else { (Weight::Regular, color) };
-                x = self.text(&run, weight, x, y, f32::MAX, color);
+                if key {
+                    // in a small cap, as the key row's (lay left room for its sides)
+                    let (w, px) = (self.width(&run, weight), self.px());
+                    let (side, ch) = (KEY_SIDE * px, (1.25 * px).round());
+                    let top = (y + (self.h() - ch) / 2.0).round();
+                    let (cap, edge) = (self.theme.cap(), self.theme.cap_edge());
+                    self.rounded_fill(x, top, w + 2.0 * side, ch, 0.25 * px, cap);
+                    self.rounded_edge(x, top, w + 2.0 * side, ch, 0.25 * px, 1.0, edge);
+                    x = self.text(&run, weight, x + side, y, f32::MAX, color) + side;
+                } else {
+                    x = self.text(&run, weight, x, y, f32::MAX, color);
+                }
                 run.clear();
             }
             key = is_key;
@@ -868,10 +886,11 @@ impl<'a> Draw<'a> {
         let mut right = self.right();
         let age_w = self.g.age_width(t, self.fonts);
         if self.g.overdue(t) {
-            // an age that has waited too long: a chip of its task's flag's colour (red
-            // with none), so it reads as a mark, not as an odd weight
+            // an age that has waited too long: a chip of its task's flag's colour, whole
+            // (red with none), so it reads as a mark, not as an odd weight
             let color = solid(t.flag.map_or(self.theme.red, |f| self.theme.flag(f)));
-            chip::chip(self, &t.age, self.m().label, right, cy, color);
+            let ink = solid(self.theme.bg);
+            chip::solid(self, &t.age, self.m().label, right, cy, color, ink);
         } else {
             let (weight, color) = if let Some(c) = tone { (Weight::Bold, c) } else { (Weight::Regular, self.theme.dim()) };
             let x = right - self.fonts.width(&t.age, weight, small);

@@ -127,7 +127,7 @@ impl Theme {
     /// The selected card's fill when its task needs you or stopped: its flag's colour,
     /// well over twice as strong as its wash.
     pub fn flag_tint(&self, flag: Flag) -> [u8; 4] {
-        faint(bright(self.flag(flag)), 0.26)
+        faint(self.fill(flag), 0.26)
     }
 
 
@@ -154,11 +154,21 @@ impl Theme {
         }
     }
 
+    /// A flag's colour as a fill: amber a quarter of the way to red (a faint yellow on
+    /// a dark pane is olive; this stays warm), at its brightest.
+    fn fill(&self, flag: Flag) -> Rgb {
+        let warm = |y: u8, r: u8| ((y as u16 * 3 + r as u16) / 4) as u8;
+        bright(match flag {
+            Flag::Needs => Rgb(warm(self.yellow.0, self.red.0), warm(self.yellow.1, self.red.1), warm(self.yellow.2, self.red.2)),
+            Flag::Stopped => self.red,
+        })
+    }
+
     /// Behind a task that needs you or stopped: its flag's colour at its brightest (a
     /// light theme's amber is dark, to read as text, and a wash of it is beige),
     /// faintly, so dim text on it still reads at 4.5:1 on a light theme's white.
     pub fn wash(&self, flag: Flag) -> [u8; 4] {
-        faint(bright(self.flag(flag)), 0.1)
+        faint(self.fill(flag), 0.1)
     }
 
     /// A status's colour for a shape (a mark, a segment of the status bar, a dot): its
@@ -187,7 +197,7 @@ impl Theme {
             "needs" | "stopped" | "ready" | "finished" | "review" => self.shape(status).unwrap_or(self.text()),
             "working" => faint(self.fg, 0.7),
             "triage" => solid(self.between()),
-            _ => faint(self.fg, 0.36),
+            _ => faint(self.fg, 0.45),
         }
     }
 

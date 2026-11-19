@@ -201,8 +201,9 @@ fn a_detail_is_wrapped_by_pixels_no_line_breaking_with_room_for_its_next_word() 
         let room = c.right() - Geo { c, idw: laid.idw }.text_x();
         for (k, line) in lines.iter().enumerate() {
             assert!(fonts.width(line, Weight::Regular, c.m.detail) <= room, "{size:?}: {line}");
-            // the next line's first word didn't fit on this one
-            if let Some(next) = lines.get(k + 1).and_then(|l| l.split(' ').next()) {
+            // the next line's first word didn't fit on this one (but the last line's, which
+            // may have taken words to be a line of its own)
+            if let Some(next) = lines.get(k + 1).filter(|_| k + 2 < lines.len()).and_then(|l| l.split(' ').next()) {
                 let with = format!("{line} {next}");
                 assert!(fonts.width(&with, Weight::Regular, c.m.detail) > room, "{size:?}: {with}");
             }
@@ -254,11 +255,9 @@ fn a_cut_is_at_a_words_end_with_no_comma_before_its_ellipsis() {
     assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two, three fo…") + 0.5), "one two, three…");
     // and its comma goes
     assert_eq!(f.fit("one two three four, five six", Weight::Regular, 12.0, w("one two three four, fi…") + 0.5), "one two three four…");
-    // nor does it end on a small word that leads nowhere
-    assert_eq!(f.fit("one two three four five six seven of bestowals", Weight::Regular, 12.0, w("one two three four five six seven of best…") + 0.5), "one two three four five six seven…");
-    // a few letters are given up whatever room that leaves
+    // whatever room that leaves, down to half of it
     assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two, thr…") + 0.5), "one two…");
-    // more than a few, with most of the room left empty: it's cut in the word
+    // under half: it's cut in the word
     assert_eq!(f.fit("one background jobs", Weight::Regular, 12.0, w("one backgrou…") + 0.5), "one backgrou…");
     // a word whose comma alone doesn't fit is whole
     assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two…") + 0.5), "one two…");
@@ -308,7 +307,8 @@ fn a_wrapped_texts_last_word_isnt_left_alone() {
         long.push_str(" more");
     }
     let lines = g.detail_lines(&format!("{long} last."), 2, 0.0, 0.0, &f);
-    assert_eq!(lines[1], "more last.");
+    // a detail's last line takes words until it's a line of its own: four, or two fifths of the room
+    assert_eq!(lines[1], "more more more last.");
 }
 
 #[test]
@@ -450,12 +450,11 @@ fn an_age_that_has_waited_too_long_is_a_chip_of_its_tasks_flags_colour() {
         let s = draw_in(&rows(vec![Row::Task(t)]), TextSize::Medium).1;
         (0..s.pixmap.height()).flat_map(|y| (0..s.pixmap.width()).map(move |x| (x, y))).map(|(x, y)| px_at(&s, x, y)).collect()
     };
-    // its word in its colour, on that colour faintly: amber on a task that needs you, red with no flag
-    let chip = |c: theme::Rgb| { let b = theme::bright(c); [b.0, b.1, b.2, 46] };
+    // the colour whole, its word in the pane's background: amber on a task that needs you, red with no flag
     let amber = all(aged(true, Some(Flag::Needs)));
     assert!(has(&amber, theme.yellow) && !has(&amber, theme.red));
-    assert!(has(&all(aged(true, None)), theme.red) && all(aged(true, None)).iter().any(|p| faintly(*p, chip(theme.red))));
-    assert!(!has(&all(aged(false, None)), theme.red));
+    assert!(has(&all(aged(true, None)), theme.red) && has(&all(aged(true, None)), theme.bg));
+    assert!(!has(&all(aged(false, None)), theme.red) && !has(&all(aged(false, None)), theme.bg));
     // and the title makes room for the chip
     let g = Geo { c, idw: 0.0 };
     assert_eq!(g.right_side(&aged(true, None), &fonts), chip::width(&fonts, "12m", c.m.label));

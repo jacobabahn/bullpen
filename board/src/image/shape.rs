@@ -54,6 +54,35 @@ pub(super) fn diamond(cx: f32, cy: f32, r: f32) -> Option<Path> {
     pb.finish()
 }
 
+/// The left `w` pixels of a rectangle with rounded corners (`rounded`'s): a bar down
+/// its left edge that follows its corners.
+pub(super) fn left_slice(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<Path> {
+    if w <= 0.0 || h <= 0.0 {
+        return None;
+    }
+    let r = r.min(h / 2.0).max(0.1);
+    // how far round each left corner the slice's right edge meets it
+    let a = ((r - w.min(r)) / r).clamp(-1.0, 1.0).acos();
+    let k = 4.0 / 3.0 * (a / 4.0).tan() * r;
+    let (cx, top, bottom) = (x + r, y + r, y + h - r);
+    let at = |cy: f32, t: f32| (cx + r * t.cos(), cy + r * t.sin());
+    let mut pb = PathBuilder::new();
+    // from the top corner's point at the slice's right edge, round to its left
+    let ((x0, y0), (x1, y1)) = (at(top, PI + a), at(top, PI));
+    pb.move_to(x0, y0);
+    pb.cubic_to(x0 - k * a.sin(), y0 + k * a.cos(), x1, y1 - k, x1, y1);
+    // down the left edge, and round the bottom corner to the slice's right edge
+    let ((x2, y2), (x3, y3)) = (at(bottom, PI), at(bottom, PI - a));
+    pb.line_to(x2, y2);
+    pb.cubic_to(x2, y2 + k, x3 - k * a.sin(), y3 - k * a.cos(), x3, y3);
+    if w > r {
+        pb.line_to(x + w, y + h);
+        pb.line_to(x + w, y);
+    }
+    pb.close();
+    pb.finish()
+}
+
 /// A rectangle with rounded corners.
 pub(super) fn rounded(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<Path> {
     if w <= 0.0 || h <= 0.0 {

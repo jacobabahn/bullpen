@@ -37,15 +37,8 @@ pub struct Fonts {
     cache: HashMap<(Weight, bool, u16, u32, u8), Glyph>,
 }
 
-/// The words a cut doesn't end on.
-const SMALL: [&str; 16] = ["a", "an", "the", "of", "for", "in", "as", "to", "and", "or", "with", "on", "at", "by", "from", "its"];
-
-/// The most letters of a word (with the space before them) a cut gives up to end at a
-/// word's end, whatever room that leaves.
-const STUB: usize = 7;
-
-/// The least of its room a text cut at a word's end fills, when it gives up more.
-const FILL: f32 = 0.8;
+/// The least of its room a text cut at a word's end fills: under it, it's cut in the word.
+const FILL: f32 = 0.5;
 
 impl Fonts {
     /// Inter, built in.
@@ -108,9 +101,8 @@ impl Fonts {
     }
 
     /// Text cut to `max` pixels wide, with "…" when it was cut: after its last whole
-    /// word that fits (and not after a full stop, a comma or a colon), when that loses
-    /// STUB letters at most or keeps FILL of the room used; else in the word (a long
-    /// word, a path).
+    /// word that fits (and not after a full stop, a comma or a colon); in a word only
+    /// when that would leave under FILL of the room used (one long word, a path).
     pub fn fit(&self, text: &str, weight: Weight, px: f32, max: f32) -> String {
         if self.width(text, weight, px) <= max {
             return text.to_string();
@@ -134,15 +126,8 @@ impl Fonts {
         let in_word = left.chars().any(char::is_alphanumeric) && !out.ends_with(char::is_whitespace);
         // a piece of a word says little: the cut goes back to the word before
         if let (true, Some(space)) = (in_word, out.rfind(char::is_whitespace)) {
-            if out[space..].chars().count() <= STUB || self.width(&out[..space], weight, px) >= FILL * room {
+            if self.width(&out[..space], weight, px) >= FILL * room {
                 out.truncate(space);
-                // and not after a small word that leads nowhere ("a…", "for the…")
-                while let Some((rest, word)) = out.trim_end().rsplit_once(char::is_whitespace) {
-                    if !SMALL.contains(&word.to_lowercase().as_str()) || self.width(rest, weight, px) < (FILL - 0.2) * room {
-                        break;
-                    }
-                    out.truncate(rest.len());
-                }
             }
         }
         out.trim_end().trim_end_matches(['.', ',', ':', ';', '·', '-', '(']).trim_end().to_string() + "…"
@@ -178,6 +163,23 @@ impl Fonts {
 
     /// A last line of one word takes the last word of the line above it, when that line
     /// has three or more and the two fit: a word isn't left alone under a full line.
+    /// A detail's last line of a word or two takes words from the line above it until
+    /// it has four, or two fifths of the room: it reads as a line, not as a leftover.
+    pub fn fill_last(&self, lines: &mut [String], weight: Weight, px: f32, max: f32) {
+        let [.., above, last] = lines else { return };
+        if last.ends_with('…') {
+            return;
+        }
+        while last.split(' ').count() < 4 && self.width(last, weight, px) < 0.4 * max && above.split(' ').count() > 3 {
+            let Some((rest, word)) = above.rsplit_once(' ') else { return };
+            let moved = format!("{word} {last}");
+            if self.width(&moved, weight, px) > max {
+                return;
+            }
+            (*above, *last) = (rest.to_string(), moved);
+        }
+    }
+
     pub fn no_widow(&self, lines: &mut [String], weight: Weight, px: f32, max: f32) {
         let [.., above, last] = lines else { return };
         if last.contains(' ') || last.ends_with('…') || above.split(' ').count() < 3 {

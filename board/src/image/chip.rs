@@ -63,6 +63,17 @@ fn dot_width(px: f32) -> f32 {
 /// The room a risk's dot takes before its word, of the word's size.
 const DOT: f32 = 0.75;
 
+/// An overdue age's chip, whose right edge is at `right`, centred on `cy`: the word
+/// semibold in the pane's background on the colour, whole. Returns its left edge.
+pub fn solid(d: &mut Draw, text: &str, px: f32, right: f32, cy: f32, color: [u8; 4], ink: [u8; 4]) -> f32 {
+    let w = width(d.fonts(), text, px);
+    let h = (1.5 * px).round();
+    let (x, top) = (right - w, (cy - h / 2.0).round());
+    d.rounded_fill(x, top, w, h, h / 2.0, color);
+    d.boxed(px, text, Weight::Bold, x + SIDE * px, top, h, ink);
+    x
+}
+
 /// How wide a key's cap and what it does after it are, in type `px`.
 pub fn keycap_width(fonts: &Fonts, key: &str, what: &str, px: f32) -> f32 {
     let cap = cap_width(fonts, key, px);
