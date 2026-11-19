@@ -509,9 +509,12 @@ fn the_selected_card_of_a_task_that_needs_you_is_its_colour_stronger_with_its_ba
 #[test]
 fn a_risk_is_a_chip_a_dot_of_its_colour_and_its_word_dim_inside_a_faint_line_before_the_age_column() {
     let theme = Theme::default();
-    let c = canvas(TextSize::Medium);
+    // (a board of 44 columns or more: under that it's the dot alone)
+    let c = Canvas::new(Grid { cols: 60, ..GRID }, TextSize::Medium, Theme::default());
     let r = rows(vec![Row::Task(TaskRow { risk: Some("high".into()), age: String::new(), ..task("BP-1", "todo") })]);
-    let (_, s) = draw_in(&r, TextSize::Medium);
+    let mut fonts = Fonts::builtin();
+    let laid = lay(&r, &c, &fonts);
+    let s = render(&r, &laid, Cut::rows(0..1, laid.heights[0]), &c, &mut fonts).unwrap();
     let (w, h) = (s.pixmap.width(), s.pixmap.height());
     let all = |want: &dyn Fn([u8; 4]) -> bool| -> Vec<(u32, u32)> { (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).filter(|&(x, y)| want(px_at(&s, x, y))).collect() };
     // the dot alone is red: a few pixels across, left of the word
@@ -529,6 +532,9 @@ fn a_risk_is_a_chip_a_dot_of_its_colour_and_its_word_dim_inside_a_faint_line_bef
     let t = TaskRow { risk: Some("high".into()), ..task("BP-1", "ready") };
     // the age's column is two figures wide, so chips line up whatever the ages
     let want = fonts.width("00m", Weight::Bold, c.m.detail) + 0.5 * c.m.detail + chip::risk_width(&fonts, "high", c.m.label);
+    // on a board under 44 columns, its dot alone
+    let narrow = Geo { c: Canvas::new(Grid { cols: 35, ..GRID }, TextSize::Medium, Theme::default()), idw: 0.0 };
+    assert_eq!(narrow.right_side(&t, &fonts), fonts.width("00m", Weight::Bold, c.m.detail) + 0.5 * c.m.detail + chip::dot_width(c.m.label));
     let wide = TaskRow { age: "100m".into(), ..t.clone() };
     assert!(g.right_side(&wide, &fonts) > want);
     assert_eq!(g.right_side(&t, &fonts), want);

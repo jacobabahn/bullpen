@@ -41,10 +41,21 @@ pub fn risk(d: &mut Draw, text: &str, px: f32, right: f32, cy: f32, color: [u8; 
     let h = (1.5 * px).round();
     let (x, top) = (right - w, (cy - h / 2.0).round());
     d.rounded_edge(x, top, w, h, h / 2.0, 1.25, theme.cap_edge());
-    let dot = (0.5 * px).round();
+    let dot = dot_width(px);
     d.rounded_fill((x + SIDE * px).round(), top + ((h - dot) / 2.0).round(), dot, dot, dot / 2.0, color);
     d.boxed(px, text, Weight::Bold, x + (SIDE + DOT) * px, top, h, theme.dim());
     x
+}
+
+/// How wide a risk's dot alone is, in type `px`.
+pub fn dot_width(px: f32) -> f32 {
+    (0.5 * px).round()
+}
+
+/// A risk as its dot alone, whose right edge is at `right`, centred on `cy`.
+pub fn risk_dot(d: &mut Draw, px: f32, right: f32, cy: f32, color: [u8; 4]) {
+    let dot = dot_width(px);
+    d.rounded_fill((right - dot).round(), (cy - dot / 2.0).round(), dot, dot, dot / 2.0, color);
 }
 
 /// The room a risk's dot takes before its word, of the word's size.

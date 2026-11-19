@@ -530,9 +530,16 @@ impl Geo {
         let mut w = self.age_width(&t.age, fonts);
         if let Some(level) = &t.risk {
             let gap = if t.age.is_empty() { 0.0 } else { 0.5 * self.c.m.detail };
-            w += gap + chip::risk_width(fonts, level, self.c.m.label);
+            w += gap + self.risk_width(level, fonts);
         }
         w
+    }
+
+    /// How wide a task's risk is: its chip, or on a board under 44 columns, where the
+    /// chip would take the title's room, its dot alone (its line says the level).
+    fn risk_width(&self, level: &str, fonts: &Fonts) -> f32 {
+        let px = self.c.m.label;
+        if self.narrow() { chip::dot_width(px) } else { chip::risk_width(fonts, level, px) }
     }
 
     /// Where a task's title's first line must end: short of its risk and age, by less
@@ -845,7 +852,11 @@ impl<'a> Draw<'a> {
         if let Some(level) = &t.risk {
             let gap = if t.age.is_empty() { 0.0 } else { 0.5 * small };
             let color = self.theme.risk(level);
-            chip::risk(self, level, self.m().label, right - gap, cy, color);
+            if self.g.narrow() {
+                chip::risk_dot(self, self.m().label, right - gap, cy, color);
+            } else {
+                chip::risk(self, level, self.m().label, right - gap, cy, color);
+            }
         }
         let color = match tone {
             Some(c) => c,
