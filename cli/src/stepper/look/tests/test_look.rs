@@ -4,6 +4,7 @@
 use super::*;
 use crate::stepper::screen::DiffFn;
 use bullpen_draw::font::Fonts;
+use bullpen_draw::png;
 use serde_json::json;
 use tiny_skia::Pixmap;
 
@@ -271,12 +272,44 @@ fn an_image_that_cant_be_made_is_an_error_the_tour_falls_back_on() {
     assert!(e.to_string().starts_with("can't make an image"), "{e}");
 }
 
+/// The bytes the keys that matter write, on a tour of three steps of 100 lines each, at
+/// a pane `size` with a cell `cell`, drawing ahead between keys as the tour does: the
+/// first frame, what's drawn ahead after it (and its largest image), j, a page down
+/// (each with what was drawn ahead before it), and n drawn ahead and not.
+fn bytes(size: (i64, i64), cell: (u32, u32)) -> [usize; 7] {
+    let page = size.1 - 2;
+    let look = || Look::new(Theme::default(), cell, Type::new(Fonts::builtin()), long(100));
+    let (mut l, mut st) = (look(), stepper());
+    let first = frame(&mut l, &mut st, size).len();
+    let mut ahead = Vec::new();
+    l.ahead(&st, &|| false, &mut ahead).unwrap();
+    let ahead = String::from_utf8(ahead).unwrap();
+    let largest = ahead.split("\x1b_Ga=t,").map(str::len).max().unwrap_or(0);
+    let mut key = |l: &mut Look, st: &mut Stepper, k: &str| {
+        st.key(k, page);
+        let n = frame(l, st, size).len();
+        l.ahead(st, &|| false, &mut Vec::new()).unwrap();
+        n
+    };
+    let j = key(&mut l, &mut st, "j");
+    let down = key(&mut l, &mut st, " ");
+    st.key("g", page);
+    frame(&mut l, &mut st, size);
+    l.ahead(&st, &|| false, &mut Vec::new()).unwrap();
+    let n = key(&mut l, &mut st, "n");
+    let (mut cold, mut st2) = (look(), stepper());
+    frame(&mut cold, &mut st2, size);
+    st2.key("n", page);
+    let n_cold = frame(&mut cold, &mut st2, size).len();
+    [first, ahead.len(), largest, j, down, n, n_cold]
+}
+
 /// The bytes of the keys that matter, at a large floating pane (160×46) with a 2× cell.
 #[test]
 fn bytes_at_a_large_pane() {
     let size = (160, 46);
     let (mut l, mut st) = (look((16, 34)), stepper());
-    let first = frame(&mut l, &mut st, size).len();
+    frame(&mut l, &mut st, size);
     let mut ahead = Vec::new();
     l.ahead(&st, &|| false, &mut ahead).unwrap();
     st.key("j", 44);
@@ -287,11 +320,83 @@ fn bytes_at_a_large_pane() {
     frame(&mut cold, &mut st2, size);
     st2.key("n", 44);
     let n_cold = frame(&mut cold, &mut st2, size).len();
-    eprintln!(
-        "first frame {first} B, j {j} B, ahead {} B, n drawn ahead {n} B, n not {n_cold} B",
-        ahead.len()
+    assert!(j < 400 && n < 600 && n_cold > 10_000, "{j} {n} {n_cold}");
+}
+
+/// The bytes at a large floating pane (160×46 with a 2× cell) and the person's (217×65,
+/// 19×37-pixel cells), on long steps, as docs/tours.md says them (half a minute in a
+/// debug build: `bin/bullpen-cargo test -p bullpen-cli bytes_at_large -- --ignored
+/// --nocapture`).
+#[test]
+#[ignore]
+fn bytes_at_large_panes() {
+    for (size, cell) in [((160, 46), (17, 34)), ((217, 65), (19, 37))] {
+        let [first, ahead, largest, j, down, n, n_cold] = bytes(size, cell);
+        eprintln!(
+            "{}×{} at {}×{}: first frame {first} B, then drawn ahead {ahead} B (its largest image {largest} B); j {j} B, a page down {down} B, n {n} B (not drawn ahead {n_cold} B)",
+            size.0, size.1, cell.0, cell.1
+        );
+        assert!(
+            j < 400 && largest < 1_000_000 && n < 2_000 && n_cold > 100_000,
+            "{j} {largest} {n} {n_cold}"
+        );
+    }
+}
+
+/// Every kind of image at a pane far bigger than the person's (300×100 cells of 19×37
+/// pixels): the rail, the tiles of a long page, the foot and the end page's tiles (what's
+/// drawn ahead is these too).
+#[test]
+fn no_image_is_over_the_terminals_limit() {
+    let (size, cell) = ((300, 100), (19, 37));
+    let mut l = Look::new(Theme::default(), cell, Type::new(Fonts::builtin()), long(120));
+    let mut st = stepper();
+    let mut out = frame(&mut l, &mut st, size);
+    st.key("G", size.1 - 2);
+    out += &frame(&mut l, &mut st, size);
+    st.go(3);
+    out += &frame(&mut l, &mut st, size);
+    let sizes = bullpen_draw::cut::uploaded(&out);
+    assert!(sizes.len() > 10, "{sizes:?}");
+    for (w, h) in &sizes {
+        assert!(bullpen_draw::cut::fits(*w, *h), "an image {w}×{h}: {} bytes", w * h * 4);
+    }
+    let rail = Lay::new(size.0, size.1, 0).rail as u32 * cell.0;
+    assert!(
+        sizes.iter().filter(|(w, _)| *w == rail).count() >= 4,
+        "two rails in pieces: {sizes:?}"
     );
-    assert!(j < 200 && n < 600 && n_cold > 10_000);
+}
+
+/// At the person's pane a tile is a strip under the limit, a few to a window, and the
+/// strips are the page drawn whole, cut up.
+#[test]
+fn a_pages_strips_are_the_page_drawn_whole_cut_up() {
+    let (size, cell) = ((160, 46), (17, 34));
+    let mut l = Look::new(Theme::default(), cell, Type::new(Fonts::builtin()), long(150));
+    let st = stepper();
+    let lay = Lay::new(size.0, size.1, 0).fitted(cell);
+    assert!(lay.tile < lay.view && lay.tile > 20, "{lay:?}");
+    let (w, ch) = (lay.page_cols as u32 * cell.0, cell.1);
+    assert!(bullpen_draw::cut::fits(w, lay.tile as u32 * ch));
+    let rows = l.page_rows(&st, 0, lay);
+    let page = l.page_of(&st, 0);
+    let mut whole = l.ink(w, rows as u32 * ch, 0.0).unwrap();
+    page::draw(&mut whole, &page);
+    let whole = whole.pm;
+    let tile = lay.tile as i64;
+    for t in 0..(rows + tile - 1) / tile {
+        let n = (rows - t * tile).min(tile);
+        let mut ink = l.ink(w, n as u32 * ch, (t * tile * ch as i64) as f32).unwrap();
+        page::draw(&mut ink, &page);
+        let cut = whole
+            .clone_rect(tiny_skia::IntRect::from_xywh(0, (t * tile * ch as i64) as i32, w, n as u32 * ch).unwrap())
+            .unwrap();
+        assert!(
+            ink.pm.data() == cut.data(),
+            "strip {t} differs from the page drawn whole"
+        );
+    }
 }
 
 /// A picture of the tour as the terminal would show it: the rail, the window on the

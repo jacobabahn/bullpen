@@ -4,16 +4,21 @@
 //! drawn (page.rs, code.rs), and a foot under the page with the message and the keys.
 //! What's typed (a comment, a tell) stays text, in the foot's place.
 //!
-//! A page is measured once (its rows kept) and sent in tiles a window high, each drawn
-//! on an image the tile's height, the page shifted up by the tile's top: a long step is
-//! never an image of its own, so no image is bigger than the pane. The window on the
-//! page is one or two crops of tiles, so scrolling places crops (a few dozen bytes
-//! each) and sends a tile only the first time it's reached. An image the tour can't
-//! make (past `MOST`) is an error, and the tour is text from then on (view.rs). While no key waits
-//! (`ahead`), the tiles above and under the window, and the next and previous steps'
-//! rail, first tile and foot are drawn and sent unplaced, so `n` and `p` usually only
-//! place images. Images are kept on the terminal, hidden, to place again, and deleted
-//! when the tour closes (shown.rs).
+//! A page is measured once (its rows kept) and sent in tiles: strips of as many rows as
+//! fit under the terminal's limit on an image (bullpen-draw's cut.rs: Rex draws none
+//! over 10,000,000 bytes) at the page's width, and never more than the window. Each is
+//! drawn on an image the tile's height, the page shifted up by the tile's top, so a long
+//! step is never an image of its own. The window on the page is crops of the tiles it
+//! covers, so scrolling places crops (a few dozen bytes each) and sends a tile only the
+//! first time it's reached. The rail and the foot are cut into pieces when they're over
+//! the limit (shown.rs). An image the tour can't make (past `MOST`, or not cut under the
+//! limit) is an error, and the tour is text from then on (view.rs). While no key waits
+//! (`ahead`), the tile under the window and the one above it, the next step's rail, the
+//! tiles of its first window and its foot, a window's tiles under and over it, and the
+//! previous step's rail, first tile and foot are drawn and sent unplaced, an image at a time with a key looked for before
+//! each, so `n` and `p` usually only place images and a key waits for one strip at
+//! most. Images are kept on the terminal, hidden, to place again, and deleted when the
+//! tour closes (shown.rs).
 
 pub mod ask;
 pub mod code;
@@ -24,8 +29,8 @@ mod shown;
 
 use super::screen::{Mode, Stepper};
 use bullpen_core::json::{s, Obj};
+use bullpen_draw::cut;
 use bullpen_draw::kitty::Place;
-use bullpen_draw::png;
 use bullpen_draw::theme::Theme;
 use ink::{Ink, Type};
 use serde_json::Value;
@@ -42,8 +47,9 @@ pub const FIRST: u32 = 0x5450_0001;
 pub type PatchFn = Box<dyn Fn(usize) -> String>;
 
 /// Where things go on a terminal `cols` by `rows`: the rail's columns (none on a narrow
-/// pane), the page's first column and its columns, the rows a tile is, and the rows
-/// the window on the page has now (fewer while something is typed under it).
+/// pane), the page's first column and its columns, the rows a tile is (the window's, or
+/// as many as fit under the terminal's limit: `fitted`), and the rows the window on the
+/// page has now (fewer while something is typed under it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Lay {
     pub cols: u16,
@@ -84,6 +90,17 @@ impl Lay {
             view,
         }
     }
+
+    /// The layout with tiles under the terminal's limit at a cell `cell` pixels: the
+    /// window's rows shared evenly by as few tiles as fit (at least a row each: a row
+    /// wider is cut across), so the first frame sends no rows past the window.
+    pub fn fitted(self, (cw, ch): (u32, u32)) -> Lay {
+        let fit = cut::rows_fitting(self.page_cols as u32 * cw, ch).clamp(1, u16::MAX as u32) as u16;
+        Lay {
+            tile: self.tile.div_ceil(self.tile.div_ceil(fit)),
+            ..self
+        }
+    }
 }
 
 pub struct Look {
@@ -114,7 +131,7 @@ impl Look {
             th,
             cell,
             ty,
-            shown: Shown::new(FIRST),
+            shown: Shown::new(FIRST, cell),
             patch,
             rows: HashMap::new(),
             largest: 0,
@@ -241,9 +258,8 @@ impl Look {
         let p = self.page_of(st, i);
         let mut ink = self.ink(width, n as u32 * ch, (from * ch as i64) as f32)?;
         page::draw(&mut ink, &p);
-        let png = png::encode(&ink.pm);
-        drop(ink);
-        Ok(Some((self.shown.send(k, &png, out)?, n)))
+        let pm = ink.pm;
+        Ok(Some((self.shown.send(k, &pm, out)?, n)))
     }
 
     /// The rail at step i sent: its ID.
@@ -263,9 +279,8 @@ impl Look {
         let (w, h) = (lay.rail as u32 * self.cell.0, lay.rows as u32 * self.cell.1);
         let mut ink = self.ink(w, h, 0.0)?;
         rail::draw(&mut ink, &r);
-        let png = png::encode(&ink.pm);
-        drop(ink);
-        Ok(Some(self.shown.send(k, &png, out)?))
+        let pm = ink.pm;
+        Ok(Some(self.shown.send(k, &pm, out)?))
     }
 
     /// The foot sent: its ID.
@@ -278,9 +293,8 @@ impl Look {
         let ch = self.cell.1 as f32;
         let mut ink = self.ink(w, h, 0.0)?;
         rail::foot(&mut ink, f, ch);
-        let png = png::encode(&ink.pm);
-        drop(ink);
-        Ok(Some(self.shown.send(k, &png, out)?))
+        let pm = ink.pm;
+        Ok(Some(self.shown.send(k, &pm, out)?))
     }
 
     fn place(&self, id: u32, p: u32, (col, row): (u16, u16), crop_y: i64, (cols, rows): (u16, u16)) -> Place {
@@ -310,7 +324,7 @@ impl Look {
         } else {
             Vec::new()
         };
-        let lay = Lay::new(cols, rows, typed.len());
+        let lay = Lay::new(cols, rows, typed.len()).fitted(self.cell);
         if self.last.is_some_and(|l| (l.cols, l.rows) != (lay.cols, lay.rows)) {
             self.shown.hide_all(out)?;
             self.put(out, "\x1b[2J")?;
@@ -388,9 +402,13 @@ impl Look {
         out.flush()
     }
 
-    /// While no key waits: send what a key would want next, unplaced. The tiles over and
-    /// under the window, then the next step's rail, first tile and foot, then the
-    /// previous step's. Stops when `waiting` says a key came; whether there's more to send.
+    /// While no key waits: send what a key would want next, unplaced, an image at a
+    /// time. The tile under the window and the one over it, then the next step's rail,
+    /// the tiles of its first window and its foot, then the rest of a window's tiles
+    /// under and over it, then the previous step's rail, first tile and foot. On a large pane a tile is a strip under the terminal's limit (a
+    /// couple of hundred KB of PNG), and a key is looked for before each, so a key waits
+    /// for one image at most. Stops when `waiting` says a key came; whether there's more
+    /// to send.
     pub fn ahead(&mut self, st: &Stepper, waiting: &dyn Fn() -> bool, out: &mut impl Write) -> std::io::Result<bool> {
         let Some(lay) = self.last else { return Ok(false) };
         if st.mode != Mode::Read {
@@ -399,26 +417,34 @@ impl Look {
         let tile = lay.tile as i64;
         let (first, last) = (st.top / tile, (st.top + lay.view as i64 - 1) / tile);
         let n = st.steps.len();
-        let mut jobs: Vec<(usize, Option<i64>)> = vec![(st.at, Some(last + 1)), (st.at, Some(first - 1))];
-        if st.at < n {
-            jobs.push((st.at + 1, None));
-        }
-        if st.at > 0 {
-            jobs.push((st.at - 1, None));
-        }
-        for (i, t) in jobs {
+        let window = (lay.view as i64 + tile - 1) / tile;
+        // step i's rail, its first `tiles` tiles and its foot (none past the end)
+        let step = |i: usize, tiles: i64| -> Vec<Ahead> {
+            let rail = (i <= n && lay.rail > 0).then_some(Ahead::Rail(i));
+            let tiles = (0..tiles).map(move |t| Ahead::Tile(i, t));
+            rail.into_iter()
+                .chain(tiles)
+                .chain([Ahead::Foot(i)])
+                .filter(|_| i <= n)
+                .collect()
+        };
+        let mut jobs = vec![Ahead::Tile(st.at, last + 1), Ahead::Tile(st.at, first - 1)];
+        jobs.extend(step(st.at + 1, window));
+        jobs.extend((2..=window).flat_map(|k| [Ahead::Tile(st.at, last + k), Ahead::Tile(st.at, first - k)]));
+        jobs.extend(step(st.at.wrapping_sub(1), 1));
+        for job in jobs {
             if waiting() {
+                out.flush()?;
                 return Ok(true);
             }
-            match t {
-                Some(t) => {
+            match job {
+                Ahead::Tile(i, t) => {
                     self.tile(st, i, t, lay, out)?;
                 }
-                None => {
-                    if lay.rail > 0 {
-                        self.rail(st, i, lay, out)?;
-                    }
-                    self.tile(st, i, 0, lay, out)?;
+                Ahead::Rail(i) => {
+                    self.rail(st, i, lay, out)?;
+                }
+                Ahead::Foot(i) => {
                     let rows = self.page_rows(st, i, lay);
                     let f = rail::Foot {
                         msg: String::new(),
@@ -442,6 +468,13 @@ impl Look {
         self.shown.delete_all(out)?;
         out.flush()
     }
+}
+
+/// An image drawn ahead: a tile of step i's page, its rail or its foot.
+enum Ahead {
+    Tile(usize, i64),
+    Rail(usize),
+    Foot(usize),
 }
 
 /// A comment's field as the text tour says it.
