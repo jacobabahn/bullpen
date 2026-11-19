@@ -2,11 +2,11 @@
 //! list draws), one under the other, each as tall as the type size makes it (a cell for
 //! small type, more for medium and large), so a row needn't be a whole cell, and a
 //! detail's text wrapped by pixels to its room; the image itself is the list's block of
-//! cells. The type is real (font.rs), the marks are drawn shapes in the status colours
-//! (rings, a check, a diamond), the selected task sits on a card (a faint fill and
-//! edge, its mark inside, its first key in a cap at its lower right) with its whole
-//! title (a narrow board's tasks that are yours get two lines), a task that needs you
-//! on a wash of its colour with a round bar at its left, and a risk is a chip
+//! cells. The type is real (font.rs), the marks are drawn shapes (marks.rs) in the
+//! status colours (rings, a check, a diamond), the selected task sits on a card (a
+//! faint fill and an edge, its mark inside, its first key in a cap at its lower right)
+//! with its whole title (a task that's yours gets two lines), a task that needs you on
+//! a wash of its colour with a round bar at its left, and a risk is a chip
 //! (chip.rs). The title is the loudest thing on a row: the ID, the age and the group's
 //! name are a detail's size. The marks that move are left out when the image look
 //! places them over the list (sprite.rs draws their frames with `Draw`). The list's
@@ -16,13 +16,12 @@
 
 use super::chip;
 use super::font::{Fonts, Weight};
-use super::shape::{arc_path, diamond, half, paint, rounded};
+use super::shape::{diamond, paint, rounded};
 use super::theme::{solid, Theme};
 use crate::model::TextSize;
 use crate::ui::rows::{Flag, ItemRow, Mark, Row, Rows, TaskRow};
-use std::f32::consts::PI;
 use std::ops::Range;
-use tiny_skia::{FillRule, LineCap, Path, PathBuilder, Pixmap, Stroke, Transform};
+use tiny_skia::{FillRule, LineCap, Path, Pixmap, Stroke, Transform};
 
 /// An image's place on the terminal: its columns, and a cell's size in pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -269,13 +268,6 @@ pub fn fitting(laid: &Laid, top: usize, room: u32) -> usize {
 /// one for its smoothed edge: pieces.rs leaves this room under the block.
 pub fn card_below(c: &Canvas) -> u32 {
     c.m.inset.max(0.0).ceil() as u32 + 1
-}
-
-/// Whether there are rows above the image's (↑ at its top right) and below (↓ at its bottom).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct Marks {
-    pub up: bool,
-    pub down: bool,
 }
 
 /// The pixels drawn past a window's edges, and cut off (render).
@@ -842,178 +834,11 @@ impl<'a> Draw<'a> {
         let right = self.right();
         self.title(lines, title_weight(i.asked), right, y, color);
     }
-
-    /// The scroll marks in the last column: ↑ at the top when rows are above, ↓ at the
-    /// bottom of an image `height` high when rows are below.
-    pub(super) fn scroll_marks(&mut self, marks: Marks, height: f32) {
-        let cx = self.g.c.grid.width() as f32 - 0.4 * self.c();
-        let half = 0.5 * self.m().line.min(self.g.c.grid.cell_h as f32);
-        if marks.up {
-            self.chevron(cx, half, -1.0);
-        }
-        if marks.down {
-            self.chevron(cx, height - half, 1.0);
-        }
-    }
-
-    /// A small chevron at (cx, cy), pointing down (dir 1) or up (-1).
-    fn chevron(&mut self, cx: f32, cy: f32, dir: f32) {
-        let r = 0.26 * self.c();
-        let mut pb = PathBuilder::new();
-        pb.move_to(cx - r, cy - dir * r / 2.0);
-        pb.line_to(cx, cy + dir * r / 2.0);
-        pb.line_to(cx + r, cy - dir * r / 2.0);
-        if let Some(p) = pb.finish() {
-            let dim = self.theme.dim();
-            let lw = (0.12 * self.c()).max(1.2);
-            self.stroke(&p, lw, dim);
-        }
-    }
-
-    fn mark_r(&self) -> f32 {
-        self.g.mark_r() * self.scale
-    }
-
-    /// A mark as one frame of a sprite (sprite.rs): turned `turn` of the way round, at
-    /// `scale` of its size.
-    pub(super) fn mark_frame(&mut self, mark: &Mark, cx: f32, cy: f32, turn: f32, scale: f32) {
-        self.scale = scale;
-        self.mark(mark, cx, cy, turn);
-        self.scale = 1.0;
-    }
-
-    fn line(&self) -> f32 {
-        (self.mark_r() * 0.26).max(1.2)
-    }
-
-    /// A task's mark: each status's own shape in its colour. The marks that turn are
-    /// drawn `turn` of the way round (0: as they stand still).
-    fn mark(&mut self, mark: &Mark, cx: f32, cy: f32, turn: f32) {
-        let r = self.mark_r();
-        let lw = self.line();
-        let (fg, dim) = (self.theme.text(), self.theme.dim());
-        let color = |st: &str| self.theme.status(st).unwrap_or(dim);
-        let a0 = -0.5 * PI + 2.0 * PI * turn;
-        match mark {
-            // a command running, or a tour being written: an arc half the way round
-            Mark::Job => self.arc(cx, cy, r, a0, 1.0 * PI, lw * 1.2, fg),
-            Mark::Tour(st) => {
-                let c = color(st);
-                self.arc(cx, cy, r, a0, 1.0 * PI, lw * 1.2, c)
-            }
-            Mark::Stuck(st) => self.status_mark(st, cx, cy, Some(solid(self.theme.yellow)), 0.0),
-            // working: a faint ring with a quarter of it drawn
-            Mark::Working => {
-                self.arc(cx, cy, r, 0.0, 2.0 * PI, lw, self.theme.tint_strong());
-                self.arc(cx, cy, r, a0, 0.5 * PI, lw, fg);
-            }
-            Mark::Review => self.status_mark("review", cx, cy, None, turn),
-            Mark::Still(st) => self.status_mark(st, cx, cy, None, 0.0),
-        }
-    }
-
-    /// A status's mark, in its colour or `over` it; review's half turned `turn` round.
-    fn status_mark(&mut self, st: &str, cx: f32, cy: f32, over: Option<[u8; 4]>, turn: f32) {
-        let r = self.mark_r();
-        let lw = self.line();
-        let dim = self.theme.dim();
-        let color = over.or(self.theme.status(st)).unwrap_or(dim);
-        let ink = solid(self.theme.bg);
-        match st {
-            "needs" => self.disc(cx, cy, r, color),
-            "stopped" => {
-                if let Some(p) = rounded(cx - r * 0.9, cy - r * 0.9, r * 1.8, r * 1.8, r * 0.35) {
-                    self.fill(&p, color);
-                }
-            }
-            "triage" => {
-                self.arc(cx, cy, r, 0.0, 2.0 * PI, lw, color);
-                self.disc(cx, cy, r * 0.38, color);
-            }
-            "ready" => {
-                self.disc(cx, cy, r, color);
-                self.check(cx, cy, r * 0.62, lw * 1.1, ink);
-            }
-            "finished" => {
-                if let Some(p) = diamond(cx, cy, r * 1.1) {
-                    self.fill(&p, color);
-                }
-            }
-            "done" => self.check(cx, cy, r * 0.8, lw, color),
-            "review" => {
-                self.arc(cx, cy, r, 0.0, 2.0 * PI, lw, color);
-                if let Some(p) = half(cx, cy, r, 0.5 * PI + 2.0 * PI * turn) {
-                    self.fill(&p, color);
-                }
-            }
-            "working" => self.arc(cx, cy, r, 0.0, 2.0 * PI, lw, color),
-            "todo" => {
-                // a dotted ring: not started yet
-                for k in 0..8 {
-                    let a = k as f32 * PI / 4.0;
-                    self.disc(cx + r * a.cos(), cy + r * a.sin(), lw * 0.62, color);
-                }
-            }
-            "dropped" => {
-                let mut pb = PathBuilder::new();
-                pb.move_to(cx - r * 0.7, cy);
-                pb.line_to(cx + r * 0.7, cy);
-                if let Some(p) = pb.finish() {
-                    self.stroke(&p, lw, color);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// A task that came from the backlog: a small circling arrow.
-    fn backlog_mark(&mut self, cx: f32, cy: f32, r: f32) {
-        let dim = self.theme.dim();
-        let lw = (r * 0.35).max(1.0);
-        self.arc(cx, cy, r, -0.3 * PI, 1.25 * PI, lw, dim);
-        // the arrow's head, at the arc's start
-        let (ax, ay) = (cx + r * (-0.3 * PI).cos(), cy + r * (-0.3 * PI).sin());
-        let mut pb = PathBuilder::new();
-        pb.move_to(ax - lw * 1.6, ay - lw * 0.6);
-        pb.line_to(ax + lw * 0.4, ay + lw * 0.4);
-        pb.line_to(ax + lw * 0.2, ay - lw * 1.8);
-        pb.close();
-        if let Some(p) = pb.finish() {
-            self.fill(&p, dim);
-        }
-    }
-
-    fn disc(&mut self, cx: f32, cy: f32, r: f32, color: [u8; 4]) {
-        if let Some(p) = PathBuilder::from_circle(cx, cy, r) {
-            self.fill(&p, color);
-        }
-    }
-
-    fn check(&mut self, cx: f32, cy: f32, r: f32, lw: f32, color: [u8; 4]) {
-        let mut pb = PathBuilder::new();
-        pb.move_to(cx - r * 0.75, cy + r * 0.02);
-        pb.line_to(cx - r * 0.2, cy + r * 0.55);
-        pb.line_to(cx + r * 0.8, cy - r * 0.55);
-        if let Some(p) = pb.finish() {
-            self.stroke(&p, lw, color);
-        }
-    }
-
-    /// An arc from angle a0 sweeping `sweep` radians (clockwise on screen).
-    #[allow(clippy::too_many_arguments)]
-    fn arc(&mut self, cx: f32, cy: f32, r: f32, a0: f32, sweep: f32, lw: f32, color: [u8; 4]) {
-        if let Some(p) = arc_path(cx, cy, r, a0, sweep) {
-            self.stroke(&p, lw, color);
-        }
-    }
 }
 
-impl Theme {
-    /// A working mark's ring: the foreground, a little stronger than the tint.
-    fn tint_strong(&self) -> [u8; 4] {
-        super::theme::faint(self.fg, 0.25)
-    }
-}
+#[path = "marks.rs"]
+mod marks;
+pub use marks::Marks;
 
 #[cfg(test)]
 #[path = "tests/test_render.rs"]
