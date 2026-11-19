@@ -13,6 +13,7 @@
 //! from which they're sent back or the task accepted. Where the person was is kept with
 //! the drafts, so opening the tour again resumes there.
 
+pub mod look;
 pub mod screen;
 mod view;
 

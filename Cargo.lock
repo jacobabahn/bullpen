@@ -72,15 +72,14 @@ version = "0.1.0"
 dependencies = [
  "ansi-to-tui",
  "bullpen-core",
+ "bullpen-draw",
  "chrono",
  "libc",
- "miniz_oxide",
  "notify",
  "ratatui",
  "serde",
  "serde_json",
  "tiny-skia",
- "ttf-parser",
 ]
 
 [[package]]
@@ -88,9 +87,11 @@ name = "bullpen-cli"
 version = "0.1.0"
 dependencies = [
  "bullpen-core",
+ "bullpen-draw",
  "chrono",
  "libc",
  "serde_json",
+ "tiny-skia",
 ]
 
 [[package]]
@@ -101,6 +102,15 @@ dependencies = [
  "libc",
  "serde_json",
  "unicode-width 0.2.0",
+]
+
+[[package]]
+name = "bullpen-draw"
+version = "0.1.0"
+dependencies = [
+ "miniz_oxide",
+ "tiny-skia",
+ "ttf-parser",
 ]
 
 [[package]]

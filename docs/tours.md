@@ -27,7 +27,8 @@ In the tour:
   unsent: `a` again accepts anyway), `esc` closes.
 - As on the board, `t` tells the worker something now (type it, `⏎` sends), `a`
   accepts from any step (a second `a`, since you haven't reached the end), and `⏎`
-  and `v` close the tour and open the task's pane or its diff.
+  and `v` close the tour and open the task's pane or its diff (as text, to copy from,
+  also when the tour is [drawn](#drawn-as-images)).
 
 The line with the size of a ready task's change says "Toured" once you've opened
 its tour (until a `ready` changes the code), else "Not toured yet" or "Tour written,
@@ -87,3 +88,42 @@ bullpen tour BP-3 --view      # step through it on this terminal (the board's g:
   toward `review_rounds`, and its findings always go back to the worker; a later round
   follows up on them as usual. An approval doesn't carry it over: the comments are
   reviewed even if the code didn't change.
+
+## Drawn as images
+
+With `bullpen config --board-look image` (the board's [image look](board.md#the-image-look)),
+a terminal that draws kitty graphics shows the tour drawn, in the board's type and the
+terminal's colours, so it follows the Rex theme:
+
+- **The rail**, down the left: the task, then every step by its title down a line, the
+  steps behind you filled, the one you're on in blue, the ones ahead as rings, and a
+  count of your comments beside each step that has some. The last stop is the end. A
+  long tour's rail scrolls to keep your step in view; a pane under 80 columns has none.
+- **The page**, at the right: the step's title, the files and lines it covers, its note
+  (code in it set in a monospace on a faint chip) and your comments on amber, then its
+  code drawn: a strip per file with its +/− counts, each hunk under the lines it covers
+  and the function it's in, each line with its number, added and removed lines on green
+  and red washes. Code is in JetBrains Mono (built in), coloured by a small highlighter
+  in the terminal's colours (keywords, strings, comments, numbers, type names); a line
+  too long for the page is cut with "…". After the last step the page is the end: your
+  comments under their steps' titles, and `s` (send them back) and `a` (accept) as
+  large keys.
+- **The foot**, under the page: the message (or "↓ more" while the page goes on) and the
+  keys, in caps. What you type (`c`, `t`) is text there, as in the text tour.
+
+The keys and what they do are the text tour's. The drawn code can't be selected or
+searched: `v` opens the task's whole diff as text (in delta when it's installed), to
+copy from or search. `board_font` sets the prose's font, as on the board.
+
+It keeps a remote link cheap the way the board does. A page is drawn once and sent in
+tiles a window high; the window is placed as crops of them, so `j` or `k` sends a
+couple of placements (about 160 bytes), and a tile only the first time the window
+reaches it. While no key waits, the tour sends what the next key would want, unplaced:
+the tiles above and under the window and the next and previous steps' rail, first tile
+and foot. So `n` or `p` only places images (about 360 bytes). At a large floating pane
+(160 columns by 46 rows, a 2× cell) the first frame is about 225 KB and a step not
+drawn ahead about 70 KB. Images are kept on the terminal, hidden, to place again (the
+step you go back to) and deleted when the tour closes.
+
+On a terminal that doesn't draw images, or with `board_look text`, the tour is text, as
+above, the message line saying why when the image look was asked for.

@@ -7,7 +7,7 @@ use std::f32::consts::PI;
 use tiny_skia::{Paint, Path, PathBuilder};
 
 /// A colour (straight RGBA) to fill or stroke with, smoothed at its edges.
-pub(super) fn paint(color: [u8; 4]) -> Paint<'static> {
+pub fn paint(color: [u8; 4]) -> Paint<'static> {
     let mut p = Paint::default();
     p.set_color_rgba8(color[0], color[1], color[2], color[3]);
     p.anti_alias = true;
@@ -15,7 +15,7 @@ pub(super) fn paint(color: [u8; 4]) -> Paint<'static> {
 }
 
 /// An arc as cubic curves, a quarter turn at most each.
-pub(super) fn arc_path(cx: f32, cy: f32, r: f32, a0: f32, sweep: f32) -> Option<Path> {
+pub fn arc_path(cx: f32, cy: f32, r: f32, a0: f32, sweep: f32) -> Option<Path> {
     let mut pb = PathBuilder::new();
     let n = (sweep.abs() / (PI / 2.0)).ceil().max(1.0) as usize;
     let step = sweep / n as f32;
@@ -31,7 +31,7 @@ pub(super) fn arc_path(cx: f32, cy: f32, r: f32, a0: f32, sweep: f32) -> Option<
 
 /// Half a disc, from angle a0 half way round (clockwise on screen): from the bottom
 /// (a0 = π/2) it's the left half, the review mark's ◐.
-pub(super) fn half(cx: f32, cy: f32, r: f32, a0: f32) -> Option<Path> {
+pub fn half(cx: f32, cy: f32, r: f32, a0: f32) -> Option<Path> {
     let mut pb = PathBuilder::new();
     let k = 4.0 / 3.0 * (PI / 8.0).tan();
     pb.move_to(cx + r * a0.cos(), cy + r * a0.sin());
@@ -44,7 +44,7 @@ pub(super) fn half(cx: f32, cy: f32, r: f32, a0: f32) -> Option<Path> {
     pb.finish()
 }
 
-pub(super) fn diamond(cx: f32, cy: f32, r: f32) -> Option<Path> {
+pub fn diamond(cx: f32, cy: f32, r: f32) -> Option<Path> {
     let mut pb = PathBuilder::new();
     pb.move_to(cx, cy - r);
     pb.line_to(cx + r, cy);
@@ -56,7 +56,7 @@ pub(super) fn diamond(cx: f32, cy: f32, r: f32) -> Option<Path> {
 
 /// The left `w` pixels of a rectangle with rounded corners (`rounded`'s): a bar down
 /// its left edge that follows its corners.
-pub(super) fn left_slice(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<Path> {
+pub fn left_slice(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<Path> {
     if w <= 0.0 || h <= 0.0 {
         return None;
     }
@@ -84,7 +84,7 @@ pub(super) fn left_slice(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<Path>
 }
 
 /// A rectangle with rounded corners.
-pub(super) fn rounded(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<Path> {
+pub fn rounded(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<Path> {
     if w <= 0.0 || h <= 0.0 {
         return None;
     }

@@ -148,6 +148,8 @@ check, a diamond) in the status colours, all the same weight to the eye, each on
 left edge where a group's name starts. The list says everything the text list does,
 row for row: each task's ID, title, mark, risk, age and lines, the groups and the
 Later group.
+A task's guided tour (`g`) is drawn too, in the same type and colours (see [Drawn as
+images](tours.md#drawn-as-images)).
 
 One grid holds it: text starts a column and a half in from the pane's left edge
 and ends that far from its right, the rules and the status bar run between the two,

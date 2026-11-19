@@ -27,16 +27,20 @@ docs/tests.md); their fake Rex and fake gh are Rust (`tests/fakes/`, BP-138).
   (docs/rebuilds.md).
 - The Rust is one cargo workspace (`Cargo.toml`, one `Cargo.lock`, built into
   `target/`): `core/` (`bullpen-core`: tasks, config, wording, what the command line
-  and the board share), `cli/` (`bullpen-cli`, the program `bullpen`), `board/` and
-  `tests/fakes/` (`bullpen-fakes`, the tests' fake `rex` and `gh`; only `tests/run.py`
-  builds it).
-  `core` never depends on `cli`; the board depends on `core`. The crates are `serde_json`
-  (with `preserve_order`), `chrono`, `libc` and `unicode-width` (the board's too, and
-  ratatui's); ask before adding one. The board has ratatui's and its own besides, the
-  image look's among them: `tiny-skia` (drawing), `ttf-parser` (fonts) and
-  `miniz_oxide` (its PNGs' zlib). A module's Rust tests are in a `tests/` folder
+  and the board share), `cli/` (`bullpen-cli`, the program `bullpen`), `board/`,
+  `draw/` (`bullpen-draw`: what the board's image look and the drawn tour draw with)
+  and `tests/fakes/` (`bullpen-fakes`, the tests' fake `rex` and `gh`; only
+  `tests/run.py` builds it).
+  `core` never depends on `cli`; the board depends on `core`, the board and `cli` on
+  `draw`. The crates are `serde_json` (with `preserve_order`), `chrono`, `libc` and
+  `unicode-width` (the board's too, and ratatui's); ask before adding one. The board has
+  ratatui's and its own besides. `draw` has the image look's: `tiny-skia` (drawing),
+  `ttf-parser` (fonts) and `miniz_oxide` (its PNGs' zlib), and its fonts in
+  `draw/fonts/` with their licences (Inter, and JetBrains Mono for the tour's code,
+  both SIL Open Font License; JetBrains Mono is 204 KB of the program). The board and
+  `cli` use `tiny-skia` too. A module's Rust tests are in a `tests/` folder
   beside it, as `test_<module>.rs`. rustfmt with `max_width = 120` (`rustfmt.toml`)
-  for `core`, `cli` and `tests/fakes`; the board isn't formatted yet.
+  for `core`, `cli` and `tests/fakes`; the board and `draw` aren't formatted yet.
 - The files bullpen writes (tasks, config, news, stamps) are as the Python wrote them:
   JSON as Python's `json` (indent 2, ASCII only, keys in order), stamps as `isoformat`,
   cuts as Python's. Comments that say "as Python's" name what's kept. The width of text
@@ -138,6 +142,30 @@ the frames, how far the last frame lands after the last key, and each key's wait
 stays right when the look changes; run it before and after a change to the look's
 drawing to see it didn't undo these numbers. It can't see the terminal's own decoding
 and drawing, or the network.
+
+The board's image look draws with `draw/` (`bullpen-draw`): the type (`font.rs`),
+shapes, the terminal's colours and their tones (`theme.rs`; a flag's colours stay the
+board's, `image/theme.rs`'s `Flags`), PNG, the kitty protocol's bytes and the terminal's
+answers to its questions (`answers.rs`; reading them, with the key reader's gate, stays
+`image/term.rs`).
+
+## The tour's drawing
+
+The tour (`cli/src/stepper/`, docs/tours.md) keeps its state and keys in `screen.rs`'s
+`Stepper`, whichever way it's shown. `view.rs` runs it on the terminal: with
+`board_look image` it asks the terminal first (`look/ask.rs`, `draw`'s questions), and
+when the terminal draws images it shows the stepper with `look/` instead of as text.
+`look/mod.rs` lays the pane out (`Lay`: the rail's columns, the page's, a tile's rows and
+the window's) and draws a frame: the rail (`rail.rs`, every step's title, the step
+shown in blue), a window on the page, and the foot (the message and keys); what's typed
+is text where the foot was. A page (`page.rs`: a step's title, files, note, comments and
+code, `code.rs`; or the end) is drawn once as one tall image, measured first on an image
+a pixel high, and sent as tiles a window high (`shown.rs` sends each image once, places
+crops of it, and keeps it hidden to place again). The window is one or two tile crops,
+so a scroll is placements. While no key waits, `Look::ahead` sends what `j`, `k`, `n` and
+`p` would want next, unplaced. Its tests (`look/tests/`) check the bytes each key
+writes; `render_bp195` (ignored) writes pictures of a tour fixture
+(`TOUR_FIXTURE`, `TOUR_RENDER`).
 
 ## Closing a task
 

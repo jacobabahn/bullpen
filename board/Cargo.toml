@@ -13,9 +13,8 @@ chrono = "0.4"
 notify = "6.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# the image look (image/): a rasteriser, fonts, and zlib for its PNGs
+# the image look (image/): what it draws with (fonts, shapes, PNG, the kitty protocol)
+bullpen-draw = { path = "../draw" }
 tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
-ttf-parser = "0.25"
-miniz_oxide = "0.9"
 # reading the terminal's answers (image/term.rs)
 libc = "0.2"

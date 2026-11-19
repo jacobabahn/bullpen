@@ -1,11 +1,14 @@
 //! The stepper on a terminal (`tour ID --view`): raw mode, its own screen, a key at a
 //! time; what a key asks for (save a comment, tell the worker, send, accept, open the
-//! task's pane or diff) is done here.
+//! task's pane or diff) is done here. With `board_look image` the tour is drawn as
+//! images (look/) when the terminal says it draws them, else it's text, saying why.
 
+use super::look::ink::Type;
+use super::look::{ask, Look, PatchFn};
 use super::screen::{diff_lines, Act, Mode, Stepper};
 use super::{save_place, send_comments};
 use crate::coordinators::home_of;
-use crate::line_edit::{read_keys, ready, term_size, Decoder, Raw, PASTE_OFF, PASTE_ON};
+use crate::line_edit::{read_keys, ready, split_keys, term_size, Decoder, Raw, PASTE_OFF, PASTE_ON};
 use crate::rex::{alive, rex_focus};
 use crate::tours::comments::{add_comment, read_comments};
 use crate::tours::{step_diff, tour_diff, tour_path, tour_stale, update_task};
@@ -14,9 +17,12 @@ use bullpen_core::paths::self_bin;
 use bullpen_core::proc::{run_with, which};
 use bullpen_core::text::{splitlines, strip};
 use bullpen_core::{fail, Fail, Repo, Res};
+use bullpen_draw::font::Fonts;
+use bullpen_draw::theme::Theme;
 use serde_json::{json, Value};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 /// The drafts as objects.
 fn drafts(repo: &Repo, t: &Obj) -> Res<Vec<Obj>> {
@@ -46,8 +52,24 @@ fn bp(repo: &Repo, args: &[&str]) -> (bool, String) {
     (p.ok(), last.strip_prefix("bullpen: ").unwrap_or(last).to_string())
 }
 
-fn draw(out: &mut impl Write, st: &mut Stepper) {
+/// How the tour is shown: as text, or drawn (look/).
+enum Show {
+    Text,
+    Image(Box<Look>),
+}
+
+/// The drawn look, wanted: the font `board_font` names, and each step's patch.
+pub struct Wanted {
+    font: Option<PathBuf>,
+    patch: PatchFn,
+}
+
+fn draw(out: &mut impl Write, st: &mut Stepper, show: &mut Show) {
     let (cols, rows) = term_size();
+    if let Show::Image(look) = show {
+        let _ = look.frame(st, (cols, rows), out);
+        return;
+    }
     let lines = st.screen(cols, rows);
     let cursor = if st.mode == Mode::Read {
         "\x1b[?25l".to_string()
@@ -59,11 +81,39 @@ fn draw(out: &mut impl Write, st: &mut Stepper) {
     let _ = out.flush();
 }
 
+/// The drawn look, when it's wanted and the terminal draws images; else text, and why
+/// on the message line. The keys typed while the terminal was asked are kept.
+fn image_look(st: &mut Stepper, wanted: Option<Wanted>, out: &mut impl Write, typed: &mut Vec<String>) -> Show {
+    let Some(w) = wanted else { return Show::Text };
+    let (a, keys) = ask::ask(0, out);
+    typed.extend(split_keys(&String::from_utf8_lossy(&keys)));
+    let why = if !a.graphics {
+        "the terminal doesn't draw images"
+    } else if ask::window_cell(0).or(a.cell).is_none() {
+        "the terminal doesn't say its cell size in pixels"
+    } else {
+        match Fonts::load(w.font.as_deref()) {
+            Ok(fonts) => {
+                let cell = ask::window_cell(0).or(a.cell).unwrap_or((8, 17));
+                let theme = Theme::default().with(&a.said);
+                return Show::Image(Box::new(Look::new(theme, cell, Type::new(fonts), w.patch)));
+            }
+            Err(e) => {
+                st.msg = format!("Drawing the tour as text: {e}.");
+                return Show::Text;
+            }
+        }
+    };
+    st.msg = format!("Drawing the tour as text: {why}.");
+    Show::Text
+}
+
 /// Run the stepper on the terminal until act says it's done (true). act does what the
 /// stepper can't: save a comment, send, accept, close. moved(at) is told of each step
-/// the person goes to.
+/// the person goes to. With the drawn look wanted, the terminal is asked first.
 fn stepper_tui(
     st: &mut Stepper,
+    wanted: Option<Wanted>,
     mut act: impl FnMut(&mut Stepper, Act) -> Res<bool>,
     mut moved: impl FnMut(usize) -> Res<()>,
 ) -> Res<()> {
@@ -72,16 +122,39 @@ fn stepper_tui(
     let mut decoder = Decoder::default();
     // its own screen; long lines are cut, not wrapped
     let _ = write!(out, "\x1b[?1049h\x1b[?7l{PASTE_ON}");
+    let mut typed = Vec::new();
+    let mut show = image_look(st, wanted, &mut out, &mut typed);
     let mut run = || -> Res<()> {
+        let mut size = (0, 0);
+        let mut dirty = true;
         loop {
-            draw(&mut out, st);
-            if !ready(0, 500) {
-                continue; // redraw: the pane may have changed size
+            let now = term_size();
+            if dirty || now != size || matches!(show, Show::Text) {
+                draw(&mut out, st, &mut show);
+                (size, dirty) = (now, false);
+            }
+            if typed.is_empty() {
+                if let Show::Image(look) = &mut show {
+                    let _ = look.ahead(st, &|| ready(0, 0), &mut out);
+                }
+                if !ready(0, 500) {
+                    continue; // redraw: the pane may have changed size
+                }
+                typed = read_keys(0, &mut decoder);
             }
             let rows = term_size().1;
-            for k in read_keys(0, &mut decoder) {
+            let page = if matches!(show, Show::Image(_)) {
+                rows - 2
+            } else {
+                rows - 4
+            };
+            for k in std::mem::take(&mut typed) {
                 let at = st.at;
-                if let Some(a) = st.key(&k, rows - 4) {
+                if let Some(a) = st.key(&k, page) {
+                    if a == Act::Accept {
+                        st.msg = format!("Accepting {}…", st.tid);
+                        draw(&mut out, st, &mut show);
+                    }
                     if act(st, a)? {
                         return Ok(());
                     }
@@ -90,9 +163,13 @@ fn stepper_tui(
                     moved(st.at)?;
                 }
             }
+            dirty = true;
         }
     };
     let done = run();
+    if let Show::Image(look) = &mut show {
+        let _ = look.close(&mut out);
+    }
     drop(raw);
     let mut out = std::io::stdout();
     let _ = write!(out, "{PASTE_OFF}\x1b[?7h\x1b[?25h\x1b[?1049l");
@@ -149,6 +226,20 @@ pub fn view_tour(repo: &Repo, t: &mut Obj, back: bool) -> Res<()> {
         .flatten()
         .map(|v| v.as_object().cloned().unwrap_or_default())
         .collect();
+    let (files, steps) = (Rc::new(files), Rc::new(steps));
+    let wanted = (repo.cfg_str("board_look") == "image").then(|| {
+        let (files, steps) = (files.clone(), steps.clone());
+        let font = repo
+            .cfg
+            .get("board_font")
+            .and_then(Value::as_str)
+            .filter(|f| !f.is_empty())
+            .map(PathBuf::from);
+        Wanted {
+            font,
+            patch: Box::new(move |i: usize| step_diff(&files, &steps[i])),
+        }
+    });
     let diff = Box::new(move |i: usize, w: i64| diff_lines(&step_diff(&files, &steps[i]), w, delta.as_deref()));
     let title = t.get("title").map(bullpen_core::json::py_str).unwrap_or_default();
     let mut st = Stepper::new(&id, &title, &tour, drafts(repo, t)?, at, diff);
@@ -196,11 +287,6 @@ pub fn view_tour(repo: &Repo, t: &mut Obj, back: bool) -> Res<()> {
                 }
             },
             Act::Accept => {
-                st.msg = format!("Accepting {id}…");
-                let (cols, rows) = term_size();
-                let mut out = std::io::stdout();
-                let _ = write!(out, "\x1b[H\x1b[2J{}", st.screen(cols, rows).join("\r\n"));
-                let _ = out.flush();
                 let (ok, said) = bp(repo, &["accept", &id]);
                 if ok {
                     return Ok(true);
@@ -211,7 +297,7 @@ pub fn view_tour(repo: &Repo, t: &mut Obj, back: bool) -> Res<()> {
         }
     };
     let task = t.clone();
-    stepper_tui(&mut st, act, |at| save_place(repo, &task, &commit, at))?;
+    stepper_tui(&mut st, wanted, act, |at| save_place(repo, &task, &commit, at))?;
     if back && !left.get() {
         let home = home_of(repo, t)?;
         let b = obj(&home, "board");

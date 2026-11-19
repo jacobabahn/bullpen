@@ -1,5 +1,6 @@
 //! The image look's type: Inter (built in, regular and semibold), or a font file the
-//! `board_font` setting names, measured and drawn glyph by glyph. A glyph is drawn
+//! `board_font` setting names, and for code JetBrains Mono (built in, regular; its
+//! bold drawn heavier), measured and drawn glyph by glyph. A glyph is drawn
 //! once per size into a coverage mask and kept; a character the font lacks is drawn
 //! from Inter, else as the font's empty box.
 
@@ -8,8 +9,10 @@ use std::path::Path;
 use tiny_skia::{FillRule, Mask, PathBuilder, Pixmap, Stroke, Transform};
 use ttf_parser::{Face, GlyphId, OutlineBuilder};
 
-static REGULAR: &[u8] = include_bytes!("../../fonts/Inter-Regular.ttf");
-static SEMIBOLD: &[u8] = include_bytes!("../../fonts/Inter-SemiBold.ttf");
+static REGULAR: &[u8] = include_bytes!("../fonts/Inter-Regular.ttf");
+static SEMIBOLD: &[u8] = include_bytes!("../fonts/Inter-SemiBold.ttf");
+/// The tour's code (SIL Open Font License, fonts/JetBrainsMono-LICENSE.txt)
+static MONO: &[u8] = include_bytes!("../fonts/JetBrainsMonoNL-Regular.ttf");
 
 /// The weight a piece of text is drawn at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -45,6 +48,13 @@ impl Fonts {
     pub fn builtin() -> Fonts {
         let face = |data: &'static [u8]| Face::parse(data, 0).expect("the built-in font parses");
         Fonts { regular: face(REGULAR), bold: face(SEMIBOLD), fake_bold: false, fallback: None, cache: HashMap::new() }
+    }
+
+    /// JetBrains Mono, built in, with Inter for what it lacks: code.
+    pub fn mono() -> Fonts {
+        let face = Face::parse(MONO, 0).expect("the built-in font parses");
+        let inter = Fonts::builtin();
+        Fonts { regular: face.clone(), bold: face, fake_bold: true, fallback: Some((inter.regular, inter.bold)), cache: HashMap::new() }
     }
 
     /// The font file at path, with Inter for what it lacks; why not, when it can't be read.

@@ -337,6 +337,16 @@ impl Stepper {
         (height - rows.len() as i64 + row, col + 1)
     }
 
+    /// The keys while something is typed, the longest that fits width.
+    pub fn typing_keys(&self, width: i64) -> &'static str {
+        let keys = if self.mode == Mode::Comment {
+            COMMENT_KEYS
+        } else {
+            TELL_KEYS
+        };
+        fitting(keys, width)
+    }
+
     /// The stepper's lines: a header, the body from self.top, a message line and the keys.
     pub fn screen(&mut self, width: i64, height: i64) -> Vec<String> {
         let n = self.steps.len();
@@ -369,20 +379,9 @@ impl Stepper {
         out.extend(std::iter::repeat_n(String::new(), blank));
         let mut out: Vec<String> = out.iter().map(|l| clip_line(l, width - 1)).collect();
         let more = body.len() as i64 - self.top - rows;
-        let fitting = |keys: &[&'static str]| -> &'static str {
-            keys.iter()
-                .copied()
-                .find(|k| len(k) as i64 <= width - 2)
-                .unwrap_or(keys[keys.len() - 1])
-        };
         if self.typing() {
             out.extend(typing);
-            let keys = if self.mode == Mode::Comment {
-                COMMENT_KEYS
-            } else {
-                TELL_KEYS
-            };
-            out.push(format!(" {DIM}{}{OFF}", fitting(keys)));
+            out.push(format!(" {DIM}{}{OFF}", self.typing_keys(width)));
         } else {
             let down = if more > 0 {
                 format!("↓ {more} more")
@@ -395,10 +394,18 @@ impl Stepper {
                 format!(" {BOLD}{}{OFF}", self.msg)
             });
             let keys = if self.at_end() { END_KEYS } else { STEP_KEYS };
-            out.push(format!(" {DIM}{}{OFF}", fitting(keys)));
+            out.push(format!(" {DIM}{}{OFF}", fitting(keys, width)));
         }
         out.iter().map(|l| clip_line(l, width - 1) + OFF).collect()
     }
+}
+
+/// The longest of keys that fits width (with a column each side), else the shortest.
+fn fitting(keys: &[&'static str], width: i64) -> &'static str {
+    keys.iter()
+        .copied()
+        .find(|k| len(k) as i64 <= width - 2)
+        .unwrap_or(keys[keys.len() - 1])
 }
 
 /// Python's text[:n], n maybe negative (from the end).

@@ -20,7 +20,7 @@
 use super::chip;
 use super::font::{Fonts, Weight};
 use super::shape::{diamond, left_slice, paint, rounded};
-use super::theme::{lit, solid, Rgb, Theme};
+use super::theme::{lit, solid, Flags, Rgb, Theme};
 use crate::model::TextSize;
 use crate::ui::rows::{DetailRow, Flag, ItemRow, Mark, Row, Rows, TaskRow};
 use std::ops::Range;

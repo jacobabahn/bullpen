@@ -7,7 +7,7 @@
 
 use super::Draw;
 use crate::image::shape::{arc_path, diamond, half, rounded};
-use crate::image::theme::{solid, Theme};
+use crate::image::theme::solid;
 use crate::ui::rows::Mark;
 use std::f32::consts::PI;
 use tiny_skia::PathBuilder;
@@ -183,12 +183,5 @@ impl Draw<'_> {
         if let Some(p) = arc_path(cx, cy, r, a0, sweep) {
             self.stroke(&p, lw, color);
         }
-    }
-}
-
-impl Theme {
-    /// A working mark's ring: the foreground, a little stronger than the tint.
-    fn tint_strong(&self) -> [u8; 4] {
-        crate::image::theme::faint(self.fg, 0.25)
     }
 }

@@ -29,20 +29,18 @@
 mod ahead;
 mod bar;
 mod chip;
-mod font;
 mod frame;
-mod kitty;
 mod list;
 pub(crate) mod meter;
 mod pieces;
-mod png;
 mod render;
-mod shape;
 mod shown;
 mod sprite;
 pub mod term;
 mod theme;
 pub mod worker;
+
+use bullpen_draw::{font, kitty, png, shape};
 
 use crate::model::{Layout, Look, TextSize};
 use crate::ui::bottom::Foot;
