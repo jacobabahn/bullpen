@@ -143,44 +143,71 @@ Tasks that waited on the accepted one start by themselves (see
 
 `bullpen config --board-look image` (or `I` on the board, for this run) draws the
 board as images instead of text: real type, the marks drawn as shapes (rings, a
-check, a diamond) in the status colours, the selected task on a card (a faint fill
-with a faint edge, its mark inside it, clear of its type on every side, and at its
-lower right its first key in a small cap with what it does, `a accept` or
-`i answer`, its last line making room) with its ID in the foreground and its whole
-title (wrapped to three lines at most; another task's is cut to its line, but on a
-board under 44 columns one that's yours and waits on you, needing you, stopped or
-ready, gets two lines, at medium and large). A detail
-line wraps where the type runs out of room, measured in pixels. A task that needs
-you, or whose agent stopped, stands out: it sits on a faint wash of amber (or red)
-over the same rectangle as the card, with a bar of that colour at its left, round at
-its ends; selected, the card replaces the wash and the bar stays. A ready task's risk
-is a chip: the word, small and semibold, in its colour on a round pill of that
-colour, faint. The title is the loudest thing on a row: a task's ID (dim, on the
-title's baseline) and age, and the groups' names (a little dim), are a detail line's
-size. The list says everything the text list does, row for row: each task's ID,
-title, mark, risk, age and lines, the groups and the Later group. The marks move as
-the text board's do, at the same pace: a working task's is a faint ring with a short
-arc going round it, a task in review's a blue ring with a filled half that turns, and
-a running command's (or a tour being written) half a ring turning faster. When a
-task's status changes, its new mark settles in: it grows a little past its size and
-back, in 160 ms. `bullpen config --board-motion off` stills them all (the working,
-review and running marks stand as their first frame), and the board then sends
-nothing while nothing changes. The top line and the bottom rows are drawn too, in the
-list's type and colours, each set off from the list by a faint rule: the repository's
-name, then its counts at the right as chips like the risk's ("3 need you", or only
-their numbers when the words don't fit beside the name). On a board tall enough for
-the text's blank row under the top line, the header takes that row too for a status
-bar, in the rule's place: a segment for each open task, in its group's colour and the
-board's order (amber needs you, green ready, a fainter green finished, blue in review,
-greys for the coordinator's, working and queued), and under it each group's count
-("● 3 ready"), as many as fit, the rest dropped from the end. The list doesn't lose a
-row for it: the text's ↓ row under the list goes. With the bar, the chips on the line
-are only what needs you; the counts under the bar say the rest. The header is sent
-again only when a count changes, so the bar costs nothing while you move around. Then
-the message, and the keys
-each in a small rounded cap with what it does dim after it, dropping from the end on
-a narrow board as the text's do (`?` is never dropped). The scroll marks are small
-chevrons at the list's right edge. What you type into stays text: while a tell, a y/n
+check, a diamond) in the status colours, all the same weight to the eye, each one's
+left edge where a group's name starts. The list says everything the text list does,
+row for row: each task's ID, title, mark, risk, age and lines, the groups and the
+Later group.
+
+One grid holds it: text starts a column and a quarter in from the pane's left edge
+and ends that far from its right, the rules and the status bar run between the two,
+and a card or a wash reaches three quarters of a column past each, so type is clear
+of their edges and they're as far from one side of the pane as the other. The ages
+have a column of their own at the right, two figures wide, so the risks' chips before
+it line up down the list; a title's lines after its first stop short of it.
+
+The selected task sits on a card, and nothing else is boxed: a faint fill and an
+edge three pixels wide in the terminal's blue, its mark inside it, its ID in the
+foreground and its whole title (wrapped to three lines at most). At its lower right
+is its first key in a small cap with what it does, `a accept` or `i answer`: its
+last line makes room when it must (its last words go on a line more, or it's cut
+when it has none), and the lines above keep their width. A task that needs you, or
+whose agent stopped, stands out: it sits on a faint wash of amber (or red) over the
+card's rectangle, with a bar of that colour down its left edge, following its
+corners; selected, its fill is that colour stronger and the blue edge stands in the
+bar's place. An age that has waited too long is a chip of its task's colour, whole.
+
+A title is the loudest thing on a row: a task's ID (dim, on the title's baseline)
+and age, and the groups' names (a little dim), are a detail line's size. A title
+that's yours (it needs you, stopped, or is ready) gets two lines, at medium and
+large; another's is cut to its line, and is the foreground a step back (the
+coordinator's, and a closed one's, a step further), so yours lead the list. A cut is
+after the last whole word that fits, never after a comma or a full stop (in a word
+only when that would leave under half the room, as with a path). A detail line wraps
+where the type runs out of room, measured in pixels, and its last line isn't left a
+word or two; it's dim, but the selected task's and what a task that needs you says.
+A key a line names ("Its agent exited. `r` resumes it.") is in a small cap, as the
+keys at the bottom. A ready task's risk is a quiet chip: a dot of its colour, then
+the word dim, inside a faint line (on a board under 44 columns, its first letter: H,
+M, L). A group's name sits with its own tasks: there's more room over it than under.
+
+The marks move as the text board's do, at the same pace: a working task's is a faint
+ring with a quarter of it going round, a task in review's a blue ring with a filled
+half that turns, and a running command's (or a tour being written) half a ring
+turning faster. When a task's status changes, its new mark settles in: it grows a
+little past its size and back, in 160 ms. `bullpen config --board-motion off` stills
+them all (the working, review and running marks stand as their first frame), and the
+board then sends nothing while nothing changes.
+
+The top line and the bottom rows are drawn too, in the list's type and colours, each
+set off from the list by a faint rule: the repository's name, the pane's largest
+type, then its counts at the right as chips ("3 need you", or only their numbers
+when the words don't fit beside the name), a word in its colour on a round pill of
+that colour, faint. On a board tall enough for the text's blank row under the top
+line, the header takes that row too for a status bar, in the rule's place: a segment
+for each open task, in its group's colour and the board's order (red for a task
+whose agent stopped and amber for the others that need you, a violet for the
+coordinator's, green ready, a line of green round a faint fill finished, blue in
+review, greys for working and queued), and under it each group's count ("● 3
+ready") but what needs you, which the chip says: as many as fit, then "+N more" for
+the tasks of the rest. The list doesn't lose a row for it: the text's ↓ row under
+the list goes. With the bar, the chips on the line are only what needs you; the
+counts under the bar say the rest. The header is sent again only when a count
+changes, so the bar costs nothing while you move around. Then the message, and the
+keys each in a small rounded cap with what it does dim after it, dropping from the
+end on a narrow board as the text's do (`?` is never dropped); they sit a little up
+in their rows, clear of the pane's bottom edge, and the rule over them is above the
+message's row whether there's a message or not. The scroll marks are small chevrons
+at the list's right edge. What you type into stays text: while a tell, a y/n
 question (an accept's, a drop's, `q`'s) or the stale tour's question is open, the
 bottom rows are text, cursor and all, and are drawn again after. `?`, peeks, answers
 and mission control stay text, and so does the compact layout (`l`): with it the
@@ -189,7 +216,7 @@ board is text whatever the look.
 `bullpen config --board-text-size` sets the type: `medium` (the default) is the
 terminal's own text size, with a detail line smaller and dim under each title, a
 little space between them and about three quarters of a line between the tasks, so a
-row is a little more than a cell; `large` is larger still, for a pane read from
+row is a little more than a cell (cards one under the other are a few pixels apart); `large` is larger still, for a pane read from
 further away, and cuts titles sooner; `small` is a cell a row, as the text list. The
 list scrolls by its rows' own heights, keeping the selected task and its lines in
 view and showing only whole rows, so a page (`PgDn`) has fewer tasks than the text
@@ -204,7 +231,10 @@ tries again.
 
 The image follows the terminal's theme: its colours are the terminal's own
 foreground, background, red, green, yellow and blue, and its background is clear, so
-the pane's shows through. The board asks for them (with the cell size) when it starts
+the pane's shows through. Text is in those colours as they are; a shape (a mark, a
+bar, a dot) is in the colour lifted when it's dark, and a fill (a wash, a chip's) in
+the colour at its brightest, faint, since a light theme's amber is dark to read as
+text and would be brown as a shape and beige as a fill. The board asks for them (with the cell size) when it starts
 drawing images, and again only on a resize or when you switch to the image look: after
 a change of theme, `I` twice redraws in the new colours. It never asks on a timer.
 While the board waits for those answers it reads the keys itself and passes them on;
@@ -242,8 +272,8 @@ block of cells, so a client with other cell sizes (Rex on a phone) scales it to 
 
 `bullpen-board --dir <state dir> --root <repo> --bullpen <program> --render FILE
 --cols N` writes the board as the image look draws it to FILE: its top line, its whole
-list and its keys, a PNG N columns wide (60 by default), at the repo's text size,
-without a terminal. `--theme light` draws it in a light terminal's colours (GitHub's
+list (as tall as its rows, not rounded up to cells as on a terminal) and its keys, a
+PNG N columns wide (60 by default), at the repo's text size, without a terminal. `--theme light` draws it in a light terminal's colours (GitHub's
 light ones) on white, `--theme dark` (the default) in the default dark ones, and
 `--select ID` selects that task, so a change can be checked on both.
 

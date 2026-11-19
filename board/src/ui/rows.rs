@@ -73,7 +73,7 @@ pub(crate) struct TaskRow {
     /// its title is dim: closed, its coordinator's, or another coordinator's
     pub quiet: bool,
     /// it waits on you (it needs you, stopped, or is ready) and isn't another
-    /// coordinator's: a narrow image board gives its title two lines
+    /// coordinator's: the image board gives its title two lines
     pub yours: bool,
     /// selected (and not asked about): its first key and what it does, which the image
     /// look puts in a cap at its card's lower right
