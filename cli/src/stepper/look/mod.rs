@@ -15,10 +15,10 @@
 //! limit) is an error, and the tour is text from then on (view.rs). While no key waits
 //! (`ahead`), the tile under the window and the one above it, the next step's rail, the
 //! tiles of its first window and its foot, a window's tiles under and over it, and the
-//! previous step's rail, first tile and foot are drawn and sent unplaced, an image at a time with a key looked for before
-//! each, so `n` and `p` usually only place images and a key waits for one strip at
-//! most. Images are kept on the terminal, hidden, to place again, and deleted when the
-//! tour closes (shown.rs).
+//! previous step's rail, first tile and foot are drawn and sent unplaced, an image at a
+//! time with a key looked for before each, so `n` and `p` usually only place images and
+//! a key waits for one strip at most. Images are kept on the terminal, hidden, to place
+//! again, and deleted when the tour closes (shown.rs).
 
 pub mod ask;
 pub mod code;
@@ -405,10 +405,10 @@ impl Look {
     /// While no key waits: send what a key would want next, unplaced, an image at a
     /// time. The tile under the window and the one over it, then the next step's rail,
     /// the tiles of its first window and its foot, then the rest of a window's tiles
-    /// under and over it, then the previous step's rail, first tile and foot. On a large pane a tile is a strip under the terminal's limit (a
-    /// couple of hundred KB of PNG), and a key is looked for before each, so a key waits
-    /// for one image at most. Stops when `waiting` says a key came; whether there's more
-    /// to send.
+    /// under and over it, then the previous step's rail, first tile and foot. On a large
+    /// pane a tile is a strip under the terminal's limit (a couple of hundred KB of PNG),
+    /// and a key is looked for before each, so a key waits for one image at most. Stops
+    /// when `waiting` says a key came; whether there's more to send.
     pub fn ahead(&mut self, st: &Stepper, waiting: &dyn Fn() -> bool, out: &mut impl Write) -> std::io::Result<bool> {
         let Some(lay) = self.last else { return Ok(false) };
         if st.mode != Mode::Read {
