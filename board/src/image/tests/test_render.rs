@@ -405,6 +405,21 @@ fn a_line_is_dim_but_the_selected_tasks_and_what_a_task_that_needs_you_says() {
 }
 
 #[test]
+fn a_key_a_line_names_is_semibold_in_the_foreground() {
+    // which of the text's letters, spaces not counted
+    assert_eq!(key_letters("Its agent exited. r resumes it.", 0), vec![15]);
+    assert_eq!(key_letters("p shows its screen.", 0), vec![0]);
+    assert_eq!(key_letters("3m Not started. s starts it.", 3), vec![13]);
+    // not a word of the sentence, a capital, or a last letter
+    assert!(key_letters("Reading a file. A report, part b", 0).is_empty());
+    // drawn in the foreground on a dim line, wherever the line wraps
+    let theme = Theme::default();
+    let line = |text: &str| draw(&rows(vec![Row::Detail(detail_row(text))]));
+    assert!(has(&row_px(&line("Not started. s starts it."), 0), theme.fg));
+    assert!(!has(&row_px(&line("Not started. It starts."), 0), theme.fg));
+}
+
+#[test]
 fn a_stale_age_is_its_flags_colour_not_always_red() {
     let theme = Theme::default();
     let aged = |flag| draw(&rows(vec![Row::Task(TaskRow { stale: true, flag, age: "12m".into(), ..task("BP-1", "todo") })]));

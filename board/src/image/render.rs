@@ -395,6 +395,25 @@ fn blocks<'r>(rows: &'r Rows, places: &[Place], pad: f32) -> Vec<Block<'r>> {
     out
 }
 
+/// The keys a detail's text names ("Its agent exited. r resumes it."), as which of its
+/// letters they are, spaces not counted (so they're found on its wrapped lines): a
+/// lowercase letter alone, first or after a full stop, with a word after it. The first
+/// `lead` columns are the task's age.
+fn key_letters(text: &str, lead: usize) -> Vec<usize> {
+    let (age, rest) = crate::model::split_at_width(text, lead);
+    let mut n = age.chars().filter(|c| !c.is_whitespace()).count();
+    let words: Vec<&str> = rest.split_whitespace().collect();
+    let mut out = Vec::new();
+    for (i, w) in words.iter().enumerate() {
+        let alone = w.len() == 1 && w.chars().all(|c| c.is_ascii_lowercase());
+        if alone && i + 1 < words.len() && (i == 0 || words[i - 1].ends_with('.')) {
+            out.push(n);
+        }
+        n += w.chars().count();
+    }
+    out
+}
+
 /// The ID column's width in pixels: the widest ID in the list, so titles line up as it scrolls.
 fn id_width(rows: &Rows, fonts: &Fonts, px: f32) -> f32 {
     rows.rows
@@ -737,6 +756,8 @@ impl<'a> Draw<'a> {
                 // a step under the title, but the selected task's and what you must act on
                 let color = if d.selected || (d.loud && d.flag.is_some()) { fg } else { dim };
                 let x = self.text_x();
+                let keys = key_letters(&d.text, d.lead);
+                let mut seen = 0;
                 for (k, line) in lines.iter().enumerate() {
                     let y = y + k as f32 * m.detail_line;
                     // a narrow board's age starts the first line
@@ -744,7 +765,8 @@ impl<'a> Draw<'a> {
                     let age_color = if d.stale { self.theme.stale(d.flag) } else { dim };
                     let weight = if d.stale { Weight::Bold } else { Weight::Regular };
                     let end = self.text(&age, weight, x, y, self.right() - x, age_color);
-                    self.text(&rest, Weight::Regular, end, y, self.right() - end, color);
+                    seen += age.chars().filter(|c| !c.is_whitespace()).count();
+                    self.said(&rest, end, y, color, &keys, &mut seen);
                 }
             }
             Row::Gap => {}
@@ -768,6 +790,27 @@ impl<'a> Draw<'a> {
                 for (k, line) in lines.iter().enumerate() {
                     self.text(line, Weight::Regular, x, y + k as f32 * m.detail_line, self.right() - x, fg);
                 }
+            }
+        }
+    }
+
+    /// A detail's line from x, on the line whose top is y: its text in `color`, the
+    /// keys it names (`keys`: which of the text's letters, `seen` of them drawn on the
+    /// lines before) semibold in the foreground.
+    fn said(&mut self, line: &str, x: f32, y: f32, color: [u8; 4], keys: &[usize], seen: &mut usize) {
+        let fg = self.theme.text();
+        let (mut x, mut run, mut key) = (x, String::new(), false);
+        for c in line.chars().chain(std::iter::once('\0')) {
+            let is_key = !c.is_whitespace() && keys.contains(seen);
+            if (is_key != key || c == '\0') && !run.is_empty() {
+                let (weight, color) = if key { (Weight::Bold, fg) } else { (Weight::Regular, color) };
+                x = self.text(&run, weight, x, y, f32::MAX, color);
+                run.clear();
+            }
+            key = is_key;
+            if c != '\0' {
+                run.push(c);
+                *seen += usize::from(!c.is_whitespace());
             }
         }
     }
