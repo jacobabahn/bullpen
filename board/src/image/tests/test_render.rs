@@ -386,12 +386,25 @@ fn a_task_that_needs_you_is_washed_in_its_colour_over_the_cards_rectangle_with_a
 }
 
 #[test]
-fn the_selected_card_replaces_the_wash_and_the_bar_stays() {
+fn the_selected_card_keeps_its_wash_and_its_bar_with_an_edge_of_its_flags_colour() {
     let theme = Theme::default();
     let (_, s) = draw_in(&flagged(Flag::Needs, true), TextSize::Medium);
-    let (_, x1, _, y1) = drawn_box(&s);
-    assert!(faintly(px_at(&s, x1 - 4, y1 / 2), theme.tint()));
+    let (x0, x1, y0, y1) = drawn_box(&s);
+    assert!(faintly(px_at(&s, x1 - 4, y1 / 2), theme.wash(Flag::Needs)));
     assert_eq!(px_at(&s, 6, y1 / 2), solid(theme.yellow));
+    // its edge is amber, stronger than the hairline round a wash that isn't selected
+    let (_, washed) = draw_in(&flagged(Flag::Needs, false), TextSize::Medium);
+    let mid = (x0 + x1) / 2;
+    let (edge, line) = (px_at(&s, mid, y0), px_at(&washed, mid, y0));
+    assert!(edge[3] > 2 * line[3] && line[3] > theme.wash(Flag::Needs)[3], "{edge:?} {line:?}");
+    assert!(edge[0] > edge[2] && line[0] > line[2], "amber: {edge:?} {line:?}");
+    // a selected task that doesn't need you has the foreground's
+    let plain = rows(vec![Row::Task(TaskRow { selected: true, ..task("BP-1", "todo") }), detail("what it does", true)]);
+    let (_, p) = draw_in(&plain, TextSize::Medium);
+    let (px0, px1, py0, py1) = drawn_box(&p);
+    assert!(faintly(px_at(&p, px1 - 4, py1 / 2), theme.tint()));
+    let e = px_at(&p, (px0 + px1) / 2, py0);
+    assert!(e[3] > 2 * theme.tint()[3] && e[0] == e[2], "{e:?}");
 }
 
 #[test]

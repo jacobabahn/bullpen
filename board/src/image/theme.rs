@@ -105,9 +105,21 @@ impl Theme {
         faint(self.fg, 0.085)
     }
 
-    /// The selected card's edge: the foreground, a little stronger than its fill.
+    /// The selected card's edge: the foreground, clearly stronger than its fill, so the
+    /// card stands out among washed tasks.
     pub fn edge(&self) -> [u8; 4] {
-        faint(self.fg, 0.22)
+        faint(self.fg, 0.4)
+    }
+
+    /// The selected card's edge when its task needs you or stopped: its flag's colour.
+    pub fn flag_edge(&self, flag: Flag) -> [u8; 4] {
+        faint(self.flag(flag), 0.85)
+    }
+
+    /// The hairline round a wash: its flag's colour, faint, so a wash has an edge on a
+    /// light theme's white.
+    pub fn wash_edge(&self, flag: Flag) -> [u8; 4] {
+        faint(self.flag(flag), 0.22)
     }
 
     /// The rule under the top line and over the bottom rows: the foreground, faintly.
@@ -135,7 +147,7 @@ impl Theme {
     /// Behind a task that needs you or stopped: its flag's colour, faintly, so dim text
     /// on it still reads at 4.5:1 on a light theme's white.
     pub fn wash(&self, flag: Flag) -> [u8; 4] {
-        faint(self.flag(flag), 0.075)
+        faint(self.flag(flag), 0.09)
     }
 
     /// A status's colour, as ui::mark_style gives it; None for the dim ones.

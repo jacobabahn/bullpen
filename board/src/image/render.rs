@@ -325,7 +325,7 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
     let blocks = blocks(rows, &places, c.m.pad);
     for b in &blocks {
         match (b.selected, b.flag) {
-            (true, _) => d.card(b.top, b.bottom),
+            (true, f) => d.card(b.top, b.bottom, f),
             (false, Some(f)) => d.wash(b.top, b.bottom, f),
             _ => {}
         }
@@ -615,21 +615,32 @@ impl<'a> Draw<'a> {
         (x, top - inset, self.right() + out - x, bottom - top + 2.0 * inset)
     }
 
-    /// The selected task's (or item's) card: a faint fill with a faint edge.
-    fn card(&mut self, top: f32, bottom: f32) {
+    /// The selected task's (or item's) card: a faint fill with an edge; one that needs
+    /// you or stopped keeps its wash, and its edge is its flag's colour.
+    fn card(&mut self, top: f32, bottom: f32, flag: Option<Flag>) {
         let (x, y, w, h) = self.panel(top, bottom);
-        let r = 0.35 * self.m().title;
-        let (fill, edge) = (self.theme.tint(), self.theme.edge());
+        let r = self.radius();
+        let (fill, edge) = match flag {
+            Some(f) => (self.theme.wash(f), self.theme.flag_edge(f)),
+            None => (self.theme.tint(), self.theme.edge()),
+        };
         self.rounded_fill(x, y, w, h, r, fill);
         self.rounded_edge(x, y, w, h, r, 1.5, edge);
     }
 
+    /// A card's and a wash's corners.
+    fn radius(&self) -> f32 {
+        0.35 * self.m().title
+    }
+
     /// Behind a task that needs you (amber) or whose agent stopped (red): its colour,
-    /// faintly, over the card's rectangle.
+    /// faintly, over the card's rectangle, with a hairline of it round it.
     fn wash(&mut self, top: f32, bottom: f32, flag: Flag) {
         let (x, y, w, h) = self.panel(top, bottom);
-        let color = self.theme.wash(flag);
-        self.rounded_fill(x, y, w, h, 0.35 * self.m().title, color);
+        let (color, line, r) = (self.theme.wash(flag), self.theme.wash_edge(flag), self.radius());
+        self.rounded_fill(x, y, w, h, r, color);
+        // (a stroke of one pixel is drawn as a hairline, which spills past the rectangle)
+        self.rounded_edge(x, y, w, h, r, 1.25, line);
     }
 
     /// The bar at the left of a task that needs you or stopped, in its colour, as tall
