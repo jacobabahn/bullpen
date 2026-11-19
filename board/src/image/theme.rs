@@ -192,6 +192,7 @@ impl Theme {
     pub fn group(&self, status: &str) -> [u8; 4] {
         match status {
             "needs" => solid(self.yellow),
+            "stopped" => solid(self.red),
             "ready" => solid(self.green),
             "finished" => faint(self.green, 0.7),
             "review" => solid(self.blue),

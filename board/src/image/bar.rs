@@ -70,7 +70,7 @@ pub fn segments(tallies: &[Tally], l: f32, r: f32, gap: f32) -> Vec<(f32, f32, &
 /// how many tasks they have.
 fn counts(d: &mut Draw, tallies: &[Tally], l: f32, r: f32, y: f32, h: f32, px: f32) {
     let theme = d.theme();
-    let tallies: Vec<&Tally> = tallies.iter().filter(|t| t.status != "needs").collect();
+    let tallies: Vec<&Tally> = tallies.iter().filter(|t| !matches!(t.status, "needs" | "stopped")).collect();
     let (shown, more) = fitting(d, &tallies, r - l, px);
     let mut x = l;
     for (i, t) in tallies[..shown].iter().enumerate() {

@@ -158,12 +158,24 @@ pub(crate) struct Tally {
     pub status: &'static str,
 }
 
-/// The open groups' tallies (Closed isn't one), in the board's order.
+/// The open groups' tallies (Closed isn't one), in the board's order. The tasks that
+/// need you are two: those whose agent stopped (red in the bar, as in the list), and
+/// the rest, whichever the group has first.
 fn tallies(groups: &[(&'static str, Vec<&Task>)]) -> Vec<Tally> {
     groups
         .iter()
         .filter_map(|(heading, ts)| {
             let status = model::BOARD_GROUPS.iter().find(|(h, _)| h == heading)?.1.first()?;
+            let stopped = ts.iter().filter(|t| t.status == "stopped").count();
+            if *status == "needs" && stopped > 0 {
+                let word = if ts.len() == 1 { "needs you" } else { "need you" };
+                let mut two = vec![Tally { n: stopped, word: "stopped", status: "stopped" }, Tally { n: ts.len() - stopped, word, status }];
+                if ts.first().is_some_and(|t| t.status != "stopped") {
+                    two.reverse();
+                }
+                two.retain(|t| t.n > 0);
+                return Some(two);
+            }
             let word = match *status {
                 "needs" if ts.len() == 1 => "needs you",
                 "needs" => "need you",
@@ -175,8 +187,9 @@ fn tallies(groups: &[(&'static str, Vec<&Task>)]) -> Vec<Tally> {
                 "todo" => "queued",
                 _ => return None,
             };
-            Some(Tally { n: ts.len(), word, status })
+            Some(vec![Tally { n: ts.len(), word, status }])
         })
+        .flatten()
         .collect()
 }
 

@@ -521,7 +521,8 @@ fn the_header_tallies_the_open_groups_in_the_boards_order_for_the_status_bar() {
     let groups = a.groups();
     let h = crate::ui::list::head(&a, &groups, 42);
     let t: Vec<(usize, &str, &str)> = h.tallies.iter().map(|t| (t.n, t.word, t.status)).collect();
-    assert_eq!(t, vec![(2, "need you", "needs"), (2, "ready", "ready"), (1, "queued", "todo")]);
+    // the tasks that need you are two: the one whose agent stopped apart, red in the bar
+    assert_eq!(t, vec![(1, "need you", "needs"), (1, "stopped", "stopped"), (2, "ready", "ready"), (1, "queued", "todo")]);
     // the segments add up to the open tasks
     assert_eq!(h.tallies.iter().map(|t| t.n).sum::<usize>(), 5);
 }
