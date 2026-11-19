@@ -1,20 +1,28 @@
 #!/usr/bin/env python3
-"""Show where the terminal's limit on a kitty graphics image is: run it in a Rex pane.
+"""Show what the terminal does with a kitty graphics image over its limit: run it in a
+Rex pane.
 
     bin/kitty-limit-check              # the limit Rex is known for: 10,000,000 bytes
     bin/kitty-limit-check 16000000     # try another
 
-It places two images side by side, each a fine one-pixel checkerboard of black and
-white: on the left one just under the limit (its width × height × 4 bytes of RGBA at
-most the limit), on the right the same width a row taller, just over. Each is placed
-pixel for pixel (a crop of it the pane's height, never scaled), so a sharp one is a fine
-grey-looking weave that turns to black and white pixels up close.
+It places two images side by side, each a checkerboard of black and white squares 4
+pixels across: on the left one just under the limit (its width × height × 4 bytes of
+RGBA at most the limit), on the right one the same width and three times the limit (as
+the drawn tour's pages were before bullpen cut them). Each is placed pixel for pixel, a
+crop of it the pane's height, so the left one shows the squares sharp.
 
 What the right one looks like says what the terminal does with an image over its limit:
-blank (it's dropped), blurry or flat grey (it's scaled down to fit), or sharp like the
-left (the limit isn't this number any more). Rex's bug report: "Kitty graphics: inline
-images of 10 MB or more are silently dropped by the client" (21 Oct 2026). bullpen's
-images are kept under bullpen-draw's `kitty::MAX_BYTES` because of it (docs/code.md).
+blank (it's dropped), the squares blurred or grey (it's scaled down to fit: about 0.58
+across at three times over), or as sharp as the left (the limit isn't this number any
+more). Rex's bug report: "Kitty graphics: inline images of 10 MB or more are silently
+dropped by the client" (21 Oct 2026). bullpen's images are kept under bullpen-draw's
+`cut::MAX_BYTES` because of it (docs/code.md).
+
+Why squares 4 pixels across, and three times over: the Rex app's real cell can be a hair
+narrower than the pixels the pane reports (18.97 against 19), so every image pinned to
+cells is resampled by about 0.998, and a one-pixel pattern turns to grey moire under
+that, under the limit or not. Squares 4 pixels across survive it. And an image only a
+row over the limit, scaled down to fit, would change by less than that resampling.
 
 Press Enter to take the images off and delete them.
 """
@@ -28,6 +36,8 @@ import zlib
 
 LIMIT = 10_000_000
 IDS = (0x4B4C0001, 0x4B4C0002)
+SQUARE = 4  # the checkerboard's squares, in pixels
+OVER = 3  # how many times the limit the right image is
 CHUNK = 4096
 TOP = 2  # rows for the labels over the images
 FOOT = 3  # rows for the question under them
@@ -56,7 +66,7 @@ def plan(cols, rows, xpix, ypix, limit):
     w = half * cw
     under = limit // (4 * w)
     out = []
-    for k, h in enumerate((under, under + 1)):
+    for k, h in enumerate((under, OVER * limit // (4 * w) + 1)):
         shown = min(rows - TOP - FOOT, h // ch)
         out.append({"w": w, "h": h, "bytes": w * h * 4, "col": k * (half + 2), "cols": half, "rows": shown,
                     "crop_w": half * cw, "crop_h": shown * ch})
@@ -64,11 +74,13 @@ def plan(cols, rows, xpix, ypix, limit):
 
 
 def checkerboard(w, h):
-    """A w by h PNG (8-bit RGBA), alternate pixels black and white, each row shifted one."""
+    """A w by h PNG (8-bit RGBA), squares SQUARE pixels across, black and white."""
     black, white = b"\0\0\0\xff", b"\xff\xff\xff\xff"
-    even = b"\0" + (black + white) * (w // 2) + black * (w % 2)
-    odd = b"\0" + (white + black) * (w // 2) + white * (w % 2)
-    raw = (even + odd) * (h // 2) + even * (h % 2)
+    one = (black * SQUARE + white * SQUARE) * (w // (2 * SQUARE) + 1)
+    two = (white * SQUARE + black * SQUARE) * (w // (2 * SQUARE) + 1)
+    even, odd = b"\0" + one[:4 * w], b"\0" + two[:4 * w]
+    band = even * SQUARE + odd * SQUARE
+    raw = (band * (h // (2 * SQUARE) + 1))[:len(even) * h]
 
     def chunk(kind, data):
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
@@ -111,7 +123,7 @@ def main():
     for id, im in zip(IDS, images):
         out.append(upload(id, checkerboard(im["w"], im["h"])))
         out.append(place(id, im))
-    question = "The left one is under the limit. Is the right one blank, blurry (flat grey), or sharp like the left?"
+    question = f"The left one is under the limit, the right {OVER}x over. Is the right one blank, blurry, or as sharp as the left?"
     out.append(f"\x1b[{rows - FOOT + 2};1H{question[:cols]}\r\nPress Enter to clear. ")
     os.write(sys.stdout.fileno(), "".join(out).encode())
     try:
