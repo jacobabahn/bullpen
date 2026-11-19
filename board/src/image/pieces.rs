@@ -131,7 +131,11 @@ pub fn plan(view: &View, c: &Canvas, fonts: &Fonts, prev: Option<(u32, u32)>) ->
     };
     let y_s = p.y(s0);
     let first = y_s / ch;
-    let past = ((y_s + p.base.tall(s0, b1)).div_ceil(ch) + grew).min(rows_n as u32);
+    // (a task that needs you has its wash in the base image, which reaches under its
+    // block as the card does: the cells it reaches are the block's image's too)
+    let washed = matches!(&view.base.rows[s0], Row::Task(t) if t.flag.is_some());
+    let under = if washed { card_below(c) } else { 0 };
+    let past = ((y_s + p.base.tall(s0, b1) + under).div_ceil(ch) + grew).min(rows_n as u32);
     if first > 0 {
         p.crops.push((at0, 0, first as u16));
     }
