@@ -254,6 +254,8 @@ fn a_cut_is_at_a_words_end_with_no_comma_before_its_ellipsis() {
     assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two, three fo…") + 0.5), "one two, three…");
     // and its comma goes
     assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two, thr…") + 0.5), "one two…");
+    // a word whose comma alone doesn't fit is whole
+    assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two…") + 0.5), "one two…");
     // a long word after a short one: cutting before it would leave most of the room empty
     assert_eq!(f.fit("in board/src/image/shown.rs", Weight::Regular, 12.0, w("in board/src/ima…") + 0.5), "in board/src/ima…");
     // a single word is cut where it must be

@@ -121,7 +121,9 @@ impl Fonts {
         if room <= 0.0 {
             return String::new();
         }
-        let in_word = text[out.len()..].chars().next().is_some_and(|c| !c.is_whitespace()) && !out.ends_with(char::is_whitespace);
+        // (a word with only its comma or full stop left to come is whole)
+        let left: String = text[out.len()..].chars().take_while(|c| !c.is_whitespace()).collect();
+        let in_word = left.chars().any(char::is_alphanumeric) && !out.ends_with(char::is_whitespace);
         // a piece of a word says little: the cut goes back to the word before
         if let (true, Some(space)) = (in_word, out.rfind(char::is_whitespace)) {
             if self.width(&out[..space], weight, px) >= FILL * room {
