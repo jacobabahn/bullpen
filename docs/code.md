@@ -111,7 +111,10 @@ list's images leave those marks out. `list.rs` says which images a frame wants, 
 with a key for what it shows and its placements, and `shown.rs` sends, places, moves
 and hides only what changed, with the kitty graphics protocol (`kitty.rs`); an
 image a frame replaces is kept on the terminal, hidden, to be placed again (bounded
-by count and pixels). While no key is waiting, `ahead.rs` presses j and k on the board,
+by count and pixels). An image over the terminal's limit is sent as pieces (see
+[Images under the terminal's limit](#images-under-the-terminals-limit)): on a tall
+pane the list's window of two pages is several pieces, each placed where its cells
+are. While no key is waiting, `ahead.rs` presses j and k on the board,
 draws that frame off screen, puts back what the key changed, and sends the images it
 would want unplaced, so a j or k only places images; the list's base image it leaves
 to a thread of its own (`worker.rs`, its own fonts, answering with `Msg::Ready`),
@@ -145,9 +148,38 @@ and drawing, or the network.
 
 The board's image look draws with `draw/` (`bullpen-draw`): the type (`font.rs`),
 shapes, the terminal's colours and their tones (`theme.rs`; a flag's colours stay the
-board's, `image/theme.rs`'s `Flags`), PNG, the kitty protocol's bytes and the terminal's
-answers to its questions (`answers.rs`; reading them, with the key reader's gate, stays
-`image/term.rs`).
+board's, `image/theme.rs`'s `Flags`), PNG, the kitty protocol's bytes, cutting an image
+under the terminal's limit (`cut.rs`) and the terminal's answers to its questions
+(`answers.rs`; reading them, with the key reader's gate, stays `image/term.rs`).
+
+### Images under the terminal's limit
+
+Rex's app draws a kitty graphics image of at most 10,000,000 bytes decoded (width ×
+height × 4) and drops or blurs a bigger one, while the server still answers OK (Rex's
+bug report "Kitty graphics: inline images of 10 MB or more are silently dropped by the
+client", 21 Oct 2026). A pane's worth of pixels is more than that on a large pane: the
+tour's pages were sent in tiles a window high, about 29 MB each at 217×65 cells of
+19×37 pixels, and the board's list window of two pages is about 30 MB at 77×72. So no
+image either program sends is over `cut::MAX_BYTES` (9,500,000, a margin under the
+limit). `cut.rs` cuts an image over it into strips its whole width, as tall as fit, each
+overlapping the next by a cell (and into pieces side by side too, should even a strip
+two cells high be over), and splits a placement of the whole image into its pieces'
+placements, a run of whole cells each. The overlap keeps every cell of a crop inside one
+piece even when the crop doesn't start on a cell's edge, as the board's list doesn't
+when its rows aren't whole cells; its tests check that the pieces placed are the image
+whole, at every crop. The board's `shown.rs` and the tour's keep each image's pieces
+under its ID and place, hide and delete them together. The tour draws its pages in
+strips that fit to begin with (below). `bin/kitty-limit-check`, run in a Rex pane,
+places an image under the limit beside one three times over, to see what the terminal
+does with the second.
+
+Every placement is pinned to cells: its crop is the cells' size in pixels, as the pane
+reports them (its pixel size over its cells, rounded down), and the terminal scales the
+crop to the cells it draws. The Rex app's cell can be a hair narrower than the pane
+reports (18.97 pixels against 19 on a Retina Mac), so every image is resampled by about
+0.998: a small softening, and a one-pixel pattern turns to grey moiré. Bullpen can't
+avoid it: the pane reports whole pixels, the app's cell isn't one, and an image left to
+its own size wouldn't stay pinned to the text around it.
 
 ## The tour's drawing
 
@@ -160,14 +192,19 @@ the window's) and draws a frame: the rail (`rail.rs`, every step's title, the st
 shown in blue), a window on the page, and the foot (the message and keys); what's typed
 is text where the foot was. A page (`page.rs`: a step's title, files, note, comments and
 code, `code.rs`; or the end) is measured once, on an image a pixel high (its rows are
-kept), and sent as tiles a window high, each drawn on an image the tile's height with the
-page shifted up by its top (`Ink`'s window: code outside it isn't drawn), so no image is
-bigger than the pane however long a step is (`shown.rs` sends each image once, places
-crops of it, and keeps it hidden to place again). An image it can't make is an error,
-and `view.rs` turns the tour to text, saying why. The window is one or two tile crops,
-so a scroll is placements. While no key waits, `Look::ahead` sends what `j`, `k`, `n` and
-`p` would want next, unplaced. Its tests (`look/tests/`) check the bytes each key
-writes; `render_bp195` (ignored) writes pictures of a tour fixture
+kept), and sent as tiles: strips under the terminal's limit at the page's width, the
+window's rows shared evenly among as few as fit (`Lay::fitted`), each drawn on an image
+the tile's height with the page shifted up by its top (`Ink`'s window: code outside it
+isn't drawn), so no image is bigger than the limit however long a step is (`shown.rs`
+sends each image once, places crops of it, and keeps it hidden to place again; the rail
+and foot are cut when they're over the limit). An image it can't make is an error, and
+`view.rs` turns the tour to text, saying why. The window is crops of the tiles it
+covers, so a scroll is placements. While no key waits, `Look::ahead` sends what `j`,
+`k`, `n`, `p` and a page down would want next, unplaced, an image at a time with a key
+looked for before each, so a key waits behind one strip at most. Its tests
+(`look/tests/`) check the bytes each key writes and that no image is over the limit at
+a 300×100 pane; `bytes_at_large_panes` (ignored) prints the bytes at 160×46 and
+217×65; `render_bp195` (ignored) writes pictures of a tour fixture
 (`TOUR_FIXTURE`, `TOUR_RENDER`).
 
 ## Closing a task

@@ -115,15 +115,22 @@ The keys and what they do are the text tour's. The drawn code can't be selected 
 searched: `v` opens the task's whole diff as text (in delta when it's installed), to
 copy from or search. `board_font` sets the prose's font, as on the board.
 
-It keeps a remote link cheap the way the board does. A page is sent in tiles a window
-high, each drawn on its own (so no image is bigger than the pane, however long a step); the window is placed as crops of them, so `j` or `k` sends a
-couple of placements (about 160 bytes), and a tile only the first time the window
-reaches it. While no key waits, the tour sends what the next key would want, unplaced:
-the tiles above and under the window and the next and previous steps' rail, first tile
-and foot. So `n` or `p` only places images (about 360 bytes). At a large floating pane
-(160 columns by 46 rows, a 2× cell) the first frame is about 225 KB and a step not
-drawn ahead about 70 KB. Images are kept on the terminal, hidden, to place again (the
-step you go back to) and deleted when the tour closes.
+It keeps a remote link cheap the way the board does. A page is sent in tiles, strips
+of as many rows as fit in an image Rex will draw (Rex's app draws none over 10,000,000
+bytes, width × height × 4: its bug report "Kitty graphics: inline images of 10 MB or
+more are silently dropped by the client", 21 Oct 2026; bullpen keeps every image under
+9,500,000), the window shared evenly among a few of them, each drawn on its own, so no
+image is over the limit however long a step. The window is placed as crops of them, so
+`j` or `k` sends a few placements (about 160 to 320 bytes), and a tile only the first
+time the window reaches it. While no key waits, the tour sends what the next key would
+want, unplaced, one image at a time, looking for a key before each: the tile under the
+window and the one above, the next step's rail, first window and foot, a page of tiles
+each way, and the previous step's rail, first tile and foot. So `n`, `p` and a page
+down usually only place images (a few hundred bytes). At 217×65 cells of 19×37 pixels
+the first frame is about 440 KB, drawing ahead after it about 690 KB in images of at
+most about 120 KB, and a step not drawn ahead about 410 KB; at 160×46 (17×34 pixels)
+about 260 KB, 500 KB and 240 KB. Images are kept on the terminal, hidden, to place again
+(the step you go back to) and deleted when the tour closes.
 
 On a terminal that doesn't draw images, or with `board_look text`, the tour is text, as
 above, the message line saying why when the image look was asked for.

@@ -288,6 +288,11 @@ a mark (a few dozen bytes a mark), never the list. The kitty protocol's own anim
 (the terminal turning the frames itself) would send nothing at all, but Rex's support
 for it isn't reliable yet, so the board doesn't use it. Each image is pinned to its
 block of cells, so a client with other cell sizes (Rex on a phone) scales it to fit.
+No image is over 9,500,000 bytes (width × height × 4): Rex's app doesn't draw one of
+10,000,000 or more (its bug report "Kitty graphics: inline images of 10 MB or more are
+silently dropped by the client", 21 Oct 2026), so a bigger one, such as the list's
+window on a tall pane, is sent in strips placed where their cells are
+([code.md](code.md#images-under-the-terminals-limit)).
 
 `bullpen-board --dir <state dir> --root <repo> --bullpen <program> --render FILE
 --cols N` writes the board as the image look draws it to FILE: its top line, its whole
