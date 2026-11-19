@@ -29,10 +29,10 @@ pub struct Job {
     pub font: Option<PathBuf>,
 }
 
-/// A base image drawn, as a PNG, or why it couldn't be.
+/// A base image drawn, as PNGs (pieces, over the terminal's limit), or why it couldn't be.
 pub struct Ready {
     pub key: u64,
-    pub png: Result<Vec<u8>, String>,
+    pub png: Result<bullpen_draw::cut::Pngs, String>,
 }
 
 /// The thread, and the images it's drawing.
@@ -81,11 +81,11 @@ impl Worker {
     }
 }
 
-/// Draw a job's image as a PNG, with the font it names (loaded once).
-fn draw(job: &Job, fonts: &mut Option<(Option<PathBuf>, Fonts)>) -> Result<Vec<u8>, String> {
+/// Draw a job's image as PNGs, with the font it names (loaded once).
+fn draw(job: &Job, fonts: &mut Option<(Option<PathBuf>, Fonts)>) -> Result<bullpen_draw::cut::Pngs, String> {
     let fonts = super::fonts(fonts, job.font.as_deref())?;
     let bare = |i: usize| job.bare.get(i).copied().unwrap_or(false);
     let cut = Cut { range: job.range.clone(), at: job.at, y: job.y, h: job.h, marks: Marks::default(), bare: &bare };
     let sheet = render(&job.rows, &job.laid, cut, &job.canvas, fonts)?;
-    Ok(super::png::encode(&sheet.pixmap))
+    bullpen_draw::cut::encode(&sheet.pixmap, (job.canvas.grid.cell_w, job.canvas.grid.cell_h))
 }

@@ -12,8 +12,14 @@
 //! one showed (k after j) only places it again; the oldest is deleted past that. Images
 //! drawn ahead (`preload`, what a j or k would want next) are kept the same way, sent
 //! but not placed. All of them are deleted when the board is text again or quits.
+//!
+//! An image over the terminal's limit (bullpen-draw's cut.rs: Rex draws none over
+//! 10,000,000 bytes, and the list's window of two pages is several times that on a tall
+//! pane) is sent as pieces, each an image of its own with its own ID, and each placement
+//! of it is placed as its pieces' (`cut::split`), so it shows as one image would.
 
 use super::{kitty, meter};
+use bullpen_draw::cut::{Piece, Pngs};
 use super::sprite::Sprite;
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -37,23 +43,51 @@ pub enum Slot {
 }
 
 /// An image a frame wants: what it shows, the image when it's to be sent (what it shows
-/// changed), and its placements (their `id` is filled in here).
+/// changed: its pieces' PNGs), and its placements of the whole image (their `id` is
+/// filled in here).
 pub struct Want {
     pub slot: Slot,
     pub key: u64,
-    pub png: Option<Vec<u8>>,
+    pub png: Option<Pngs>,
     pub places: Vec<kitty::Place>,
 }
 
 /// An image sent, and where it's shown.
 struct Shown {
-    id: u32,
+    /// its pieces' IDs (the first is the image's), where each is in it, and the cell
+    ids: Vec<u32>,
+    cut: Vec<Piece>,
+    cell: (u32, u32),
     /// what it shows: a hash of what it draws, the size, the colours and the cells
     key: u64,
-    /// its placements, by number
+    /// its placements of the whole image, by number
     places: BTreeMap<u32, kitty::Place>,
-    /// its pixels, as its PNG says
+    /// its pixels, its pieces'
     px: u64,
+}
+
+impl Shown {
+    /// A placement of the image as its pieces' placements, with their IDs.
+    fn split(&self, at: &kitty::Place) -> Vec<kitty::Place> {
+        bullpen_draw::cut::split(at, &self.cut, self.cell).into_iter().map(|(i, p)| kitty::Place { id: self.ids[i], ..p }).collect()
+    }
+
+    /// Take the image off the screen, keeping it.
+    fn hide(&mut self, out: &mut impl Write) -> std::io::Result<()> {
+        self.places.clear();
+        for id in &self.ids {
+            put(out, || "hide".into(), &kitty::hide(*id))?;
+        }
+        Ok(())
+    }
+
+    /// Delete the image and its data.
+    fn delete(&self, out: &mut impl Write) -> std::io::Result<()> {
+        for id in &self.ids {
+            put(out, || "delete".into(), &kitty::delete(*id))?;
+        }
+        Ok(())
+    }
 }
 
 /// The images kept on the terminal, hidden, at most: how many, and their pixels (a
@@ -81,13 +115,19 @@ impl Screen {
         self.shown.get(slot).is_some_and(|s| s.key == key) || self.kept.iter().any(|(k, s)| k == slot && s.key == key)
     }
 
-    /// Send an image, as the next ID.
-    fn send(&mut self, png: &[u8], key: u64, out: &mut impl Write, slot: &Slot) -> std::io::Result<Shown> {
-        let id = self.next_id;
-        self.next_id = if self.next_id == u32::MAX { self.first } else { self.next_id + 1 };
-        let up = meter::time(|| "base64".into(), || kitty::upload(id, png));
-        put(out, || format!("upload {slot:?}"), &up)?;
-        Ok(Shown { id, key, places: BTreeMap::new(), px: pixels(png) })
+    /// Send an image, a piece at a time, each as the next ID.
+    fn send(&mut self, png: &Pngs, key: u64, out: &mut impl Write, slot: &Slot) -> std::io::Result<Shown> {
+        let mut ids = Vec::new();
+        for (_, piece) in &png.pieces {
+            let id = self.next_id;
+            self.next_id = if self.next_id == u32::MAX { self.first } else { self.next_id + 1 };
+            let up = meter::time(|| "base64".into(), || kitty::upload(id, piece));
+            put(out, || format!("upload {slot:?}"), &up)?;
+            ids.push(id);
+        }
+        let cut: Vec<Piece> = png.pieces.iter().map(|(p, _)| *p).collect();
+        let px = cut.iter().map(|p| p.w as u64 * p.h as u64).sum();
+        Ok(Shown { ids, cut, cell: png.cell, key, places: BTreeMap::new(), px })
     }
 
     /// Show what a frame wants, in three steps, so nothing is left blank meanwhile: every
@@ -113,8 +153,7 @@ impl Screen {
         }
         for (slot, s) in self.shown.iter_mut() {
             if !wants.iter().any(|w| w.slot == *slot) && !s.places.is_empty() {
-                s.places.clear();
-                put(out, || "hide".into(), &kitty::hide(s.id))?;
+                s.hide(out)?;
             }
         }
         // the new images are up: now the old ones go, kept a while
@@ -147,18 +186,16 @@ impl Screen {
     /// past KEEP images or KEEP_PX pixels. One forgotten (a resize) is deleted, and so are those kept before it.
     fn keep(&mut self, slot: Slot, mut s: Shown, out: &mut impl Write) -> std::io::Result<()> {
         if !s.places.is_empty() {
-            s.places.clear();
-            put(out, || "hide".into(), &kitty::hide(s.id))?;
+            s.hide(out)?;
         }
         self.kept.insert(0, (slot, s));
         for (_, s) in self.kept.extract_if(.., |(_, s)| s.key == 0) {
-            put(out, || "delete".into(), &kitty::delete(s.id))?;
+            s.delete(out)?;
         }
         // one list's image kept (the window before, or the next drawn ahead): they're big
         let lists: Vec<usize> = self.kept.iter().enumerate().filter(|(_, (k, _))| *k == Slot::List).map(|(i, _)| i).skip(1).collect();
         for i in lists.into_iter().rev() {
-            let (_, s) = self.kept.remove(i);
-            put(out, || "delete".into(), &kitty::delete(s.id))?;
+            self.kept.remove(i).1.delete(out)?;
         }
         // the rest by count and pixels
         let mut px = 0;
@@ -168,33 +205,41 @@ impl Screen {
         });
         let n = fits.count().clamp(1, KEEP).min(self.kept.len());
         for (_, s) in self.kept.split_off(n) {
-            put(out, || "delete".into(), &kitty::delete(s.id))?;
+            s.delete(out)?;
         }
         Ok(())
     }
 
-    /// Place a wanted image's placements, move those that moved, take off the rest.
+    /// Place a wanted image's placements, move those that moved, take off the rest: each
+    /// as its pieces' placements, a piece's taken off when the new ones don't replace it.
     fn place(&mut self, w: &Want, out: &mut impl Write) -> std::io::Result<()> {
         let Some(s) = self.shown.get_mut(&w.slot) else { return Ok(()) };
+        let mut now = Vec::new();
+        let mut gone = Vec::new();
         for mut at in w.places.iter().copied() {
-            at.id = s.id;
+            at.id = s.ids[0];
             if s.places.get(&at.p) != Some(&at) {
-                put(out, || "place".into(), &kitty::place(&at))?;
-                s.places.insert(at.p, at);
+                now.extend(s.split(&at));
+                gone.extend(s.places.insert(at.p, at));
             }
         }
-        let gone: Vec<u32> = s.places.keys().copied().filter(|p| !w.places.iter().any(|at| at.p == *p)).collect();
-        for p in gone {
-            s.places.remove(&p);
-            put(out, || "unplace".into(), &kitty::unplace(s.id, p))?;
+        let off: Vec<u32> = s.places.keys().copied().filter(|p| !w.places.iter().any(|at| at.p == *p)).collect();
+        gone.extend(off.iter().filter_map(|p| s.places.remove(p)));
+        for at in &now {
+            put(out, || "place".into(), &kitty::place(at))?;
+        }
+        for old in gone.iter().flat_map(|at| s.split(at)) {
+            if !now.iter().any(|at| (at.id, at.p) == (old.id, old.p)) {
+                put(out, || "unplace".into(), &kitty::unplace(old.id, old.p))?;
+            }
         }
         Ok(())
     }
 
-    /// The ID of the image the slot shows.
+    /// The ID of the image the slot shows (its first piece's).
     #[cfg(test)]
     pub fn id(&self, slot: &Slot) -> Option<u32> {
-        self.shown.get(slot).map(|s| s.id)
+        self.shown.get(slot).map(|s| s.ids[0])
     }
 
     /// The terminal may have cleared the screen and the images with it (a resize): the
@@ -211,8 +256,7 @@ impl Screen {
     pub fn hide(&mut self, out: &mut impl Write) {
         for s in self.shown.values_mut() {
             if !s.places.is_empty() {
-                s.places.clear();
-                let _ = out.write_all(kitty::hide(s.id).as_bytes());
+                let _ = s.hide(out);
                 let _ = out.flush();
             }
         }
@@ -222,22 +266,16 @@ impl Screen {
     pub fn clear(&mut self, out: &mut impl Write) {
         let kept = std::mem::take(&mut self.kept).into_iter();
         for (_, s) in std::mem::take(&mut self.shown).into_iter().chain(kept) {
-            let _ = out.write_all(kitty::delete(s.id).as_bytes());
+            let _ = s.delete(out);
         }
         let _ = out.flush();
     }
 
-    /// The IDs of the images kept, hidden.
+    /// The IDs of the images kept, hidden (their first pieces').
     #[cfg(test)]
     pub fn kept(&self) -> Vec<u32> {
-        self.kept.iter().map(|(_, s)| s.id).collect()
+        self.kept.iter().map(|(_, s)| s.ids[0]).collect()
     }
-}
-
-/// An image's pixels, from its PNG's header.
-fn pixels(png: &[u8]) -> u64 {
-    let n = |at: usize| png.get(at..at + 4).map_or(0, |b| u32::from_be_bytes(b.try_into().expect("4 bytes")) as u64);
-    n(16) * n(20)
 }
 
 /// Write a command, noting its bytes as `part` and the time it took as writing.

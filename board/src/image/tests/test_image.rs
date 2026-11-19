@@ -721,3 +721,49 @@ fn the_images_kept_are_bounded_and_deleted_with_the_rest() {
 }
 
 
+
+/// The rows of the board each placement under the marks covers (z 0), from a frame's
+/// output: how many placements cover each row.
+fn rows_covered(out: &str, rows: usize) -> Vec<usize> {
+    let mut n = vec![0; rows];
+    for (_, _, row, r) in placed(out) {
+        for k in row as usize - 1..(row + r) as usize - 1 {
+            n[k] += 1;
+        }
+    }
+    n
+}
+
+#[test]
+fn no_image_is_over_the_terminals_limit_and_one_cut_up_covers_its_cells_once() {
+    // a pane far bigger than the person's: 300×100 cells of 19×37 pixels, large type,
+    // long titles, every status, a mark turning
+    let long = "A title long enough that the selected task's wraps to a second line and more, and more again so";
+    let mut tasks: Vec<Task> = (1..=70).map(|i| task(&format!("BP-{i}"), ["todo", "ready", "review", "working"][i % 4]).with(json!({"title": long}))).collect();
+    tasks[0] = crate::ui::testing::asking("BP-1");
+    let mut app = App::for_test(tasks);
+    app.cfg = Config::default_for_test().with(json!({"board_bottom_gap": 0, "board_text_size": "large", "board_motion": true}));
+    app.look = Look::Image;
+    let mut p = picture();
+    asked(&mut app, &mut p);
+    p.answered(&term::Answers { cell: Some((19, 37)), ..answer(true) });
+    let (w, h) = (300, 100);
+    let first = frame_in(&mut app, &mut p, w, h);
+    let mut out = first.clone();
+    // scrolled out of the list's window (what's drawn ahead is these images too)
+    app.sel = Some("BP-60".into());
+    out += &frame_in(&mut app, &mut p, w, h);
+    let sizes = bullpen_draw::cut::uploaded(&out);
+    for (w, h) in &sizes {
+        assert!(bullpen_draw::cut::fits(*w, *h), "an image {w}×{h}: {} bytes", w * h * 4);
+    }
+    // the list's window was cut: its pieces are the board's width, and more than two
+    let width = app.view.as_ref().unwrap().cols as u32 * 19;
+    assert!(sizes.iter().filter(|(iw, _)| *iw == width).count() > 6, "{sizes:?}");
+    // the first frame's placements under the marks cover each row once at most, and
+    // the list's rows all but its last
+    let under: String = first.split("\x1b7").filter(|c| !c.contains(",z=")).collect::<Vec<_>>().join("\x1b7");
+    let n = rows_covered(&under, h as usize);
+    assert!(n.iter().all(|k| *k <= 1), "{n:?}");
+    assert!(n.iter().filter(|k| **k == 1).count() >= h as usize - 4, "{n:?}");
+}

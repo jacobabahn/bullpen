@@ -404,7 +404,7 @@ fn wants(
     let mut wants = Vec::new();
     let k = list::key(&Slot::Head, &f, (&view.head, head_n));
     if head_n > 0 {
-        let png = (!screen.has(&Slot::Head, k)).then(|| list::encode(&Slot::Head, || frame::head(&view.head, head_n, canvas, fonts))).transpose()?;
+        let png = (!screen.has(&Slot::Head, k)).then(|| list::encode(&Slot::Head, canvas, || frame::head(&view.head, head_n, canvas, fonts))).transpose()?;
         wants.push(Want { slot: Slot::Head, key: k, png, places: vec![whole(view, canvas, view.row0, head_n)] });
     }
     let mut list = list::wants(&f, image.key, screen, fonts, jobs)?;
@@ -412,7 +412,7 @@ fn wants(
     wants.extend(list);
     if let Some(foot) = view.foot.as_ref().filter(|_| foot_n > 0) {
         let k = list::key(&Slot::Foot, &f, (foot, foot_n));
-        let png = (!screen.has(&Slot::Foot, k)).then(|| list::encode(&Slot::Foot, || frame::foot(foot, foot_n, canvas, fonts))).transpose()?;
+        let png = (!screen.has(&Slot::Foot, k)).then(|| list::encode(&Slot::Foot, canvas, || frame::foot(foot, foot_n, canvas, fonts))).transpose()?;
         wants.push(Want { slot: Slot::Foot, key: k, png, places: vec![whole(view, canvas, view.row + view.rows_n, foot_n)] });
     }
     wants.extend(sprites);

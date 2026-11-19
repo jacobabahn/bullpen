@@ -10,7 +10,8 @@ use super::render::{render, Canvas, Cut, Marks};
 use super::shown::{Screen, Slot, Want};
 use super::sprite::{self, Sprite};
 use super::worker::Job;
-use super::{meter, png, View};
+use super::{meter, View};
+use bullpen_draw::cut::{self, Pngs};
 use crate::model::TextSize;
 use crate::ui::rows::{Mark, Row};
 use std::collections::BTreeMap;
@@ -97,11 +98,12 @@ pub fn job(f: &Frame, k: u64) -> Job {
     Job { key: k, rows, laid, range, at: p.win_at, y: p.win_y, h: p.win_h, bare, canvas: *f.c, font: None }
 }
 
-/// The slot's image drawn and made a PNG, or why it couldn't be drawn, as the message
-/// says it.
-pub fn encode(slot: &Slot, draw: impl FnOnce() -> Result<tiny_skia::Pixmap, String>) -> Result<Vec<u8>, String> {
+/// The slot's image drawn and made PNGs (pieces, over the terminal's limit: cut.rs), or
+/// why it couldn't be drawn, as the message says it.
+pub fn encode(slot: &Slot, c: &Canvas, draw: impl FnOnce() -> Result<tiny_skia::Pixmap, String>) -> Result<Pngs, String> {
     let drawn = meter::time(|| format!("draw {slot:?}"), draw).map_err(|e| format!("Drawing the list as text: {e}."))?;
-    Ok(meter::time(|| format!("png {slot:?}"), || png::encode(&drawn)))
+    let cell = (c.grid.cell_w, c.grid.cell_h);
+    meter::time(|| format!("png {slot:?}"), || cut::encode(&drawn, cell)).map_err(|e| format!("Drawing the list as text: {e}."))
 }
 
 /// A placement in the list's block: on its cell row `row`, `rows` high, of the image's
@@ -134,7 +136,7 @@ pub fn wants(f: &Frame, k: u64, screen: &Screen, fonts: &mut Fonts, jobs: Option
             None => {
                 let bare = |i: usize| (f.bare)(&rs.rows[i]);
                 let cut = Cut { range: p.win.clone(), at: p.win_at, y: p.win_y, h: p.win_h, marks: Marks::default(), bare: &bare };
-                Some(encode(&Slot::List, || render(rs, &p.laid, cut, c, fonts).map(|s| s.pixmap))?)
+                Some(encode(&Slot::List, c, || render(rs, &p.laid, cut, c, fonts).map(|s| s.pixmap))?)
             }
         }
     };
@@ -151,7 +153,7 @@ pub fn wants(f: &Frame, k: u64, screen: &Screen, fonts: &mut Fonts, jobs: Option
         } else {
             let bare = |i: usize| (f.bare)(&v.rows.rows[i]);
             let cut = Cut { range: p.top..p.end, at: p.at(), y: first as u32 * ch, h: n as u32 * ch, marks: Marks::default(), bare: &bare };
-            Some(encode(&slot, || render(&v.rows, &p.laid, cut, c, fonts).map(|s| s.pixmap))?)
+            Some(encode(&slot, c, || render(&v.rows, &p.laid, cut, c, fonts).map(|s| s.pixmap))?)
         };
         wants.push(Want { slot, key: k, png, places: vec![across(f, 1, first, n, 0)] });
     }
@@ -209,7 +211,7 @@ pub fn wants(f: &Frame, k: u64, screen: &Screen, fonts: &mut Fonts, jobs: Option
 fn sprite_want(f: &Frame, slot: Slot, places: Vec<Place>, screen: &Screen, fonts: &mut Fonts) -> Result<Want, String> {
     let k = key(&slot, f, ());
     let png = match (&slot, screen.has(&slot, k)) {
-        (Slot::Sprite(s), false) => Some(encode(&slot, || sprite::draw(s, f.c, fonts))?),
+        (Slot::Sprite(s), false) => Some(encode(&slot, f.c, || sprite::draw(s, f.c, fonts))?),
         _ => None,
     };
     Ok(Want { slot, key: k, png, places })

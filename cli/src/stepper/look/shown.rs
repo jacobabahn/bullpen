@@ -63,7 +63,7 @@ impl Shown {
         if let Some(id) = self.id(key) {
             return Ok(id);
         }
-        let pngs = cut::encode(pm, self.cell).map_err(std::io::Error::other)?;
+        let pngs = cut::encode(pm, self.cell).map_err(std::io::Error::other)?.pieces;
         let id = self.next;
         let mut pieces = Vec::new();
         for (piece, png) in pngs {

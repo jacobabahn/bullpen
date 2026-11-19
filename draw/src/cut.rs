@@ -74,20 +74,37 @@ pub fn pieces(w: u32, h: u32, (cw, ch): (u32, u32)) -> Option<Vec<Piece>> {
     Some(ys.iter().flat_map(|&(y, h)| xs.iter().map(move |&(x, w)| Piece { x, y, w, h })).collect())
 }
 
-/// An image as the PNGs of its pieces, or why it can't be cut.
-pub fn encode(pm: &Pixmap, cell: (u32, u32)) -> Result<Vec<(Piece, Vec<u8>)>, String> {
+/// An image ready to send: the PNG of each of its pieces, and the cell it was cut for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pngs {
+    pub cell: (u32, u32),
+    pub pieces: Vec<(Piece, Vec<u8>)>,
+}
+
+impl Pngs {
+    /// A placement of the image as its pieces' placements (`split`).
+    pub fn split(&self, p: &Place) -> Vec<(usize, Place)> {
+        let cut: Vec<Piece> = self.pieces.iter().map(|(piece, _)| *piece).collect();
+        split(p, &cut, self.cell)
+    }
+}
+
+/// An image as the PNGs of its pieces for a cell `cell` pixels, or why it can't be cut.
+pub fn encode(pm: &Pixmap, cell: (u32, u32)) -> Result<Pngs, String> {
     let (w, h) = (pm.width(), pm.height());
     let cut = pieces(w, h, cell).ok_or_else(|| format!("can't cut an image {w}×{h} pixels under the terminal's limit"))?;
     if cut.len() == 1 {
-        return Ok(vec![(cut[0], png::encode(pm))]);
+        return Ok(Pngs { cell, pieces: vec![(cut[0], png::encode(pm))] });
     }
-    cut.into_iter()
+    let pieces = cut
+        .into_iter()
         .map(|p| {
             let rect = IntRect::from_xywh(p.x as i32, p.y as i32, p.w, p.h).ok_or("a piece out of the image")?;
             let part = pm.clone_rect(rect).ok_or("a piece out of the image")?;
             Ok((p, png::encode(&part)))
         })
-        .collect()
+        .collect::<Result<_, String>>()?;
+    Ok(Pngs { cell, pieces })
 }
 
 /// The runs of a crop's cells (from `start` pixels, `n` cells `size` apart) in the same
