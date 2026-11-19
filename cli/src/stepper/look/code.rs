@@ -1,11 +1,13 @@
 //! A step's code, drawn: its patch read into files, hunks and lines; each file a strip
 //! with its name and +/− counts, each hunk under the lines it covers in the new file
 //! and the function it's in, each line with its number in a gutter, added and removed
-//! lines on a green or red wash with a bar at their edge. The code's colours are a
-//! small highlighter's (keywords, strings, comments, numbers and type names, by the
-//! file's extension), in the terminal's colours.
+//! lines on a green or red wash with a bar at their edge. It's drawn on the terminal's
+//! grid: a character a cell and a line a row, at the terminal's own size. The code's
+//! colours are a small highlighter's (keywords, strings, comments, numbers and type
+//! names, by the file's extension), in the terminal's colours.
 
 use super::ink::{Face, Ink};
+use bullpen_core::text::{char_width, width};
 use bullpen_draw::theme::{bright, faint, lit, solid, Rgb, Theme};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -296,145 +298,164 @@ pub fn wash(th: &Theme, kind: Kind) -> Option<[u8; 4]> {
     }
 }
 
-/// The sizes code is drawn at, at a 2× cell.
-const CODE: f32 = 21.0;
-const LINE: f32 = 31.0;
-const STRIP: f32 = 44.0;
-const HUNK: f32 = 34.0;
-const FILE_GAP: f32 = 22.0;
-
-/// How tall the files' code is, drawn `s` big.
-pub fn height(files: &[File], s: f32) -> f32 {
-    let mut h = 0.0;
+/// The rows the files' code takes on the terminal's grid: a file's strip a row, a row
+/// between files, a row for a file's note, a row over each hunk (its lines and the
+/// function it's in) and a row each line.
+pub fn rows(files: &[File]) -> usize {
+    let mut n = 0;
     for (k, f) in files.iter().enumerate() {
-        h += if k > 0 { FILE_GAP } else { 0.0 } + STRIP + 6.0;
-        if f.note.is_some() {
-            h += LINE;
-        }
-        for hunk in &f.hunks {
-            h += HUNK + LINE * hunk.lines.len() as f32;
-        }
+        n += usize::from(k > 0) + 1 + usize::from(f.note.is_some());
+        n += f.hunks.iter().map(|h| 1 + h.lines.len()).sum::<usize>();
     }
-    (h * s).round()
+    n
 }
 
-/// Draw the files' code from `top`, `w` wide from x.
+/// How tall the files' code is, in rows `ch` high.
+pub fn height(files: &[File], ch: f32) -> f32 {
+    rows(files) as f32 * ch
+}
+
+/// The gutter's digits: the most a line number of the files has, two at least.
+fn digits(files: &[File]) -> usize {
+    let lines = files.iter().flat_map(|f| &f.hunks).flat_map(|h| &h.lines);
+    lines.map(|l| l.n.to_string().len()).max().unwrap_or(0).max(2)
+}
+
+/// Text cut to `cols` cells, with "…" in the last when it was.
+pub fn clip(text: &str, cols: usize) -> String {
+    if width(text) <= cols {
+        return text.to_string();
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for c in text.chars() {
+        used += char_width(c);
+        if used + 1 > cols {
+            break;
+        }
+        out.push(c);
+    }
+    out + "…"
+}
+
+/// Draw the files' code from `top` (a row's top), `w` wide from x (a cell's edge): every
+/// character in a cell of the terminal's grid, a line a row, as the terminal's own text.
+/// A line's number is in the gutter, its code after it; a line too long is cut.
 pub fn draw(ink: &mut Ink, files: &[File], x: f32, top: f32, w: f32) {
     let th = ink.th;
-    let s = ink.s;
-    let (code, lh) = (CODE * s, (LINE * s).round());
-    let gutter = ink.ty.width("00000", Face::Mono, code) + 22.0 * s;
+    let (cw, ch) = ink.sz.cell;
+    let d = digits(files);
+    let code_x = x + (d + 3) as f32 * cw;
+    let cols = ((x + w - code_x) / cw).floor().max(1.0) as usize;
     let mut y = top;
     for (k, file) in files.iter().enumerate() {
         if k > 0 {
-            y += FILE_GAP * s;
+            y += ch;
         }
-        if ink.shows(y, STRIP * s) {
+        if ink.shows(y, ch) {
             strip(ink, file, x, y, w);
         }
-        y += (STRIP + 6.0) * s;
+        y += ch;
         if let Some(note) = &file.note {
-            ink.boxed(note, Face::Ui, 19.0 * s, x + gutter, y, lh, th.dim());
-            y += lh;
+            ink.boxed(note, Face::Ui, ink.sz.detail, code_x, y, ch, th.dim());
+            y += ch;
         }
         for (hk, hunk) in file.hunks.iter().enumerate() {
-            let hh = HUNK * s;
-            if !ink.shows(y, hh) {
-                y += hh;
-                for line in &hunk.lines {
-                    if ink.shows(y, lh) {
-                        code_line(ink, &file.name, line, (x, y, w, lh), gutter);
+            if ink.shows(y, ch) {
+                let label = format!("lines {}–{}", hunk.from, hunk.to);
+                let used = ink.cells(&label, Face::Mono, code_x, y, cols, th.dim());
+                let room = cols.saturating_sub(used + 2);
+                if !hunk.within.is_empty() && room > 3 {
+                    let within = clip(&hunk.within, room);
+                    ink.cells(&within, Face::Mono, code_x + (used + 2) as f32 * cw, y, room, th.dim());
+                }
+                if hk > 0 {
+                    for k in 0..3 {
+                        let cy = y + ch / 2.0 + (k as f32 - 1.0) * 0.22 * ch;
+                        ink.disc(x + (d + 2) as f32 * cw / 2.0, cy, 1.8 * ink.s, faint(th.fg, 0.45));
                     }
-                    y += lh;
-                }
-                continue;
-            }
-            let label = format!("lines {}–{}", hunk.from, hunk.to);
-            let end = ink.boxed(&label, Face::Ui, 19.0 * s, x + gutter, y, hh, th.dim());
-            if !hunk.within.is_empty() {
-                let room = x + w - end - 30.0 * s;
-                let t = ink.ty.fit(&hunk.within, Face::Mono, 18.0 * s, room);
-                ink.boxed(&t, Face::Mono, 18.0 * s, end + 18.0 * s, y, hh, faint(th.fg, 0.55));
-            }
-            if hk > 0 {
-                for d in 0..3 {
-                    ink.disc(
-                        x + gutter / 2.0,
-                        y + (9.0 + 8.0 * d as f32) * s,
-                        1.8 * s,
-                        faint(th.fg, 0.45),
-                    );
                 }
             }
-            y += hh;
+            y += ch;
             for line in &hunk.lines {
-                if ink.shows(y, lh) {
-                    code_line(ink, &file.name, line, (x, y, w, lh), gutter);
+                if ink.shows(y, ch) {
+                    code_line(ink, &file.name, line, (x, y, w), d, cols);
                 }
-                y += lh;
+                y += ch;
             }
         }
     }
 }
 
-/// A file's strip: its folder dim, its name, and its counts at the right.
+/// A file's strip, a row: its folder dim, its name, and its counts at the right, on the
+/// grid as the code under it.
 fn strip(ink: &mut Ink, file: &File, x: f32, y: f32, w: f32) {
     let (th, s) = (ink.th, ink.s);
-    let (code, sh) = (CODE * s, STRIP * s);
-    ink.rrect(x, y, w, sh, 10.0 * s, faint(th.fg, 0.075));
+    let (cw, ch) = ink.sz.cell;
+    ink.rrect(x, y, w, ch, 8.0 * s, faint(th.fg, 0.075));
+    let cells = (w / cw).floor() as usize;
     let (dir, base) = file
         .name
         .rsplit_once('/')
         .map_or(("", file.name.as_str()), |(d, b)| (d, b));
-    let small = 0.9 * code;
-    let plus = format!("+{}", file.added);
-    let minus = format!("  −{}", file.removed);
-    let counts = ink.ty.width(&plus, Face::Mono, small) + ink.ty.width(&minus, Face::Mono, small);
-    let cx = x + w - 16.0 * s - counts;
-    let mut pen = x + 16.0 * s;
-    if !dir.is_empty() {
-        let room = cx - pen - 24.0 * s - ink.ty.width(base, Face::MonoBold, code);
-        let dir = ink.ty.fit(&format!("{dir}/"), Face::Mono, code, room.max(0.0));
-        pen = ink.boxed(&dir, Face::Mono, code, pen, y, sh, th.dim());
+    let (plus, minus) = (format!("+{}", file.added), format!("−{}", file.removed));
+    let at = cells.saturating_sub(1 + width(&plus) + 2 + width(&minus));
+    let room = at.saturating_sub(3);
+    let base = clip(base, room);
+    let dir_room = room.saturating_sub(width(&base));
+    let mut pen = 1;
+    if !dir.is_empty() && dir_room >= 4 {
+        let dir = clip(&format!("{dir}/"), dir_room);
+        pen += ink.cells(&dir, Face::Mono, x + cw, y, dir_room, th.dim());
     }
-    ink.boxed(base, Face::MonoBold, code, pen, y, sh, th.text());
-    let e = ink.boxed(&plus, Face::Mono, small, cx, y, sh, colour(&th, Tok::Str));
-    ink.boxed(&minus, Face::Mono, small, e, y, sh, solid(mix(lit(th.red), th.fg, 0.1)));
+    ink.cells(&base, Face::MonoBold, x + pen as f32 * cw, y, room, th.text());
+    let ax = x + at as f32 * cw;
+    let used = ink.cells(&plus, Face::Mono, ax, y, cells, colour(&th, Tok::Str));
+    let red = solid(mix(lit(th.red), th.fg, 0.1));
+    ink.cells(&minus, Face::Mono, ax + (used + 2) as f32 * cw, y, cells, red);
 }
 
-/// One line: its wash and bar, its number, its code in its colours (cut at the edge).
-fn code_line(ink: &mut Ink, file: &str, line: &Line, (x, y, w, lh): (f32, f32, f32, f32), gutter: f32) {
+/// One line: its wash and bar, its number, its code in its colours, a character a cell
+/// (cut at `cols`, "…" in the last).
+fn code_line(ink: &mut Ink, file: &str, line: &Line, (x, y, w): (f32, f32, f32), d: usize, cols: usize) {
     let (th, s) = (ink.th, ink.s);
-    let code = CODE * s;
+    let (cw, ch) = ink.sz.cell;
     if let Some(c) = wash(&th, line.kind) {
-        ink.rect(x, y, w, lh, c);
+        ink.rect(x, y, w, ch, c);
         let bar = if line.kind == Kind::Added { th.green } else { th.red };
-        ink.rect(x, y, (4.0 * s).max(2.0), lh, solid(bar));
+        ink.rect(x, y, (4.0 * s).max(2.0), ch, solid(bar));
     }
     let n = line.n.to_string();
-    let nw = ink.ty.width(&n, Face::Mono, 0.86 * code);
     let ink_n = if line.kind == Kind::Context {
         faint(th.fg, 0.5)
     } else {
         faint(th.fg, 0.7)
     };
-    ink.boxed(&n, Face::Mono, 0.86 * code, x + gutter - 14.0 * s - nw, y, lh, ink_n);
-    let room = w - gutter - 12.0 * s;
-    let advance = ink.ty.width("0", Face::Mono, code).max(1.0);
-    let fits = (room / advance).floor() as usize;
-    let cut = line.text.chars().count() > fits;
-    let mut left = if cut { fits.saturating_sub(1) } else { fits };
-    let mut pen = x + gutter;
+    let nx = x + (1 + d).saturating_sub(n.len()) as f32 * cw;
+    ink.cells(&n, Face::Mono, nx, y, n.len(), ink_n);
+    let code_x = x + (d + 3) as f32 * cw;
+    let cut = width(&line.text) > cols;
+    let left = if cut { cols.saturating_sub(1) } else { cols };
+    let mut col = 0;
     for (text, tok) in tokens(file, &line.text) {
-        if left == 0 {
+        if col >= left {
             break;
         }
-        let piece: String = text.chars().take(left).collect();
-        left -= piece.chars().count();
-        pen = ink.boxed(&piece, Face::Mono, code, pen, y, lh, colour(&th, tok));
+        let used = ink.cells(
+            &text,
+            Face::Mono,
+            code_x + col as f32 * cw,
+            y,
+            left - col,
+            colour(&th, tok),
+        );
+        col += used;
+        if used < width(&text) {
+            break; // a wide character at the edge
+        }
     }
     if cut {
-        ink.boxed("…", Face::Mono, code, pen, y, lh, th.dim());
+        ink.cells("…", Face::Mono, code_x + col as f32 * cw, y, 1, th.dim());
     }
 }
 

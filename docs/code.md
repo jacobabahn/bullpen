@@ -190,7 +190,10 @@ when the terminal draws images it shows the stepper with `look/` instead of as t
 `look/mod.rs` lays the pane out (`Lay`: the rail's columns, the page's, a tile's rows and
 the window's) and draws a frame: the rail (`rail.rs`, every step's title, the step
 shown in blue), a window on the page, and the foot (the message and keys); what's typed
-is text where the foot was. A page (`page.rs`: a step's title, files, note, comments and
+is text where the foot was. The type's sizes come from the cell (`ink.rs`'s `Sizes`):
+code at the em where its advance is a cell, drawn a character a cell on whole pixels
+(`Ink::cells`) and a line a row from a row's top; prose from the cell's height as the
+board's medium or large type. A page (`page.rs`: a step's title, files, note, comments and
 code, `code.rs`; or the end) is measured once, on an image a pixel high (its rows are
 kept), and sent as tiles: strips under the terminal's limit at the page's width, the
 window's rows shared evenly among as few as fit (`Lay::fitted`), each drawn on an image
@@ -204,7 +207,7 @@ covers, so a scroll is placements. While no key waits, `Look::ahead` sends what 
 looked for before each, so a key waits behind one strip at most. Its tests
 (`look/tests/`) check the bytes each key writes and that no image is over the limit at
 a 300×100 pane; `bytes_at_large_panes` (ignored) prints the bytes at 160×46 and
-217×65; `render_bp195` (ignored) writes pictures of a tour fixture
+217×65; `render_tour` (ignored) writes pictures of a tour fixture
 (`TOUR_FIXTURE`, `TOUR_RENDER`).
 
 ## Closing a task

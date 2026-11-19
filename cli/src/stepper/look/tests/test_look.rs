@@ -1,5 +1,5 @@
 //! The drawn tour's frames as bytes: what's sent once, what a key places, what typing
-//! shows as text, and what closing deletes. `render_bp195` (ignored) writes pictures.
+//! shows as text, and what closing deletes. `render_tour` (ignored) writes pictures.
 
 use super::*;
 use crate::stepper::screen::DiffFn;
@@ -182,8 +182,9 @@ fn a_resize_takes_the_images_off_and_draws_them_at_the_new_width() {
 #[test]
 fn a_narrow_pane_has_no_rail() {
     assert_eq!(Lay::new(70, 30, 0).rail, 0);
-    assert_eq!(Lay::new(160, 46, 0).rail, 36);
-    assert_eq!(Lay::new(200, 46, 0).rail, 40);
+    assert_eq!(Lay::new(80, 30, 0).rail, 24);
+    assert_eq!(Lay::new(160, 46, 0).rail, 41);
+    assert_eq!(Lay::new(217, 65, 0).rail, 48);
     let (mut l, mut st) = (look(CELL), stepper());
     let out = frame(&mut l, &mut st, (70, 30));
     assert_eq!(uploads(&out), 2);
@@ -420,8 +421,7 @@ fn picture(l: &mut Look, st: &mut Stepper, (cols, rows): (i64, i64)) -> Pixmap {
             at: st.at,
             comments,
         };
-        let s = l.scale();
-        let mut ink = Ink::new(lay.rail as u32 * cw, rows as u32 * ch, &mut l.ty, l.th, s).unwrap();
+        let mut ink = Ink::new(lay.rail as u32 * cw, rows as u32 * ch, &mut l.ty, l.th, l.sz).unwrap();
         rail::draw(&mut ink, &r);
         pm.draw_pixmap(0, 0, ink.pm.as_ref(), &paint, id, None);
     }
@@ -442,8 +442,7 @@ fn picture(l: &mut Look, st: &mut Stepper, (cols, rows): (i64, i64)) -> Pixmap {
         more: page_rows - st.top - lay.view as i64 > 0,
         end: st.at_end(),
     };
-    let s = l.scale();
-    let mut ink = Ink::new(lay.page_cols as u32 * cw, FOOT as u32 * ch, &mut l.ty, l.th, s).unwrap();
+    let mut ink = Ink::new(lay.page_cols as u32 * cw, FOOT as u32 * ch, &mut l.ty, l.th, l.sz).unwrap();
     rail::foot(&mut ink, &f, ch as f32);
     pm.draw_pixmap(
         (lay.rail as u32 * cw) as i32,
@@ -456,14 +455,26 @@ fn picture(l: &mut Look, st: &mut Stepper, (cols, rows): (i64, i64)) -> Pixmap {
     pm
 }
 
+/// "217x65" as (217, 65), or the default when it's not set.
+fn pair(var: &str, default: (u32, u32)) -> (u32, u32) {
+    std::env::var(var)
+        .ok()
+        .and_then(|v| v.split_once('x').map(|(a, b)| (a.parse().ok(), b.parse().ok())))
+        .and_then(|(a, b)| Some((a?, b?)))
+        .unwrap_or(default)
+}
+
 /// Pictures of a tour from a fixture (TOUR_FIXTURE: a tour's steps, each with its
-/// "patch", and comments) to TOUR_RENDER, dark and light, at a 160×46 pane, 2× cell.
+/// "patch", and comments) to TOUR_RENDER, dark and light, at a pane TOUR_PANE cells
+/// (160x46) of TOUR_CELL pixels (16x34).
 #[test]
 #[ignore]
-fn render_bp195() {
+fn render_tour() {
     let (Ok(fixture), Ok(dir)) = (std::env::var("TOUR_FIXTURE"), std::env::var("TOUR_RENDER")) else {
         return;
     };
+    let (cols, rows) = pair("TOUR_PANE", (160, 46));
+    let cell = pair("TOUR_CELL", (16, 34));
     let fx: Value = serde_json::from_str(&std::fs::read_to_string(fixture).unwrap()).unwrap();
     let steps: Vec<Value> = fx["steps"]
         .as_array()
@@ -493,7 +504,7 @@ fn render_bp195() {
             let patches = patches.clone();
             let mut l = Look::new(
                 th,
-                (16, 34),
+                cell,
                 Type::new(Fonts::builtin()),
                 Box::new(move |i| patches[i].clone()),
             );
@@ -506,7 +517,7 @@ fn render_bp195() {
                 Box::new(|_, _| vec![]),
             );
             st.top = top;
-            let pm = picture(&mut l, &mut st, (160, 46));
+            let pm = picture(&mut l, &mut st, (cols as i64, rows as i64));
             std::fs::write(format!("{dir}/{shot}-{name}.png"), png::encode(&pm)).unwrap();
         }
     }

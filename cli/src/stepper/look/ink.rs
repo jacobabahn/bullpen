@@ -3,8 +3,12 @@
 //! by pixels (a code span on a faint chip, in the monospace), and the board's keycaps.
 //! An image is a window on what's drawn on it: a tile of a page is the page drawn
 //! shifted up by the tile's top, so a long page is never an image of its own.
-//! Sizes are the tour's at a 2× cell (34 pixels high), scaled to the terminal's (`s`).
+//! The type's sizes come from the terminal's cell (`Sizes`): code at the size where a
+//! character's advance is the cell's width, one to a cell as the terminal's own, and
+//! prose from the cell's height as the board's medium (or large) type. The rest (room,
+//! marks, cards) is the tour's at a 2× cell (34 pixels high), scaled to the terminal's (`s`).
 
+use bullpen_core::text::char_width;
 use bullpen_draw::font::{Fonts, Weight};
 use bullpen_draw::shape::{paint, rounded};
 use bullpen_draw::theme::{faint, Theme};
@@ -19,10 +23,12 @@ pub enum Face {
     MonoBold,
 }
 
-/// The tour's type: prose (Inter, or `board_font`) and code.
+/// The tour's type: prose (Inter, or `board_font`) and code, and whether the prose is
+/// large (`board_text_size large`; else medium, the board's default and the tour's least).
 pub struct Type {
     pub ui: Fonts,
     pub mono: Fonts,
+    pub large: bool,
 }
 
 impl Type {
@@ -30,6 +36,7 @@ impl Type {
         Type {
             ui,
             mono: Fonts::mono(),
+            large: false,
         }
     }
 
@@ -108,25 +115,81 @@ pub fn words(text: &str) -> Vec<Word> {
     out
 }
 
-/// An image being drawn: its pixels, the type, the colours and the scale (1 at a 2×
-/// cell's 34 pixels).
+/// The sizes the tour is drawn at on a terminal, from its cell (pixels).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Sizes {
+    /// a cell's width and height
+    pub cell: (f32, f32),
+    /// the room, marks and cards: 1 at a 2× cell (34 pixels high)
+    pub s: f32,
+    /// the page's title
+    pub heading: f32,
+    /// what you read: the note, comments, the rail's steps (the board's title size)
+    pub body: f32,
+    /// the files line, the rail's task, the end's labels (the board's detail size)
+    pub detail: f32,
+    /// the foot's keys (the board's label size)
+    pub label: f32,
+    /// code's em: its advance a cell's width, unless that's too tall for a row
+    pub code: f32,
+}
+
+/// The board's medium type, of a cell's height: its titles, its details and its labels
+/// (board/src/image/render.rs's `Metrics`); large is about 1.15 times it. The page's
+/// title is a step above.
+const BODY: f32 = 0.80;
+const DETAIL: f32 = 0.70;
+const LABEL: f32 = 0.60;
+const HEADING: f32 = 1.15;
+const LARGE: f32 = 1.15;
+
+/// The most of a row's height code's em is: a taller one's capitals and descenders
+/// would touch the next row's.
+const CODE_ROW: f32 = 0.9;
+
+impl Sizes {
+    pub fn of((cw, ch): (u32, u32), ty: &mut Type) -> Sizes {
+        let (cw, ch) = (cw.max(1) as f32, ch.max(1) as f32);
+        let k = if ty.large { LARGE } else { 1.0 };
+        let advance = ty.width("0", Face::Mono, 1.0).max(0.1);
+        Sizes {
+            cell: (cw, ch),
+            s: ch / 34.0,
+            heading: HEADING * k * ch,
+            body: BODY * k * ch,
+            detail: DETAIL * k * ch,
+            label: LABEL * k * ch,
+            code: (cw / advance).min(CODE_ROW * ch),
+        }
+    }
+
+    /// y moved down to the next row's top.
+    pub fn on_row(&self, y: f32) -> f32 {
+        (y / self.cell.1 - 0.001).ceil() * self.cell.1
+    }
+}
+
+/// An image being drawn: its pixels, the type, the colours and the sizes (`s`, the
+/// scale of the rest, is theirs: 1 at a 2× cell's 34 pixels).
 pub struct Ink<'a> {
     pub pm: Pixmap,
     /// where the image's top is in what's drawn: what's above it or under it isn't drawn
     pub oy: f32,
     pub ty: &'a mut Type,
     pub th: Theme,
+    pub sz: Sizes,
     pub s: f32,
 }
 
 impl Ink<'_> {
-    pub fn new(w: u32, h: u32, ty: &mut Type, th: Theme, s: f32) -> Option<Ink<'_>> {
+    pub fn new(w: u32, h: u32, ty: &mut Type, th: Theme, sz: Sizes) -> Option<Ink<'_>> {
         Some(Ink {
             pm: Pixmap::new(w.max(1), h.max(1))?,
             oy: 0.0,
             ty,
             th,
-            s,
+            sz,
+            s: sz.s,
         })
     }
 
@@ -135,8 +198,8 @@ impl Ink<'_> {
     }
 
     /// An image `h` high showing what's drawn from `oy` down.
-    pub fn window(w: u32, h: u32, oy: f32, ty: &mut Type, th: Theme, s: f32) -> Option<Ink<'_>> {
-        let mut ink = Ink::new(w, h, ty, th, s)?;
+    pub fn window(w: u32, h: u32, oy: f32, ty: &mut Type, th: Theme, sz: Sizes) -> Option<Ink<'_>> {
+        let mut ink = Ink::new(w, h, ty, th, sz)?;
         ink.oy = oy;
         Some(ink)
     }
@@ -191,6 +254,33 @@ impl Ink<'_> {
     pub fn boxed(&mut self, text: &str, face: Face, px: f32, x: f32, top: f32, h: f32, c: [u8; 4]) -> f32 {
         let base = (top + (h + self.ty.cap_height(px)) / 2.0).round();
         self.text(text, face, px, x, base, c)
+    }
+
+    /// Code on the terminal's grid, in a row from `top`: from x (a cell's edge), a
+    /// character a cell (two for a wide one), each glyph's pen on a whole pixel, as the
+    /// terminal's own text; `most` cells at most. The cells it took.
+    pub fn cells(&mut self, text: &str, face: Face, x: f32, top: f32, most: usize, c: [u8; 4]) -> usize {
+        let ((cw, ch), px) = (self.sz.cell, self.sz.code);
+        let base = (top + (ch + self.ty.mono.cap_height(px)) / 2.0).round() - self.oy;
+        let shows = self.shows(top, ch);
+        let mut col = 0;
+        let mut one = [0u8; 4];
+        for k in text.chars() {
+            let w = char_width(k);
+            if w == 0 {
+                continue;
+            }
+            if col + w > most {
+                break;
+            }
+            if shows && k != ' ' {
+                let pen = (x + col as f32 * cw).round();
+                let (f, weight) = self.ty.face(face);
+                f.draw(&mut self.pm, k.encode_utf8(&mut one), weight, px, (pen, base), c);
+            }
+            col += w;
+        }
+        col
     }
 
     /// A code span's width on its chip.

@@ -123,8 +123,60 @@ fn every_colour_of_code_reads_at_4_5_to_1_on_the_pane_and_on_its_washes() {
 fn the_code_is_as_tall_as_its_strips_hunks_and_lines() {
     let files = parse(PATCH);
     let lines: usize = files.iter().flat_map(|f| &f.hunks).map(|h| h.lines.len()).sum();
-    let h = height(&files, 1.0);
-    let expected = 3.0 * (STRIP + 6.0) + 2.0 * FILE_GAP + 2.0 * LINE + 2.0 * HUNK + LINE * lines as f32;
-    assert_eq!(h, expected.round());
-    assert_eq!(height(&files, 0.5), (expected * 0.5).round());
+    // three strips, two rows between files, two notes, two hunks' rows, and their lines
+    let want = 3 + 2 + 2 + 2 + lines;
+    assert_eq!(rows(&files), want);
+    assert_eq!(height(&files, 37.0), 37.0 * want as f32);
+}
+
+#[test]
+fn a_line_is_cut_by_columns() {
+    assert_eq!(clip("abcdef", 6), "abcdef");
+    assert_eq!(clip("abcdef", 4), "abc…");
+    assert_eq!(clip("日本語", 4), "日…");
+}
+
+#[test]
+fn the_codes_rows_are_the_terminals() {
+    use crate::stepper::look::ink::{Sizes, Type};
+    use crate::stepper::look::page::{self, Page, Step};
+    use bullpen_draw::font::Fonts;
+    let th = Theme::default();
+    let mut ty = Type::new(Fonts::builtin());
+    let sz = Sizes::of((19, 37), &mut ty);
+    let page = Page::Step(Step {
+        title: "A title",
+        refs: vec![],
+        note: "A note that is long enough to take a line of its own, and then some.",
+        comments: vec!["A comment."],
+        files: parse(PATCH),
+    });
+    let h = page::draw(&mut Ink::new(1900, 1, &mut ty, th, sz).unwrap(), &page);
+    let mut ink = Ink::new(1900, h as u32, &mut ty, th, sz).unwrap();
+    page::draw(&mut ink, &page);
+    // the first removed line's red bar starts on a row's top
+    let red = solid(th.red);
+    let y = (0..ink.pm.height())
+        .find(|&y| {
+            let p = ink.pm.pixel(76, y).unwrap().demultiply();
+            [p.red(), p.green(), p.blue(), p.alpha()] == red
+        })
+        .expect("a red bar");
+    assert_eq!(y % 37, 0, "{y}");
+}
+
+#[test]
+fn every_text_you_read_is_at_4_5_to_1() {
+    for th in [Theme::default(), Theme::light()] {
+        let bg = [th.bg.0, th.bg.1, th.bg.2];
+        let strip = over(faint(th.fg, 0.075), th.bg);
+        let card = over(faint(th.amber(), 0.1), th.bg);
+        let chip = over(faint(th.fg, 0.09), th.bg);
+        for (what, c) in [("text", th.text()), ("dim", th.dim()), ("note", faint(th.fg, 0.9))] {
+            for g in [bg, strip, card, chip] {
+                let r = contrast(over(c, Rgb(g[0], g[1], g[2])), g);
+                assert!(r >= 4.5, "{what} on {g:?} ({:?}): {r:.2}", th.bg);
+            }
+        }
+    }
 }

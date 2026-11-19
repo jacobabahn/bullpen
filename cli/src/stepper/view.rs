@@ -58,9 +58,12 @@ enum Show {
     Image(Box<Look>),
 }
 
-/// The drawn look, wanted: the font `board_font` names, and each step's patch.
+/// The drawn look, wanted: the font `board_font` names, whether `board_text_size` is
+/// large (small is medium here: the tour's prose is never under the board's medium),
+/// and each step's patch.
 pub struct Wanted {
     font: Option<PathBuf>,
+    large: bool,
     patch: PatchFn,
 }
 
@@ -101,7 +104,11 @@ fn image_look(st: &mut Stepper, wanted: Option<Wanted>, out: &mut impl Write, ty
             Ok(fonts) => {
                 let cell = ask::window_cell(0).or(a.cell).unwrap_or((8, 17));
                 let theme = Theme::default().with(&a.said);
-                return Show::Image(Box::new(Look::new(theme, cell, Type::new(fonts), w.patch)));
+                let ty = Type {
+                    large: w.large,
+                    ..Type::new(fonts)
+                };
+                return Show::Image(Box::new(Look::new(theme, cell, ty, w.patch)));
             }
             Err(e) => {
                 st.msg = format!("Drawing the tour as text: {e}.");
@@ -242,6 +249,7 @@ pub fn view_tour(repo: &Repo, t: &mut Obj, back: bool) -> Res<()> {
             .map(PathBuf::from);
         Wanted {
             font,
+            large: repo.cfg_str("board_text_size") == "large",
             patch: Box::new(move |i: usize| step_diff(&files, &steps[i])),
         }
     });

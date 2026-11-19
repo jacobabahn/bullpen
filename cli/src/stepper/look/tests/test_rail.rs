@@ -1,5 +1,5 @@
 use super::*;
-use crate::stepper::look::ink::Type;
+use crate::stepper::look::ink::{Sizes, Type};
 use bullpen_draw::font::Fonts;
 use bullpen_draw::theme::Theme;
 
@@ -26,7 +26,8 @@ fn blue_rows(pm: &tiny_skia::Pixmap, th: Theme) -> Vec<u32> {
 
 fn drawn(r: &Rail, h: u32) -> tiny_skia::Pixmap {
     let mut ty = Type::new(Fonts::builtin());
-    let mut ink = Ink::new(300, h, &mut ty, Theme::default(), 0.5).unwrap();
+    let sz = Sizes::of((8, 17), &mut ty);
+    let mut ink = Ink::new(300, h, &mut ty, Theme::default(), sz).unwrap();
     draw(&mut ink, r);
     ink.pm
 }
@@ -56,7 +57,8 @@ fn the_foot_shows_fewer_keys_when_narrow() {
     let few = keys_width(&mut ty, STEP_KEYS[STEP_KEYS.len() - 1], 10.0);
     assert!(few < all / 2.0);
     for (w, end) in [(400, false), (2000, false), (400, true)] {
-        let mut ink = Ink::new(w, 34, &mut ty, Theme::default(), 0.5).unwrap();
+        let sz = Sizes::of((8, 17), &mut ty);
+        let mut ink = Ink::new(w, 34, &mut ty, Theme::default(), sz).unwrap();
         foot(
             &mut ink,
             &Foot {

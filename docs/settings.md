@@ -60,7 +60,8 @@ it in a new theme's colours; the compact layout stays text, and a terminal that
 doesn't draw images gets text with a line saying why), and its guided tours too (see
 [Drawn as images](tours.md#drawn-as-images)). `--board-text-size` sets its
 type: `medium` (the default, the terminal's own text size, a row a little more than a
-cell), `large`, or `small` (a cell a row, as the text). `--board-font PATH` has it
+cell), `large`, or `small` (a cell a row, as the text; a drawn tour's prose is never
+under medium). `--board-font PATH` has it
 drawn in that font file instead of the built-in Inter (a tour's prose too; `""`
 clears it; see [The image look](board.md#the-image-look)). `--board-motion off` stills it: its working, review
 and running marks stop turning, and a task's mark no longer settles in when its status

@@ -105,11 +105,25 @@ terminal's colours, so it follows the Rex theme:
   and the function it's in, each line with its number, added and removed lines on green
   and red washes. Code is in JetBrains Mono (built in), coloured by a small highlighter
   in the terminal's colours (keywords, strings, comments, numbers, type names); a line
-  too long for the page is cut with "…". After the last step the page is the end: your
+  too long for the page is cut with "…" in its last column. After the last step the page is the end: your
   comments under their steps' titles, and `s` (send them back) and `a` (accept) as
   large keys.
 - **The foot**, under the page: the message (or "↓ more" while the page goes on) and the
   keys, in caps. What you type (`c`, `t`) is text there, as in the text tour.
+
+Its type is the terminal's size. Code is on the terminal's own grid: drawn at the
+size where a character's advance is the pane's cell width (unless that would be too
+tall for a row), a character a cell (two for a wide one) and a line a row, each glyph
+starting on a whole pixel, so its strokes land where the terminal's would and it reads
+as sharp as the text beside it; a file's strip and a hunk's line are a row each, and
+the line numbers are on the grid too. The rest is sized from the cell's height as the
+board's [image look](board.md#the-image-look) sizes its type, at medium or larger
+(`board_text_size large` is larger; `small` is medium here): the note, your comments
+and the rail's steps at the board's title size (0.8 of a cell's height), the files
+line and the rail's task at its detail size (0.7), the foot's keys at its label size
+(0.6), and the step's title a step above (1.15). The rail is about a quarter of the
+pane (24 to 48 columns) for its titles at that size. Everything you read is at 4.5:1
+or more against what's under it, on dark and light themes; the line numbers are quieter.
 
 The keys and what they do are the text tour's. The drawn code can't be selected or
 searched: `v` opens the task's whole diff as text (in delta when it's installed), to
@@ -127,9 +141,9 @@ want, unplaced, one image at a time, looking for a key before each: the tile und
 window and the one above, the next step's rail, first window and foot, a page of tiles
 each way, and the previous step's rail, first tile and foot. So `n`, `p` and a page
 down usually only place images (a few hundred bytes). At 217×65 cells of 19×37 pixels
-the first frame is about 440 KB, drawing ahead after it about 690 KB in images of at
-most about 120 KB, and a step not drawn ahead about 410 KB; at 160×46 (17×34 pixels)
-about 260 KB, 500 KB and 240 KB. Images are kept on the terminal, hidden, to place again
+the first frame is about 490 KB, drawing ahead after it about 830 KB in images of at
+most about 130 KB, and a step not drawn ahead about 460 KB; at 160×46 (17×34 pixels)
+about 280 KB, 530 KB and 250 KB. Images are kept on the terminal, hidden, to place again
 (the step you go back to) and deleted when the tour closes.
 
 On a terminal that doesn't draw images, or with `board_look text`, the tour is text, as

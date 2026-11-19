@@ -1,5 +1,5 @@
 use super::*;
-use crate::stepper::look::ink::Type;
+use crate::stepper::look::ink::{Sizes, Type};
 use bullpen_draw::font::Fonts;
 use bullpen_draw::theme::Theme;
 
@@ -15,11 +15,15 @@ fn step<'a>(comments: Vec<&'a str>) -> Page<'a> {
     })
 }
 
+/// A 1× cell's pixels.
+const CELL: (u32, u32) = (8, 17);
+
 /// The page's height, measured, and the page drawn that high.
 fn drawn(page: &Page, th: Theme) -> (f32, tiny_skia::Pixmap) {
     let mut ty = Type::new(Fonts::builtin());
-    let h = draw(&mut Ink::new(1280, 1, &mut ty, th, 0.5).unwrap(), page);
-    let mut ink = Ink::new(1280, h.ceil() as u32, &mut ty, th, 0.5).unwrap();
+    let sz = Sizes::of(CELL, &mut ty);
+    let h = draw(&mut Ink::new(1280, 1, &mut ty, th, sz).unwrap(), page);
+    let mut ink = Ink::new(1280, h.ceil() as u32, &mut ty, th, sz).unwrap();
     assert_eq!(draw(&mut ink, page), h, "measured as drawn");
     (h, ink.pm)
 }
@@ -35,8 +39,8 @@ fn a_comment_is_an_amber_card_and_makes_the_page_taller() {
     let (bare, _) = drawn(&step(vec![]), th);
     let (with, pm) = drawn(&step(vec!["Say which word failed."]), th);
     assert!(with > bare + 20.0);
-    // the card's bar, at the margin, in the terminal's yellow, somewhere down the page
-    let x = (72.0 * 0.5) as u32 + 1;
+    // the card's bar, at the margin (five cells), in the terminal's yellow, somewhere down the page
+    let x = 5 * CELL.0 + 1;
     let y = (0..pm.height()).find(|&y| px(&pm, x, y)[..3] == [th.yellow.0, th.yellow.1, th.yellow.2]);
     assert!(y.is_some(), "no amber bar");
 }

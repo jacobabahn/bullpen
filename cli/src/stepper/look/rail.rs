@@ -20,28 +20,33 @@ pub struct Rail {
     pub comments: Vec<usize>,
 }
 
+/// The rail is laid out for its steps' type `TEXT` pixels high: its room and marks
+/// grow with it (`u`, 1 at that size).
 const TEXT: f32 = 20.0;
 const ROW: f32 = 28.0;
 const GAP: f32 = 26.0;
 
 pub fn draw(ink: &mut Ink, rail: &Rail) {
-    let (th, s) = (ink.th, ink.s);
+    let (th, sz) = (ink.th, ink.sz);
     let h = ink.pm.height() as f32;
-    let x = 48.0 * s;
-    let room = ink.w() - x - 24.0 * s;
-    let (px, row) = (TEXT * s, (ROW * s).round());
-    let mut y = 34.0 * s;
-    ink.boxed(&rail.tid, Face::UiBold, px, x, y, 30.0 * s, th.dim());
-    y += 34.0 * s;
-    for line in ink.ty.wrap(&rail.title.replace('`', ""), Face::Ui, px, room, 2) {
-        ink.boxed(&line, Face::Ui, px, x, y, 30.0 * s, th.dim());
-        y += 30.0 * s;
+    let px = sz.body;
+    let s = px / TEXT;
+    let x = 36.0 * s;
+    let room = ink.w() - x - 20.0 * s;
+    let row = (ROW * s).round();
+    let (dpx, drow) = (sz.detail, (1.45 * sz.detail).round());
+    let mut y = 30.0 * s;
+    ink.boxed(&rail.tid, Face::UiBold, dpx, x, y, drow, th.dim());
+    y += drow + 2.0 * s;
+    for line in ink.ty.wrap(&rail.title.replace('`', ""), Face::Ui, dpx, room, 2) {
+        ink.boxed(&line, Face::Ui, dpx, x, y, drow, th.dim());
+        y += drow;
     }
-    y += 34.0 * s;
+    y += 30.0 * s;
     let n = rail.steps.len();
-    let (cx, tx) = (x + 12.0 * s, x + 44.0 * s);
-    let count_w = 48.0 * s;
-    let tw = (ink.w() - tx - count_w - 16.0 * s).max(10.0);
+    let (cx, tx) = (x + 12.0 * s, x + 40.0 * s);
+    let count_w = 44.0 * s;
+    let tw = (ink.w() - tx - count_w - 12.0 * s).max(10.0);
     // each stop's title lines, and where it is
     let mut stops: Vec<(Vec<String>, Face)> = Vec::new();
     for i in 0..=n {
@@ -89,40 +94,31 @@ pub fn draw(ink: &mut Ink, rail: &Rail) {
             ink.disc(cx, cy, 7.0 * s, solid(th.bg));
             ink.ring(cx, cy, 6.0 * s, 2.0 * s, faint(th.fg, 0.4));
         }
-        let c = if i == rail.at {
-            th.text()
-        } else if i < rail.at {
-            th.dim()
-        } else {
-            faint(th.fg, 0.62)
-        };
+        // the steps behind and ahead read alike: their marks tell them apart
+        let c = if i == rail.at { th.text() } else { th.dim() };
         for (k, line) in lines.iter().enumerate() {
             ink.boxed(line, *face, px, tx, top + k as f32 * row, row, c);
         }
         let k = rail.comments.get(i).copied().unwrap_or(0);
         if k > 0 {
-            count(ink, k, ink.w() - 24.0 * s, top);
+            count(ink, k, ink.w() - 20.0 * s, top, s);
         }
     }
     // the rail's edge
-    ink.rect(
-        ink.w() - (2.0 * s).max(1.0),
-        0.0,
-        (2.0 * s).max(1.0),
-        h,
-        faint(th.fg, 0.09),
-    );
+    let edge = (2.0 * ink.s).max(1.0);
+    ink.rect(ink.w() - edge, 0.0, edge, h, faint(th.fg, 0.09));
 }
 
-/// How many comments a step has, in a small amber pill ending at `right`.
-fn count(ink: &mut Ink, k: usize, right: f32, top: f32) {
-    let (th, s) = (ink.th, ink.s);
+/// How many comments a step has, in a small amber pill ending at `right` (`s`, the
+/// rail's scale).
+fn count(ink: &mut Ink, k: usize, right: f32, top: f32, s: f32) {
+    let th = ink.th;
     let label = k.to_string();
     let px = 16.0 * s;
     let lw = ink.ty.width(&label, Face::UiBold, px);
     let (pw, ph) = ((lw + 14.0 * s).max(24.0 * s), 24.0 * s);
     let x = right - pw;
-    let y = top + 2.0 * s;
+    let y = top + (ROW - 24.0) / 2.0 * s;
     ink.rrect(x, y, pw, ph, ph / 2.0, faint(bright(th.yellow), 0.22));
     let light = super::code::luma(th.bg) > super::code::luma(th.fg);
     let c = if light { th.text() } else { solid(th.yellow) };
@@ -196,14 +192,15 @@ pub fn foot(ink: &mut Ink, foot: &Foot, cell_h: f32) {
     let (th, s) = (ink.th, ink.s);
     let x = 72.0 * s;
     let w = ink.w();
-    let px = 20.0 * s;
+    // the message is read, at the detail's size; the keys are labels
+    let (said, px) = (ink.sz.detail, ink.sz.label);
     if !foot.msg.is_empty() {
-        let t = ink.ty.fit(&foot.msg, Face::UiBold, px, w - 2.0 * x);
-        ink.boxed(&t, Face::UiBold, px, x, 0.0, cell_h, th.text());
+        let t = ink.ty.fit(&foot.msg, Face::UiBold, said, w - 2.0 * x);
+        ink.boxed(&t, Face::UiBold, said, x, 0.0, cell_h, th.text());
     } else if foot.more {
         let t = "↓ more";
-        let tw = ink.ty.width(t, Face::Ui, px);
-        ink.boxed(t, Face::Ui, px, w - x - tw, 0.0, cell_h, th.dim());
+        let tw = ink.ty.width(t, Face::Ui, said);
+        ink.boxed(t, Face::Ui, said, w - x - tw, 0.0, cell_h, th.dim());
     }
     ink.rect(0.0, cell_h - (2.0 * s).max(1.0), w, (2.0 * s).max(1.0), th.rule());
     let sets = if foot.end { END_KEYS } else { STEP_KEYS };

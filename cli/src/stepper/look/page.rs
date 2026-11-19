@@ -32,7 +32,8 @@ pub enum Page<'a> {
     End(End<'a>),
 }
 
-/// The page's margin at a 2× cell, and the widest a column of prose gets.
+/// The page's margin at a 2× cell (to the nearest cell), and the widest a column of
+/// prose gets.
 const MARGIN: f32 = 72.0;
 const COLUMN: f32 = 1500.0;
 const CARD: f32 = 1300.0;
@@ -46,28 +47,26 @@ pub fn draw(ink: &mut Ink, page: &Page) -> f32 {
     }
 }
 
+/// The page's left edge: a cell's, so its code is on the terminal's grid.
+fn margin(ink: &Ink) -> f32 {
+    let cw = ink.sz.cell.0;
+    (MARGIN * ink.s / cw).round().max(1.0) * cw
+}
+
 fn step(ink: &mut Ink, st: &Step) -> f32 {
-    let (th, s) = (ink.th, ink.s);
-    let x = MARGIN * s;
+    let (th, s, sz) = (ink.th, ink.s, ink.sz);
+    let x = margin(ink);
     let width = ink.w() - 2.0 * x;
     let col = width.min(COLUMN * s);
     let mut y = (46.0 * s).round();
-    let (tpx, tlh) = (40.0 * s, (56.0 * s).round());
+    let (tpx, tlh) = (sz.heading, (1.35 * sz.heading).round());
     y += ink.prose(st.title, true, tpx, x, y, col, tlh, th.text());
     y += 6.0 * s;
     y += files(ink, &st.refs, x, y, width);
     y += 18.0 * s;
     if !st.note.trim().is_empty() {
-        y += ink.prose(
-            st.note,
-            false,
-            24.0 * s,
-            x,
-            y,
-            col,
-            (38.0 * s).round(),
-            faint(th.fg, 0.9),
-        );
+        let lh = (1.5 * sz.body).round();
+        y += ink.prose(st.note, false, sz.body, x, y, col, lh, faint(th.fg, 0.9));
         y += 26.0 * s;
     }
     for c in &st.comments {
@@ -75,19 +74,23 @@ fn step(ink: &mut Ink, st: &Step) -> f32 {
     }
     y += 18.0 * s;
     if st.files.is_empty() {
-        ink.boxed("No code in this step.", Face::Ui, 22.0 * s, x, y, 34.0 * s, th.dim());
-        y += 34.0 * s;
+        let h = (1.5 * sz.body).round();
+        ink.boxed("No code in this step.", Face::Ui, sz.body, x, y, h, th.dim());
+        y += h;
     } else {
+        // the code's rows are the terminal's
+        y = sz.on_row(y);
         code::draw(ink, &st.files, x, y, width);
-        y += code::height(&st.files, s);
+        y += code::height(&st.files, sz.cell.1);
     }
     y + 40.0 * s
 }
 
 /// The files a step covers: each file's folder dim, its name, and its lines, wrapped.
 fn files(ink: &mut Ink, refs: &[(String, Vec<String>)], x: f32, top: f32, max: f32) -> f32 {
-    let (th, s) = (ink.th, ink.s);
-    let (px, h) = (21.0 * s, (36.0 * s).round());
+    let th = ink.th;
+    let px = ink.sz.detail;
+    let h = (1.6 * px).round();
     let (mut pen, mut y) = (x, top);
     for (file, lines) in refs {
         let (dir, base) = file
@@ -101,7 +104,7 @@ fn files(ink: &mut Ink, refs: &[(String, Vec<String>)], x: f32, top: f32, max: f
         if pen > x && pen + need > x + max {
             (pen, y) = (x, y + h);
         }
-        pen = ink.boxed(&dir, Face::Mono, px, pen, y, h, faint(th.fg, 0.62));
+        pen = ink.boxed(&dir, Face::Mono, px, pen, y, h, th.dim());
         pen = ink.boxed(base, Face::MonoBold, px, pen, y, h, th.text());
         if !ls.is_empty() {
             pen = ink.boxed(&ls, Face::Ui, px, pen + 0.5 * px, y, h, th.dim());
@@ -117,7 +120,8 @@ fn files(ink: &mut Ink, refs: &[(String, Vec<String>)], x: f32, top: f32, max: f
 /// A comment of yours: on a wash of amber, a bar of it at its left. Its height.
 pub fn card(ink: &mut Ink, text: &str, x: f32, top: f32, w: f32) -> f32 {
     let (th, s) = (ink.th, ink.s);
-    let (px, lh) = (23.0 * s, (34.0 * s).round());
+    let px = ink.sz.body;
+    let lh = (1.45 * px).round();
     let inner = w - 52.0 * s;
     let h = ink.prose_height(text, false, px, inner, lh) + 28.0 * s;
     ink.rrect(x, top, w, h, 10.0 * s, faint(th.amber(), 0.1));
@@ -127,13 +131,13 @@ pub fn card(ink: &mut Ink, text: &str, x: f32, top: f32, w: f32) -> f32 {
 }
 
 fn end(ink: &mut Ink, end: &End) -> f32 {
-    let (th, s) = (ink.th, ink.s);
-    let x = MARGIN * s;
+    let (th, s, sz) = (ink.th, ink.s, ink.sz);
+    let x = margin(ink);
     let width = ink.w() - 2.0 * x;
     let col = width.min(COLUMN * s);
     let mut y = (46.0 * s).round();
-    let (tpx, tlh) = (40.0 * s, (56.0 * s).round());
-    let (px, lh) = (24.0 * s, (38.0 * s).round());
+    let (tpx, tlh) = (sz.heading, (1.35 * sz.heading).round());
+    let (px, lh) = (sz.body, (1.5 * sz.body).round());
     let n = end.comments.len();
     if n == 0 {
         y += ink.prose("End of the tour", true, tpx, x, y, col, tlh, th.text()) + 10.0 * s;
@@ -153,7 +157,7 @@ fn end(ink: &mut Ink, end: &End) -> f32 {
     );
     y += ink.prose(&says, false, px, x, y, col, lh, th.dim()) + 40.0 * s;
     for (step, title, text) in &end.comments {
-        let (spx, slh) = (21.0 * s, (32.0 * s).round());
+        let (spx, slh) = (sz.detail, (1.5 * sz.detail).round());
         let e = ink.boxed(step, Face::UiBold, spx, x, y, slh, th.dim());
         ink.prose(
             title,
@@ -187,8 +191,8 @@ fn end(ink: &mut Ink, end: &End) -> f32 {
 
 /// A way out: its key in a large cap, what it does, and what that means. Its height.
 fn big_key(ink: &mut Ink, key: &str, what: &str, says: &str, x: f32, y: f32, w: f32) -> f32 {
-    let (th, s) = (ink.th, ink.s);
-    let cap = (58.0 * s).round();
+    let (th, s, sz) = (ink.th, ink.s, ink.sz);
+    let cap = (2.1 * sz.body).round();
     ink.rrect(x, y, cap, cap, 12.0 * s, th.cap());
     let edge = (2.0 * s).max(1.0);
     ink.rstroke(
@@ -200,21 +204,14 @@ fn big_key(ink: &mut Ink, key: &str, what: &str, says: &str, x: f32, y: f32, w: 
         edge,
         th.cap_edge(),
     );
-    let kw = ink.ty.width(key, Face::UiBold, 28.0 * s);
-    ink.boxed(key, Face::UiBold, 28.0 * s, x + (cap - kw) / 2.0, y, cap, th.text());
+    let kw = ink.ty.width(key, Face::UiBold, sz.body);
+    ink.boxed(key, Face::UiBold, sz.body, x + (cap - kw) / 2.0, y, cap, th.text());
     let tx = x + cap + 22.0 * s;
-    ink.boxed(what, Face::UiBold, 26.0 * s, tx, y, 34.0 * s, th.text());
-    let h = ink.prose(
-        says,
-        false,
-        21.0 * s,
-        tx,
-        y + 36.0 * s,
-        w - cap - 22.0 * s,
-        (31.0 * s).round(),
-        th.dim(),
-    );
-    (36.0 * s + h).max(cap)
+    let head = (1.35 * sz.body).round();
+    ink.boxed(what, Face::UiBold, sz.body, tx, y, head, th.text());
+    let lh = (1.45 * sz.detail).round();
+    let h = ink.prose(says, false, sz.detail, tx, y + head, w - cap - 22.0 * s, lh, th.dim());
+    (head + h).max(cap)
 }
 
 fn plural(n: usize, word: &str) -> String {

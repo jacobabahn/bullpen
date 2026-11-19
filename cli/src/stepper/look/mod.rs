@@ -32,7 +32,7 @@ use bullpen_core::json::{s, Obj};
 use bullpen_draw::cut;
 use bullpen_draw::kitty::Place;
 use bullpen_draw::theme::Theme;
-use ink::{Ink, Type};
+use ink::{Ink, Sizes, Type};
 use serde_json::Value;
 use shown::Shown;
 use std::collections::hash_map::DefaultHasher;
@@ -63,6 +63,10 @@ pub struct Lay {
 /// The rows the foot has.
 const FOOT: u16 = 2;
 
+/// The rail's share of a pane's columns (percent), 24 to 48 columns: its steps' titles
+/// are the board's title size.
+const RAIL: u32 = 26;
+
 /// The most pixels (bytes) an image is drawn on: a pane's, at a 2× cell, is a few tens
 /// of MB; past this the tour is text rather than risk the memory.
 const MOST: usize = 256 << 20;
@@ -71,7 +75,7 @@ impl Lay {
     pub fn new(cols: i64, rows: i64, typed: usize) -> Lay {
         let (cols, rows) = (cols.clamp(1, 1000) as u16, rows.clamp(3, 1000) as u16);
         let rail = if cols >= 80 {
-            (cols as u32 * 23 / 100).clamp(24, 40) as u16
+            (cols as u32 * RAIL / 100).clamp(24, 48) as u16
         } else {
             0
         };
@@ -107,6 +111,8 @@ pub struct Look {
     pub th: Theme,
     /// a cell's width and height in pixels
     pub cell: (u32, u32),
+    /// the type's sizes and the scale things are drawn at, from the cell
+    sz: Sizes,
     ty: Type,
     shown: Shown,
     patch: PatchFn,
@@ -126,10 +132,11 @@ fn key(of: impl Hash) -> u64 {
 }
 
 impl Look {
-    pub fn new(th: Theme, cell: (u32, u32), ty: Type, patch: PatchFn) -> Look {
+    pub fn new(th: Theme, cell: (u32, u32), mut ty: Type, patch: PatchFn) -> Look {
         Look {
             th,
             cell,
+            sz: Sizes::of(cell, &mut ty),
             ty,
             shown: Shown::new(FIRST, cell),
             patch,
@@ -138,11 +145,6 @@ impl Look {
             last: None,
             texted: false,
         }
-    }
-
-    /// The scale things are drawn at: 1 at a 2× cell (34 pixels high).
-    fn scale(&self) -> f32 {
-        self.cell.1 as f32 / 34.0
     }
 
     /// How many images are kept on the terminal.
@@ -211,8 +213,8 @@ impl Look {
             return *rows;
         }
         let p = self.page_of(st, i);
-        let (th, s, ch) = (self.th, self.scale(), self.cell.1);
-        let Some(mut ink) = Ink::new(width, 1, &mut self.ty, th, s) else {
+        let (th, sz, ch) = (self.th, self.sz, self.cell.1);
+        let Some(mut ink) = Ink::new(width, 1, &mut self.ty, th, sz) else {
             return 1;
         };
         let rows = ((page::draw(&mut ink, &p) / ch as f32).ceil() as i64).max(1);
@@ -224,9 +226,9 @@ impl Look {
     /// can't be made.
     fn ink(&mut self, w: u32, h: u32, oy: f32) -> std::io::Result<Ink<'_>> {
         let bytes = w as usize * h as usize * 4;
-        let (th, s) = (self.th, self.scale());
+        let (th, sz) = (self.th, self.sz);
         let ink = (bytes <= MOST)
-            .then(|| Ink::window(w, h, oy, &mut self.ty, th, s))
+            .then(|| Ink::window(w, h, oy, &mut self.ty, th, sz))
             .flatten();
         let ink = ink.ok_or_else(|| std::io::Error::other(format!("can't make an image {w}×{h} pixels")))?;
         self.largest = self.largest.max(bytes);
