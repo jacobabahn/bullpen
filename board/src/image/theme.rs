@@ -123,6 +123,12 @@ impl Theme {
         faint(self.fg, 0.45)
     }
 
+    /// The selected card's fill when its task needs you or stopped: its flag's colour,
+    /// twice as strong as its wash.
+    pub fn flag_tint(&self, flag: Flag) -> [u8; 4] {
+        faint(self.flag(flag), 0.2)
+    }
+
     /// The selected card's edge when its task needs you or stopped: its flag's colour.
     pub fn flag_edge(&self, flag: Flag) -> [u8; 4] {
         solid(self.flag(flag))

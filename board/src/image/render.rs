@@ -634,17 +634,17 @@ impl<'a> Draw<'a> {
         (x, top - inset, self.right() + out - x, bottom - top + 2.0 * inset)
     }
 
-    /// The selected task's (or item's) card, the same wherever it is: the faint fill
-    /// (over its wash, when it needs you or stopped) and an edge two pixels wide, the
-    /// foreground's or its flag's colour.
+    /// The selected task's (or item's) card, the same wherever it is: a fill a step
+    /// stronger than what's around it (the foreground, faint, or its flag's colour
+    /// twice its wash's strength when it needs you or stopped) and an edge two pixels
+    /// wide in that colour.
     fn card(&mut self, top: f32, bottom: f32, flag: Option<Flag>) {
         let (x, y, w, h) = self.panel(top, bottom);
         let r = self.radius();
-        if let Some(f) = flag {
-            let wash = self.theme.wash(f);
-            self.rounded_fill(x, y, w, h, r, wash);
-        }
-        let (fill, edge) = (self.theme.tint(), flag.map_or(self.theme.edge(), |f| self.theme.flag_edge(f)));
+        let (fill, edge) = match flag {
+            Some(f) => (self.theme.flag_tint(f), self.theme.flag_edge(f)),
+            None => (self.theme.tint(), self.theme.edge()),
+        };
         self.rounded_fill(x, y, w, h, r, fill);
         self.rounded_edge(x, y, w, h, r, 2.0, edge);
     }

@@ -468,14 +468,14 @@ fn a_task_that_needs_you_is_washed_in_its_colour_over_the_cards_rectangle_with_a
 }
 
 #[test]
-fn the_selected_card_is_the_cards_fill_over_its_wash_with_its_bar_and_an_edge_of_its_flags_colour() {
+fn the_selected_card_of_a_task_that_needs_you_is_its_colour_stronger_with_its_bar_and_an_edge_of_it() {
     let theme = Theme::default();
     let (_, s) = draw_in(&flagged(Flag::Needs, true), TextSize::Medium);
     let (x0, x1, y0, y1) = drawn_box(&s);
     let (_, washed) = draw_in(&flagged(Flag::Needs, false), TextSize::Medium);
-    // the card's fill over the wash: more there than the wash alone, and amber in it
+    // its fill: amber, twice the wash's strength
     let (inside, wash) = (px_at(&s, x1 - 4, y1 / 2), px_at(&washed, x1 - 4, y1 / 2));
-    assert!(inside[3] > wash[3] && inside[0] > inside[2], "{inside:?} {wash:?}");
+    assert!(faintly(inside, theme.flag_tint(Flag::Needs)) && inside[3] >= 2 * wash[3], "{inside:?} {wash:?}");
     assert_eq!(px_at(&s, 9, y1 / 2), solid(theme.yellow));
     // its edge is amber, stronger than the hairline round a wash that isn't selected
     let mid = (x0 + x1) / 2;
