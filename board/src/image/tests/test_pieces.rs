@@ -54,7 +54,7 @@ fn put_together(view: &View, p: &Plan, c: &Canvas, bare: bool) -> Pixmap {
     let mut put = |img: &Pixmap, y: u32| pm.draw_pixmap(0, y as i32, img.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
     let rows = if p.whole { &view.rows } else { &view.base };
     let b = |i: usize| is_bare(&rows.rows[i]);
-    let base = render(rows, &p.base, Cut { range: p.win.clone(), at: p.win_at, y: p.win_y, h: p.win_h, marks: Marks::default(), bare: &b }, c, &mut fonts).unwrap().pixmap;
+    let base = render(rows, &p.laid, Cut { range: p.win.clone(), at: p.win_at, y: p.win_y, h: p.win_h, marks: Marks::default(), bare: &b }, c, &mut fonts).unwrap().pixmap;
     for &(from, at, n) in &p.crops {
         put(&base.clone_rect(IntRect::from_xywh(0, from as i32, base.width(), n as u32 * ch).unwrap()).unwrap(), at as u32 * ch);
     }
@@ -71,7 +71,7 @@ fn put_together(view: &View, p: &Plan, c: &Canvas, bare: bool) -> Pixmap {
         let mark = sprite_mark(row).unwrap();
         let strip = sprite::draw(&Sprite::Mark(mark), c, &mut fonts).unwrap();
         let at = sprite::at(c, mark_y(p, i, c), 0, view.rows_n).unwrap();
-        let w = sprite::COLS as u32 * c.grid.cell_w;
+        let w = sprite::cols(c) as u32 * c.grid.cell_w;
         let frame = strip.clone_rect(IntRect::from_xywh(0, at.crop_y as i32, w, at.crop_h).unwrap()).unwrap();
         put(&frame, at.row as u32 * ch);
     }
@@ -134,7 +134,7 @@ fn moving_the_selection_keeps_the_base_image_and_moves_its_crops() {
     // the next task down (the board groups them: BP-4 is under BP-1), still on the page
     let view = view_of(&mut app, "BP-4");
     let b = plan(&view, &c, &Fonts::builtin(), None);
-    assert_eq!((a.top, &a.win, a.win_y, a.win_h, &a.base), (b.top, &b.win, b.win_y, b.win_h, &b.base));
+    assert_eq!((a.top, &a.win, a.win_y, a.win_h, &a.laid), (b.top, &b.win, b.win_y, b.win_h, &b.laid));
     assert!(!a.whole && !b.whole);
     assert_ne!(a.crops, b.crops);
     assert_ne!(a.sel, b.sel);
@@ -149,18 +149,50 @@ fn moving_the_selection_keeps_the_base_image_and_moves_its_crops() {
 }
 
 #[test]
-fn the_rows_under_the_block_move_by_whole_cells() {
+fn moving_the_selection_moves_no_row() {
+    for size in [TextSize::Small, TextSize::Medium, TextSize::Large] {
+        let c = canvas(size);
+        let mut app = board();
+        let first = view_of(&mut app, "BP-1");
+        let a = plan(&first, &c, &Fonts::builtin(), None);
+        // with nothing selected the rows are laid out as they are with any task selected
+        assert_eq!(lay(&first.base, &c, &Fonts::builtin()), a.laid, "{size:?}");
+        for sel in ["BP-4", "BP-2", "BP-6", "BP-5"] {
+            let view = view_of(&mut app, sel);
+            let b = plan(&view, &c, &Fonts::builtin(), None);
+            // (the list may scroll to keep the selection in view: that's not a move)
+            assert_eq!(&a.laid, &b.laid, "{sel} at {size:?}");
+            if a.top == b.top {
+                assert_eq!((a.end, &a.ys), (b.end, &b.ys), "{sel} at {size:?}");
+            }
+            // the block's image is over the cells its rows are in, and no more
+            let s0 = view.rows.rows.iter().position(Row::is_selected).unwrap();
+            let s1 = s0 + 1 + view.rows.rows[s0 + 1..].iter().take_while(|r| r.is_detail()).count();
+            let ch = c.grid.cell_h;
+            let (from, n) = b.sel.unwrap();
+            assert_eq!((from as u32, (from + n) as u32), (b.y(s0) / ch, (b.y(s0) + b.laid.tall(s0, s1)).div_ceil(ch)), "{sel} at {size:?}");
+        }
+    }
+}
+
+#[test]
+fn an_item_has_its_line_whether_its_selected_or_not() {
     let c = canvas(TextSize::Medium);
     let mut app = board();
-    let view = view_of(&mut app, "BP-2");
-    let p = plan(&view, &c, &Fonts::builtin(), None);
-    let s0 = view.rows.rows.iter().position(Row::is_selected).unwrap();
-    let after = s0 + 1 + view.rows.rows[s0 + 1..].iter().take_while(|r| r.is_detail()).count();
-    let b1 = s0 + 1 + view.base.rows[s0 + 1..].iter().take_while(|r| r.is_detail()).count();
-    // the row after the block is lower than in the base image by whole cells, and the space is under the block
-    let moved = p.y(after) - p.base.tall(p.top, b1);
-    assert!(moved > 0 && moved % c.grid.cell_h == 0, "{moved}");
-    assert!(p.laid.after[after - 1] > 0);
+    let item = |id: &str, state: &str| crate::model::Item { id: id.into(), title: format!("Idea {id}"), state: state.into(), by: "BP-9".into(), ..Default::default() };
+    app.later = vec![item("L1", "asks"), item("L2", "kept")];
+    app.later_open = true;
+    let on_task = view_of(&mut app, "BP-9");
+    let lines = |v: &View| v.rows.rows.iter().filter(|r| matches!(r, Row::ItemDetail(..))).count();
+    // the one that asks says so, selected or not; the kept one has nothing to say
+    assert_eq!(lines(&on_task), 1);
+    let a = plan(&on_task, &c, &Fonts::builtin(), None);
+    app.top = a.top;
+    for sel in ["L1", "L2"] {
+        let view = view_of(&mut app, sel);
+        assert_eq!(lines(&view), 1, "{sel}");
+        assert_eq!(plan(&view, &c, &Fonts::builtin(), None).laid, a.laid, "{sel}");
+    }
 }
 
 #[test]

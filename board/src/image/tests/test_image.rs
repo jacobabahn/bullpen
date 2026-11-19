@@ -272,23 +272,24 @@ fn the_text_size_setting_sets_the_rows_heights() {
 
 #[test]
 fn the_images_are_hidden_under_an_overlay_and_deleted_when_the_board_is_text_again() {
+    // (a board with room for the list's image under the selected block)
     let (mut app, mut p) = (board(3), picture());
     asked(&mut app, &mut p);
-    frame(&mut app, &mut p);
+    frame_in(&mut app, &mut p, 40, 14);
     app.mode = crate::Mode::Help { top: 0 };
-    let out = frame(&mut app, &mut p);
+    let out = frame_in(&mut app, &mut p, 40, 14);
     let hidden = commands(&out);
     assert!(hidden.iter().all(|c| c.starts_with("a=d,d=i,") && !c.contains("p=")), "{hidden:?}");
     assert!([HEAD, LIST, FOOT, SEL].iter().all(|id| out.contains(&kitty::hide(*id))));
     app.mode = crate::Mode::Normal;
-    let out = frame(&mut app, &mut p);
+    let out = frame_in(&mut app, &mut p, 40, 14);
     // placed again, not sent again
     assert!([HEAD, LIST, FOOT, SEL].iter().all(|id| out.contains(&format!("a=p,i={id},"))) && !out.contains("a=t"));
     app.look = Look::Text;
-    let out = frame(&mut app, &mut p);
+    let out = frame_in(&mut app, &mut p, 40, 14);
     assert!(commands(&out).iter().all(|c| c.starts_with("a=d,d=I,")));
     assert!([HEAD, LIST, FOOT, SEL].iter().all(|id| out.contains(&kitty::delete(*id))));
-    assert_eq!(frame(&mut app, &mut p), "");
+    assert_eq!(frame_in(&mut app, &mut p, 40, 14), "");
 }
 
 #[test]
@@ -346,14 +347,15 @@ fn the_compact_layout_stays_text() {
 
 #[test]
 fn colours_asked_again_change_the_image() {
+    // (a board with room for the list's image under the selected block)
     let (mut app, mut p) = (board(3), picture());
     asked(&mut app, &mut p);
-    frame(&mut app, &mut p);
+    frame_in(&mut app, &mut p, 40, 14);
     p.asking = Some(false);
     let mut light = answer(true);
     light.said.fg = Some(theme::Rgb(0, 0, 0));
     p.answered(&light);
-    let out = frame(&mut app, &mut p);
+    let out = frame_in(&mut app, &mut p, 40, 14);
     // each sent again, the old ones taken off and kept a while
     assert!([HEAD, LIST, FOOT, SEL].iter().all(|id| out.contains(&kitty::hide(*id)) && p.screen.kept().contains(id)));
 }
@@ -663,7 +665,7 @@ fn the_list_is_sent_again_for_a_change_on_screen_or_scrolling_out_of_its_window_
     let view = app.view.clone().unwrap();
     let c = Canvas::new(Grid { cols: view.cols as usize, cell_w: 10, cell_h: 20 }, app.cfg.text_size, Theme::default());
     let plan = pieces::plan(&view, &c, &Fonts::builtin(), p.list.as_ref().map(|l| l.win));
-    let off = (plan.shown.end..plan.win.end).find_map(|i| match &view.base.rows[i] {
+    let off = (plan.end..plan.win.end).find_map(|i| match &view.base.rows[i] {
         crate::ui::rows::Row::Task(t) => Some(t.id.clone()),
         _ => None,
     });
@@ -717,3 +719,5 @@ fn the_images_kept_are_bounded_and_deleted_with_the_rest() {
     let deleted: Vec<&String> = all.iter().filter(|id| out.contains(&format!("a=d,d=I,i={id},"))).collect();
     assert!(p.screen.kept().is_empty() && deleted.len() >= 16, "{}", deleted.len());
 }
+
+

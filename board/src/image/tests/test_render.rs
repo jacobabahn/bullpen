@@ -27,6 +27,11 @@ fn detail(text: &str, selected: bool) -> Row {
     Row::Detail(DetailRow { text: text.into(), lines: 1, loud: false, lead: 0, selected, stale: false, flag: None })
 }
 
+/// A selected ready task, with its first key.
+fn selected_with_key(id: &str) -> TaskRow {
+    TaskRow { selected: true, key: Some(("a".into(), "accept".into())), ..task(id, "ready") }
+}
+
 fn rows(rows: Vec<Row>) -> Rows {
     Rows { rows, idw: 5 }
 }
@@ -143,31 +148,35 @@ fn larger_type_makes_taller_rows_with_space_between_tasks_and_a_smaller_detail()
     assert!(task_h > 20); // more than a cell
     assert!(laid.heights[2] < task_h);
     // a task's lines are smaller than a detail's size (its ID's and age's), after a gap
-    assert!(medium.body < medium.detail && medium.title_gap >= 3.0 && laid.heights[2] == medium.body_line as u32);
+    assert!(medium.body < medium.detail && medium.title_gap >= 3.0 && laid.heights[2] == (medium.body_line + medium.below) as u32);
     assert_eq!(sheet.places[2].y, laid.heights[0] + task_h);
     // small is the text list's: a cell a row
     assert_eq!(draw_in(&r, TextSize::Small).0.heights, vec![20, 20, 20]);
 }
 
 #[test]
-fn the_selected_tasks_title_wraps_and_another_is_cut_to_its_row() {
+fn a_title_is_laid_out_the_same_selected_or_not() {
     let long = "a title much too long for one row of a board this narrow, which goes on";
-    let other = TaskRow { title: long.into(), ..task("BP-1", "todo") };
-    let selected = TaskRow { title: long.into(), selected: true, ..task("BP-2", "todo") };
-    let r = rows(vec![Row::Task(other), Row::Task(selected)]);
-    let (laid, _) = draw_in(&r, TextSize::Medium);
-    let m = Metrics::of(TextSize::Medium, 20);
+    let pair = |selected: bool| {
+        let other = TaskRow { title: long.into(), selected, ..task("BP-1", "todo") };
+        let yours = TaskRow { title: long.into(), yours: true, selected: !selected, ..task("BP-2", "ready") };
+        draw_in(&rows(vec![Row::Task(other), Row::Task(yours)]), TextSize::Medium).0
+    };
+    let laid = pair(false);
+    assert_eq!(laid, pair(true));
+    // another's is cut to its row; one that's yours gets two lines
     assert_eq!(laid.lines[0].len(), 1);
     assert!(laid.lines[0][0].ends_with('…'));
-    assert!(laid.lines[1].len() > 1 && laid.lines[1].len() <= TITLE_LINES);
-    assert_eq!(laid.heights[1], (m.pad + laid.lines[1].len() as f32 * m.line + m.title_gap) as u32);
+    assert_eq!(laid.lines[1].len(), YOURS_LINES);
+    let m = Metrics::of(TextSize::Medium, 20);
+    assert_eq!(laid.heights[1], (m.pad + 2.0 * m.line + m.title_gap + m.below) as u32);
     let joined = laid.lines[1].join(" ");
     assert!(long.starts_with(joined.trim_end_matches('…')));
 }
 
 #[test]
 fn the_rows_that_fit_are_whole_rows_and_one_at_least() {
-    let laid = Laid { heights: vec![30, 30, 30, 30], after: vec![0; 4], lines: vec![vec![]; 4], idw: 0.0 };
+    let laid = Laid { heights: vec![30, 30, 30, 30], lines: vec![vec![]; 4], idw: 0.0 };
     assert_eq!(fitting(&laid, 0, 100), 3);
     assert_eq!(fitting(&laid, 2, 100), 4);
     assert_eq!(fitting(&laid, 1, 10), 2); // too tall to fit: cut, but drawn
@@ -197,9 +206,10 @@ fn a_detail_is_wrapped_by_pixels_no_line_breaking_with_room_for_its_next_word() 
         let r = rows(vec![Row::Task(task("BP-1", "needs")), Row::Detail(DetailRow { lines: 3, ..detail_row(text) })]);
         let laid = lay(&r, &c, &fonts);
         let lines = &laid.lines[1];
-        // as many lines as it needs, three at most, the row as tall as they are
+        // as many lines as it needs, three at most, the row as tall as they are and the
+        // room under its block's last line
         assert!(lines.len() > 1 && lines.len() <= 3, "{size:?}: {lines:?}");
-        assert_eq!(laid.heights[1], (lines.len() as f32 * c.m.body_line).round() as u32);
+        assert_eq!(laid.heights[1], (lines.len() as f32 * c.m.body_line).round() as u32 + c.m.below as u32);
         let room = Geo { c, idw: laid.idw }.detail_room();
         for (k, line) in lines.iter().enumerate() {
             assert!(fonts.width(line, Weight::Regular, c.m.body) <= room, "{size:?}: {line}");
@@ -274,13 +284,13 @@ fn a_titles_lines_after_its_first_stop_short_of_the_ages_column() {
     let fonts = Fonts::builtin();
     let long = "Accept: merge a stack of ready tasks in dependency order, one rebase each and then some more of it";
     let c = Canvas::new(Grid { cols: 47, cell_w: 16, cell_h: 34 }, TextSize::Medium, Theme::default());
-    let t = TaskRow { title: long.into(), selected: true, ..task("BP-1", "todo") };
+    let t = TaskRow { title: long.into(), yours: true, ..task("BP-1", "ready") };
     let r = rows(vec![Row::Task(t.clone())]);
     let laid = lay(&r, &c, &fonts);
     let g = Geo { c, idw: laid.idw };
     let room = g.title_right(&t, &fonts) - g.title_x();
     assert!(room < c.right() - g.title_x() - fonts.width("00m", Weight::Bold, c.m.detail));
-    assert!(laid.lines[0].len() == 3 && laid.lines[0][1..].iter().all(|l| fonts.width(l, Weight::Regular, c.m.title) <= room), "{:?}", laid.lines[0]);
+    assert!(laid.lines[0].len() == 2 && laid.lines[0][1..].iter().all(|l| fonts.width(l, Weight::Regular, c.m.title) <= room), "{:?}", laid.lines[0]);
     // with its age on its line under it (a narrow board's), they run to the right edge
     let no_age = TaskRow { age: String::new(), ..t };
     assert_eq!(g.title_right(&no_age, &fonts), c.right());
@@ -361,9 +371,10 @@ fn the_selected_card_holds_its_mark_and_clears_its_type() {
     // as far from the image's right edge as from its left
     let (x0, x1, _, _) = drawn_box(&s);
     assert_eq!((x0, s.pixmap.width() - 1 - x1), (5, 5));
-    // it reaches past its first and last lines by `inset`, and no further
-    let (top, bottom) = (first - m.inset as u32, last + m.inset as u32);
-    assert!(m.inset >= (0.25 * m.title).floor());
+    // it reaches past its first line by `inset` and ends with its last row, and no further
+    // (the room under its last line is its last row's)
+    let (top, bottom) = (first - m.inset as u32, last);
+    assert!(m.inset >= (0.35 * m.title).floor() && m.below >= m.inset);
     let x = 100;
     assert!(px_at(&s, x, top + 1)[3] > 0 && px_at(&s, x, bottom - 2)[3] > 0);
     assert_eq!((px_at(&s, x, top - 2)[3], px_at(&s, x, bottom + 1)[3]), (0, 0));
@@ -384,7 +395,7 @@ fn the_selected_id_has_no_pill_but_is_in_the_foreground() {
 #[test]
 fn medium_type_has_room_above_each_task_and_between_its_title_and_lines() {
     let m = Metrics::of(TextSize::Medium, 34);
-    assert!(m.pad >= 0.7 * m.title && m.title_gap > 0.0);
+    assert!(m.pad >= 0.6 * m.title && m.title_gap > 0.0);
     assert!(m.line >= 1.35 * m.title && m.detail_line >= 1.4 * m.detail);
     // small stays a cell a row, its card a pixel inside its rows
     let s = Metrics::of(TextSize::Small, 34);
@@ -545,17 +556,20 @@ fn the_selected_card_has_a_blue_edge_whatever_its_fill_and_a_task_that_needs_you
     // its fill: amber, stronger than the wash
     let (inside, wash) = (px_at(&s, x1 - 4, y1 / 2), px_at(&washed, x1 - 4, y1 / 2));
     assert!(faintly(inside, theme.flag_tint(Flag::Needs)) && inside[3] > wash[3] + 20, "{inside:?} {wash:?}");
-    // its edge: the terminal's blue, three pixels of it, in the bar's place at its left
+    // its edge: the terminal's blue, two pixels of it, part clear so it's mixed into the
+    // fill, in the bar's place at its left
     let mid = (x0 + x1) / 2;
-    assert!((0..3).all(|k| px_at(&s, mid, y0 + k) == solid(theme.blue)));
-    assert_ne!(px_at(&s, mid, y0 + 4), solid(theme.blue));
-    assert_eq!(px_at(&s, 6, y1 / 2), solid(theme.blue));
+    let blue = |p: [u8; 4]| p[2] > p[0] && p[3] < 255 && p[3] > inside[3];
+    assert!((0..2).all(|k| blue(px_at(&s, mid, y0 + k))), "{:?}", px_at(&s, mid, y0));
+    assert!(!blue(px_at(&s, mid, y0 + 3)));
+    assert!(blue(px_at(&s, x0, y1 / 2)));
+    assert!(theme.edge()[3] < 255 && theme.edge()[3] > 128);
     // the same on a selected task that doesn't need you, round the foreground's faint fill
     let plain = rows(vec![Row::Task(TaskRow { selected: true, ..task("BP-1", "todo") }), detail("what it does", true)]);
     let (_, p) = draw_in(&plain, TextSize::Medium);
     let (px0, px1, py0, py1) = drawn_box(&p);
     assert!(faintly(px_at(&p, px1 - 4, py1 / 2), theme.tint()));
-    assert_eq!(px_at(&p, (px0 + px1) / 2, py0), solid(theme.blue));
+    assert!(blue(px_at(&p, (px0 + px1) / 2, py0)));
 }
 
 #[test]
@@ -599,28 +613,25 @@ fn differ(a: &Sheet, b: &Sheet, (x0, x1): (u32, u32), (y0, y1): (u32, u32)) -> b
 }
 
 #[test]
-fn the_selected_tasks_key_is_in_a_cap_at_its_cards_lower_right_and_its_last_line_makes_room() {
-    let long = "a detail long enough to run to the right edge of the card and on to a second line of it";
+fn the_selected_tasks_key_is_in_a_cap_at_its_cards_lower_right() {
     let block = |key: Option<(String, String)>| {
         let t = TaskRow { selected: true, key, ..task("BP-1", "ready") };
-        rows(vec![Row::Task(t), Row::Detail(DetailRow { lines: 3, selected: true, ..detail_row(long) }), Row::Task(task("BP-2", "todo"))])
+        rows(vec![Row::Task(t), detail("a short line", true), Row::Task(task("BP-2", "todo"))])
     };
     for size in [TextSize::Small, TextSize::Medium, TextSize::Large] {
         let (c, fonts) = (canvas(size), Fonts::builtin());
         let (laid, s) = draw_in(&block(Some(("a".into(), "accept".into()))), size);
         let (bare_laid, bare) = draw_in(&block(None), size);
-        let g = Geo { c, idw: laid.idw };
-        let key_w = g.key_width("a", "accept", &fonts);
-        let last = laid.lines[1].last().unwrap();
-        assert!(fonts.width(last, Weight::Regular, c.m.body) <= g.detail_room() - key_w, "{size:?}: {last}");
-        // without a key the line had the whole width
-        assert!(fonts.width(&bare_laid.lines[1][0], Weight::Regular, c.m.body) > g.detail_room() - key_w, "{size:?}");
+        // the key takes no room of the line's: the layout is the same with it or without
+        assert_eq!(laid, bare_laid, "{size:?}");
+        let key_w = Geo { c, idw: laid.idw }.key_width("a", "accept", &fonts);
         // on the block's last line, at the right; nothing else on the title's lines
-        let (top, bottom) = (laid.heights[0], laid.heights[0] + laid.heights[1]);
+        let (top, bottom) = (laid.heights[0], laid.heights[0] + laid.heights[1] - c.m.below as u32);
         let at = ((c.right() - key_w + 0.8 * c.m.label) as u32, c.right() as u32);
         let last_line = (bottom - c.m.body_line as u32, bottom);
         assert!(differ(&s, &bare, at, last_line), "{size:?}");
-        assert!(!differ(&s, &bare, (0, s.pixmap.width()), (0, top)), "{size:?}");
+        // (its cap may reach a pixel into the gap over its line)
+        assert!(!differ(&s, &bare, (0, s.pixmap.width()), (0, top - 2)), "{size:?}");
         // the key's cap: its faint fill
         let cy = bottom - c.m.body_line as u32 / 2;
         assert!(px_at(&s, at.0 + 3, cy)[3] > px_at(&bare, at.0 + 3, cy)[3], "{size:?}");
@@ -636,38 +647,33 @@ fn a_short_last_line_keeps_its_room_beside_the_key_and_a_task_with_no_key_has_no
     let (laid, s) = draw_in(&with(Some(("i".into(), "answer".into()))), TextSize::Medium);
     let (_, bare) = draw_in(&with(None), TextSize::Medium);
     assert_eq!(laid.lines[2], vec!["3 files, +4 −1".to_string()]);
-    let bottom = laid.heights.iter().sum::<u32>();
+    let bottom = laid.heights.iter().sum::<u32>() - Metrics::of(TextSize::Medium, 20).below as u32;
     assert!(differ(&s, &bare, (250, 400), (bottom - 25, bottom)));
     // only the last line has it
     assert!(!differ(&s, &bare, (0, 400), (0, bottom - 25)));
 }
 
 #[test]
-fn only_a_details_last_line_makes_room_for_the_key() {
+fn the_key_is_on_the_last_line_only_where_it_fits_as_it_is() {
     let fonts = Fonts::builtin();
     let c = canvas(TextSize::Medium);
     let g = Geo { c, idw: 0.0 };
     let w = |s: &str| fonts.width(s, Weight::Regular, c.m.body);
-    let key = g.key_width("a", "accept", &fonts);
-    // two full lines: the first keeps its width, the second's last words go on a third
     let mut full = String::from("one");
     while w(&format!("{full} more")) <= g.detail_room() {
         full.push_str(" more");
     }
-    let mut lines = vec![full.clone(), full.clone()];
-    g.room_for_key(&mut lines, 3, key, &fonts);
-    assert_eq!(lines.len(), 3);
-    assert_eq!(lines[0], full);
-    assert!(w(&lines[2]) <= g.detail_room() - key && lines.concat().matches("more").count() == 2 * full.matches("more").count());
-    // with no line more to take, the last is cut
-    let mut lines = vec![full.clone(), full.clone()];
-    g.room_for_key(&mut lines, 2, key, &fonts);
-    assert_eq!(lines[0], full);
-    assert!(lines[1].ends_with('…') && w(&lines[1]) <= g.detail_room() - key);
-    // a short last line is left as it is
-    let mut lines = vec![full.clone(), "short".to_string()];
-    g.room_for_key(&mut lines, 3, key, &fonts);
-    assert_eq!(lines, vec![full, "short".to_string()]);
+    let line = |text: String, selected: bool| Row::Detail(DetailRow { lines: 2, selected, ..detail_row(&text) });
+    let block = |last: &str| rows(vec![Row::Task(selected_with_key("BP-1")), line(format!("{full} {last}"), true)]);
+    // a short last line has the key after it; a full one is left whole, with no key
+    let (short, long) = (block("short"), block(&full));
+    let (a, b) = (lay(&short, &c, &fonts), lay(&long, &c, &fonts));
+    assert_eq!((a.lines[1].len(), b.lines[1].len()), (2, 2));
+    assert!(g.key_fits(&short.rows[1], &a.lines[1], "a", "accept", &fonts));
+    assert!(!g.key_fits(&long.rows[1], &b.lines[1], "a", "accept", &fonts));
+    // and the lines are the ones the task has unselected
+    let plain = rows(vec![Row::Task(task("BP-1", "ready")), line(format!("{full} short"), false)]);
+    assert_eq!(lay(&plain, &c, &fonts), a);
 }
 
 #[test]

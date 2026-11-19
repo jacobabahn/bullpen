@@ -70,8 +70,8 @@ impl Picture {
         if plan.whole || wh <= room {
             return Ok(());
         }
-        let total = plan.base.tall(0, plan.base.heights.len());
-        let y0 = plan.base.tall(0, plan.top);
+        let total = plan.laid.tall(0, plan.laid.heights.len());
+        let y0 = plan.laid.tall(0, plan.top);
         let paint = Paint { canvas, size: app.cfg.text_size, motion: app.cfg.motion, settling: &self.settling, ms: self.ms, list: None };
         for y in [y0 + room / 4, y0.saturating_sub(room / 4)] {
             let y = y.min(total.saturating_sub(room));

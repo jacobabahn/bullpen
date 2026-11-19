@@ -100,7 +100,7 @@ fn draw_row(buf: &mut Buffer, area: Rect, app: &App, s: &Sizes, y: usize, row: &
         Row::Empty { text, first } => put(buf, area, y, 1, span(fit(text, w.saturating_sub(2)), if *first { bold() } else { dim() })),
         Row::Later { text, amber } => draw_later_line(buf, area, y, app, text, *amber, w),
         Row::Item(i) => draw_item(buf, area, y, app, i, idw, w),
-        Row::ItemDetail(text, _) => draw_item_detail(buf, area, y, text, detail_w),
+        Row::ItemDetail(text, ..) => draw_item_detail(buf, area, y, text, detail_w),
     }
 }
 

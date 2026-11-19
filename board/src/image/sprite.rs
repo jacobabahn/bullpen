@@ -17,8 +17,12 @@ use crate::ui::rows::Mark;
 use crate::ui::{self, MARK_MS, SPINNER_MS};
 use tiny_skia::{Pixmap, PixmapPaint, Transform};
 
-/// A mark's tiles take the list's first columns, where its marks are.
-pub const COLS: u16 = 3;
+/// A mark's tiles take the list's first columns, where its marks are: as many as reach
+/// past its right edge at its largest (three at least).
+pub fn cols(c: &Canvas) -> u16 {
+    let right = mark_at(c).0 + mark_reach(c, POP_MAX);
+    ((right / c.grid.cell_w as f32).ceil() as u16).max(3)
+}
 
 /// How long a mark settling in holds each of its sizes: 160 ms in all, growing past its
 /// size and back.
@@ -84,7 +88,7 @@ fn tile(c: &Canvas) -> Tile {
     Tile { h: (most + 1) * ch, centre: ch + reach, reach }
 }
 
-/// Draw a sprite: a mark's frames one under the other, each a tile COLS cells wide; or
+/// Draw a sprite: a mark's frames one under the other, each a tile `cols` cells wide; or
 /// the two scroll marks, a cell each.
 pub fn draw(sprite: &Sprite, c: &Canvas, fonts: &mut Fonts) -> Result<Pixmap, String> {
     let (cw, ch) = (c.grid.cell_w, c.grid.cell_h);
@@ -95,7 +99,7 @@ pub fn draw(sprite: &Sprite, c: &Canvas, fonts: &mut Fonts) -> Result<Pixmap, St
             let (x, y) = mark_at(c);
             // the mark's centre is as far into its pixel as the list's
             let frac = y.fract();
-            let w = COLS as u32 * cw;
+            let w = cols(c) as u32 * cw;
             let mut pm = Pixmap::new(w, n as u32 * t.h).ok_or("can't make a mark's image")?;
             let mut d = Draw::new(&mut pm, fonts, c, 0.0);
             for f in 0..n {

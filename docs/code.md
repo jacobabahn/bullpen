@@ -95,8 +95,9 @@ top line and the bottom rows (`frame.rs`) and the list, all with no terminal. Th
 is pieces (`pieces.rs`): a window of the rows drawn with nothing selected (the `View`
 has them too, `rows::unselected`; the page when a row on it changed, else two pages at
 a page's steps), placed as two crops above and under the selected block, which is an
-image of its own; the block grows by whole cells, so the rows under it are the same
-image placed lower, and scrolling moves the crops. The window on the terminal stays
+image of its own; a block is laid out the same selected or not (`ui/rows.rs` gives the
+image's selected task the lines it has unselected), so there is one layout, the crops
+stay where they are, and scrolling moves them. The window on the terminal stays
 while the rows shown are as it drew them (`list::still`). Every piece draws its rows
 where they are in the whole list (`render::Cut::at`), so the pieces match the list
 drawn whole to the bit. The marks that

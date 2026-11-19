@@ -4,11 +4,13 @@
 //! detail's text wrapped by pixels to its room; the image itself is the list's block of
 //! cells. The type is real (font.rs), the marks are drawn shapes (marks.rs) in the
 //! status colours (rings, a check, a diamond), the selected task sits on a card (a
-//! faint fill and an edge, its mark inside, its first key in a cap at its lower right)
-//! with its whole title (a task that's yours gets two lines), a task that needs you on
-//! a wash of its colour with a round bar at its left, and a risk is a chip
-//! (chip.rs). A task is one block: its mark and ID in a gutter, its title's lines and
-//! its details from the title's left edge. The title is the loudest thing on a row: the
+//! faint fill and a quiet edge, its mark inside, its first key in a cap at its lower
+//! right when its last line leaves room), a task that needs you on a wash of its colour
+//! with a round bar at its left, and a risk is a chip (chip.rs). A task is one block:
+//! its mark and ID in a gutter, its title's lines (two for a task that's yours) and its
+//! details from the title's left edge, and under its last line the room its card has
+//! there. A block is laid out the same selected or not, so moving the selection moves
+//! nothing else. The title is the loudest thing on a row: the
 //! ID, the age and the group's name are a detail's size. The marks that move are left
 //! out when the image look places them over the list (sprite.rs draws their frames
 //! with `Draw`). The list's last column has the scroll marks. Nothing here touches the
@@ -20,7 +22,7 @@ use super::font::{Fonts, Weight};
 use super::shape::{diamond, left_slice, paint, rounded};
 use super::theme::{lit, solid, Rgb, Theme};
 use crate::model::TextSize;
-use crate::ui::rows::{Flag, ItemRow, Mark, Row, Rows, TaskRow};
+use crate::ui::rows::{DetailRow, Flag, ItemRow, Mark, Row, Rows, TaskRow};
 use std::ops::Range;
 use tiny_skia::{FillRule, LineCap, Path, Pixmap, Stroke, Transform};
 
@@ -54,7 +56,8 @@ pub struct Metrics {
     /// age's), and their height
     pub body: f32,
     pub body_line: f32,
-    /// the space above a task (or an item), and above a heading
+    /// the space above a task's (or an item's) first line: what's between two cards,
+    /// and the card's room over its type (`inset`); and the space above a heading
     pub pad: f32,
     pub head_pad: f32,
     /// the space between groups: more than is under a group's name, so the name sits
@@ -62,9 +65,11 @@ pub struct Metrics {
     pub gap: f32,
     /// the space between a title's last line and the task's first detail line
     pub title_gap: f32,
-    /// how far the selected card reaches past its first line, and past its last (a
-    /// little more: a line's type sits low in it, with its descenders); a pixel inside
-    /// them for small type, whose rows are a cell each
+    /// the room a card (the selected task's, or a wash) has inside it over its block's
+    /// first line and under its last (a little more: a line's type sits low in it,
+    /// with its descenders). The room under is part of the block's last row, so a card
+    /// ends where its block does. Small type's rows are a cell each: no room under, and
+    /// the card a pixel inside its rows
     pub inset: f32,
     pub below: f32,
     /// small type's: every row a cell, as the text list's (no title but the selected
@@ -75,9 +80,9 @@ pub struct Metrics {
 impl Metrics {
     /// Small is the terminal's row: every row a cell, as the text list's. Medium and large
     /// set the type larger than a cell holds and give the rows the height it needs, a
-    /// detail smaller than a title, and room: about three quarters of a title's size
-    /// above each task, a little between its title and its lines, and the selected card
-    /// a quarter of it clear of the type. A label is smaller than a detail at every size.
+    /// detail smaller than a title, and room: a little between a task's title and its
+    /// lines, a card's room round its type, and a few pixels between one card and the
+    /// next. A label is smaller than a detail at every size.
     pub fn of(size: TextSize, cell_h: u32) -> Metrics {
         let ch = cell_h as f32;
         let (t, d, l) = match size {
@@ -90,7 +95,7 @@ impl Metrics {
         if size == TextSize::Small {
             let (line, detail_line, gap) = (ch, ch, ch);
             let (pad, head_pad, title_gap, inset) = (0.0, 0.0, 0.0, -1.0);
-            return Metrics { title, detail, label, line, detail_line, body: detail, body_line: detail_line, pad, head_pad, gap, title_gap, inset, below: inset, cells: true };
+            return Metrics { title, detail, label, line, detail_line, body: detail, body_line: detail_line, pad, head_pad, gap, title_gap, inset, below: 0.0, cells: true };
         }
         // a task's lines are smaller than its title by two steps, after a gap, so the
         // two read apart though they start at the same edge
@@ -103,16 +108,21 @@ impl Metrics {
             detail_line: (1.42 * detail).round(),
             body,
             body_line: (1.42 * body).round(),
-            pad: (0.86 * title).round(),
+            pad: (BETWEEN * title).round() + (ROOM * title).round(),
             head_pad: (0.5 * title).round(),
-            gap: (0.75 * ch).round(),
+            gap: (0.5 * ch).round(),
             title_gap: (0.22 * title).round(),
-            inset: (0.25 * title).round(),
-            below: (0.25 * title).round() + (0.08 * title).round(),
+            inset: (ROOM * title).round(),
+            below: (ROOM * title).round() + (0.08 * title).round(),
             cells: false,
         }
     }
 }
+
+/// A card's room over its type, of a title's size (its line has as much again over its
+/// capitals), and the space between two cards.
+const ROOM: f32 = 0.38;
+const BETWEEN: f32 = 0.28;
 
 /// The type of the lines under a task, of a detail's size (medium's is 0.62 of a cell).
 const BODY: f32 = 0.886;
@@ -135,12 +145,17 @@ impl Canvas {
     }
 
     /// Where text starts (a group's name, the top line, the keys) and ends: a column and
-    /// a quarter in from each side (the right's last part has the list's scroll marks).
-    /// The rules and the status bar run between the two, and a card reaches three
-    /// quarters of a column past each, so it's as far from the pane's left edge as
-    /// from its right.
+    /// a half in from each side (the right's last part has the list's scroll marks).
+    /// The rules and the status bar run between the two, and a card reaches a column
+    /// past each (`out`), so it's as far from the pane's left edge as from its right.
     pub fn left(&self) -> f32 {
-        (1.25 * self.c()).round()
+        (1.5 * self.c()).round()
+    }
+
+    /// How far a card or a wash reaches past where text starts and ends: its room
+    /// beside its type.
+    pub fn out(&self) -> f32 {
+        self.c().round()
     }
 
     pub fn right(&self) -> f32 {
@@ -168,94 +183,65 @@ pub struct Sheet {
     pub places: Vec<Place>,
 }
 
-/// The rows laid out: each one's height in pixels and the space left after it (the
-/// selected block's, so the rows under it move by whole cells: pieces.rs), a task's (or
-/// an item's) title, or a detail's text, as the lines it's drawn on, and the ID
-/// column's width.
+/// The rows laid out: each one's height in pixels, a task's (or an item's) title, or a
+/// detail's text, as the lines it's drawn on, and the ID column's width. Which task is
+/// selected changes none of it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Laid {
     pub heights: Vec<u32>,
-    pub after: Vec<u32>,
     lines: Vec<Vec<String>>,
     pub idw: f32,
 }
 
 impl Laid {
-    /// The pixels row i takes: its height and the space after it.
-    pub fn span(&self, i: usize) -> u32 {
-        self.heights[i] + self.after[i]
-    }
-
-    /// Every row's span.
-    pub fn spans(&self) -> Vec<u32> {
-        (0..self.heights.len()).map(|i| self.span(i)).collect()
-    }
-
-    /// Rows [a, b)'s spans, in pixels.
+    /// Rows [a, b)'s heights, in pixels.
     pub fn tall(&self, a: usize, b: usize) -> u32 {
-        (a..b.min(self.heights.len())).map(|i| self.span(i)).sum()
+        self.heights[a.min(b)..b.min(self.heights.len())].iter().sum()
     }
 }
 
-/// The most lines the selected task's title wraps to; one that's yours (it waits on
-/// you) wraps to two, but in small type, a cell a row as the text list's; any other
-/// title is cut to one.
-const TITLE_LINES: usize = 3;
+/// The most lines the title of a task that's yours (it waits on you) wraps to, but in
+/// small type, a cell a row as the text list's; any other title is cut to one.
 const YOURS_LINES: usize = 2;
 
-/// Lay the rows out: a title cut to its row, or wrapped (the selected one's, and on a
-/// narrow board one that's yours), a detail's text wrapped by pixels to the room its
-/// type has, and how tall each row is.
+/// Lay the rows out: a title cut to its row, or wrapped (one that's yours), a detail's
+/// text wrapped by pixels to the room its type has, and how tall each row is: a
+/// block's last row with the room its card has under it.
 pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
     let idw = id_width(rows, fonts, Geo { c: *c, idw: 0.0 }.id_px());
     let g = Geo { c: *c, idw };
     let mut all = Vec::new();
     let mut heights = Vec::new();
-    // the room the selected task's key takes on its block's last line
-    let mut key_w = 0.0;
-    // the last task (or item) was on a wash, which reaches under its block
-    let mut washed = false;
+    // the room under a block's last row
+    let under = |i: usize| if rows.rows.get(i + 1).is_some_and(Row::is_detail) { 0 } else { c.m.below as u32 };
     for (i, row) in rows.rows.iter().enumerate() {
         let (title, most, weight, right, rest) = match row {
             Row::Task(t) => {
-                key_w = t.key.as_ref().map_or(0.0, |(k, what)| g.key_width(k, what, fonts));
-                washed = t.flag.is_some();
-                let two = t.yours && !c.m.cells;
-                let most = if t.selected { TITLE_LINES } else if two { YOURS_LINES } else { 1 };
+                let most = if t.yours && !c.m.cells { YOURS_LINES } else { 1 };
                 (&t.title, most, title_weight(), g.task_right(t, fonts), g.title_right(t, fonts))
             }
-            Row::Item(i) => (&i.title, if i.selected { TITLE_LINES } else { 1 }, title_weight(), c.right(), c.right()),
+            Row::Item(i) => (&i.title, 1, title_weight(), c.right(), c.right()),
             Row::Detail(d) => {
                 // a stale age is semibold: the first line has that much less room
                 let (age, _) = crate::model::split_at_width(&d.text, d.lead);
                 let bolder = if d.stale { fonts.width(&age, Weight::Bold, c.m.body) - fonts.width(&age, Weight::Regular, c.m.body) } else { 0.0 };
-                // (each key the text names is in a cap: room for their sides on every line)
-                let caps = key_letters(&d.text, d.lead).len() as f32 * 2.0 * KEY_SIDE * c.m.body;
-                let mut lines = g.detail_lines(&d.text, d.lines, bolder, caps, fonts);
-                let last = !rows.rows.get(i + 1).is_some_and(Row::is_detail);
-                // the key goes after its last line, which makes room when it must
-                if last && key_w > 0.0 {
-                    g.room_for_key(&mut lines, d.lines, key_w + caps, fonts);
-                }
-                heights.push(g.height(row, lines.len()));
+                let lines = g.detail_lines(&d.text, d.lines, bolder, g.caps(d), fonts);
+                heights.push(g.height(row, lines.len()) + under(i));
                 all.push(lines);
                 continue;
             }
-            Row::ItemDetail(text, most) => {
+            Row::ItemDetail(text, most, _) => {
                 let lines = g.detail_lines(text, *most, 0.0, 0.0, fonts);
-                heights.push(g.height(row, lines.len()));
+                heights.push(g.height(row, lines.len()) + under(i));
                 all.push(lines);
                 continue;
             }
             _ => {
-                // the space between groups starts under a wash, not under its block;
-                // and the list's first group's name is clear of the header over it
+                // the list's first group's name is clear of the header over it
                 let under = match row {
-                    Row::Gap if washed => c.m.below.max(0.0) as u32,
                     Row::Head { .. } if i == 0 && !c.m.cells => (c.m.gap / 2.0).round() as u32,
                     _ => 0,
                 };
-                washed = false;
                 all.push(vec![]);
                 heights.push(g.height(row, 1) + under);
                 continue;
@@ -272,11 +258,10 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
         } else {
             vec![fonts.fit(title, weight, px, first)]
         };
-        heights.push(g.height(row, lines.len().max(1)));
+        heights.push(g.height(row, lines.len().max(1)) + under(i));
         all.push(lines);
     }
-    let after = vec![0; heights.len()];
-    Laid { heights, after, lines: all, idw }
+    Laid { heights, lines: all, idw }
 }
 
 /// The rows from `top` that fit in `room` pixels whole: [top, end). One at least, cut if
@@ -284,21 +269,15 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
 pub fn fitting(laid: &Laid, top: usize, room: u32) -> usize {
     let mut used = 0;
     let mut end = top;
-    while end < laid.heights.len() && (end == top || used + laid.span(end) <= room) {
-        used += laid.span(end);
+    while end < laid.heights.len() && (end == top || used + laid.heights[end] <= room) {
+        used += laid.heights[end];
         end += 1;
     }
     end
 }
 
-/// How far the selected card reaches under its block's last row, in whole pixels with
-/// one for its smoothed edge: pieces.rs leaves this room under the block.
-pub fn card_below(c: &Canvas) -> u32 {
-    c.m.below.max(0.0).ceil() as u32 + 1
-}
-
 /// The selected card's edge, in pixels.
-const RING: f32 = 3.0;
+const RING: f32 = 2.0;
 
 /// The pixels drawn past a window's edges, and cut off (render).
 const EDGE: u32 = 4;
@@ -344,7 +323,7 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
             _ => None,
         };
         places.push(Place { row: i, y, h: laid.heights[i], id });
-        y += laid.span(i);
+        y += laid.heights[i];
     }
     // the window: the rows are drawn where they are in the layout, moved up by its top
     // (whole pixels), so a row's edges fall on the same fractions of a pixel in any image
@@ -372,10 +351,10 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
             d.row(&rows.rows[p.row], &laid.lines[p.row], (y, h), (cut.bare)(p.row));
         }
     }
-    // the selected task's key, at its card's lower right (lay made room for it)
+    // the selected task's key, at its card's lower right, when its last line leaves room
     for b in blocks.iter().filter(|b| b.ends) {
-        if let Some((key, what)) = b.key {
-            d.action(key, what, b.bottom);
+        if let Some((key, what)) = b.key.filter(|(k, what)| d.g.key_fits(&rows.rows[b.last], &laid.lines[b.last], k, what, d.fonts)) {
+            d.action(key, what, b.bottom - c.m.below);
         }
     }
     let mut pm = pm.clone_rect(tiny_skia::IntRect::from_xywh(0, EDGE as i32, width, height).ok_or_else(made)?).ok_or_else(made)?;
@@ -383,8 +362,8 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
     Ok(Sheet { pixmap: pm, places })
 }
 
-/// A task's (or an item's) block: from its first line's top to its last line's bottom,
-/// whether it's selected, and its flag.
+/// A task's (or an item's) block: from its first line's top to its last row's bottom
+/// (its card's), whether it's selected, and its flag.
 struct Block<'r> {
     top: f32,
     bottom: f32,
@@ -394,6 +373,8 @@ struct Block<'r> {
     /// where the key goes
     key: Option<&'r (String, String)>,
     ends: bool,
+    /// its last row
+    last: usize,
 }
 
 /// The blocks of the rows placed: each task's or item's row with the lines under it (a
@@ -404,7 +385,7 @@ fn blocks<'r>(rows: &'r Rows, places: &[Place], pad: f32) -> Vec<Block<'r>> {
     for p in places {
         let row = &rows.rows[p.row];
         let (y, bottom) = (p.y as f32, (p.y + p.h) as f32);
-        let block = |top: f32, selected: bool, flag: Option<Flag>| Block { top, bottom, selected, flag, key: None, ends: false };
+        let block = |top: f32, selected: bool, flag: Option<Flag>| Block { top, bottom, selected, flag, key: None, ends: false, last: p.row };
         // a line under a task (or an item) that's its block's last
         let ends = row.is_detail() && !rows.rows.get(p.row + 1).is_some_and(Row::is_detail);
         match row {
@@ -412,10 +393,10 @@ fn blocks<'r>(rows: &'r Rows, places: &[Place], pad: f32) -> Vec<Block<'r>> {
             Row::Item(i) => out.push(block(y + pad, i.selected, None)),
             Row::Detail(_) | Row::ItemDetail(..) if open => {
                 let b = out.last_mut().expect("a block is open");
-                (b.bottom, b.ends) = (bottom, ends);
+                (b.bottom, b.ends, b.last) = (bottom, ends, p.row);
             }
             Row::Detail(dr) => out.push(Block { ends, ..block(y, dr.selected, dr.flag) }),
-            Row::ItemDetail(..) => out.push(Block { ends, ..block(y, true, None) }),
+            Row::ItemDetail(_, _, sel) => out.push(Block { ends, ..block(y, *sel, None) }),
             _ => {}
         }
         open = row.is_entry() || row.is_detail();
@@ -514,23 +495,18 @@ impl Geo {
         if lines.is_empty() { vec![String::new()] } else { lines }
     }
 
-    /// Make room at the right of a detail's last line for the selected task's key,
-    /// `key` pixels: when the line is too long for it, its last words go on a line
-    /// more (the lines above keep their width), or with `most` lines already, it's cut.
-    fn room_for_key(&self, lines: &mut Vec<String>, most: usize, key: f32, fonts: &Fonts) {
-        let (px, room) = (self.c.m.body, self.detail_room() - key);
-        let wide = |l: &str| fonts.width(l, Weight::Regular, px) > room;
-        let Some(line) = lines.pop() else { return };
-        if !wide(&line) {
-            return lines.push(line);
-        }
-        match line.rsplit_once(' ') {
-            Some((rest, word)) if lines.len() + 1 < most && !line.ends_with('…') => {
-                lines.extend([rest.to_string(), word.to_string()]);
-                fonts.fill_last(lines, Weight::Regular, px, room);
-            }
-            _ => lines.push(fonts.fit(&line, Weight::Regular, px, room)),
-        }
+    /// The room the caps of the keys a detail's text names take on a line: their sides.
+    fn caps(&self, d: &DetailRow) -> f32 {
+        key_letters(&d.text, d.lead).len() as f32 * 2.0 * KEY_SIDE * self.c.m.body
+    }
+
+    /// Does the selected task's key fit at the right of its block's last line (`row`,
+    /// a detail, drawn on `lines`) as that line is? The line is never cut or moved for
+    /// it: where it doesn't fit it's left out, and the key row has it.
+    fn key_fits(&self, row: &Row, lines: &[String], key: &str, what: &str, fonts: &Fonts) -> bool {
+        let Row::Detail(d) = row else { return false };
+        let line = lines.last().map_or(0.0, |l| fonts.width(l, Weight::Bold, self.c.m.body));
+        line + self.caps(d) + self.key_width(key, what, fonts) <= self.detail_room()
     }
 
     /// A detail line's room: from the title's left edge to where text ends.
@@ -703,28 +679,28 @@ impl<'a> Draw<'a> {
         self.pm.stroke_path(path, &paint(color), &stroke, t, None);
     }
 
-    /// What a block from `top` to `bottom` sits on (Block): three quarters of a cell past where text
+    /// What a block from `top` to `bottom` sits on (Block): a column past where text
     /// starts and ends, on each side (its mark inside it), clear of the type above by
-    /// `inset` and under it by `below`, into the space above the next task. As x, y, w, h.
+    /// `inset`, to its last row's bottom, which has the room under its type (small
+    /// type's: a pixel inside its rows). As x, y, w, h.
     fn panel(&self, top: f32, bottom: f32) -> (f32, f32, f32, f32) {
-        let (m, out) = (self.m(), (0.75 * self.c()).round());
+        let (m, out) = (self.m(), self.g.c.out());
         let x = self.g.c.left() - out;
-        (x, top - m.inset, self.right() + out - x, bottom - top + m.inset + m.below)
+        (x, top - m.inset, self.right() + out - x, bottom - top + m.inset + if m.cells { m.inset } else { 0.0 })
     }
 
     /// The selected task's (or item's) card, the same wherever it is: a fill a step
     /// stronger than what's around it (the foreground, faint, or its flag's colour
-    /// well over its wash's strength when it needs you or stopped) and an edge three
-    /// pixels wide, the terminal's blue (in the bar's place, on a task that needs you).
+    /// well over its wash's strength when it needs you or stopped) and a quiet edge two
+    /// pixels wide, the terminal's blue mixed into the pane's colour (in the bar's
+    /// place, on a task that needs you).
     fn card(&mut self, top: f32, bottom: f32, flag: Option<Flag>) {
         let (x, y, w, h) = self.panel(top, bottom);
         let r = self.radius();
         let fill = flag.map_or(self.theme.tint(), |f| self.theme.flag_tint(f));
         let edge = self.theme.edge();
         self.rounded_fill(x, y, w, h, r, fill);
-        // (small type's rows are a cell each: a thinner edge, clear of the type)
-        let ring = if self.m().cells { RING - 1.0 } else { RING };
-        self.rounded_edge(x, y, w, h, r, ring, edge);
+        self.rounded_edge(x, y, w, h, r, RING, edge);
     }
 
     /// A card's and a wash's corners.
@@ -847,11 +823,11 @@ impl<'a> Draw<'a> {
                 self.text(rest, Weight::Regular, end, y, self.right() - end, rc);
             }
             Row::Item(i) => self.item(i, lines, y + m.pad, bare),
-            Row::ItemDetail(..) => {
+            Row::ItemDetail(_, _, selected) => {
                 let x = self.title_x();
                 for (k, line) in lines.iter().enumerate() {
-                    let soft = self.theme.soft();
-                    self.text(line, Weight::Regular, x, y + k as f32 * m.body_line, self.right() - x, soft);
+                    let color = if *selected { self.theme.soft() } else { dim };
+                    self.text(line, Weight::Regular, x, y + k as f32 * m.body_line, self.right() - x, color);
                 }
             }
         }

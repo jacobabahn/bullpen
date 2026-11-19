@@ -8,7 +8,7 @@ use super::kitty::Place;
 use super::pieces::{mark_y, rows_in, sprite_mark, Plan};
 use super::render::{render, Canvas, Cut, Marks};
 use super::shown::{Screen, Slot, Want};
-use super::sprite::{self, Sprite, COLS};
+use super::sprite::{self, Sprite};
 use super::worker::Job;
 use super::{meter, png, View};
 use crate::model::TextSize;
@@ -50,7 +50,7 @@ fn base_rows<'a>(f: &Frame<'a>) -> &'a [Row] {
 pub fn base_shows(f: &Frame) -> u64 {
     let p = f.plan;
     let rows = if p.whole { &f.view.rows } else { &f.view.base };
-    key(&Slot::List, f, (&rows.rows[p.shown.clone()], p.base.idw.to_bits()))
+    key(&Slot::List, f, (&rows.rows[p.top..p.end], p.laid.idw.to_bits()))
 }
 
 /// The base image as drawn: its key, its window (pixels from the list's top, and how
@@ -74,8 +74,8 @@ pub fn list_image(f: &Frame) -> ListImage {
         h.finish()
     };
     let rows: Vec<u64> = base_rows(f).iter().map(|r| one(&|h| (r, (f.bare)(r)).hash(h))).collect();
-    let spans: Vec<u32> = p.win.clone().map(|i| p.base.span(i)).collect();
-    let layout = key(&Slot::List, f, (&p.win, p.win_at, p.win_y, p.win_h, spans, p.base.idw.to_bits(), p.whole));
+    let spans: Vec<u32> = p.win.clone().map(|i| p.laid.heights[i]).collect();
+    let layout = key(&Slot::List, f, (&p.win, p.win_at, p.win_y, p.win_h, spans, p.laid.idw.to_bits(), p.whole));
     let key = one(&|h| (layout, &rows).hash(h));
     ListImage { key, win: (p.win_at + p.win_y, p.win_h), layout, first: p.win.start, rows }
 }
@@ -93,7 +93,7 @@ pub fn job(f: &Frame, k: u64) -> Job {
     let p = f.plan;
     let rs = if p.whole { &f.view.rows } else { &f.view.base };
     let bare = rs.rows.iter().map(f.bare).collect();
-    let (rows, laid, range) = (rs.clone(), p.base.clone(), p.win.clone());
+    let (rows, laid, range) = (rs.clone(), p.laid.clone(), p.win.clone());
     Job { key: k, rows, laid, range, at: p.win_at, y: p.win_y, h: p.win_h, bare, canvas: *f.c, font: None }
 }
 
@@ -134,7 +134,7 @@ pub fn wants(f: &Frame, k: u64, screen: &Screen, fonts: &mut Fonts, jobs: Option
             None => {
                 let bare = |i: usize| (f.bare)(&rs.rows[i]);
                 let cut = Cut { range: p.win.clone(), at: p.win_at, y: p.win_y, h: p.win_h, marks: Marks::default(), bare: &bare };
-                Some(encode(&Slot::List, || render(rs, &p.base, cut, c, fonts).map(|s| s.pixmap))?)
+                Some(encode(&Slot::List, || render(rs, &p.laid, cut, c, fonts).map(|s| s.pixmap))?)
             }
         }
     };
@@ -184,7 +184,7 @@ pub fn wants(f: &Frame, k: u64, screen: &Screen, fonts: &mut Fonts, jobs: Option
         let frame = sprite::frame(&mark, f.ms.saturating_sub((f.began)(row)));
         let Some(at) = sprite::at(c, mark_y(p, i, c), frame, v.rows_n) else { continue };
         let places = marks.entry(mark).or_default();
-        let cols = COLS.min(v.cols);
+        let cols = sprite::cols(c).min(v.cols);
         places.push(Place {
             id: 0,
             p: places.len() as u32 + 1,

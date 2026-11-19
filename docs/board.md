@@ -41,7 +41,8 @@ it has been there; a task that needs you or stopped turns its age red after 5
 minutes. On the lines under it (from under its ID) it shows
 what it needs or where it stands ("Asks: python3 or python?", "PR #4, approved
 by light review.", "Follow-up review on round 2 of 2."): one or two lines, cut
-to fit, and for the selected task all of it, up to eight lines. The lines of a task
+to fit, and for the selected task all of it, up to eight lines (on the text board; the
+image look keeps a task the same selected or not, see [The image look](#the-image-look)). The lines of a task
 that needs you, stopped, is ready or finished are at normal weight; the rest
 (working, queued, in review, the coordinator's, closed, and a change's size) are
 dimmed. The selected
@@ -148,10 +149,10 @@ left edge where a group's name starts. The list says everything the text list do
 row for row: each task's ID, title, mark, risk, age and lines, the groups and the
 Later group.
 
-One grid holds it: text starts a column and a quarter in from the pane's left edge
+One grid holds it: text starts a column and a half in from the pane's left edge
 and ends that far from its right, the rules and the status bar run between the two,
-and a card or a wash reaches three quarters of a column past each, so type is clear
-of their edges and they're as far from one side of the pane as the other. The ages
+and a card or a wash reaches a column past each, so type has clear room inside its
+edges and they're as far from one side of the pane as the other. The ages
 have a column of their own at the right, two figures wide, so the risks' chips before
 it line up down the list; a title's lines after its first stop short of it. A task
 is one block with a hanging indent: its mark and its ID are in a gutter at the left,
@@ -160,21 +161,26 @@ title's left edge. The two are told apart by their type: a title is semibold, an
 the lines under it are regular, two sizes smaller, after a gap. On a board under 44 columns the ID is a size smaller and the gap
 after it narrower, so the gutter takes less of those lines.
 
-The selected task sits on a card, and nothing else is boxed: a faint fill and an
-edge three pixels wide in the terminal's blue, its mark inside it, its ID in the
-foreground and its whole title (wrapped to three lines at most). At its lower right
-is its first key in a small cap with what it does, `a accept` or `i answer`: its
-last line makes room when it must (its last words go on a line more, or it's cut
-when it has none), and the lines above keep their width. A task that needs you, or
-whose agent stopped, stands out: it sits on a faint wash of amber (or red) over the
-card's rectangle, with a bar of that colour down its left edge, following its
-corners; selected, its fill is that colour stronger and the blue edge stands in the
-bar's place. An age that has waited too long is a chip of its task's colour, whole.
+The selected task sits on a card, and nothing else is boxed: a faint fill and a
+quiet edge two pixels wide, the terminal's blue mixed into the card's fill, its mark
+inside it and its ID in the foreground. A card has room inside it on every side: a
+column beside the type, and a little over a third of a title's size over the first
+line and under the last. A task is laid out the same whether it's selected or not
+(the same title lines, the same lines under it), so `j` and `k` move only the card:
+nothing else on screen moves, though the list still scrolls to keep the selection in
+view. Its first key, in a small cap with what it does (`a accept`, `i answer`), sits
+at the card's lower right when its last line leaves room for it as it is; where it
+doesn't, it's left out (the key line at the bottom has it). A task that needs you, or
+whose agent stopped, stands out: it sits on a faint wash of amber (or red), the
+card's size, with a bar of that colour down its left edge, following its corners;
+selected, its fill is that colour stronger and the blue edge stands in the bar's
+place. An age that has waited too long is a chip of its task's colour, whole.
 
 A title is the loudest thing on a row: a task's ID (dim, on the title's baseline)
 and age, and the groups' names (a little dim), are a size under it. A title
 that's yours (it needs you, stopped, or is ready) gets two lines, at medium and
-large; another's is cut to its line, and is the foreground a step back (the
+large, selected or not; another's is cut to its line (`p` and `⏎` show the task in
+full), and is the foreground a step back (the
 coordinator's, and a closed one's, a step further), so yours lead the list. A cut is
 after the last whole word that fits, never after a comma or a full stop (in a word
 only when that would leave under half the room, as with a path). A detail line wraps
@@ -182,7 +188,10 @@ where the type runs out of room, measured in pixels, and its last line isn't lef
 word or two; it's dim, but the selected task's and what a task that needs you says,
 which are a step under the title's foreground (each reads at 4.5:1 or more on what
 it's drawn on, a light theme's washes and cards too). What a task needs from you
-gets up to four lines unselected, so a question isn't cut.
+gets up to four lines, so a question isn't cut, and what a ready or finished task of
+yours says (its review, its risk's reason) up to three; any other task one, its stat
+line after. A Later item that asks for a yes, or that the coordinator skipped, has its
+line whether it's selected or not.
 A key a line names ("Its agent exited. `r` resumes it.") is in a small cap, as the
 keys at the bottom. A ready task's risk is a quiet chip: a dot of its colour, then
 the word dim, inside a faint line (on a board under 44 columns, its first letter: H,
@@ -223,8 +232,8 @@ board is text whatever the look.
 
 `bullpen config --board-text-size` sets the type: `medium` (the default) is the
 terminal's own text size, with the lines under each title smaller and dimmer, a
-little space between them and about three quarters of a line between the tasks, so a
-row is a little more than a cell (cards one under the other are a few pixels apart); `large` is larger still, for a pane read from
+little space between them and a card's room round each task, so a row is a little
+more than a cell (cards one under the other are a few pixels apart); `large` is larger still, for a pane read from
 further away, and cuts titles sooner; `small` is a cell a row, as the text list. The
 list scrolls by its rows' own heights, keeping the selected task and its lines in
 view and showing only whole rows, so a page (`PgDn`) has fewer tasks than the text
@@ -257,9 +266,9 @@ The board is images: the top line, the list's rows shown and the bottom rows, ea
 drawn at the terminal's cell size and sent only when what it shows changes (a task's
 status or age on screen, the message), so a change to the list doesn't send the top
 line again. The list is drawn with nothing selected, and the selected task's block
-(its card, its whole title and all its lines) is a small image of its own over the
-cells it takes: the rows under it move down by whole cells to make room, by placing
-the list's image again lower, not sending it. The list's image is a window of the
+(its card and its lines) is a small image of its own over the cells it's in; since
+a block is the same size selected or not, the list's image is placed above and under
+it where it was, and nothing moves. The list's image is a window of the
 list: the page, when something on it changed; scrolled out of that, two pages at a
 page's steps, so scrolling a row places it again higher and sends nothing. It's sent
 again when a row on the page changes (a row off the page that changed is drawn when it

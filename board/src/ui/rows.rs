@@ -23,8 +23,10 @@ pub(crate) enum Row {
     Later { text: String, amber: bool },
     /// an item of the Later group, expanded
     Item(ItemRow),
-    /// a line under the selected item, and the most lines it takes (detail_lines)
-    ItemDetail(String, usize),
+    /// a line under an item, the most lines it takes (detail_lines), and whether the
+    /// item is selected (the text list's: the selected item's; the image's: any item's
+    /// with something to know)
+    ItemDetail(String, usize, bool),
 }
 
 /// A task's mark: still, or one the text board turns.
@@ -143,7 +145,8 @@ pub(crate) struct Rows {
     pub idw: usize,
 }
 
-/// How many lines of detail the selected task gets.
+/// How many lines of detail the selected task gets on the text board (the image
+/// board gives it the lines it has unselected).
 const SELECTED_LINES: usize = 8;
 
 /// The rows of a board `w` columns wide (`narrow`: a task's age goes on its detail line
@@ -204,6 +207,9 @@ fn build_as(app: &App, w: usize, narrow: bool, now: Now, selection: bool) -> Row
 /// The most lines the image board gives what a task needs from you, unselected.
 const ASKED_LINES: usize = 4;
 
+/// And what it gives a task that's yours to accept or close (ready, finished).
+const YOURS_LINES: usize = 3;
+
 /// A task's detail lines (the grouped layout's): what its agent is doing now, or
 /// what there is to say about it; then its stat line.
 fn details(rows: &mut Vec<Row>, app: &App, t: &Task, cur: bool, age_on_detail: bool, detail_w: usize, now: Now) {
@@ -213,11 +219,15 @@ fn details(rows: &mut Vec<Row>, app: &App, t: &Task, cur: bool, age_on_detail: b
     // as does one its coordinator is on (when it comes to you); anything else
     // one; the selected task all it has to say, up to SELECTED_LINES
     // (on the image board what a task needs from you is never cut short of ASKED_LINES:
-    // it's what you have to answer)
-    let lines = if cur {
+    // it's what you have to answer, and what's yours to accept or close gets
+    // YOURS_LINES, its risk's reason whole; the selected task gets the lines it has
+    // unselected, so moving the selection moves nothing else)
+    let lines = if cur && !app.image {
         SELECTED_LINES
     } else if app.image && t.flagged() {
         ASKED_LINES
+    } else if app.image && doing.is_empty() && loud_detail(app, t) {
+        YOURS_LINES
     } else if !doing.is_empty() {
         1
     } else if t.flagged() || t.is_limited() || t.triage() || t.status == "finished" || !model::pr_phrase(t).is_empty() {

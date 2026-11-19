@@ -117,11 +117,12 @@ impl Theme {
         faint(self.fg, 0.085)
     }
 
-    /// The selected card's edge: the terminal's blue, whatever the card's fill. Nothing
-    /// else on the board is boxed, so the ring is the selection wherever it is, among
-    /// amber and red washes too.
+    /// The selected card's edge: the terminal's blue, part clear, so it's mixed into
+    /// the card's own fill and reads as a quiet line, not a frame. Nothing else on the
+    /// board is boxed, so the ring is the selection wherever it is, among amber and red
+    /// washes too.
     pub fn edge(&self) -> [u8; 4] {
-        solid(self.blue)
+        faint(self.blue, EDGE)
     }
 
     /// The selected card's fill when its task needs you or stopped: its flag's colour,
@@ -235,6 +236,9 @@ pub fn bright(c: Rgb) -> Rgb {
     let up = |v: u8| (v as u32 * 255 / most) as u8;
     Rgb(up(c.0), up(c.1), up(c.2))
 }
+
+/// How much of the selected card's edge is the terminal's blue.
+const EDGE: f32 = 0.6;
 
 pub fn solid(c: Rgb) -> [u8; 4] {
     [c.0, c.1, c.2, 255]

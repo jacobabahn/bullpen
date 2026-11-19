@@ -565,3 +565,25 @@ fn on_the_image_board_what_a_task_needs_from_you_gets_four_lines_unselected() {
     let at = r.rows.iter().position(|r| matches!(r, Row::Task(t) if t.id == "BP-1")).unwrap();
     assert!(r.rows[at + 1..].iter().take_while(|r| r.is_detail()).count() <= 3);
 }
+
+#[test]
+fn on_the_image_board_a_task_has_the_same_lines_selected_or_not() {
+    use crate::ui::rows::Row;
+    let mut a = app(vec![asking("BP-1"), ready("BP-2").with(json!({"diffstat": "3 files, +4 −1"})), task("BP-3", "todo")], 0, Layout::Grouped);
+    a.image = true;
+    let lines = |a: &App, id: &str| -> Vec<usize> {
+        let r = crate::ui::rows::build(a, 42, false, model::now());
+        let at = r.rows.iter().position(|r| matches!(r, Row::Task(t) if t.id == id)).unwrap();
+        r.rows[at + 1..].iter().map_while(|r| if let Row::Detail(d) = r { Some(d.lines) } else { None }).collect()
+    };
+    // what's yours to accept gets three lines; a queued task one
+    a.sel = Some("BP-1".into());
+    let (two, three) = (lines(&a, "BP-2"), lines(&a, "BP-3"));
+    assert_eq!((two[0], three[0]), (3, 1));
+    for id in ["BP-1", "BP-2", "BP-3"] {
+        a.sel = Some("BP-1".into());
+        let other = lines(&a, id);
+        a.sel = Some(id.into());
+        assert_eq!(lines(&a, id), other, "{id}");
+    }
+}

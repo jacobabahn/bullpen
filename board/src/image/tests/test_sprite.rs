@@ -31,7 +31,9 @@ fn a_strip_has_a_tile_a_frame_each_turned_or_sized() {
     let mut fonts = Fonts::builtin();
     let t = tile(&c);
     let working = draw(&Sprite::Mark(Mark::Working), &c, &mut fonts).unwrap();
-    assert_eq!((working.width(), working.height()), (30, 10 * t.h));
+    // as many columns as the mark reaches, at its largest
+    assert_eq!((working.width(), working.height()), (cols(&c) as u32 * 10, 10 * t.h));
+    assert!(cols(&c) >= 3 && mark_at(&c).0 + mark_reach(&c, POP_MAX) <= working.width() as f32);
     // the turning arc is somewhere else in each frame
     let tile_px = |pm: &Pixmap, f: u32| pm.clone_rect(tiny_skia::IntRect::from_xywh(0, (f * t.h) as i32, pm.width(), t.h).unwrap()).unwrap();
     assert_ne!(tile_px(&working, 0).data(), tile_px(&working, 1).data());

@@ -387,7 +387,7 @@ fn wants(
         };
     }
     let now = list::list_image(&frame!(&plan));
-    let kept = p.list.filter(|d| screen.has(&Slot::List, d.key) && list::still(d, &now, plan.shown.clone()));
+    let kept = p.list.filter(|d| screen.has(&Slot::List, d.key) && list::still(d, &now, plan.top..plan.end));
     let (plan, image) = match kept {
         _ if screen.has(&Slot::List, now.key) => (plan, now),
         Some(d) => (plan, d.clone()),

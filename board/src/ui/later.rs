@@ -35,9 +35,11 @@ pub(super) fn later_rows(app: &App, items: &[Item], after_rows: bool, detail_w: 
         let row = item_row(app, i, selection);
         let selected = row.selected;
         rows.push(Row::Item(row));
-        if selected {
+        // (the image board's list is the same whichever item is selected: an item with
+        // something to know, a yes it asks for or why it was skipped, always has its line)
+        if if app.image { i.asks() || !i.skipped.is_empty() } else { selected } {
             for (line, most) in detail_lines(app, &model::item_detail(i), detail_w, ITEM_LINES) {
-                rows.push(Row::ItemDetail(line, most));
+                rows.push(Row::ItemDetail(line, most, selected));
             }
         }
     }
