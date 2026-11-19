@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""Show where the terminal's limit on a kitty graphics image is: run it in a Rex pane.
+
+    bin/kitty-limit-check              # the limit Rex is known for: 10,000,000 bytes
+    bin/kitty-limit-check 16000000     # try another
+
+It places two images side by side, each a fine one-pixel checkerboard of black and
+white: on the left one just under the limit (its width × height × 4 bytes of RGBA at
+most the limit), on the right the same width a row taller, just over. Each is placed
+pixel for pixel (a crop of it the pane's height, never scaled), so a sharp one is a fine
+grey-looking weave that turns to black and white pixels up close.
+
+What the right one looks like says what the terminal does with an image over its limit:
+blank (it's dropped), blurry or flat grey (it's scaled down to fit), or sharp like the
+left (the limit isn't this number any more). Rex's bug report: "Kitty graphics: inline
+images of 10 MB or more are silently dropped by the client" (21 Oct 2026). bullpen's
+images are kept under bullpen-draw's `kitty::MAX_BYTES` because of it (docs/code.md).
+
+Press Enter to take the images off and delete them.
+"""
+
+import fcntl
+import os
+import struct
+import sys
+import termios
+import zlib
+
+LIMIT = 10_000_000
+IDS = (0x4B4C0001, 0x4B4C0002)
+CHUNK = 4096
+TOP = 2  # rows for the labels over the images
+FOOT = 3  # rows for the question under them
+
+
+def pane():
+    """The pane's columns, rows, and its size in pixels (0 when the terminal doesn't say)."""
+    for fd in (sys.stdout.fileno(), sys.stdin.fileno()):
+        try:
+            rows, cols, xpix, ypix = struct.unpack("HHHH", fcntl.ioctl(fd, termios.TIOCGWINSZ, b"\0" * 8))
+            return cols, rows, xpix, ypix
+        except OSError:
+            continue
+    return 0, 0, 0, 0
+
+
+def plan(cols, rows, xpix, ypix, limit):
+    """The two images and where each goes: a dict for each with its width and height in
+    pixels, its bytes (w × h × 4), its first column, and the block of cells it's placed
+    on with the crop that fills it pixel for pixel. None when the terminal doesn't say
+    its size in pixels or the pane is too small."""
+    if not (cols and rows and xpix and ypix) or cols < 8 or rows < TOP + FOOT + 2:
+        return None
+    cw, ch = xpix // cols, ypix // rows
+    half = (cols - 2) // 2
+    w = half * cw
+    under = limit // (4 * w)
+    out = []
+    for k, h in enumerate((under, under + 1)):
+        shown = min(rows - TOP - FOOT, h // ch)
+        out.append({"w": w, "h": h, "bytes": w * h * 4, "col": k * (half + 2), "cols": half, "rows": shown,
+                    "crop_w": half * cw, "crop_h": shown * ch})
+    return out
+
+
+def checkerboard(w, h):
+    """A w by h PNG (8-bit RGBA), alternate pixels black and white, each row shifted one."""
+    black, white = b"\0\0\0\xff", b"\xff\xff\xff\xff"
+    even = b"\0" + (black + white) * (w // 2) + black * (w % 2)
+    odd = b"\0" + (white + black) * (w // 2) + white * (w % 2)
+    raw = (even + odd) * (h // 2) + even * (h % 2)
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b"")
+
+
+def apc(control, payload=""):
+    return f"\x1b_G{control};{payload}\x1b\\" if payload else f"\x1b_G{control}\x1b\\"
+
+
+def upload(id, png):
+    import base64
+    data = base64.b64encode(png).decode()
+    chunks = [data[k:k + CHUNK] for k in range(0, len(data), CHUNK)] or [""]
+    out = []
+    for k, c in enumerate(chunks):
+        more = int(k + 1 < len(chunks))
+        control = f"a=t,f=100,t=d,i={id},q=2,m={more}" if k == 0 else f"q=2,m={more}"
+        out.append(apc(control, c))
+    return "".join(out)
+
+
+def place(id, im):
+    control = f"a=p,i={id},p=1,x=0,y=0,w={im['crop_w']},h={im['crop_h']},c={im['cols']},r={im['rows']},C=1,q=2"
+    return f"\x1b[{TOP + 1};{im['col'] + 1}H" + apc(control)
+
+
+def main():
+    limit = int(sys.argv[1]) if len(sys.argv) > 1 else LIMIT
+    cols, rows, xpix, ypix = pane()
+    images = plan(cols, rows, xpix, ypix, limit)
+    if images is None:
+        sys.exit("kitty-limit-check: the terminal doesn't say its size in pixels, or the pane is too small")
+    out = ["\x1b[2J\x1b[H"]
+    for side, im in zip(("under", "over"), images):
+        label = f"{side} the limit: {im['w']}×{im['h']} = {im['bytes']:,} bytes"
+        out.append(f"\x1b[1;{im['col'] + 1}H{label[:im['cols']]}")
+    for id, im in zip(IDS, images):
+        out.append(upload(id, checkerboard(im["w"], im["h"])))
+        out.append(place(id, im))
+    question = "The left one is under the limit. Is the right one blank, blurry (flat grey), or sharp like the left?"
+    out.append(f"\x1b[{rows - FOOT + 2};1H{question[:cols]}\r\nPress Enter to clear. ")
+    os.write(sys.stdout.fileno(), "".join(out).encode())
+    try:
+        input()
+    except (EOFError, KeyboardInterrupt):
+        pass
+    os.write(sys.stdout.fileno(), ("".join(apc(f"a=d,d=I,i={id},q=2") for id in IDS) + "\x1b[2J\x1b[H").encode())
+
+
+if __name__ == "__main__":
+    main()
