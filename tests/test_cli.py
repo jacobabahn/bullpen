@@ -360,7 +360,7 @@ class CodeTest(unittest.TestCase):
 
     def modules(self):
         """Every module the code map lists: the crates' Rust but their tests, and the Lua."""
-        rust = [f for d in ("core", "cli", "board", "tests/fakes") for f in (ROOT / d / "src").rglob("*.rs")
+        rust = [f for d in ("core", "cli", "board", "draw", "tests/fakes") for f in (ROOT / d / "src").rglob("*.rs")
                 if not f.name.startswith("test_")]
         return {str(f.relative_to(ROOT)) for f in [*rust, *(ROOT / "lua").rglob("*.lua")]}
 

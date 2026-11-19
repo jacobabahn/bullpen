@@ -3,9 +3,10 @@
 //! accept start, given the build lock by fd), their rebuild_if_stale, and the catch-up
 //! of an internal command this build doesn't have yet (catch_up).
 //!
-//! bullpen's own checkout (HOME) is one cargo workspace (Cargo.toml): core/, cli/ (the
-//! command line, bin/bullpen runs it) and board/. Each program's source has a hash, and
-//! its build records the hash it was built from (its stamp). `up`, and an accept in
+//! bullpen's own checkout (HOME) is one cargo workspace (Cargo.toml): core/, draw/ (what
+//! both draw images with), cli/ (the command line, bin/bullpen runs it) and board/. Each
+//! program's source has a hash (its crates', draw's among them), and its build records
+//! the hash it was built from (its stamp). `up`, and an accept in
 //! HOME's own repo, start a build in the background when a source no longer matches. An
 //! accept that merged into another copy of bullpen that runs from its own build starts
 //! that copy's build the same way, run by that copy (rebuild_merged_into). A
@@ -54,7 +55,7 @@ pub struct Program {
 pub static CLI: Program = Program {
     name: "bullpen",
     package: "bullpen-cli",
-    crates: &["core", "cli"],
+    crates: &["core", "draw", "cli"],
     what: "bullpen's command line",
     keeps: "Commands keep running the old build",
     news_as: ("bullpen", Kind::Build),
@@ -63,7 +64,7 @@ pub static CLI: Program = Program {
 pub static BOARD: Program = Program {
     name: "bullpen-board",
     package: "bullpen-board",
-    crates: &["core", "board"],
+    crates: &["core", "draw", "board"],
     what: "the board",
     keeps: "Boards keep running the old one",
     news_as: ("board", Kind::Board),

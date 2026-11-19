@@ -38,7 +38,8 @@ def sh(*cmd, cwd=None):
 def cli_source_hash():
     """The hash of the command line's source that its build stamp (target/bullpen.json)
     records: cli/src/build.rs's source_hash, for bullpen-cli."""
-    return source_hash(("Cargo.toml", "Cargo.lock", "core/Cargo.toml", "core/src", "cli/Cargo.toml", "cli/src"))
+    return source_hash(("Cargo.toml", "Cargo.lock", "core/Cargo.toml", "core/src", "draw/Cargo.toml", "draw/src",
+                        "cli/Cargo.toml", "cli/src"))
 
 
 def source_hash(rels):

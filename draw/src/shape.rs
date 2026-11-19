@@ -1,7 +1,7 @@
 //! The shapes the image look draws with: the paint a colour fills with, arcs, a half
-//! disc, a diamond and a rectangle with rounded corners, as tiny-skia paths. The marks
-//! (render.rs), the cards and washes behind tasks, and the chips and keycaps (chip.rs)
-//! are made of these.
+//! disc, a diamond and a rectangle with rounded corners, as tiny-skia paths. The board's
+//! marks, cards, washes, chips and keycaps (board/src/image/) and the tour's rail, cards
+//! and code (cli/src/stepper/look/) are made of these.
 
 use std::f32::consts::PI;
 use tiny_skia::{Paint, Path, PathBuilder};

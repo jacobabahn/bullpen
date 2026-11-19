@@ -18,7 +18,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 # (folder, its comment marker), in the map's order
 ROOTS = ("lib.rs", "main.rs", "mod.rs")
-PLACES = [("core/src", "//!"), ("cli/src", "//!"), ("board/src", "//!"), ("tests/fakes/src", "//!"), ("lua", "--")]
+PLACES = [("core/src", "//!"), ("cli/src", "//!"), ("board/src", "//!"), ("draw/src", "//!"), ("tests/fakes/src", "//!"),
+          ("lua", "--")]
 
 
 def modules(folder, ext):
