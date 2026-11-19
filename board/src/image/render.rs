@@ -94,7 +94,7 @@ impl Metrics {
         }
         // a task's lines are smaller than its title by two steps, after a gap, so the
         // two read apart though they start at the same edge
-        let body = (0.62 * ch).max(6.0);
+        let body = (BODY * detail).max(6.0);
         Metrics {
             title,
             detail,
@@ -113,6 +113,9 @@ impl Metrics {
         }
     }
 }
+
+/// The type of the lines under a task, of a detail's size (medium's is 0.62 of a cell).
+const BODY: f32 = 0.886;
 
 /// What an image is drawn on and in: its grid, the type's sizes and the colours.
 #[derive(Debug, Clone, Copy)]
