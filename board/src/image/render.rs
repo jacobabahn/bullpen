@@ -50,6 +50,10 @@ pub struct Metrics {
     /// a title line's height, and a detail line's
     pub line: f32,
     pub detail_line: f32,
+    /// the lines under a task: their type, a size under a detail's (the ID's, the
+    /// age's), and their height
+    pub body: f32,
+    pub body_line: f32,
     /// the space above a task (or an item), and above a heading
     pub pad: f32,
     pub head_pad: f32,
@@ -86,18 +90,23 @@ impl Metrics {
         if size == TextSize::Small {
             let (line, detail_line, gap) = (ch, ch, ch);
             let (pad, head_pad, title_gap, inset) = (0.0, 0.0, 0.0, -1.0);
-            return Metrics { title, detail, label, line, detail_line, pad, head_pad, gap, title_gap, inset, below: inset, cells: true };
+            return Metrics { title, detail, label, line, detail_line, body: detail, body_line: detail_line, pad, head_pad, gap, title_gap, inset, below: inset, cells: true };
         }
+        // a task's lines are smaller than its title by two steps, after a gap, so the
+        // two read apart though they start at the same edge
+        let body = (0.62 * ch).max(6.0);
         Metrics {
             title,
             detail,
             label,
             line: (1.40 * title).round(),
             detail_line: (1.42 * detail).round(),
+            body,
+            body_line: (1.42 * body).round(),
             pad: (0.86 * title).round(),
             head_pad: (0.5 * title).round(),
             gap: (0.75 * ch).round(),
-            title_gap: (0.06 * title).round(),
+            title_gap: (0.22 * title).round(),
             inset: (0.25 * title).round(),
             below: (0.25 * title).round() + (0.08 * title).round(),
             cells: false,
@@ -210,15 +219,15 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
                 washed = t.flag.is_some();
                 let two = t.yours && !c.m.cells;
                 let most = if t.selected { TITLE_LINES } else if two { YOURS_LINES } else { 1 };
-                (&t.title, most, title_weight(t.asked.is_some()), g.task_right(t, fonts), g.title_right(t, fonts))
+                (&t.title, most, title_weight(), g.task_right(t, fonts), g.title_right(t, fonts))
             }
-            Row::Item(i) => (&i.title, if i.selected { TITLE_LINES } else { 1 }, title_weight(i.asked), c.right(), c.right()),
+            Row::Item(i) => (&i.title, if i.selected { TITLE_LINES } else { 1 }, title_weight(), c.right(), c.right()),
             Row::Detail(d) => {
                 // a stale age is semibold: the first line has that much less room
                 let (age, _) = crate::model::split_at_width(&d.text, d.lead);
-                let bolder = if d.stale { fonts.width(&age, Weight::Bold, c.m.detail) - fonts.width(&age, Weight::Regular, c.m.detail) } else { 0.0 };
+                let bolder = if d.stale { fonts.width(&age, Weight::Bold, c.m.body) - fonts.width(&age, Weight::Regular, c.m.body) } else { 0.0 };
                 // (each key the text names is in a cap: room for their sides on every line)
-                let caps = key_letters(&d.text, d.lead).len() as f32 * 2.0 * KEY_SIDE * c.m.detail;
+                let caps = key_letters(&d.text, d.lead).len() as f32 * 2.0 * KEY_SIDE * c.m.body;
                 let mut lines = g.detail_lines(&d.text, d.lines, bolder, caps, fonts);
                 let last = !rows.rows.get(i + 1).is_some_and(Row::is_detail);
                 // the key goes after its last line, which makes room when it must
@@ -434,8 +443,9 @@ pub(super) fn mark_reach(c: &Canvas, scale: f32) -> f32 {
     Geo { c: *c, idw: 0.0 }.mark_reach(scale)
 }
 
-fn title_weight(asked: bool) -> Weight {
-    if asked { Weight::Bold } else { Weight::Regular }
+/// A title is semibold, whatever the task: its lines under it are regular.
+fn title_weight() -> Weight {
+    Weight::Bold
 }
 
 /// Where things go across a row, and how tall a row is.
@@ -496,8 +506,8 @@ impl Geo {
     /// "…" when there's more. One line at least, so a row is never empty.
     fn detail_lines(&self, text: &str, most: usize, less: f32, key: f32, fonts: &Fonts) -> Vec<String> {
         let room = self.detail_room() - key;
-        let mut lines = fonts.wrap(text, Weight::Regular, self.c.m.detail, (room - less, room), most);
-        fonts.fill_last(&mut lines, Weight::Regular, self.c.m.detail, room);
+        let mut lines = fonts.wrap(text, Weight::Regular, self.c.m.body, (room - less, room), most);
+        fonts.fill_last(&mut lines, Weight::Regular, self.c.m.body, room);
         if lines.is_empty() { vec![String::new()] } else { lines }
     }
 
@@ -505,7 +515,7 @@ impl Geo {
     /// `key` pixels: when the line is too long for it, its last words go on a line
     /// more (the lines above keep their width), or with `most` lines already, it's cut.
     fn room_for_key(&self, lines: &mut Vec<String>, most: usize, key: f32, fonts: &Fonts) {
-        let (px, room) = (self.c.m.detail, self.detail_room() - key);
+        let (px, room) = (self.c.m.body, self.detail_room() - key);
         let wide = |l: &str| fonts.width(l, Weight::Regular, px) > room;
         let Some(line) = lines.pop() else { return };
         if !wide(&line) {
@@ -595,7 +605,7 @@ impl Geo {
             Row::Head { .. } => m.head_pad + m.detail_line,
             Row::Task(_) | Row::Item(_) => m.pad + lines as f32 * m.line + m.title_gap,
             Row::Later { .. } => m.pad + m.line,
-            Row::Detail(_) | Row::ItemDetail(..) => lines as f32 * m.detail_line,
+            Row::Detail(_) | Row::ItemDetail(..) => lines as f32 * m.body_line,
             Row::Gap => m.gap,
             Row::Empty { .. } => m.line,
         };
@@ -743,7 +753,7 @@ impl<'a> Draw<'a> {
     fn action(&mut self, key: &str, what: &str, bottom: f32) {
         let px = self.g.key_px();
         let x = self.right() - chip::keycap_width(self.fonts, key, what, px);
-        chip::keycap(self, key, what, px, x, bottom - self.m().detail_line / 2.0);
+        chip::keycap(self, key, what, px, x, bottom - self.m().body_line / 2.0);
     }
 
     /// A rectangle with rounded corners, filled.
@@ -784,7 +794,7 @@ impl<'a> Draw<'a> {
         let left = self.g.c.left();
         let full = self.right() - left;
         match row {
-            Row::Detail(_) | Row::ItemDetail(..) => self.set(m.detail, m.detail_line),
+            Row::Detail(_) | Row::ItemDetail(..) => self.set(m.body, m.body_line),
             _ => self.set(m.title, m.line),
         }
         match row {
@@ -800,13 +810,14 @@ impl<'a> Draw<'a> {
             }
             Row::Task(t) => self.task(t, lines, y, bare),
             Row::Detail(d) => {
-                // a step under the title, but the selected task's and what you must act on
-                let color = if d.selected || (d.loud && d.flag.is_some()) { fg } else { dim };
+                // dim, but the selected task's and what you must act on, which are a
+                // step under the title's foreground
+                let color = if d.selected || (d.loud && d.flag.is_some()) { self.theme.soft() } else { dim };
                 let x = self.title_x();
                 let keys = key_letters(&d.text, d.lead);
                 let mut seen = 0;
                 for (k, line) in lines.iter().enumerate() {
-                    let y = y + k as f32 * m.detail_line;
+                    let y = y + k as f32 * m.body_line;
                     // a narrow board's age starts the first line
                     let (age, rest) = crate::model::split_at_width(line, if k == 0 { d.lead } else { 0 });
                     // (an age that has waited too long is semibold, in the foreground)
@@ -836,7 +847,8 @@ impl<'a> Draw<'a> {
             Row::ItemDetail(..) => {
                 let x = self.title_x();
                 for (k, line) in lines.iter().enumerate() {
-                    self.text(line, Weight::Regular, x, y + k as f32 * m.detail_line, self.right() - x, fg);
+                    let soft = self.theme.soft();
+                    self.text(line, Weight::Regular, x, y + k as f32 * m.body_line, self.right() - x, soft);
                 }
             }
         }
@@ -885,7 +897,7 @@ impl<'a> Draw<'a> {
             None => self.theme.soft(),
         };
         let (first, rest) = (self.g.task_right(t, self.fonts), self.g.title_right(t, self.fonts));
-        self.title(lines, title_weight(tone.is_some()), (first, rest), y, color);
+        self.title(lines, title_weight(), (first, rest), y, color);
     }
 
     /// A title's lines from the title column, the first ending at `first`, the rest at `rest`.
@@ -932,7 +944,7 @@ impl<'a> Draw<'a> {
         self.id(&i.id, i.selected, false, i.asked.then_some(red), y);
         let color = if i.asked { red } else { self.theme.text() };
         let right = self.right();
-        self.title(lines, title_weight(i.asked), (right, right), y, color);
+        self.title(lines, title_weight(), (right, right), y, color);
     }
 }
 

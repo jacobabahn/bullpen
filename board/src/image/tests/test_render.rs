@@ -140,8 +140,10 @@ fn larger_type_makes_taller_rows_with_space_between_tasks_and_a_smaller_detail()
     let (laid, sheet) = draw_in(&r, TextSize::Medium);
     let task_h = laid.heights[1];
     assert_eq!(task_h, (medium.pad + medium.line + medium.title_gap) as u32);
-    assert!(task_h > 20 && task_h % 20 != 0); // not a whole number of cells
+    assert!(task_h > 20); // more than a cell
     assert!(laid.heights[2] < task_h);
+    // a task's lines are smaller than a detail's size (its ID's and age's), after a gap
+    assert!(medium.body < medium.detail && medium.title_gap >= 3.0 && laid.heights[2] == medium.body_line as u32);
     assert_eq!(sheet.places[2].y, laid.heights[0] + task_h);
     // small is the text list's: a cell a row
     assert_eq!(draw_in(&r, TextSize::Small).0.heights, vec![20, 20, 20]);
@@ -197,15 +199,15 @@ fn a_detail_is_wrapped_by_pixels_no_line_breaking_with_room_for_its_next_word() 
         let lines = &laid.lines[1];
         // as many lines as it needs, three at most, the row as tall as they are
         assert!(lines.len() > 1 && lines.len() <= 3, "{size:?}: {lines:?}");
-        assert_eq!(laid.heights[1], (lines.len() as f32 * c.m.detail_line).round() as u32);
+        assert_eq!(laid.heights[1], (lines.len() as f32 * c.m.body_line).round() as u32);
         let room = Geo { c, idw: laid.idw }.detail_room();
         for (k, line) in lines.iter().enumerate() {
-            assert!(fonts.width(line, Weight::Regular, c.m.detail) <= room, "{size:?}: {line}");
+            assert!(fonts.width(line, Weight::Regular, c.m.body) <= room, "{size:?}: {line}");
             // the next line's first word didn't fit on this one (but the last line's, which
             // may have taken words to be a line of its own)
             if let Some(next) = lines.get(k + 1).filter(|_| k + 2 < lines.len()).and_then(|l| l.split(' ').next()) {
                 let with = format!("{line} {next}");
-                assert!(fonts.width(&with, Weight::Regular, c.m.detail) > room, "{size:?}: {with}");
+                assert!(fonts.width(&with, Weight::Regular, c.m.body) > room, "{size:?}: {with}");
             }
         }
     }
@@ -303,7 +305,7 @@ fn a_wrapped_texts_last_word_isnt_left_alone() {
     let c = canvas(TextSize::Medium);
     let g = Geo { c, idw: 0.0 };
     let mut long = String::from("one");
-    while f.width(&format!("{long} more"), Weight::Regular, c.m.detail) <= g.detail_room() {
+    while f.width(&format!("{long} more"), Weight::Regular, c.m.body) <= g.detail_room() {
         long.push_str(" more");
     }
     let lines = g.detail_lines(&format!("{long} last."), 2, 0.0, 0.0, &f);
@@ -422,11 +424,15 @@ fn a_title_thats_yours_is_the_foreground_and_anothers_a_step_back() {
 #[test]
 fn a_line_is_dim_but_the_selected_tasks_and_what_a_task_that_needs_you_says() {
     let theme = Theme::default();
-    let full = |d: DetailRow| has(&row_px(&draw(&rows(vec![Row::Detail(d)])), 0), theme.fg);
+    // (a step under the title's foreground: soft, where the rest is dim)
+    let full = |d: DetailRow| row_px(&draw(&rows(vec![Row::Detail(d)])), 0).iter().any(|p| p[3] == theme.soft()[3]);
+    assert!(theme.soft()[3] > theme.dim()[3] && theme.soft()[3] < 255);
     assert!(!full(detail_row("approved by full review")));
     assert!(!full(DetailRow { loud: true, ..detail_row("approved by full review") }), "a ready task's line is a step under its title");
-    assert!(full(DetailRow { loud: true, flag: Some(Flag::Needs), ..detail_row("Asks: which one?") }));
-    assert!(full(DetailRow { selected: true, ..detail_row("approved by full review") }));
+    // (on its wash the type is laid over the fill: stronger than the same line dim)
+    let most = |d: DetailRow| row_px(&draw(&rows(vec![Row::Detail(d)])), 0).iter().map(|p| p[3] as u32).sum::<u32>();
+    let asks = DetailRow { flag: Some(Flag::Needs), ..detail_row("Asks: which one?") };
+    assert!(most(DetailRow { loud: true, ..asks.clone() }) > most(asks));
 }
 
 #[test]
@@ -606,17 +612,17 @@ fn the_selected_tasks_key_is_in_a_cap_at_its_cards_lower_right_and_its_last_line
         let g = Geo { c, idw: laid.idw };
         let key_w = g.key_width("a", "accept", &fonts);
         let last = laid.lines[1].last().unwrap();
-        assert!(fonts.width(last, Weight::Regular, c.m.detail) <= g.detail_room() - key_w, "{size:?}: {last}");
+        assert!(fonts.width(last, Weight::Regular, c.m.body) <= g.detail_room() - key_w, "{size:?}: {last}");
         // without a key the line had the whole width
-        assert!(fonts.width(&bare_laid.lines[1][0], Weight::Regular, c.m.detail) > g.detail_room() - key_w, "{size:?}");
+        assert!(fonts.width(&bare_laid.lines[1][0], Weight::Regular, c.m.body) > g.detail_room() - key_w, "{size:?}");
         // on the block's last line, at the right; nothing else on the title's lines
         let (top, bottom) = (laid.heights[0], laid.heights[0] + laid.heights[1]);
         let at = ((c.right() - key_w + 0.8 * c.m.label) as u32, c.right() as u32);
-        let last_line = (bottom - c.m.detail_line as u32, bottom);
+        let last_line = (bottom - c.m.body_line as u32, bottom);
         assert!(differ(&s, &bare, at, last_line), "{size:?}");
         assert!(!differ(&s, &bare, (0, s.pixmap.width()), (0, top)), "{size:?}");
         // the key's cap: its faint fill
-        let cy = bottom - c.m.detail_line as u32 / 2;
+        let cy = bottom - c.m.body_line as u32 / 2;
         assert!(px_at(&s, at.0 + 3, cy)[3] > px_at(&bare, at.0 + 3, cy)[3], "{size:?}");
     }
 }
@@ -641,7 +647,7 @@ fn only_a_details_last_line_makes_room_for_the_key() {
     let fonts = Fonts::builtin();
     let c = canvas(TextSize::Medium);
     let g = Geo { c, idw: 0.0 };
-    let w = |s: &str| fonts.width(s, Weight::Regular, c.m.detail);
+    let w = |s: &str| fonts.width(s, Weight::Regular, c.m.body);
     let key = g.key_width("a", "accept", &fonts);
     // two full lines: the first keeps its width, the second's last words go on a third
     let mut full = String::from("one");

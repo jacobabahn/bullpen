@@ -50,6 +50,32 @@ fn dim_text_reads_on_a_light_theme_and_a_dark_one() {
     }
 }
 
+/// `c` laid over `bg`, as a fill is.
+fn over(c: [u8; 4], bg: Rgb) -> Rgb {
+    let mix = |f: u8, b: u8| ((f as f32 * c[3] as f32 + b as f32 * (255 - c[3]) as f32) / 255.0).round() as u8;
+    Rgb(mix(c[0], bg.0), mix(c[1], bg.1), mix(c[2], bg.2))
+}
+
+#[test]
+fn a_tasks_lines_read_on_everything_theyre_drawn_on() {
+    use crate::ui::rows::Flag;
+    for t in [Theme::light(), Theme::default()] {
+        // dim lines: on the pane, and on a coordinator's or a ready task's selected card they're soft
+        assert!(contrast(t.dim(), t.bg) >= 4.5, "{t:?}");
+        // the selected task's lines, and what a task that needs you says: a step under the foreground
+        assert!(contrast(t.soft(), over(t.tint(), t.bg)) >= 4.5, "{t:?}");
+        for flag in [Flag::Needs, Flag::Stopped] {
+            for fill in [t.wash(flag), t.flag_tint(flag)] {
+                let c = contrast(t.soft(), over(fill, t.bg));
+                assert!(c >= 4.5, "{flag:?} on {t:?}: {c}");
+            }
+            // and the dim parts of a washed row (its age)
+            let c = contrast(t.dim(), over(t.wash(flag), t.bg));
+            assert!(c >= 4.5, "{flag:?} on {t:?}: {c}");
+        }
+    }
+}
+
 #[test]
 fn a_theme_is_named_light_or_dark() {
     assert_eq!(Theme::named("light"), Some(Theme::light()));

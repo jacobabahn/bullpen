@@ -156,7 +156,8 @@ have a column of their own at the right, two figures wide, so the risks' chips b
 it line up down the list; a title's lines after its first stop short of it. A task
 is one block with a hanging indent: its mark and its ID are in a gutter at the left,
 and its title, every line the title wraps to and every line under it start at the
-title's left edge. On a board under 44 columns the ID is a size smaller and the gap
+title's left edge. The two are told apart by their type: a title is semibold, and
+the lines under it are regular, two sizes smaller, after a gap. On a board under 44 columns the ID is a size smaller and the gap
 after it narrower, so the gutter takes less of those lines.
 
 The selected task sits on a card, and nothing else is boxed: a faint fill and an
@@ -171,7 +172,7 @@ corners; selected, its fill is that colour stronger and the blue edge stands in 
 bar's place. An age that has waited too long is a chip of its task's colour, whole.
 
 A title is the loudest thing on a row: a task's ID (dim, on the title's baseline)
-and age, and the groups' names (a little dim), are a detail line's size at most. A title
+and age, and the groups' names (a little dim), are a size under it. A title
 that's yours (it needs you, stopped, or is ready) gets two lines, at medium and
 large; another's is cut to its line, and is the foreground a step back (the
 coordinator's, and a closed one's, a step further), so yours lead the list. A cut is
@@ -179,7 +180,9 @@ after the last whole word that fits, never after a comma or a full stop (in a wo
 only when that would leave under half the room, as with a path). A detail line wraps
 where the type runs out of room, measured in pixels, and its last line isn't left a
 word or two; it's dim, but the selected task's and what a task that needs you says,
-which gets up to four lines unselected, so a question isn't cut.
+which are a step under the title's foreground (each reads at 4.5:1 or more on what
+it's drawn on, a light theme's washes and cards too). What a task needs from you
+gets up to four lines unselected, so a question isn't cut.
 A key a line names ("Its agent exited. `r` resumes it.") is in a small cap, as the
 keys at the bottom. A ready task's risk is a quiet chip: a dot of its colour, then
 the word dim, inside a faint line (on a board under 44 columns, its first letter: H,
@@ -219,7 +222,7 @@ and mission control stay text, and so does the compact layout (`l`): with it the
 board is text whatever the look.
 
 `bullpen config --board-text-size` sets the type: `medium` (the default) is the
-terminal's own text size, with a detail line smaller and dim under each title, a
+terminal's own text size, with the lines under each title smaller and dimmer, a
 little space between them and about three quarters of a line between the tasks, so a
 row is a little more than a cell (cards one under the other are a few pixels apart); `large` is larger still, for a pane read from
 further away, and cuts titles sooner; `small` is a cell a row, as the text list. The
