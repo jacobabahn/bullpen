@@ -104,6 +104,10 @@ struct Board {
     picture: Picture,
     term: Terminal<CrosstermBackend<Out>>,
     out: Out,
+    /// the board's loop's channel: the worker's images come back on it (and, held down,
+    /// the keys)
+    tx: mpsc::Sender<Msg>,
+    rx: mpsc::Receiver<Msg>,
 }
 
 impl Board {
@@ -121,11 +125,13 @@ impl Board {
         let mut app = App::new(args, None, tx);
         app.reload();
         app.later_open = true;
-        let picture = Picture { probe: Probe::Yes, on: true, cell: Some(case.cell), window: || None, ..Picture::new(Arc::new(term::Gate::default())) };
+        let mut picture = Picture { probe: Probe::Yes, on: true, cell: Some(case.cell), window: || None, ..Picture::new(Arc::new(term::Gate::default())) };
+        let (tx, rx) = mpsc::channel();
+        picture.use_thread(tx.clone());
         let viewport = Viewport::Fixed(Rect::new(0, 0, case.cols, ROWS));
         let out = Out::default();
         let term = Terminal::with_options(CrosstermBackend::new(out.clone()), TerminalOptions { viewport }).unwrap();
-        let mut b = Board { app, picture, term, out };
+        let mut b = Board { app, picture, term, out, tx, rx };
         b.frame();
         b
     }
@@ -161,6 +167,7 @@ impl Board {
         let (t, before) = (Instant::now(), self.out.bytes.get());
         meter::take();
         while self.ahead() {}
+        self.settle();
         let parts = meter::take();
         meter::stop();
         for (k, v) in parts.ms {
@@ -171,6 +178,24 @@ impl Board {
         tally.ms.insert("total".into(), ms);
         tally.bytes.insert("total".into(), n);
         tally
+    }
+
+    /// A message for the picture (the worker's image), as the main loop handles it.
+    fn handle(&mut self, m: Msg) {
+        match m {
+            Msg::Ready(r) => self.picture.ready(r, self.term.backend_mut()),
+            m => {
+                self.app.handle(m);
+            }
+        }
+    }
+
+    /// Wait for the worker's images to come back, and send them.
+    fn settle(&mut self) {
+        while self.picture.busy() {
+            let m = self.rx.recv_timeout(Duration::from_secs(5)).expect("the worker's image");
+            self.handle(m);
+        }
     }
 
     /// Draw ahead one key's images, as the board does while it waits: more to draw?
@@ -259,7 +284,8 @@ fn held(b: &mut Board, keys: usize, gap: Duration) -> Held {
     b.app.sel = b.app.order().first().map(|t| t.id.clone());
     b.frame();
     while b.ahead() {}
-    let (tx, rx) = mpsc::channel();
+    b.settle();
+    let tx = b.tx.clone();
     let sender = std::thread::spawn(move || {
         let mut sent = Vec::new();
         for _ in 0..keys {
@@ -275,19 +301,24 @@ fn held(b: &mut Board, keys: usize, gap: Duration) -> Held {
     while got < keys {
         let tick = b.picture.tick().map_or(b.app.tick(), |t| t.min(b.app.tick()));
         let next = loop {
-            match rx.try_recv() {
+            match b.rx.try_recv() {
                 Err(mpsc::TryRecvError::Empty) if b.ahead() => continue,
                 Ok(m) => break Ok(m),
-                Err(_) => break rx.recv_timeout(tick),
+                Err(_) => break b.rx.recv_timeout(tick),
             }
         };
         match next {
+            Ok(Msg::Ready(r)) => {
+                // the worker's image: sent, and no frame
+                b.picture.ready(r, b.term.backend_mut());
+                continue;
+            }
             Ok(m) => {
                 got += 1;
-                b.app.handle(m);
-                while let Ok(m) = rx.try_recv() {
-                    got += 1;
-                    b.app.handle(m);
+                b.handle(m);
+                while let Ok(m) = b.rx.try_recv() {
+                    got += usize::from(matches!(m, Msg::Key(_)));
+                    b.handle(m);
                 }
             }
             Err(_) => {
@@ -353,6 +384,7 @@ fn change(dir: &Path, case: Case) -> [f64; 7] {
     b.app.sel = b.app.order().first().map(|t| t.id.clone());
     b.frame();
     while b.ahead() {}
+    b.settle();
     let order: Vec<String> = b.app.order().iter().map(|t| t.id.clone()).collect();
     let off = order.len() > b.app.top + b.app.page + 1;
     let mut out = vec![];

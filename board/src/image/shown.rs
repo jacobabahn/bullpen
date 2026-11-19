@@ -7,7 +7,8 @@
 //! data kept to place again.
 //!
 //! An image a frame replaces isn't deleted at once: the last few are kept on the
-//! terminal, hidden (at most KEEP of them and KEEP_PX pixels), so going back to what
+//! terminal, hidden (at most KEEP of them and KEEP_PX pixels, and one of the list's
+//! base images, which are big), so going back to what
 //! one showed (k after j) only places it again; the oldest is deleted past that. Images
 //! drawn ahead (`preload`, what a j or k would want next) are kept the same way, sent
 //! but not placed. All of them are deleted when the board is text again or quits.
@@ -56,7 +57,8 @@ struct Shown {
 }
 
 /// The images kept on the terminal, hidden, at most: how many, and their pixels (a
-/// 2x board's list is about 8 million, a selected block 1).
+/// selected block at a 2x cell is about 1 million), but for the one list's base image
+/// kept (a 2x board's two pages are about 15 million).
 const KEEP: usize = 16;
 const KEEP_PX: u64 = 24_000_000;
 
@@ -152,9 +154,16 @@ impl Screen {
         for (_, s) in self.kept.extract_if(.., |(_, s)| s.key == 0) {
             put(out, || "delete".into(), &kitty::delete(s.id))?;
         }
+        // one list's image kept (the window before, or the next drawn ahead): they're big
+        let lists: Vec<usize> = self.kept.iter().enumerate().filter(|(_, (k, _))| *k == Slot::List).map(|(i, _)| i).skip(1).collect();
+        for i in lists.into_iter().rev() {
+            let (_, s) = self.kept.remove(i);
+            put(out, || "delete".into(), &kitty::delete(s.id))?;
+        }
+        // the rest by count and pixels
         let mut px = 0;
-        let fits = self.kept.iter().take_while(|(_, s)| {
-            px += s.px;
+        let fits = self.kept.iter().take_while(|(k, s)| {
+            px += if *k == Slot::List { 0 } else { s.px };
             px <= KEEP_PX
         });
         let n = fits.count().clamp(1, KEEP).min(self.kept.len());

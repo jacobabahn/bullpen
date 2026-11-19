@@ -9,6 +9,7 @@ use super::pieces::{mark_y, rows_in, sprite_mark, Plan};
 use super::render::{render, Canvas, Cut, Marks};
 use super::shown::{Screen, Slot, Want};
 use super::sprite::{self, Sprite, COLS};
+use super::worker::Job;
 use super::{meter, png, View};
 use crate::model::TextSize;
 use crate::ui::rows::{Mark, Row};
@@ -86,6 +87,16 @@ pub fn still(drawn: &ListImage, now: &ListImage, shown: std::ops::Range<usize>) 
     drawn.layout == now.layout && shown.into_iter().all(|i| drawn.rows.get(i - drawn.first) == now.rows.get(i - now.first))
 }
 
+/// The base image keyed `k` as the worker's thread draws it (worker.rs); its font is
+/// the board's to say.
+pub fn job(f: &Frame, k: u64) -> Job {
+    let p = f.plan;
+    let rs = if p.whole { &f.view.rows } else { &f.view.base };
+    let bare = rs.rows.iter().map(f.bare).collect();
+    let (rows, laid, range) = (rs.clone(), p.base.clone(), p.win.clone());
+    Job { key: k, rows, laid, range, at: p.win_at, y: p.win_y, h: p.win_h, bare, canvas: *f.c, font: None }
+}
+
 /// The slot's image drawn and made a PNG, or why it couldn't be drawn, as the message
 /// says it.
 pub fn encode(slot: &Slot, draw: impl FnOnce() -> Result<tiny_skia::Pixmap, String>) -> Result<Vec<u8>, String> {
@@ -102,8 +113,9 @@ fn across(f: &Frame, p: u32, row: u16, rows: u16, crop_y: u32) -> Place {
 }
 
 /// The list's images this frame, the ones `screen` doesn't show yet drawn; the base
-/// image is the one keyed `k` (list_image's, or one drawn before that still does).
-pub fn wants(f: &Frame, k: u64, screen: &Screen, fonts: &mut Fonts) -> Result<Vec<Want>, String> {
+/// image is the one keyed `k` (list_image's, or one drawn before that still does). With
+/// `jobs`, a base image to draw is left to the worker's thread (worker.rs) instead.
+pub fn wants(f: &Frame, k: u64, screen: &Screen, fonts: &mut Fonts, jobs: Option<&mut Vec<Job>>) -> Result<Vec<Want>, String> {
     let (p, c, v) = (f.plan, f.c, f.view);
     let ch = c.grid.cell_h;
     let mut wants = Vec::new();
@@ -113,9 +125,18 @@ pub fn wants(f: &Frame, k: u64, screen: &Screen, fonts: &mut Fonts) -> Result<Ve
         None
     } else {
         let rs = if p.whole { &v.rows } else { &v.base };
-        let bare = |i: usize| (f.bare)(&rs.rows[i]);
-        let cut = Cut { range: p.win.clone(), at: p.win_at, y: p.win_y, h: p.win_h, marks: Marks::default(), bare: &bare };
-        Some(encode(&Slot::List, || render(rs, &p.base, cut, c, fonts).map(|s| s.pixmap))?)
+        match jobs {
+            // drawn on the worker's thread (drawing ahead)
+            Some(jobs) => {
+                jobs.push(job(f, k));
+                None
+            }
+            None => {
+                let bare = |i: usize| (f.bare)(&rs.rows[i]);
+                let cut = Cut { range: p.win.clone(), at: p.win_at, y: p.win_y, h: p.win_h, marks: Marks::default(), bare: &bare };
+                Some(encode(&Slot::List, || render(rs, &p.base, cut, c, fonts).map(|s| s.pixmap))?)
+            }
+        }
     };
     let places = p.crops.iter().enumerate().map(|(k, &(from, at, n))| across(f, k as u32 + 1, at, n, from)).collect();
     wants.push(Want { slot: Slot::List, key: k, png, places });

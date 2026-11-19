@@ -89,8 +89,9 @@ fn main() {
 
     // the key reader; it stops while the image look asks the terminal something
     let gate = Arc::new(image::term::Gate::default());
-    read_keys(tx, gate.clone());
+    read_keys(tx.clone(), gate.clone());
     let mut picture = image::Picture::new(gate);
+    picture.use_thread(tx.clone());
 
     // Rex picks a pane's icon by the program in it and doesn't know this one. A
     // program can say what it is (OSC 7501's app): "rust" gets Rust's icon.
@@ -143,7 +144,7 @@ fn main() {
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
-        stale = !matches!(m, Msg::Parked); // a key may have changed a task, and a file event says one did
+        stale = !matches!(m, Msg::Parked | Msg::Ready(_)); // a key may have changed a task, and a file event says one did
         keyed = matches!(m, Msg::Key(_) | Msg::Paste(_));
         if !handle(&mut app, &mut picture, term.backend_mut(), m) {
             break;
@@ -189,6 +190,7 @@ fn draw<B: ratatui::backend::Backend + Write>(
 fn handle(app: &mut App, picture: &mut image::Picture, out: &mut impl Write, m: Msg) -> bool {
     match m {
         Msg::Parked => picture.parked(out),
+        Msg::Ready(r) => picture.ready(r, out),
         Msg::Redraw => {
             picture.resized();
             return app.handle(m);

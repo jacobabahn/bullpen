@@ -90,12 +90,13 @@ wrapped), scrolls them by those heights (`list::scroll_by`, which the text list'
 `scroll` is with every row 1 high; it sets `app.top` and `app.page`), and draws the
 top line and the bottom rows (`frame.rs`) and the list, all with no terminal. The list
 is pieces (`pieces.rs`): a window of the rows drawn with nothing selected (the `View`
-has them too, `rows::unselected`; the whole list under three pages, else two at a
-page's steps), placed as two crops above and under the selected block, which is an
+has them too, `rows::unselected`; the page when a row on it changed, else two pages at
+a page's steps), placed as two crops above and under the selected block, which is an
 image of its own; the block grows by whole cells, so the rows under it are the same
-image placed lower, and scrolling moves the crops. Every piece draws its rows where
-they are in the whole list (`render::Cut::at`), so the pieces match the list drawn
-whole to the bit. The marks that
+image placed lower, and scrolling moves the crops. The window on the terminal stays
+while the rows shown are as it drew them (`list::still`). Every piece draws its rows
+where they are in the whole list (`render::Cut::at`), so the pieces match the list
+drawn whole to the bit. The marks that
 move and the scroll marks are small images sent once (`sprite.rs`): a mark on screen
 is a placement of its strip of frames, and a tick changes which frame it crops; the
 list's images leave those marks out. `list.rs` says which images a frame wants, each
@@ -104,7 +105,10 @@ and hides only what changed, with the kitty graphics protocol (`kitty.rs`); an
 image a frame replaces is kept on the terminal, hidden, to be placed again (bounded
 by count and pixels). While no key is waiting, `ahead.rs` presses j and k on the board,
 draws that frame off screen, puts back what the key changed, and sends the images it
-would want unplaced, so a j or k only places images; the main loop also draws a key's
+would want unplaced, so a j or k only places images; the list's base image it leaves
+to a thread of its own (`worker.rs`, its own fonts, answering with `Msg::Ready`),
+which also starts on the list's next window as the page nears its edge. The main
+loop also draws a key's
 frame before it reads the tasks again. While the board is an image, a task's detail is
 one row holding its whole text and the most lines it gets (`rows::detail_lines`), and
 `render.rs` wraps it by pixels, as its type measures; the text list's are wrapped to
@@ -123,7 +127,8 @@ cells, each text size, motion on and off, and the text look beside them. For one
 it prints the time from the key to its frame's last byte and where it goes (building
 rows, laying out, drawing and PNG-encoding each image, base64, writing; `image/meter.rs`
 notes them, in tests only), the bytes sent by image, how many keys sent the list
-again, and what drawing ahead took after it; then a held-down j (20 keys 30 ms apart):
+again, and what drawing ahead took after it; the first frame, and a task's title
+changing on screen and off; then a held-down j (20 keys 30 ms apart):
 the frames, how far the last frame lands after the last key, and each key's wait.
 `BENCH_ONLY="80×45 32px,text"` runs some cases. Sizes come from the renderer, so it
 stays right when the look changes; run it before and after a change to the look's

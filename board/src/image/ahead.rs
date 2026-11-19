@@ -4,6 +4,9 @@
 //! bytes, and nothing to draw. shown.rs keeps them with the images a frame replaced
 //! (bounded, and deleted with the rest).
 //!
+//! The list's base image, when a key would scroll it out of its window, is drawn on a
+//! thread of its own (worker.rs), so a key that comes meanwhile doesn't wait for it.
+//!
 //! What a key would show is worked out by pressing it on the board, drawing the frame
 //! off screen, and putting back what the key changed (the selection and the message).
 //! Only on the board itself, with nothing asked: there j and k only move the selection.
@@ -16,12 +19,16 @@ use ratatui::layout::Rect;
 use ratatui::{Terminal, TerminalOptions, Viewport};
 use std::io::Write;
 
+/// In the keys still to draw ahead for: the list's next window (`far`).
+const FAR: char = '\0';
+
 impl Picture {
     /// After a frame: what's left to draw ahead is j's and k's, for this view.
     pub(super) fn plan_ahead(&mut self, view: Option<&View>) {
         if self.ahead_of.as_ref() != view {
             self.ahead_of = view.cloned();
-            self.todo = vec!['k', 'j'];
+            // j's, k's, then the list's next window
+            self.todo = vec![FAR, 'k', 'j'];
         }
     }
 
@@ -31,14 +38,53 @@ impl Picture {
     pub fn ahead(&mut self, app: &mut App, area: Rect, out: &mut impl Write) -> bool {
         let Some(key) = self.todo.pop() else { return false };
         if !self.drawing(app) || self.ahead_of.is_none() || !matches!(app.mode, Mode::Normal) || app.pending.is_some() {
+            // back on the board, it draws ahead again, even for the same view
             self.todo.clear();
+            self.ahead_of = None;
             return false;
         }
-        if let Some(view) = super::meter::time(|| "view".into(), || moved(app, key, area)) {
+        if key == FAR {
+            let _ = self.far(app);
+        } else if let Some(view) = super::meter::time(|| "view".into(), || moved(app, key, area)) {
             // a key that comes anyway draws what this couldn't
             let _ = self.preload(&view, app, out);
         }
         !self.todo.is_empty()
+    }
+
+    /// Start drawing the list's next window on the worker's thread when the page comes
+    /// within a quarter of a page of its window's edge, so a key a few on that scrolls
+    /// out of it only places it. Not for a window that's the page alone (the list just
+    /// changed there): a j or k's own drawing ahead does that.
+    fn far(&mut self, app: &App) -> Result<(), String> {
+        let (Some(view), Some(drawn)) = (self.ahead_of.clone(), self.list.clone()) else { return Ok(()) };
+        if self.worker.is_none() {
+            return Ok(());
+        }
+        let cell = self.cell().ok_or("no cell size")?;
+        let canvas = Canvas::new(Grid { cols: view.cols as usize, cell_w: cell.0, cell_h: cell.1 }, app.cfg.text_size, self.theme);
+        let fonts = fonts(&mut self.fonts, app.cfg.font.as_deref())?;
+        let plan = super::pieces::plan(&view, &canvas, fonts, Some(drawn.win));
+        let room = view.rows_n as u32 * cell.1;
+        let (wy, wh) = drawn.win;
+        if plan.whole || wh <= room {
+            return Ok(());
+        }
+        let total = plan.base.tall(0, plan.base.heights.len());
+        let y0 = plan.base.tall(0, plan.top);
+        let paint = Paint { canvas, size: app.cfg.text_size, motion: app.cfg.motion, settling: &self.settling, ms: self.ms, list: None };
+        for y in [y0 + room / 4, y0.saturating_sub(room / 4)] {
+            let y = y.min(total.saturating_sub(room));
+            if wy <= y && y + room <= wy + wh {
+                continue;
+            }
+            let (key, mut job) = super::list_job(&view, &plan.with_window(super::pieces::grid(y, room)), &paint);
+            if !self.screen.has(&super::Slot::List, key) {
+                job.font = app.cfg.font.clone();
+                self.worker.as_mut().expect("a worker").draw(job);
+            }
+        }
+        Ok(())
     }
 
     /// Send what a frame of `view` wants that the terminal doesn't have, unplaced.
@@ -50,7 +96,13 @@ impl Picture {
         let plan = super::meter::time(|| "plan".into(), || super::pieces::plan(view, &canvas, fonts, prev));
         let list = self.list.as_ref();
         let paint = Paint { canvas, size: app.cfg.text_size, motion: app.cfg.motion, settling: &self.settling, ms: self.ms, list };
-        let (wants, ..) = wants(view, plan, &paint, &self.screen, fonts)?;
+        // the base image on the worker's thread, when there is one
+        let mut jobs = Vec::new();
+        let (wants, ..) = wants(view, plan, &paint, &self.screen, fonts, self.worker.is_some().then_some(&mut jobs))?;
+        for mut job in jobs {
+            job.font = app.cfg.font.clone();
+            self.worker.as_mut().expect("a worker").draw(job);
+        }
         self.screen.preload(wants, out).map_err(|e| e.to_string())
     }
 }

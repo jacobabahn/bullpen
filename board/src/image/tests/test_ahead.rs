@@ -74,3 +74,33 @@ fn nothing_is_drawn_ahead_twice_or_while_a_question_is_asked() {
     assert!(app.pending.is_some());
 }
 
+
+#[test]
+fn the_lists_next_window_is_drawn_ahead_on_its_own_thread() {
+    let mut app = App::for_test((1..=30).map(|i| task(&format!("BP-{i}"), "todo").with(json!({"title": format!("Task {i}")}))).collect());
+    app.cfg = Config::default_for_test().with(json!({"board_bottom_gap": 0}));
+    app.look = Look::Image;
+    let (_, mut p) = board();
+    let (tx, rx) = std::sync::mpsc::channel();
+    p.use_thread(tx);
+    let list = |p: &Picture| p.screen.id(&super::super::Slot::List);
+    frame(&mut app, &mut p);
+    // down a task at a time, drawing ahead between, the worker's images sent as they
+    // come back: the list's image changes as it scrolls, but no key sends it
+    let mut ids = vec![list(&p)];
+    for k in 2..=30 {
+        while p.ahead(&mut app, AREA, &mut Vec::new()) {}
+        while p.busy() {
+            if let Ok(crate::Msg::Ready(r)) = rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                p.ready(r, &mut Vec::new());
+            }
+        }
+        press(&mut app, 'j');
+        let out = frame(&mut app, &mut p);
+        assert_eq!(app.sel.as_deref(), Some(format!("BP-{k}").as_str()));
+        assert!(!out.contains("a=t,"), "BP-{k}: {out:?}");
+        ids.push(list(&p));
+    }
+    ids.dedup();
+    assert!(ids.len() > 2, "{ids:?}");
+}

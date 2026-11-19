@@ -24,8 +24,19 @@ fn the_images_kept_are_the_latest_few() {
     // the oldest three were deleted
     assert_eq!(String::from_utf8(out).unwrap().matches("a=d,d=I,").count(), 3);
     // and so many pixels: one image as big as all of them leaves just itself
-    s.preload(vec![Want { png: Some(png(10_000, 2_400)), ..want(Slot::List, 1) }], &mut Vec::new()).unwrap();
+    s.preload(vec![Want { png: Some(png(10_000, 2_400)), ..want(Slot::Foot, 1) }], &mut Vec::new()).unwrap();
     assert_eq!(s.kept().len(), 1);
+}
+
+#[test]
+fn one_of_the_lists_images_is_kept_its_latest() {
+    let mut s = Screen::new(1);
+    for k in 1..=3 {
+        s.preload(vec![Want { png: Some(png(10_000, 6_000)), ..want(Slot::List, k) }, want(Slot::Sel, k)], &mut Vec::new()).unwrap();
+    }
+    assert!(s.has(&Slot::List, 3) && !s.has(&Slot::List, 2) && !s.has(&Slot::List, 1));
+    // they don't count against the others' pixels
+    assert!((1..=3).all(|k| s.has(&Slot::Sel, k)));
 }
 
 #[test]

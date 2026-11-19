@@ -41,6 +41,7 @@ mod shown;
 mod sprite;
 pub mod term;
 mod theme;
+pub mod worker;
 
 use crate::model::{Layout, Look, TextSize};
 use crate::ui::bottom::Foot;
@@ -133,6 +134,9 @@ pub struct Picture {
     window: fn() -> Option<(u32, u32)>,
     /// the list's base image on the terminal (list.rs)
     list: Option<list::ListImage>,
+    /// the thread drawing ahead's base images are drawn on (worker.rs), once the board
+    /// gives it its loop's channel
+    worker: Option<worker::Worker>,
     /// the view last drawn, and the keys whose images are still to be drawn ahead for
     /// it (ahead.rs)
     ahead_of: Option<View>,
@@ -158,6 +162,7 @@ impl Picture {
             clock: None,
             window: window_cell,
             list: None,
+            worker: None,
             ahead_of: None,
             todo: Vec::new(),
         }
@@ -283,10 +288,32 @@ impl Picture {
             self.settling.retain(|_, t| ms.saturating_sub(*t) < sprite::settling_ms());
         }
         let paint = Paint { canvas, size, motion, settling: &self.settling, ms, list: self.list.as_ref() };
-        let (wants, plan, list) = wants(view, plan, &paint, &self.screen, fonts)?;
+        let (wants, plan, list) = wants(view, plan, &paint, &self.screen, fonts, None)?;
         self.screen.show(wants, out).map_err(|e| format!("Drawing the list as text: {e}."))?;
         self.list = Some(list);
         Ok(Drawn { top: plan.top, page: plan.page })
+    }
+
+    /// Draw ahead's base images on a thread of their own, which answers on the board's
+    /// loop's channel (`Msg::Ready`).
+    pub fn use_thread(&mut self, board: std::sync::mpsc::Sender<crate::Msg>) {
+        self.worker = Some(worker::Worker::start(board));
+    }
+
+    /// A base image drawn ahead came back from its thread: send it, unplaced, if it's
+    /// still wanted and the board is still images.
+    pub fn ready(&mut self, r: worker::Ready, out: &mut impl Write) {
+        let wanted = self.worker.as_mut().is_some_and(|w| w.done(r.key));
+        if let (true, true, Ok(png)) = (wanted, self.on, r.png) {
+            let want = Want { slot: Slot::List, key: r.key, png: Some(png), places: vec![] };
+            let _ = self.screen.preload(vec![want], out);
+        }
+    }
+
+    /// Is a base image being drawn ahead on its thread?
+    #[cfg(test)]
+    pub fn busy(&self) -> bool {
+        self.worker.as_ref().is_some_and(worker::Worker::busy)
     }
 
     /// Redraw this soon, though nothing else changes: while a mark settles in.
@@ -302,6 +329,7 @@ impl Picture {
         self.due = true;
         self.screen.forget();
         (self.list, self.ahead_of) = (None, None);
+        self.worker.as_mut().map(worker::Worker::drop_all);
     }
 
     /// Take the images off the screen, keeping them for when the board shows again.
@@ -316,6 +344,7 @@ impl Picture {
         self.seen.clear();
         self.settling.clear();
         (self.list, self.ahead_of) = (None, None);
+        self.worker.as_mut().map(worker::Worker::drop_all);
     }
 }
 
@@ -335,7 +364,14 @@ struct Paint<'a> {
 /// screen doesn't have it; with its plan and the list's base image then. The base image
 /// on the terminal stays while it shows the rows shown as they are; when one of them
 /// changes, the page is drawn again; scrolled out of it, its plan's window is.
-fn wants(view: &View, plan: pieces::Plan, p: &Paint, screen: &Screen, fonts: &mut Fonts) -> Result<(Vec<Want>, pieces::Plan, list::ListImage), String> {
+fn wants(
+    view: &View,
+    plan: pieces::Plan,
+    p: &Paint,
+    screen: &Screen,
+    fonts: &mut Fonts,
+    jobs: Option<&mut Vec<worker::Job>>,
+) -> Result<(Vec<Want>, pieces::Plan, list::ListImage), String> {
     let (canvas, settling, motion) = (&p.canvas, p.settling, p.motion);
     let bare = |row: &Row| pieces::bare(row, motion, &|id| settling.contains_key(id));
     // a turning mark turns with the text board's, from the board's start
@@ -372,7 +408,7 @@ fn wants(view: &View, plan: pieces::Plan, p: &Paint, screen: &Screen, fonts: &mu
         let png = (!screen.has(&Slot::Head, k)).then(|| list::encode(&Slot::Head, || frame::head(&view.head, head_n, canvas, fonts))).transpose()?;
         wants.push(Want { slot: Slot::Head, key: k, png, places: vec![whole(view, canvas, view.row0, head_n)] });
     }
-    let mut list = list::wants(&f, image.key, screen, fonts)?;
+    let mut list = list::wants(&f, image.key, screen, fonts, jobs)?;
     let sprites = list.split_off(list.iter().position(|w| matches!(w.slot, Slot::Sel | Slot::Tail | Slot::Cap | Slot::Sprite(_))).unwrap_or(list.len()));
     wants.extend(list);
     if let Some(foot) = view.foot.as_ref().filter(|_| foot_n > 0) {
@@ -383,6 +419,14 @@ fn wants(view: &View, plan: pieces::Plan, p: &Paint, screen: &Screen, fonts: &mu
     wants.extend(sprites);
     drop(f);
     Ok((wants, plan, image))
+}
+
+/// The base image of `plan`, as the worker's thread draws it: its key, and the job.
+fn list_job(view: &View, plan: &pieces::Plan, p: &Paint) -> (u64, worker::Job) {
+    let bare = |row: &Row| pieces::bare(row, p.motion, &|id| p.settling.contains_key(id));
+    let f = list::Frame { view, plan, c: &p.canvas, size: p.size, bare: &bare, began: &|_| 0, ms: p.ms };
+    let k = list::list_image(&f).key;
+    (k, list::job(&f, k))
 }
 
 /// Note the tasks' marks: one that changed to a still mark settles in from now (`ms`).

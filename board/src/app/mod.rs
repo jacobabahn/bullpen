@@ -172,6 +172,8 @@ pub enum Msg {
     Parked,
     /// what the terminal answered
     Answered(crate::image::term::Answers),
+    /// a base image drawn ahead on its own thread (image/worker.rs)
+    Ready(crate::image::worker::Ready),
 }
 
 impl App {
@@ -386,7 +388,7 @@ impl App {
             Msg::Done { id, job, ok, out } => self.done(id, job, ok, out),
             Msg::Peeked { id, text, ok } => self.peeked(id, text, ok),
             Msg::Prompted { id, prompt, out } => self.prompted(id, prompt, out),
-            Msg::Redraw | Msg::Changed | Msg::Parked | Msg::Answered(_) => {}
+            Msg::Redraw | Msg::Changed | Msg::Parked | Msg::Answered(_) | Msg::Ready(_) => {}
         }
         true
     }

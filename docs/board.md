@@ -210,21 +210,24 @@ status or age on screen, the message), so a change to the list doesn't send the 
 line again. The list is drawn with nothing selected, and the selected task's block
 (its card, its whole title and all its lines) is a small image of its own over the
 cells it takes: the rows under it move down by whole cells to make room, by placing
-the list's image again lower, not sending it. The list's image is the whole list
-(two pages of it at a time, when it's longer than three), so scrolling a row places
-it again higher and sends nothing. While the board waits for a key it draws what `j`
-and `k` would show next (the block a task down and up, and the key row for it) and
-sends it without showing it; an image a key replaces is kept on the terminal, hidden,
-a while (the last 16). So `j` and `k` send only a few placements, a few hundred
-bytes, and draw nothing; the list is sent again only when what it shows changes or it
-scrolls a page on. The board draws a key's frame before it reads the tasks again
+the list's image again lower, not sending it. The list's image is a window of the
+list: the page, when something on it changed; scrolled out of that, two pages at a
+page's steps, so scrolling a row places it again higher and sends nothing. It's sent
+again when a row on the page changes (a row off the page that changed is drawn when it
+comes on), or when the list scrolls out of the window. While the board waits for a key
+it draws what `j` and `k` would show next (the block a task down and up, and the key
+row for it) and sends it without showing it; the list's next window, when the page
+comes near the window's edge, is drawn on a thread of its own, so a key doesn't wait
+for it. An image a key replaces is kept on the terminal, hidden, a while (the last 16,
+and one of the list's). So `j` and `k` send only a few placements, a few hundred
+bytes, and draw nothing. The board draws a key's frame before it reads the tasks again
 (then reads them, and draws what changed), so a key doesn't wait for the task files.
-Everything is deleted when the board is text again or quits. The marks that move and the scroll marks are small
-images too, sent once: a tick only places another frame of a mark (a few dozen bytes
-a mark), never the list. The kitty protocol's own animation (the terminal turning the
-frames itself) would send nothing at all, but Rex's support for it isn't reliable
-yet, so the board doesn't use it. Each image is pinned to its block of cells, so a
-client with other cell sizes (Rex on a phone) scales it to fit.
+Everything is deleted when the board is text again or quits. The marks that move and
+the scroll marks are small images too, sent once: a tick only places another frame of
+a mark (a few dozen bytes a mark), never the list. The kitty protocol's own animation
+(the terminal turning the frames itself) would send nothing at all, but Rex's support
+for it isn't reliable yet, so the board doesn't use it. Each image is pinned to its
+block of cells, so a client with other cell sizes (Rex on a phone) scales it to fit.
 
 `bullpen-board --dir <state dir> --root <repo> --bullpen <program> --render FILE
 --cols N` writes the board as the image look draws it to FILE: its top line, its whole
