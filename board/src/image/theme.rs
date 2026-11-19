@@ -89,10 +89,10 @@ impl Theme {
         solid(self.fg)
     }
 
-    /// Dim text: the foreground at 66%, which reads at 4.5:1 on a light theme's white,
-    /// even on the selected card (and at over 6:1 on a dark one).
+    /// Dim text: the foreground at 70%, which reads at over 4.5:1 on a light theme's
+    /// white, even on the selected card (and at over 6:1 on a dark one).
     pub fn dim(&self) -> [u8; 4] {
-        faint(self.fg, 0.66)
+        faint(self.fg, 0.7)
     }
 
     /// A group's name: the foreground, a little dim, so the titles under it lead.
@@ -186,11 +186,11 @@ impl Theme {
         match status {
             "needs" => solid(self.yellow),
             "ready" => solid(self.green),
-            "finished" => faint(self.green, 0.55),
+            "finished" => faint(self.green, 0.7),
             "review" => solid(self.blue),
-            "working" => faint(self.fg, 0.62),
-            "triage" => faint(self.fg, 0.46),
-            _ => faint(self.fg, 0.32),
+            "working" => faint(self.fg, 0.66),
+            "triage" => faint(self.fg, 0.52),
+            _ => faint(self.fg, 0.4),
         }
     }
 

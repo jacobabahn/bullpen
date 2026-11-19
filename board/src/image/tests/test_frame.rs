@@ -182,3 +182,15 @@ fn at_36_columns_the_keys_and_question_mark_dont_overlap_and_the_question_mark_s
         }
     }
 }
+
+#[test]
+fn the_rule_over_the_bottom_rows_stays_put_when_a_message_comes() {
+    let (c, t) = (canvas(TextSize::Medium), Theme::default());
+    let keys = || FootLine::Keys(vec![("a".into(), "accept".into())]);
+    let quiet = foot(&Foot { lines: vec![(2, keys())] }, 3, &c, &mut Fonts::builtin()).unwrap();
+    let said = foot(&Foot { lines: vec![(1, FootLine::Msg("Accepted BP-1.".into(), Tone::Green)), (2, keys())] }, 3, &c, &mut Fonts::builtin()).unwrap();
+    let (a, b) = (rows_with(&quiet, t.rule()), rows_with(&said, t.rule()));
+    // above the message's row, there or not
+    assert!(!a.is_empty() && a == b, "{a:?} {b:?}");
+    assert!(a[0] < c.grid.cell_h);
+}

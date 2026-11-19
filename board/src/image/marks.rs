@@ -60,7 +60,7 @@ impl Draw<'_> {
     }
 
     pub(super) fn line(&self) -> f32 {
-        (self.mark_r() * 0.26).max(1.2)
+        (self.mark_r() * 0.3).max(1.2)
     }
 
     /// A task's mark: each status's own shape in its colour. The marks that turn are
@@ -97,7 +97,8 @@ impl Draw<'_> {
         let color = over.or(self.theme.status(st)).unwrap_or(dim);
         let ink = solid(self.theme.bg);
         match st {
-            "needs" => self.disc(cx, cy, r, color),
+            // (a disc and a diamond look larger than a ring their size: a little under it)
+            "needs" => self.disc(cx, cy, r * 0.88, color),
             "stopped" => {
                 if let Some(p) = rounded(cx - r * 0.9, cy - r * 0.9, r * 1.8, r * 1.8, r * 0.35) {
                     self.fill(&p, color);
@@ -112,7 +113,7 @@ impl Draw<'_> {
                 self.check(cx, cy, r * 0.62, lw * 1.1, ink);
             }
             "finished" => {
-                if let Some(p) = diamond(cx, cy, r * 1.1) {
+                if let Some(p) = diamond(cx, cy, r) {
                     self.fill(&p, color);
                 }
             }

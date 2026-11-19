@@ -447,7 +447,7 @@ impl Geo {
     /// How far a mark reaches from its centre, at `scale` (a mark settling in grows past
     /// its size: sprite.rs), with its stroke and a pixel for its edge.
     pub(super) fn mark_reach(&self, scale: f32) -> f32 {
-        1.15 * self.mark_r() * scale + (self.mark_r() * 0.26).max(1.2) + 2.0
+        1.15 * self.mark_r() * scale + (self.mark_r() * 0.3).max(1.2) + 2.0
     }
 
     /// Where a task's text starts (its ID, and its lines under it): two columns past

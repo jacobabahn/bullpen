@@ -78,13 +78,16 @@ fn rule(d: &mut Draw, c: &Canvas, y: f32) {
 
 /// The bottom rows, in an image the grid's columns wide and `rows` cells high: each
 /// line on its row, as the text has it, the message in the detail lines' type and the
-/// keys in caps; a faint rule above the first line, as under the top line (at the
-/// image's top when the first line is on its first row).
+/// keys in caps; a faint rule above the first line, or above the message's row when
+/// there's no message, as under the top line (at the image's top when the first line
+/// is on its first row).
 pub fn foot(foot: &Foot, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pixmap, String> {
     let mut pm = pixmap(c, rows)?;
     let mut d = Draw::new(&mut pm, fonts, c, 0.0);
     let ch = c.grid.cell_h as f32;
+    // above the message's row, there or not, so the rule stays put when a message comes
     if let Some(first) = foot.lines.iter().map(|(row, _)| *row).min() {
+        let first = first.min(rows.saturating_sub(2));
         rule(&mut d, c, (first as f32 * ch - 0.45 * ch).round().max(0.0));
     }
     d.set(c.m.detail, ch);
