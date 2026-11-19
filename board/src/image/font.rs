@@ -161,8 +161,6 @@ impl Fonts {
         lines
     }
 
-    /// A last line of one word takes the last word of the line above it, when that line
-    /// has three or more and the two fit: a word isn't left alone under a full line.
     /// A detail's last line of a word or two takes words from the line above it until
     /// it has four, or two fifths of the room: it reads as a line, not as a leftover.
     pub fn fill_last(&self, lines: &mut [String], weight: Weight, px: f32, max: f32) {
@@ -180,6 +178,8 @@ impl Fonts {
         }
     }
 
+    /// A last line of one word takes the last word of the line above it, when that line
+    /// has three or more and the two fit: a word isn't left alone under a full line.
     pub fn no_widow(&self, lines: &mut [String], weight: Weight, px: f32, max: f32) {
         let [.., above, last] = lines else { return };
         if last.contains(' ') || last.ends_with('…') || above.split(' ').count() < 3 {

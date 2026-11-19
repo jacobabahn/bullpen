@@ -415,8 +415,11 @@ const KEY_SIDE: f32 = 0.28;
 
 /// The keys a detail's text names ("Its agent exited. r resumes it."), as which of its
 /// letters they are, spaces not counted (so they're found on its wrapped lines): a
-/// lowercase letter alone, first or after a full stop, with a word after it. The first
-/// `lead` columns are the task's age.
+/// lowercase letter alone, first or after a full stop, in the form the board's own
+/// phrases have (core's words.rs: "r resumes it", "p shows its screen", "t tells it
+/// to continue"): the letter, a verb of four letters or more ending in s, then "it"
+/// or "its". A detail is often an agent's own words, where a letter alone ("a token
+/// is needed") is no key. The first `lead` columns are the task's age.
 fn key_letters(text: &str, lead: usize) -> Vec<usize> {
     let (age, rest) = crate::model::split_at_width(text, lead);
     let mut n = age.chars().filter(|c| !c.is_whitespace()).count();
@@ -424,7 +427,9 @@ fn key_letters(text: &str, lead: usize) -> Vec<usize> {
     let mut out = Vec::new();
     for (i, w) in words.iter().enumerate() {
         let alone = w.len() == 1 && w.chars().all(|c| c.is_ascii_lowercase());
-        if alone && i + 1 < words.len() && (i == 0 || words[i - 1].ends_with('.')) {
+        let verb = words.get(i + 1).is_some_and(|v| v.len() >= 4 && v.ends_with('s') && v.chars().all(|c| c.is_ascii_lowercase()));
+        let it = words.get(i + 2).is_some_and(|o| matches!(o.trim_end_matches(['.', ',', ';', ':']), "it" | "its"));
+        if alone && verb && it && (i == 0 || words[i - 1].ends_with('.')) {
             out.push(n);
         }
         n += w.chars().count();

@@ -432,8 +432,17 @@ fn a_key_a_line_names_is_semibold_in_the_foreground() {
     assert_eq!(key_letters("Its agent exited. r resumes it.", 0), vec![15]);
     assert_eq!(key_letters("p shows its screen.", 0), vec![0]);
     assert_eq!(key_letters("3m Not started. s starts it.", 3), vec![13]);
+    assert_eq!(key_letters("Done. a closes it, keeping the branch.", 0), vec![5]);
+    assert_eq!(key_letters("t tells it to continue.", 0), vec![0]);
     // not a word of the sentence, a capital, or a last letter
     assert!(key_letters("Reading a file. A report, part b", 0).is_empty());
+    // nor a letter alone in an agent's own words (a task's why, or its note)
+    assert!(key_letters("Can't reach the API. a token is needed.", 0).is_empty());
+    assert!(key_letters("a passes b. x marks the spot. i is it.", 0).is_empty());
+    let why = DetailRow { loud: true, flag: Some(Flag::Needs), ..detail_row("Can't reach the API. a token is needed.") };
+    let plain = DetailRow { text: "Can't reach the API. A token is needed.".into(), ..why.clone() };
+    let caps = |d: DetailRow| draw_in(&rows(vec![Row::Detail(d)]), TextSize::Medium).1.pixmap.pixels().iter().filter(|p| p.alpha() == Theme::default().cap_edge()[3]).count();
+    assert_eq!(caps(why), caps(plain), "no cap round the a");
     // drawn in the foreground on a dim line, wherever the line wraps
     let theme = Theme::default();
     let line = |text: &str| draw(&rows(vec![Row::Detail(detail_row(text))]));

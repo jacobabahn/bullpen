@@ -168,7 +168,7 @@ fn tallies(groups: &[(&'static str, Vec<&Task>)]) -> Vec<Tally> {
             let status = model::BOARD_GROUPS.iter().find(|(h, _)| h == heading)?.1.first()?;
             let stopped = ts.iter().filter(|t| t.status == "stopped").count();
             if *status == "needs" && stopped > 0 {
-                let word = if ts.len() == 1 { "needs you" } else { "need you" };
+                let word = if ts.len() - stopped == 1 { "needs you" } else { "need you" };
                 let mut two = vec![Tally { n: stopped, word: "stopped", status: "stopped" }, Tally { n: ts.len() - stopped, word, status }];
                 if ts.first().is_some_and(|t| t.status != "stopped") {
                     two.reverse();

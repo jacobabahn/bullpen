@@ -130,8 +130,6 @@ impl Theme {
         faint(self.fill(flag), 0.26)
     }
 
-
-
     /// The rule under the top line and over the bottom rows: the foreground, faintly.
     pub fn rule(&self) -> [u8; 4] {
         faint(self.fg, 0.12)
