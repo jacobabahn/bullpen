@@ -92,6 +92,12 @@ fn a_key_row_too_long_for_its_width_keeps_the_question_mark() {
 }
 
 /// The rows of an image with a pixel of this colour (at its alpha, its colour within
+/// A chip's fill: its colour at its brightest, at 18%.
+fn fill(c: theme::Rgb) -> [u8; 4] {
+    let b = theme::bright(c);
+    [b.0, b.1, b.2, 46]
+}
+
 /// what storing it premultiplied rounds off).
 fn rows_with(pm: &Pixmap, c: [u8; 4]) -> Vec<u32> {
     (0..pm.height())
@@ -105,10 +111,10 @@ fn the_headers_counts_are_chips_with_a_rule_under_the_line() {
     let c = canvas(TextSize::Medium);
     let pm = head(&head_of(vec![("1 needs you", "needs"), ("2 ready", "ready")]), 2, &c, &mut Fonts::builtin()).unwrap();
     // each count on its colour, faintly, a pill a word and a half high
-    let amber = rows_with(&pm, [t.yellow.0, t.yellow.1, t.yellow.2, 46]);
+    let amber = rows_with(&pm, fill(t.yellow));
     let tall = amber.last().unwrap() - amber.first().unwrap() + 1;
     assert!((tall as f32 - 1.5 * (c.m.label + 1.0)).abs() <= 2.0, "{tall}");
-    assert!(!rows_with(&pm, [t.green.0, t.green.1, t.green.2, 46]).is_empty());
+    assert!(!rows_with(&pm, fill(t.green)).is_empty());
     // the rule: under the chips, across the line
     let rule = rows_with(&pm, t.rule());
     assert!(!rule.is_empty() && rule[0] > *amber.last().unwrap());
@@ -133,8 +139,8 @@ fn a_three_cell_header_has_the_status_bar_in_the_rules_place_and_only_the_chip_o
     let pm = head(&h, 3, &c, &mut Fonts::builtin()).unwrap();
     assert_eq!(pm.height(), 60);
     // the line: the amber chip, not the green one (the counts under the bar say it)
-    assert!(!rows_with(&pm, [t.yellow.0, t.yellow.1, t.yellow.2, 46]).is_empty());
-    assert!(rows_with(&pm, [t.green.0, t.green.1, t.green.2, 46]).is_empty());
+    assert!(!rows_with(&pm, fill(t.yellow)).is_empty());
+    assert!(rows_with(&pm, fill(t.green)).is_empty());
     // the bar, solid in its groups' colours, and no rule (a row of it across the line)
     let ruled = |pm: &Pixmap| (0..pm.height()).any(|y| block(pm, (14, 386), (y, y + 1)).iter().all(|p| p[3] == t.rule()[3]));
     assert!(!ruled(&pm));

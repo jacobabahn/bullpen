@@ -41,7 +41,7 @@ pub struct Fonts {
 const SMALL: [&str; 16] = ["a", "an", "the", "of", "for", "in", "as", "to", "and", "or", "with", "on", "at", "by", "from", "its"];
 
 /// The least of its room a text cut at a word's end fills: under it, it's cut in the word.
-const FILL: f32 = 0.7;
+const FILL: f32 = 0.8;
 
 impl Fonts {
     /// Inter, built in.
@@ -133,7 +133,7 @@ impl Fonts {
                 out.truncate(space);
                 // and not after a small word that leads nowhere ("a…", "for the…")
                 while let Some((rest, word)) = out.trim_end().rsplit_once(char::is_whitespace) {
-                    if !SMALL.contains(&word.to_lowercase().as_str()) || self.width(rest, weight, px) < (FILL - 0.2) * room {
+                    if !SMALL.contains(&word.to_lowercase().as_str()) || self.width(rest, weight, px) < (FILL - 0.1) * room {
                         break;
                     }
                     out.truncate(rest.len());

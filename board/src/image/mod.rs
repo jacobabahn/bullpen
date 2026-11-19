@@ -488,7 +488,9 @@ pub fn render_file(view: &View, size: TextSize, cell: (u32, u32), theme: Theme, 
     let mut fonts = Fonts::load(font)?;
     let canvas = Canvas::new(Grid { cols: view.cols as usize, cell_w: cell.0, cell_h: cell.1 }, size, theme);
     let laid = render::lay(&view.rows, &canvas, &fonts);
-    let list_h = laid.heights.iter().sum::<u32>().div_ceil(cell.1) * cell.1;
+    // (the list as tall as its rows, not rounded up to cells as on a terminal, where
+    // it's cut to the pane: the space a short list leaves isn't the look's)
+    let list_h = laid.heights.iter().sum::<u32>();
     let n = view.rows.rows.len();
     let parts = [
         frame::head(&view.head, view.row - view.row0, &canvas, &mut fonts)?,

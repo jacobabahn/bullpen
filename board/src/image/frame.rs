@@ -19,14 +19,14 @@ use tiny_skia::Pixmap;
 /// numbers); with two cells or more, a faint rule under it all. With three (a tall
 /// board's) and tasks open, the status bar (bar.rs) is under it in the rule's place,
 /// and its counts say the rest, so the only chip left is what needs you. Its line is a
-/// little more than a cell, from a tenth of one down (a cell for a one-cell header).
+/// little more than a cell, from a fifth of one down (a cell for a one-cell header).
 pub fn head(head: &Head, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pixmap, String> {
     let bar = rows >= 3 && !head.tallies.is_empty();
     let chips: Vec<(String, &'static str)> = head.counts.iter().filter(|(_, st)| !bar || *st == "needs").cloned().collect();
     let mut pm = pixmap(c, rows)?;
     let mut d = Draw::new(&mut pm, fonts, c, 0.0);
     let ch = c.grid.cell_h as f32;
-    let (top, line) = if rows >= 2 { ((0.1 * ch).round(), (1.3 * ch).round()) } else { (0.0, ch) };
+    let (top, line) = if rows >= 2 { ((0.2 * ch).round(), (1.3 * ch).round()) } else { (0.0, ch) };
     // the repository's name is the pane's largest type
     let name_px = (NAME * c.m.title).round();
     d.set(name_px, line);
@@ -54,7 +54,7 @@ pub fn head(head: &Head, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pix
     if bar {
         super::bar::draw(&mut d, c, &head.tallies);
     } else if rows >= 2 {
-        rule(&mut d, c, (1.55 * ch).round());
+        rule(&mut d, c, (1.65 * ch).round());
     }
     Ok(pm)
 }
@@ -92,16 +92,19 @@ pub fn foot(foot: &Foot, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pix
     let mut pm = pixmap(c, rows)?;
     let mut d = Draw::new(&mut pm, fonts, c, 0.0);
     let ch = c.grid.cell_h as f32;
+    // with a row to spare above them, the lines sit a little up in their rows, clear
+    // of the pane's bottom edge
+    let up = if rows >= 3 { (LIFT * ch).round() } else { 0.0 };
     // above the message's row, there or not, so the rule stays put when a message comes
     if let Some(first) = foot.lines.iter().map(|(row, _)| *row).min() {
         let first = first.min(rows.saturating_sub(2));
-        rule(&mut d, c, (first as f32 * ch - 0.45 * ch).round().max(0.0));
+        rule(&mut d, c, (first as f32 * ch - 0.45 * ch - up).round().max(0.0));
     }
     d.set(c.m.detail, ch);
     let theme = d.theme();
     let left = c.left();
     for (row, line) in &foot.lines {
-        let y = *row as f32 * ch;
+        let y = *row as f32 * ch - up;
         match line {
             FootLine::Msg(text, tone) => {
                 let (weight, color) = match tone {
@@ -123,6 +126,9 @@ fn pixmap(c: &Canvas, rows: u16) -> Result<Pixmap, String> {
     let (w, h) = (c.grid.width(), rows as u32 * c.grid.cell_h);
     Pixmap::new(w.max(1), h.max(1)).ok_or_else(|| format!("can't make an image {w}×{h} pixels"))
 }
+
+/// How far up in their rows the bottom lines sit, of a cell's height.
+const LIFT: f32 = 0.2;
 
 /// The space between a key's pair and the next, of their type.
 const KEY_GAP: f32 = 0.9;

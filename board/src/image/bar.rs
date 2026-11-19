@@ -11,10 +11,10 @@ use super::render::{Canvas, Draw};
 use crate::ui::list::Tally;
 
 /// The bar's top and its height, of a cell's height.
-const TOP: f32 = 1.5;
+const TOP: f32 = 1.6;
 const HEIGHT: f32 = 0.24;
 /// The space between the bar and its counts' line, of a cell's height.
-const UNDER: f32 = 0.2;
+const UNDER: f32 = 0.14;
 
 /// The bar and its counts, from where text starts to where it ends, as the rule under
 /// a shorter header is.

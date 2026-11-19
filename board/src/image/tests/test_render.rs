@@ -253,9 +253,11 @@ fn a_cut_is_at_a_words_end_with_no_comma_before_its_ellipsis() {
     // room for "one two, three fo" and the ellipsis: the cut goes back to the word before
     assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two, three fo…") + 0.5), "one two, three…");
     // and its comma goes
-    assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two, thr…") + 0.5), "one two…");
+    assert_eq!(f.fit("one two three four, five six", Weight::Regular, 12.0, w("one two three four, fi…") + 0.5), "one two three four…");
     // nor does it end on a small word that leads nowhere
-    assert_eq!(f.fit("one two three for the best", Weight::Regular, 12.0, w("one two three for the b…") + 0.5), "one two three…");
+    assert_eq!(f.fit("one two three four five six seven of bestowals", Weight::Regular, 12.0, w("one two three four five six seven of best…") + 0.5), "one two three four five six seven…");
+    // going back would leave too much of the room empty: it's cut in the word
+    assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two, thr…") + 0.5), "one two, thr…");
     // a word whose comma alone doesn't fit is whole
     assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two…") + 0.5), "one two…");
     // a long word after a short one: cutting before it would leave most of the room empty
@@ -440,14 +442,12 @@ fn a_key_a_line_names_is_semibold_in_the_foreground() {
 }
 
 #[test]
-fn a_stale_age_is_its_flags_colour_not_always_red() {
+fn an_age_that_has_waited_too_long_is_semibold_in_the_foreground() {
     let theme = Theme::default();
-    let aged = |flag| draw(&rows(vec![Row::Task(TaskRow { stale: true, flag, age: "12m".into(), ..task("BP-1", "todo") })]));
+    let aged = |stale| draw(&rows(vec![Row::Task(TaskRow { stale, age: "12m".into(), ..task("BP-1", "todo") })]));
     let all = |s: &Sheet| -> Vec<[u8; 4]> { (0..s.pixmap.height()).flat_map(|y| (0..s.pixmap.width()).map(move |x| (x, y))).map(|(x, y)| px_at(s, x, y)).collect() };
-    let amber = all(&aged(Some(Flag::Needs)));
-    assert!(has(&amber, theme.yellow) && !has(&amber, theme.red));
-    assert!(has(&all(&aged(Some(Flag::Stopped))), theme.red));
-    assert!(has(&all(&aged(None)), theme.red));
+    assert!(has(&all(&aged(true)), theme.fg) && !has(&all(&aged(true)), theme.red));
+    assert!(!has(&all(&aged(false)), theme.fg));
 }
 
 #[test]
@@ -552,9 +552,10 @@ fn a_risk_is_a_chip_a_dot_of_its_colour_and_its_word_dim_inside_a_faint_line_bef
     let t = TaskRow { risk: Some("high".into()), ..task("BP-1", "ready") };
     // the age's column is two figures wide, so chips line up whatever the ages
     let want = fonts.width("00m", Weight::Bold, c.m.detail) + 0.5 * c.m.detail + chip::risk_width(&fonts, "high", c.m.label);
-    // on a board under 44 columns, its dot alone
+    // on a board under 44 columns, the chip has the level's first letter
     let narrow = Geo { c: Canvas::new(Grid { cols: 35, ..GRID }, TextSize::Medium, Theme::default()), idw: 0.0 };
-    assert_eq!(narrow.right_side(&t, &fonts), fonts.width("00m", Weight::Bold, c.m.detail) + 0.5 * c.m.detail + chip::dot_width(c.m.label));
+    assert_eq!(narrow.risk_word("high"), "H");
+    assert_eq!(narrow.right_side(&t, &fonts), fonts.width("00m", Weight::Bold, c.m.detail) + 0.5 * c.m.detail + chip::risk_width(&fonts, "H", c.m.label));
     let wide = TaskRow { age: "100m".into(), ..t.clone() };
     assert!(g.right_side(&wide, &fonts) > want);
     assert_eq!(g.right_side(&t, &fonts), want);

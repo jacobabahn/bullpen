@@ -117,33 +117,22 @@ impl Theme {
         faint(self.fg, 0.085)
     }
 
-    /// The selected card's edge: the foreground, clearly stronger than its fill, so the
-    /// card stands out among washed tasks.
+    /// The selected card's edge: the foreground, nearly whole, whatever the card's fill,
+    /// so the selection is one mark everywhere and isn't a needs-you task's amber.
     pub fn edge(&self) -> [u8; 4] {
-        faint(self.fg, 0.45)
+        faint(self.fg, 0.8)
     }
 
     /// The selected card's fill when its task needs you or stopped: its flag's colour,
     /// twice as strong as its wash.
     pub fn flag_tint(&self, flag: Flag) -> [u8; 4] {
-        faint(self.flag(flag), 0.2)
-    }
-
-    /// The selected card's edge when its task needs you or stopped: its flag's colour.
-    pub fn flag_edge(&self, flag: Flag) -> [u8; 4] {
-        solid(self.flag(flag))
-    }
-
-    /// The age of a task that has waited on you too long (semibold too): its flag's
-    /// colour, so an amber task's isn't the red of one that stopped; red with no flag.
-    pub fn stale(&self, flag: Option<Flag>) -> [u8; 4] {
-        solid(flag.map_or(self.red, |f| self.flag(f)))
+        faint(bright(self.flag(flag)), 0.2)
     }
 
     /// The hairline round a wash: its flag's colour, faint, so a wash has an edge on a
     /// light theme's white.
     pub fn wash_edge(&self, flag: Flag) -> [u8; 4] {
-        faint(self.flag(flag), 0.22)
+        faint(bright(self.flag(flag)), 0.3)
     }
 
     /// The rule under the top line and over the bottom rows: the foreground, faintly.
@@ -168,10 +157,11 @@ impl Theme {
         }
     }
 
-    /// Behind a task that needs you or stopped: its flag's colour, faintly, so dim text
-    /// on it still reads at 4.5:1 on a light theme's white.
+    /// Behind a task that needs you or stopped: its flag's colour at its brightest (a
+    /// light theme's amber is dark, to read as text, and a wash of it is beige),
+    /// faintly, so dim text on it still reads at 4.5:1 on a light theme's white.
     pub fn wash(&self, flag: Flag) -> [u8; 4] {
-        faint(self.flag(flag), 0.09)
+        faint(bright(self.flag(flag)), 0.09)
     }
 
     /// A status's colour, as ui::mark_style gives it; None for the dim ones.
@@ -217,6 +207,14 @@ impl Theme {
             _ => solid(self.green),
         }
     }
+}
+
+/// A colour at its brightest: its hue, scaled so its strongest part is whole. What a
+/// fill is made of (a wash, a chip): a faint fill of a dark colour is muddy.
+pub fn bright(c: Rgb) -> Rgb {
+    let most = c.0.max(c.1).max(c.2).max(1) as u32;
+    let up = |v: u8| (v as u32 * 255 / most) as u8;
+    Rgb(up(c.0), up(c.1), up(c.2))
 }
 
 pub fn solid(c: Rgb) -> [u8; 4] {
