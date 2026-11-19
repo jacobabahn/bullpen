@@ -130,13 +130,6 @@ fn the_code_is_as_tall_as_its_strips_hunks_and_lines() {
 }
 
 #[test]
-fn a_line_is_cut_by_columns() {
-    assert_eq!(clip("abcdef", 6), "abcdef");
-    assert_eq!(clip("abcdef", 4), "abc…");
-    assert_eq!(clip("日本語", 4), "日…");
-}
-
-#[test]
 fn the_codes_rows_are_the_terminals() {
     use crate::stepper::look::ink::{Sizes, Type};
     use crate::stepper::look::page::{self, Page, Step};

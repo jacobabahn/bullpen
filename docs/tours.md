@@ -105,9 +105,9 @@ terminal's colours, so it follows the Rex theme:
   and the function it's in, each line with its number, added and removed lines on green
   and red washes. Code is in JetBrains Mono (built in), coloured by a small highlighter
   in the terminal's colours (keywords, strings, comments, numbers, type names); a line
-  too long for the page is cut with "…" in its last column. After the last step the page is the end: your
-  comments under their steps' titles, and `s` (send them back) and `a` (accept) as
-  large keys.
+  too long for the page is cut with "…" in its last column. After the last step the page
+  is the end: your comments under their steps' titles, and `s` (send them back) and `a`
+  (accept) as large keys.
 - **The foot**, under the page: the message (or "↓ more" while the page goes on) and the
   keys, in caps. What you type (`c`, `t`) is text there, as in the text tour.
 

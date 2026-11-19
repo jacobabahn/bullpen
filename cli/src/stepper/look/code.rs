@@ -7,7 +7,7 @@
 //! names, by the file's extension), in the terminal's colours.
 
 use super::ink::{Face, Ink};
-use bullpen_core::text::{char_width, width};
+use bullpen_core::text::{fit, width};
 use bullpen_draw::theme::{bright, faint, lit, solid, Rgb, Theme};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -321,23 +321,6 @@ fn digits(files: &[File]) -> usize {
     lines.map(|l| l.n.to_string().len()).max().unwrap_or(0).max(2)
 }
 
-/// Text cut to `cols` cells, with "…" in the last when it was.
-pub fn clip(text: &str, cols: usize) -> String {
-    if width(text) <= cols {
-        return text.to_string();
-    }
-    let mut out = String::new();
-    let mut used = 0;
-    for c in text.chars() {
-        used += char_width(c);
-        if used + 1 > cols {
-            break;
-        }
-        out.push(c);
-    }
-    out + "…"
-}
-
 /// Draw the files' code from `top` (a row's top), `w` wide from x (a cell's edge): every
 /// character in a cell of the terminal's grid, a line a row, as the terminal's own text.
 /// A line's number is in the gutter, its code after it; a line too long is cut.
@@ -366,7 +349,7 @@ pub fn draw(ink: &mut Ink, files: &[File], x: f32, top: f32, w: f32) {
                 let used = ink.cells(&label, Face::Mono, code_x, y, cols, th.dim());
                 let room = cols.saturating_sub(used + 2);
                 if !hunk.within.is_empty() && room > 3 {
-                    let within = clip(&hunk.within, room);
+                    let within = fit(&hunk.within, room as i64);
                     ink.cells(&within, Face::Mono, code_x + (used + 2) as f32 * cw, y, room, th.dim());
                 }
                 if hk > 0 {
@@ -401,11 +384,11 @@ fn strip(ink: &mut Ink, file: &File, x: f32, y: f32, w: f32) {
     let (plus, minus) = (format!("+{}", file.added), format!("−{}", file.removed));
     let at = cells.saturating_sub(1 + width(&plus) + 2 + width(&minus));
     let room = at.saturating_sub(3);
-    let base = clip(base, room);
+    let base = fit(base, room as i64);
     let dir_room = room.saturating_sub(width(&base));
     let mut pen = 1;
     if !dir.is_empty() && dir_room >= 4 {
-        let dir = clip(&format!("{dir}/"), dir_room);
+        let dir = fit(&format!("{dir}/"), dir_room as i64);
         pen += ink.cells(&dir, Face::Mono, x + cw, y, dir_room, th.dim());
     }
     ink.cells(&base, Face::MonoBold, x + pen as f32 * cw, y, room, th.text());
