@@ -311,10 +311,13 @@ fn the_selected_card_holds_its_mark_and_clears_its_type() {
     let (laid, s) = draw_in(&r, TextSize::Medium);
     let m = canvas(TextSize::Medium).m;
     let (first, last) = (m.pad as u32, laid.heights[0] + laid.heights[1]);
-    // its mark is inside it: the card starts half a cell in, left of the mark
+    // its mark is inside it: the card starts three quarters of a cell in, left of the mark
     let mid = first + m.line as u32 / 2;
-    assert!(px_at(&s, 6, mid)[3] > 0, "the card at its left edge");
-    assert_eq!(px_at(&s, 3, mid)[3], 0, "nothing left of the card");
+    assert!(px_at(&s, 9, mid)[3] > 0, "the card at its left edge");
+    assert_eq!(px_at(&s, 6, mid)[3], 0, "nothing left of the card");
+    // as far from the image's right edge as from its left
+    let (x0, x1, _, _) = drawn_box(&s);
+    assert_eq!((x0, s.pixmap.width() - 1 - x1), (8, 8));
     // it reaches past its first and last lines by `inset`, and no further
     let (top, bottom) = (first - m.inset as u32, last + m.inset as u32);
     assert!(m.inset >= (0.25 * m.title).floor());
@@ -416,8 +419,8 @@ fn a_task_that_needs_you_is_washed_in_its_colour_over_the_cards_rectangle_with_a
         let (_, _, top, _) = drawn_box(&washed);
         // the bar: 3 pixels of amber across, half a cell in, its ends round
         let mid = y1 / 2;
-        assert!((5..8).all(|x| px_at(&washed, x, mid) == solid(theme.yellow)) && px_at(&washed, 4, mid)[3] == 0, "{size:?}");
-        assert!(px_at(&washed, 5, top)[3] < 255, "{size:?}: the bar's end is round");
+        assert!((8..11).all(|x| px_at(&washed, x, mid) == solid(theme.yellow)) && px_at(&washed, 7, mid)[3] == 0, "{size:?}");
+        assert!(px_at(&washed, 8, top)[3] < 255, "{size:?}: the bar's end is round");
     }
     let (_, stopped) = draw_in(&flagged(Flag::Stopped, false), TextSize::Medium);
     let (_, x1, _, y1) = drawn_box(&stopped);
@@ -430,7 +433,7 @@ fn the_selected_card_keeps_its_wash_and_its_bar_with_an_edge_of_its_flags_colour
     let (_, s) = draw_in(&flagged(Flag::Needs, true), TextSize::Medium);
     let (x0, x1, y0, y1) = drawn_box(&s);
     assert!(faintly(px_at(&s, x1 - 4, y1 / 2), theme.wash(Flag::Needs)));
-    assert_eq!(px_at(&s, 6, y1 / 2), solid(theme.yellow));
+    assert_eq!(px_at(&s, 9, y1 / 2), solid(theme.yellow));
     // its edge is amber, stronger than the hairline round a wash that isn't selected
     let (_, washed) = draw_in(&flagged(Flag::Needs, false), TextSize::Medium);
     let mid = (x0 + x1) / 2;

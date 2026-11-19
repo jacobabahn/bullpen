@@ -113,7 +113,7 @@ fn the_headers_counts_are_chips_with_a_rule_under_the_line() {
     let rule = rows_with(&pm, t.rule());
     assert!(!rule.is_empty() && rule[0] > *amber.last().unwrap());
     let y = rule[0];
-    assert!(block(&pm, (10, 380), (y, y + 1)).iter().all(|p| p[3] > 0));
+    assert!(block(&pm, (14, 386), (y, y + 1)).iter().all(|p| p[3] > 0));
     // a header a cell high has no room for it
     let one = head(&head_of(vec![("2 ready", "ready")]), 1, &c, &mut Fonts::builtin()).unwrap();
     assert!(rows_with(&one, t.rule()).is_empty());
@@ -136,7 +136,7 @@ fn a_three_cell_header_has_the_status_bar_in_the_rules_place_and_only_the_chip_o
     assert!(!rows_with(&pm, [t.yellow.0, t.yellow.1, t.yellow.2, 46]).is_empty());
     assert!(rows_with(&pm, [t.green.0, t.green.1, t.green.2, 46]).is_empty());
     // the bar, solid in its groups' colours, and no rule (a row of it across the line)
-    let ruled = |pm: &Pixmap| (0..pm.height()).any(|y| block(pm, (10, 380), (y, y + 1)).iter().all(|p| p[3] == t.rule()[3]));
+    let ruled = |pm: &Pixmap| (0..pm.height()).any(|y| block(pm, (14, 386), (y, y + 1)).iter().all(|p| p[3] == t.rule()[3]));
     assert!(!ruled(&pm));
     let bar = block(&pm, (0, 400), (30, 35));
     assert!(has(&bar, t.yellow) && has(&bar, t.green) && has(&bar, t.blue));

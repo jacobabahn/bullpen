@@ -117,16 +117,16 @@ impl Canvas {
         self.grid.cell_w as f32
     }
 
-    /// Where text starts (a group's name, the top line, the keys) and ends: a column in
-    /// from the left, and a column and a quarter from the right, whose last part has the
-    /// list's scroll marks. The rules and the status bar run between the two, and a
-    /// card reaches half a column past each.
+    /// Where text starts (a group's name, the top line, the keys) and ends: a column and
+    /// a quarter in from each side (the right's last part has the list's scroll marks).
+    /// The rules and the status bar run between the two, and a card reaches half a
+    /// column past each, so it's as far from the pane's left edge as from its right.
     pub fn left(&self) -> f32 {
-        self.c()
+        (1.25 * self.c()).round()
     }
 
     pub fn right(&self) -> f32 {
-        self.grid.width() as f32 - 1.25 * self.c()
+        self.grid.width() as f32 - self.left()
     }
 }
 
@@ -447,11 +447,11 @@ impl Geo {
         1.15 * self.mark_r() * scale + (self.mark_r() * 0.26).max(1.2) + 2.0
     }
 
-    /// Where text starts (under the ID: column 3, as on the text board, or past a larger
-    /// type's mark and a little space).
+    /// Where a task's text starts (its ID, and its lines under it): two columns past
+    /// its mark's left edge, or past a larger type's mark and a little space.
     fn text_x(&self) -> f32 {
         let c = self.c.c();
-        (3.0 * c).max(self.mark_x() + self.mark_r() + 0.4 * self.c.m.title)
+        (self.c.left() + 2.0 * c).max(self.mark_x() + self.mark_r() + 0.4 * self.c.m.title)
     }
 
     /// Where a title starts: past the ID column and a gap, narrower on a board under 44
@@ -619,7 +619,7 @@ impl<'a> Draw<'a> {
     /// starts and ends, on each side (its mark inside it), clear of the type above and
     /// below by `inset`, the last into the space above the next task. As x, y, w, h.
     fn panel(&self, top: f32, bottom: f32) -> (f32, f32, f32, f32) {
-        let (inset, out) = (self.m().inset, 0.5 * self.c());
+        let (inset, out) = (self.m().inset, (0.5 * self.c()).round());
         let x = self.g.c.left() - out;
         (x, top - inset, self.right() + out - x, bottom - top + 2.0 * inset)
     }
