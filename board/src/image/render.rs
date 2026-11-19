@@ -52,7 +52,8 @@ pub struct Metrics {
     /// the space above a task (or an item), and above a heading
     pub pad: f32,
     pub head_pad: f32,
-    /// the space between groups
+    /// the space between groups: more than is under a group's name, so the name sits
+    /// with its own tasks
     pub gap: f32,
     /// the space between a title's last line and the task's first detail line
     pub title_gap: f32,
@@ -92,7 +93,7 @@ impl Metrics {
             detail_line: (1.42 * detail).round(),
             pad: (0.8 * title).round(),
             head_pad: (0.5 * title).round(),
-            gap: (0.45 * ch).round(),
+            gap: (0.75 * ch).round(),
             title_gap: (0.06 * title).round(),
             inset: (0.25 * title).round(),
             cells: false,
@@ -553,7 +554,7 @@ impl Geo {
     fn height(&self, row: &Row, lines: usize) -> u32 {
         let m = &self.c.m;
         let h = match row {
-            Row::Head { .. } => m.head_pad + m.line,
+            Row::Head { .. } => m.head_pad + m.detail_line,
             Row::Task(_) | Row::Item(_) => m.pad + lines as f32 * m.line + m.title_gap,
             Row::Later { .. } => m.pad + m.line,
             Row::Detail(_) | Row::ItemDetail(..) => lines as f32 * m.detail_line,
@@ -752,7 +753,7 @@ impl<'a> Draw<'a> {
             // a group's name at a detail's size, a little dim: the titles under it lead
             Row::Head { name, count } => {
                 let y = y + m.head_pad;
-                self.set(m.detail, m.line);
+                self.set(m.detail, m.detail_line);
                 let head = self.theme.heading();
                 let end = self.text(name, Weight::Bold, left, y, full, head);
                 let gap = 0.5 * self.px();
