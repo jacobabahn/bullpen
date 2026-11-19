@@ -221,8 +221,8 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
                 let mut lines = g.detail_lines(&d.text, d.lines, bolder, caps, fonts);
                 let last = !rows.rows.get(i + 1).is_some_and(Row::is_detail);
                 // the key goes after its last line, which makes room when it must
-                if last && key_w > 0.0 && lines.last().is_some_and(|l| fonts.width(l, Weight::Regular, c.m.detail) > g.detail_room() - key_w) {
-                    lines = g.detail_lines(&d.text, d.lines, bolder, key_w + caps, fonts);
+                if last && key_w > 0.0 {
+                    g.room_for_key(&mut lines, d.lines, key_w + caps, fonts);
                 }
                 heights.push(g.height(row, lines.len()));
                 all.push(lines);
@@ -515,6 +515,25 @@ impl Geo {
         if lines.is_empty() { vec![String::new()] } else { lines }
     }
 
+    /// Make room at the right of a detail's last line for the selected task's key,
+    /// `key` pixels: when the line is too long for it, its last words go on a line
+    /// more (the lines above keep their width), or with `most` lines already, it's cut.
+    fn room_for_key(&self, lines: &mut Vec<String>, most: usize, key: f32, fonts: &Fonts) {
+        let (px, room) = (self.c.m.detail, self.detail_room() - key);
+        let wide = |l: &str| fonts.width(l, Weight::Regular, px) > room;
+        let Some(line) = lines.pop() else { return };
+        if !wide(&line) {
+            return lines.push(line);
+        }
+        match line.rsplit_once(' ') {
+            Some((rest, word)) if lines.len() + 1 < most && !line.ends_with('…') => {
+                lines.extend([rest.to_string(), word.to_string()]);
+                fonts.fill_last(lines, Weight::Regular, px, room);
+            }
+            _ => lines.push(fonts.fit(&line, Weight::Regular, px, room)),
+        }
+    }
+
     /// A detail line's room: from under the ID to where text ends.
     fn detail_room(&self) -> f32 {
         self.c.right() - self.text_x()
@@ -704,7 +723,9 @@ impl<'a> Draw<'a> {
         let fill = flag.map_or(self.theme.tint(), |f| self.theme.flag_tint(f));
         let edge = self.theme.edge();
         self.rounded_fill(x, y, w, h, r, fill);
-        self.rounded_edge(x, y, w, h, r, RING, edge);
+        // (small type's rows are a cell each: a thinner edge, clear of the type)
+        let ring = if self.m().cells { RING - 1.0 } else { RING };
+        self.rounded_edge(x, y, w, h, r, ring, edge);
     }
 
     /// A card's and a wash's corners.

@@ -623,3 +623,43 @@ fn a_short_last_line_keeps_its_room_beside_the_key_and_a_task_with_no_key_has_no
     // only the last line has it
     assert!(!differ(&s, &bare, (0, 400), (0, bottom - 25)));
 }
+
+#[test]
+fn only_a_details_last_line_makes_room_for_the_key() {
+    let fonts = Fonts::builtin();
+    let c = canvas(TextSize::Medium);
+    let g = Geo { c, idw: 0.0 };
+    let w = |s: &str| fonts.width(s, Weight::Regular, c.m.detail);
+    let key = g.key_width("a", "accept", &fonts);
+    // two full lines: the first keeps its width, the second's last words go on a third
+    let mut full = String::from("one");
+    while w(&format!("{full} more")) <= g.detail_room() {
+        full.push_str(" more");
+    }
+    let mut lines = vec![full.clone(), full.clone()];
+    g.room_for_key(&mut lines, 3, key, &fonts);
+    assert_eq!(lines.len(), 3);
+    assert_eq!(lines[0], full);
+    assert!(w(&lines[2]) <= g.detail_room() - key && lines.concat().matches("more").count() == 2 * full.matches("more").count());
+    // with no line more to take, the last is cut
+    let mut lines = vec![full.clone(), full.clone()];
+    g.room_for_key(&mut lines, 2, key, &fonts);
+    assert_eq!(lines[0], full);
+    assert!(lines[1].ends_with('…') && w(&lines[1]) <= g.detail_room() - key);
+    // a short last line is left as it is
+    let mut lines = vec![full.clone(), "short".to_string()];
+    g.room_for_key(&mut lines, 3, key, &fonts);
+    assert_eq!(lines, vec![full, "short".to_string()]);
+}
+
+#[test]
+fn the_bar_at_a_washs_left_follows_its_corners() {
+    // (with the space between groups under it, so the wash's foot is in the image)
+    let mut r = flagged(Flag::Needs, false);
+    r.rows.push(Row::Gap);
+    let (_, s) = draw_in(&r, TextSize::Medium);
+    let (x0, _, top, bottom) = drawn_box(&s);
+    // at the wash's corners its first column is clear, as the wash's is; at its middle it's the bar
+    assert_eq!((px_at(&s, x0, top)[3], px_at(&s, x0, bottom)[3]), (0, 0));
+    assert_eq!(px_at(&s, x0, (top + bottom) / 2), solid(Theme::default().yellow));
+}
