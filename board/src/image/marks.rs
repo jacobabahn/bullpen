@@ -23,7 +23,7 @@ impl Draw<'_> {
     /// The scroll marks in the last column: ↑ at the top when rows are above, ↓ at the
     /// bottom of an image `height` high when rows are below.
     pub(in crate::image) fn scroll_marks(&mut self, marks: Marks, height: f32) {
-        let cx = self.g.c.grid.width() as f32 - 0.4 * self.c();
+        let cx = self.g.c.grid.width() as f32 - 0.28 * self.c();
         let half = 0.5 * self.m().line.min(self.g.c.grid.cell_h as f32);
         if marks.up {
             self.chevron(cx, half, -1.0);
@@ -35,7 +35,7 @@ impl Draw<'_> {
 
     /// A small chevron at (cx, cy), pointing down (dir 1) or up (-1).
     fn chevron(&mut self, cx: f32, cy: f32, dir: f32) {
-        let r = 0.26 * self.c();
+        let r = 0.2 * self.c();
         let mut pb = PathBuilder::new();
         pb.move_to(cx - r, cy - dir * r / 2.0);
         pb.line_to(cx, cy + dir * r / 2.0);

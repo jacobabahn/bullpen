@@ -172,8 +172,7 @@ impl Fonts {
     }
 
     /// A last line of one word takes the last word of the line above it, when that line
-    /// has three or more and the two fit: a word isn't left alone under a full line (a
-    /// detail's lines; a title keeps its first line full beside its age).
+    /// has three or more and the two fit: a word isn't left alone under a full line.
     pub fn no_widow(&self, lines: &mut [String], weight: Weight, px: f32, max: f32) {
         let [.., above, last] = lines else { return };
         if last.contains(' ') || last.ends_with('…') || above.split(' ').count() < 3 {
@@ -183,25 +182,6 @@ impl Fonts {
         let moved = format!("{word} {last}");
         if self.width(&moved, weight, px) <= max {
             (*above, *last) = (rest.to_string(), moved);
-        }
-    }
-
-    /// A title on two lines, neither cut: words go from the first line's end to the
-    /// second's start until the second is half the first's width (and while that leaves
-    /// the two closer in width), so the second isn't a word or two under a full line.
-    pub fn balance(&self, lines: &mut [String], weight: Weight, px: f32, max: f32) {
-        let [first, second] = lines else { return };
-        if second.ends_with('…') {
-            return;
-        }
-        let w = |s: &str| self.width(s, weight, px);
-        while let Some((rest, word)) = first.rsplit_once(' ') {
-            let moved = format!("{word} {second}");
-            let (now, then) = ((w(first) - w(second)).abs(), (w(rest) - w(&moved)).abs());
-            if w(&moved) > max || then >= now || 2.0 * w(second) >= w(first) {
-                break;
-            }
-            (*first, *second) = (rest.to_string(), moved);
         }
     }
 

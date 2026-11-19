@@ -117,10 +117,11 @@ impl Theme {
         faint(self.fg, 0.085)
     }
 
-    /// The selected card's edge: the foreground, nearly whole, whatever the card's fill,
-    /// so the selection is one mark everywhere and isn't a needs-you task's amber.
+    /// The selected card's edge: the terminal's blue, whatever the card's fill. Nothing
+    /// else on the board is boxed, so the ring is the selection wherever it is, among
+    /// amber and red washes too.
     pub fn edge(&self) -> [u8; 4] {
-        faint(self.fg, 0.8)
+        solid(self.blue)
     }
 
     /// The selected card's fill when its task needs you or stopped: its flag's colour,
@@ -129,11 +130,7 @@ impl Theme {
         faint(bright(self.flag(flag)), 0.2)
     }
 
-    /// The hairline round a wash: its flag's colour, faint, so a wash has an edge on a
-    /// light theme's white.
-    pub fn wash_edge(&self, flag: Flag) -> [u8; 4] {
-        faint(bright(self.flag(flag)), 0.3)
-    }
+
 
     /// The rule under the top line and over the bottom rows: the foreground, faintly.
     pub fn rule(&self) -> [u8; 4] {
@@ -161,7 +158,7 @@ impl Theme {
     /// light theme's amber is dark, to read as text, and a wash of it is beige),
     /// faintly, so dim text on it still reads at 4.5:1 on a light theme's white.
     pub fn wash(&self, flag: Flag) -> [u8; 4] {
-        faint(bright(self.flag(flag)), 0.09)
+        faint(bright(self.flag(flag)), 0.1)
     }
 
     /// A status's colour, as ui::mark_style gives it; None for the dim ones.
@@ -176,7 +173,7 @@ impl Theme {
     }
 
     /// A group's colour in the header's status bar, by its first status: what waits on
-    /// you in its status's colour (finished fainter than ready), in review blue, the
+    /// you in its status's colour (finished the ready's green, drawn hollow), in review blue, the
     /// coordinator's a violet of its own, and what's working or queued in the
     /// foreground, the queued fainter.
     pub fn group(&self, status: &str) -> [u8; 4] {
@@ -184,7 +181,7 @@ impl Theme {
             "needs" => solid(self.yellow),
             "stopped" => solid(self.red),
             "ready" => solid(self.green),
-            "finished" => faint(self.green, 0.7),
+            "finished" => solid(self.green),
             "review" => solid(self.blue),
             "working" => faint(self.fg, 0.7),
             "triage" => solid(self.between()),

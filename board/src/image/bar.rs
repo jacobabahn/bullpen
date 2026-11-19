@@ -22,12 +22,26 @@ pub fn draw(d: &mut Draw, c: &Canvas, tallies: &[Tally]) {
     let ch = c.grid.cell_h as f32;
     let (l, r) = (c.left(), c.right());
     let (top, h) = ((TOP * ch).round(), (HEIGHT * ch).round().max(2.0));
-    let theme = d.theme();
     for (x, w, status) in segments(tallies, l, r, gap(c)) {
-        d.rounded_fill(x, top, w, h, (h.min(w) / 2.0).floor(), theme.group(status));
+        mark(d, x, top, w, h, status);
     }
     counts(d, tallies, l, r, (top + h + UNDER * ch).round(), ch, c.m.label);
 }
+
+/// A segment, or a count's dot: a round-ended bar in its group's colour, filled, but
+/// a finished task's, which is hollow (a line of its green), so it isn't taken for one
+/// that's ready, a fuller green.
+fn mark(d: &mut Draw, x: f32, y: f32, w: f32, h: f32, status: &str) {
+    let (r, color) = ((h.min(w) / 2.0).floor(), d.theme().group(status));
+    if status == "finished" && w >= 6.0 && h >= 6.0 {
+        d.rounded_edge(x, y, w, h, r, HOLLOW, color);
+    } else {
+        d.rounded_fill(x, y, w, h, r, color);
+    }
+}
+
+/// A hollow mark's line.
+const HOLLOW: f32 = 2.0;
 
 /// The space between segments: a few pixels, as a cell's width sets it.
 fn gap(c: &Canvas) -> f32 {
@@ -76,7 +90,7 @@ fn counts(d: &mut Draw, tallies: &[Tally], l: f32, r: f32, y: f32, h: f32, px: f
     for (i, t) in tallies[..shown].iter().enumerate() {
         let start = if i == 0 { x } else { x + PAIR * px };
         let dot = (DOT_R * 2.0 * px).round();
-        d.rounded_fill(start, (y + (h - dot) / 2.0).round(), dot, dot, dot / 2.0, theme.group(t.status));
+        mark(d, start, (y + (h - dot) / 2.0).round(), dot, dot, t.status);
         let end = d.boxed(px, &t.n.to_string(), Weight::Bold, start + DOT * px, y, h, theme.text());
         x = d.boxed(px, &format!(" {}", t.word), Weight::Regular, end, y, h, theme.dim());
     }

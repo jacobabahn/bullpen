@@ -123,8 +123,9 @@ impl Canvas {
 
     /// Where text starts (a group's name, the top line, the keys) and ends: a column and
     /// a quarter in from each side (the right's last part has the list's scroll marks).
-    /// The rules and the status bar run between the two, and a card reaches half a
-    /// column past each, so it's as far from the pane's left edge as from its right.
+    /// The rules and the status bar run between the two, and a card reaches three
+    /// quarters of a column past each, so it's as far from the pane's left edge as
+    /// from its right.
     pub fn left(&self) -> f32 {
         (1.25 * self.c()).round()
     }
@@ -164,8 +165,6 @@ pub struct Laid {
     pub after: Vec<u32>,
     lines: Vec<Vec<String>>,
     pub idw: f32,
-    /// the selected task's key is drawn: its block's last line has room for it
-    keyed: bool,
 }
 
 impl Laid {
@@ -199,9 +198,8 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
     let g = Geo { c: *c, idw };
     let mut all = Vec::new();
     let mut heights = Vec::new();
-    // the room the selected task's key takes on its block's last line, and whether
-    // it has that room
-    let (mut key_w, mut keyed) = (0.0, true);
+    // the room the selected task's key takes on its block's last line
+    let mut key_w = 0.0;
     // the last task (or item) was on a wash, which reaches under its block
     let mut washed = false;
     for (i, row) in rows.rows.iter().enumerate() {
@@ -220,15 +218,14 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
                 let bolder = if d.stale { fonts.width(&age, Weight::Bold, c.m.detail) - fonts.width(&age, Weight::Regular, c.m.detail) } else { 0.0 };
                 let mut lines = g.detail_lines(&d.text, d.lines, bolder, 0.0, fonts);
                 let last = !rows.rows.get(i + 1).is_some_and(Row::is_detail);
-                // the key goes after its last line, which makes room when it must; when
-                // that would cut its text, the key is left out (the key row has it)
+                // the key goes after its last line when that has room beside it, else on
+                // a line of its own under it: the text is laid out the same with or
+                // without it (small type keeps its rows a cell each, and cuts the line)
                 if last && key_w > 0.0 && lines.last().is_some_and(|l| fonts.width(l, Weight::Regular, c.m.detail) > g.detail_room() - key_w) {
-                    let narrower = g.detail_lines(&d.text, d.lines, bolder, key_w, fonts);
-                    let cut = |l: &[String]| l.last().is_some_and(|l| l.ends_with('…'));
-                    if cut(&narrower) && !cut(&lines) {
-                        keyed = false;
+                    if c.m.cells {
+                        lines = g.detail_lines(&d.text, d.lines, bolder, key_w, fonts);
                     } else {
-                        lines = narrower;
+                        lines.push(String::new());
                     }
                 }
                 heights.push(g.height(row, lines.len()));
@@ -254,8 +251,9 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
         let x = g.title_x();
         let first = right - x;
         let lines = if most > 1 {
+            // (its first line full beside its age, but a last line of one word takes another)
             let mut lines = fonts.wrap(title, weight, px, (first, c.right() - x), most);
-            fonts.balance(&mut lines, weight, px, c.right() - x);
+            fonts.no_widow(&mut lines, weight, px, c.right() - x);
             lines
         } else {
             vec![fonts.fit(title, weight, px, first)]
@@ -264,7 +262,7 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
         all.push(lines);
     }
     let after = vec![0; heights.len()];
-    Laid { heights, after, lines: all, idw, keyed }
+    Laid { heights, after, lines: all, idw }
 }
 
 /// The rows from `top` that fit in `room` pixels whole: [top, end). One at least, cut if
@@ -357,7 +355,7 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
         }
     }
     // the selected task's key, at its card's lower right (lay made room for it)
-    for b in blocks.iter().filter(|b| b.ends && laid.keyed) {
+    for b in blocks.iter().filter(|b| b.ends) {
         if let Some((key, what)) = b.key {
             d.action(key, what, b.bottom);
         }
@@ -665,11 +663,11 @@ impl<'a> Draw<'a> {
         self.pm.stroke_path(path, &paint(color), &stroke, t, None);
     }
 
-    /// What a block from `top` to `bottom` sits on (Block): half a cell past where text
+    /// What a block from `top` to `bottom` sits on (Block): three quarters of a cell past where text
     /// starts and ends, on each side (its mark inside it), clear of the type above by
     /// `inset` and under it by `below`, into the space above the next task. As x, y, w, h.
     fn panel(&self, top: f32, bottom: f32) -> (f32, f32, f32, f32) {
-        let (m, out) = (self.m(), (0.5 * self.c()).round());
+        let (m, out) = (self.m(), (0.75 * self.c()).round());
         let x = self.g.c.left() - out;
         (x, top - m.inset, self.right() + out - x, bottom - top + m.inset + m.below)
     }
@@ -677,7 +675,7 @@ impl<'a> Draw<'a> {
     /// The selected task's (or item's) card, the same wherever it is: a fill a step
     /// stronger than what's around it (the foreground, faint, or its flag's colour
     /// twice its wash's strength when it needs you or stopped) and an edge two pixels
-    /// wide, the foreground's.
+    /// wide, the terminal's blue.
     fn card(&mut self, top: f32, bottom: f32, flag: Option<Flag>) {
         let (x, y, w, h) = self.panel(top, bottom);
         let r = self.radius();
@@ -693,13 +691,11 @@ impl<'a> Draw<'a> {
     }
 
     /// Behind a task that needs you (amber) or whose agent stopped (red): its colour,
-    /// faintly, over the card's rectangle, with a hairline of it round it.
+    /// faintly, over the card's rectangle, with no edge: only the selection is boxed.
     fn wash(&mut self, top: f32, bottom: f32, flag: Flag) {
         let (x, y, w, h) = self.panel(top, bottom);
-        let (color, line, r) = (self.theme.wash(flag), self.theme.wash_edge(flag), self.radius());
+        let (color, r) = (self.theme.wash(flag), self.radius());
         self.rounded_fill(x, y, w, h, r, color);
-        // (a stroke of one pixel is drawn as a hairline, which spills past the rectangle)
-        self.rounded_edge(x, y, w, h, r, 1.25, line);
     }
 
     /// The bar at the left of a task that needs you or stopped, in its colour, as tall
