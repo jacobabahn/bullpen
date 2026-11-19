@@ -48,3 +48,34 @@ fn running_count_counts_only_working_tasks() {
     .collect();
     assert_eq!(running_count(&every), 2);
 }
+
+#[test]
+fn done_phrase_says_how_the_dependencies_ended() {
+    let every = tasks(json!([
+        {"id": "BP-1", "status": "done"},
+        {"id": "BP-2", "status": "done", "closed": true},
+        {"id": "BP-3", "status": "done", "closed": true},
+        {"id": "BP-4", "status": "todo", "after": ["BP-1"]},
+        {"id": "BP-5", "status": "todo", "after": ["BP-2", "BP-3"]},
+        {"id": "BP-6", "status": "todo", "after": ["BP-1", "BP-2"]},
+    ]));
+    assert_eq!(done_phrase(&every["BP-4"], &every), "BP-1 is accepted already");
+    assert_eq!(done_phrase(&every["BP-5"], &every), "BP-2, BP-3 are closed already");
+    assert_eq!(done_phrase(&every["BP-6"], &every), "BP-1, BP-2 are done already");
+}
+
+#[test]
+fn said_tells_what_became_of_the_task() {
+    let done = "BP-1 is accepted already";
+    assert_eq!(
+        said("BP-2", done, Outcome::Started),
+        "BP-2 started: BP-1 is accepted already"
+    );
+    assert_eq!(
+        said("BP-2", done, Outcome::NoRoom(3)),
+        "BP-2 is queued (BP-1 is accepted already): max_running (3) tasks are working, so it starts when one \
+         frees a slot"
+    );
+    assert!(said("BP-2", done, Outcome::Limit("at 5pm".into())).contains("`bullpen start BP-2` after the reset"));
+    assert!(said("BP-2", done, Outcome::Failed("no Rex session".into())).contains("`bullpen start BP-2` tries again"));
+}

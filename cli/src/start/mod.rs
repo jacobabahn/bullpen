@@ -5,7 +5,8 @@
 //! A task can wait on others (`add --after`, `after`): its "after" is a list of IDs.
 //! `start` refuses it until they're all done. When a task is accepted or dropped, or its
 //! worker hands it off (to review, ready or finished), the queue starts each todo task
-//! that has dependencies, all done, within max_running.
+//! that has dependencies, all done, within max_running; and when `add` or `after` gives
+//! a task dependencies that are all done already.
 
 use crate::args::{flag, pos, value, Arg, Args, Nargs};
 use crate::coordinators::{calling_coordinator, primary};
@@ -114,8 +115,8 @@ pub fn dep_ids(repo: &Repo, values: &[&str]) -> Vec<String> {
     out
 }
 
-/// after, if the task tid can wait on those tasks: each exists, isn't tid itself or
-/// dropped, and none of them waits on tid already (a cycle).
+/// after, if the task tid can wait on those tasks: each exists, isn't tid itself,
+/// dropped or closed with its branch kept (it never merges), and none of them waits on tid already (a cycle).
 fn check_after(repo: &Repo, tid: &str, after: Vec<String>) -> Res<Vec<String>> {
     let tasks = by_id(repo)?;
     for d in &after {
@@ -130,6 +131,11 @@ fn check_after(repo: &Repo, tid: &str, after: Vec<String>) -> Res<Vec<String>> {
         };
         if s(t, "status") == "dropped" {
             return fail(format!("{d} was dropped: {tid} would wait on it forever"));
+        }
+        if truthy(t.get("kept")) {
+            return fail(format!(
+                "{d} was closed with its branch kept, not merged: {tid} would wait on it forever"
+            ));
         }
         if let Some(path) = dep_path(&tasks, d, tid, &mut HashSet::new()) {
             return fail(format!(
@@ -197,9 +203,14 @@ pub fn read_text(path: &str) -> Res<String> {
     Ok(text.replace("\r\n", "\n").replace('\r', "\n"))
 }
 
-/// `add`: add a task; prints its ID.
+/// `add`: add a task; prints its ID. One whose dependencies are all done already starts
+/// as their accept would have started it, saying so (on stderr: stdout is the ID).
 pub fn cmd_add(argv: &[String]) -> Res<i32> {
-    println!("{}", add(argv, Obj::new())?);
+    let tid = add(argv, Obj::new())?;
+    println!("{tid}");
+    if let Some(line) = queue::start_if_done(&Repo::new(repo_root()?)?, &tid)? {
+        eprintln!("{line}");
+    }
     Ok(0)
 }
 
@@ -314,6 +325,9 @@ pub fn cmd_after(argv: &[String]) -> Res<i32> {
         println!("{tid} waits on nothing");
     } else {
         println!("{tid} waits on {}", after.join(", "));
+        if let Some(line) = queue::start_if_done(&repo, &tid)? {
+            println!("{line}");
+        }
     }
     Ok(0)
 }

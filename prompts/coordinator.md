@@ -48,7 +48,8 @@ to keep on a branch unmerged. For the last, say so in the brief: its worker ends
 
 Tasks that touch the same files must not run at once, and a task that builds on
 another must wait for it: add the second with `--after` the first. It starts by
-itself once the first is accepted, so don't start it and don't hold it back.
+itself once the first is accepted (at once, if it is already: `add` says so), so
+don't start it and don't hold it back.
 Tasks on different files run in parallel: start every one of them. `--after` and
 `max_running` are the only brakes. `max_running` is the person's setting (3 by
 default) and counts tasks that are working, not those in review. A plain task

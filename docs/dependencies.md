@@ -3,8 +3,17 @@
 A task can wait on others: `bullpen add "..." --brief-file f --after BP-8`
 (repeat `--after`, or give several as `BP-8,BP-9`). `bullpen after BP-9 BP-8`
 sets or changes what an existing task waits on, and `bullpen after BP-9 --none`
-clears it. Both refuse an unknown task, a dropped one, and a cycle (BP-8 waiting
-on BP-9 while BP-9 waits on BP-8).
+clears it. Both refuse an unknown task, a dropped one, one closed with its
+branch kept (it never merges), and a cycle (BP-8 waiting on BP-9 while BP-9
+waits on BP-8), saying why: such a task would wait forever.
+
+If every task it's given is done already (accepted, or closed with nothing to
+merge), the queue runs as their accept would have run it: the task starts if
+`max_running` leaves room (earlier queued tasks first), and the command says
+what became of it: `BP-9 started: BP-8 is accepted already`, or that it's
+queued for a slot, or that the usage limit holds it. `add` says this on stderr,
+so its stdout is still just the ID; `after` prints it after its own line. A task
+given a mix of done and open tasks waits for the open ones.
 
 `start` refuses a task whose dependencies aren't all accepted, naming them;
 `--force` starts it anyway. The board, `ls` and `show` say "Waits on BP-8" for it.

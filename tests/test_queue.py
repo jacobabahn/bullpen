@@ -105,6 +105,81 @@ class QueueTest(BullpenTest):
         self.assertIn("bullpen after BP-2 --none", asks[0])
         self.assertIn("was dropped", self.bp("after", "BP-2", "BP-1", ok=False).stderr)
 
+    def mark(self, tid, **fields):
+        path = next((self.tmp / "state" / "repos").iterdir()) / "tasks" / f"{tid}.json"
+        path.write_text(json.dumps({**json.loads(path.read_text()), **fields}))
+
+    def accepted(self):
+        tid = self.ready_with_a_commit()
+        self.merge_on_github(tid)
+        self.bp("accept", tid)
+        return tid
+
+    def test_add_after_an_accepted_task_starts_it_and_says_so(self):
+        self.accepted()  # BP-1
+        p = self.bp("add", "Next", "--brief", "x", "--after", "BP-1")
+        self.assertEqual(p.stdout.strip(), "BP-2")  # stdout stays the ID
+        self.assertIn("BP-2 started: BP-1 is accepted already", p.stderr)
+        self.assertEqual(self.show("BP-2")["status"], "working")
+        self.assertIn("bullpen · BP-2 started (BP-1 is accepted already)", self.news_lines())
+
+    def test_add_after_a_task_closed_with_nothing_to_merge_starts_it(self):
+        self.bp("up")
+        dep = self.done_dependency()  # BP-1
+        self.mark(dep, closed=True)
+        p = self.bp("add", "Next", "--brief", "x", "--after", dep)
+        self.assertIn("BP-2 started: BP-1 is closed already", p.stderr)
+        self.assertEqual(self.show("BP-2")["status"], "working")
+
+    def test_add_after_a_done_task_with_no_slot_says_it_is_queued(self):
+        self.bp("config", "--max-running", "1")
+        self.start_task("First")  # BP-1 takes the one slot
+        dep = self.done_dependency()  # BP-2
+        p = self.bp("add", "Next", "--brief", "x", "--after", dep)
+        self.assertIn("BP-3 is queued (BP-2 is accepted already): max_running (1) tasks are working", p.stderr)
+        self.assertEqual(self.show("BP-3")["status"], "todo")
+
+    def test_add_after_a_dropped_or_kept_task_refuses_it_and_says_why(self):
+        self.start_task("First")  # BP-1
+        dep = self.done_dependency()  # BP-2
+        self.bp("drop", "BP-1", "--force")
+        p = self.bp("add", "Next", "--brief", "x", "--after", f"{dep},BP-1", ok=False)
+        self.assertIn("BP-1 was dropped: BP-3 would wait on it forever", p.stderr)
+        self.mark(dep, kept={"branch": "x", "remote": None})
+        p = self.bp("add", "Next", "--brief", "x", "--after", dep, ok=False)
+        self.assertIn("BP-2 was closed with its branch kept, not merged: BP-3 would wait on it forever", p.stderr)
+        self.assertEqual(self.bp("add", "Plain", "--brief", "x").stdout.strip(), "BP-3")  # no ID was used up
+
+    def test_add_after_a_mix_of_done_and_open_waits_for_the_open_ones(self):
+        tid = self.ready_with_a_commit()  # BP-1, not accepted yet
+        dep = self.done_dependency()  # BP-2
+        p = self.bp("add", "Both", "--brief", "x", "--after", f"{tid},{dep}")
+        self.assertEqual(p.stderr, "")
+        self.assertEqual(self.show("BP-3")["status"], "todo")
+        self.assertIn("Waits on BP-1.", self.bp("ls").stdout)
+        self.merge_on_github(tid)
+        self.bp("accept", tid)
+        self.assertEqual(self.show("BP-3")["status"], "working")
+        self.assertIn("bullpen · BP-3 started (BP-1 was accepted)", self.news_lines())
+
+    def test_after_on_an_accepted_task_starts_it_and_says_so(self):
+        self.accepted()  # BP-1
+        self.bp("add", "Next", "--brief", "x")  # BP-2: plain, waits for the coordinator
+        out = self.bp("after", "BP-2", "BP-1").stdout
+        self.assertIn("BP-2 waits on BP-1", out)
+        self.assertIn("BP-2 started: BP-1 is accepted already", out)
+        self.assertEqual(self.show("BP-2")["status"], "working")
+
+    def test_after_on_a_mix_or_a_dropped_task_starts_nothing(self):
+        self.start_task("First")  # BP-1, working
+        dep = self.done_dependency()  # BP-2
+        self.bp("add", "Next", "--brief", "x")  # BP-3
+        self.assertEqual(self.bp("after", "BP-3", f"BP-1,{dep}").stdout.strip(), "BP-3 waits on BP-1, BP-2")
+        self.assertEqual(self.show("BP-3")["status"], "todo")
+        self.bp("drop", "BP-1", "--force")
+        self.assertIn("was dropped: BP-3 would wait on it forever", self.bp("after", "BP-3", "BP-1", ok=False).stderr)
+        self.assertIn("Waits on BP-1 (dropped)", self.bp("ls").stdout)  # still, as set before the drop
+
     def test_a_started_dependent_hears_what_landed(self):
         tid = self.ready_with_a_commit()
         briefs = next((self.tmp / "state" / "repos").iterdir()) / "briefs"
