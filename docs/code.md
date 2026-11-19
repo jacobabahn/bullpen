@@ -88,7 +88,8 @@ group's count for the status bar: `bar.rs`) and the bottom rows (`bottom::Foot`)
 values too, and the blocks of cells each has (on a tall board the header has the
 three rows above the list). After ratatui's frame, and through the same output, image/ lays the
 rows out (`render.rs`: each row's height from the text size, the selected title
-wrapped; the marks' shapes are its child `marks.rs`), scrolls them by those heights (`list::scroll_by`, which the text list's
+wrapped; the marks' shapes are its child `marks.rs`, and the keys a line names, in
+caps, its child `said.rs`), scrolls them by those heights (`list::scroll_by`, which the text list's
 `scroll` is with every row 1 high; it sets `app.top` and `app.page`), and draws the
 top line and the bottom rows (`frame.rs`) and the list, all with no terminal. The list
 is pieces (`pieces.rs`): a window of the rows drawn with nothing selected (the `View`

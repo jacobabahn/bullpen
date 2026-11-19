@@ -198,7 +198,7 @@ fn a_detail_is_wrapped_by_pixels_no_line_breaking_with_room_for_its_next_word() 
         // as many lines as it needs, three at most, the row as tall as they are
         assert!(lines.len() > 1 && lines.len() <= 3, "{size:?}: {lines:?}");
         assert_eq!(laid.heights[1], (lines.len() as f32 * c.m.detail_line).round() as u32);
-        let room = c.right() - Geo { c, idw: laid.idw }.text_x();
+        let room = Geo { c, idw: laid.idw }.detail_room();
         for (k, line) in lines.iter().enumerate() {
             assert!(fonts.width(line, Weight::Regular, c.m.detail) <= room, "{size:?}: {line}");
             // the next line's first word didn't fit on this one (but the last line's, which
@@ -394,7 +394,10 @@ fn the_title_leads_its_row_the_id_and_age_are_a_details_size() {
     let r = rows(vec![Row::Task(task("BP-123", "todo"))]);
     let (c, fonts) = (canvas(TextSize::Medium), Fonts::builtin());
     let laid = lay(&r, &c, &fonts);
-    assert_eq!(laid.idw, fonts.width("BP-123", Weight::Bold, c.m.detail));
+    // (the test's board is under 44 columns: its IDs are a label's size, a wider one's a detail's)
+    assert_eq!(laid.idw, fonts.width("BP-123", Weight::Bold, c.m.label));
+    let wide = Canvas::new(Grid { cols: 60, ..GRID }, TextSize::Medium, Theme::default());
+    assert_eq!(lay(&r, &wide, &fonts).idw, fonts.width("BP-123", Weight::Bold, wide.m.detail));
     let g = Geo { c, idw: laid.idw };
     let t = task("BP-123", "todo");
     assert_eq!(g.right_side(&t, &fonts), fonts.width("00m", Weight::Bold, c.m.detail));
@@ -671,4 +674,25 @@ fn the_bar_at_a_washs_left_follows_its_corners() {
     // at the wash's corners its first column is clear, as the wash's is; at its middle it's the bar
     assert_eq!((px_at(&s, x0, top)[3], px_at(&s, x0, bottom)[3]), (0, 0));
     assert_eq!(px_at(&s, x0, (top + bottom) / 2), solid(Theme::default().yellow));
+}
+
+#[test]
+fn a_tasks_lines_start_at_its_titles_left_edge_with_its_id_in_a_gutter() {
+    let fonts = Fonts::builtin();
+    for (cols, size) in [(35, TextSize::Medium), (47, TextSize::Medium), (79, TextSize::Large), (47, TextSize::Small)] {
+        let c = Canvas::new(Grid { cols, cell_w: 16, cell_h: 34 }, size, Theme::default());
+        let r = rows(vec![Row::Task(TaskRow { title: "Title".into(), age: String::new(), ..task("BP-123", "todo") }), detail("Its line", false)]);
+        let laid = lay(&r, &c, &fonts);
+        let mut f = Fonts::builtin();
+        let s = render(&r, &laid, Cut::rows(0..2, laid.heights[0] + laid.heights[1]), &c, &mut f).unwrap();
+        let g = Geo { c, idw: laid.idw };
+        // the first inked column of the detail's row is where the title starts: nothing under the ID
+        let (y0, y1) = (laid.heights[0], laid.heights[0] + laid.heights[1]);
+        let first = (0..s.pixmap.width()).find(|&x| (y0..y1).any(|y| px_at(&s, x, y)[3] > 0)).unwrap();
+        assert!((first as f32 - g.title_x()).abs() <= 3.0, "{cols} {size:?}: {first} {}", g.title_x());
+        assert!(g.title_x() > g.text_x() + laid.idw && g.detail_room() == c.right() - g.title_x());
+    }
+    // a board under 44 columns has a narrower gutter: its IDs are a label's size
+    let narrow = Geo { c: Canvas::new(Grid { cols: 35, cell_w: 16, cell_h: 34 }, TextSize::Medium, Theme::default()), idw: 0.0 };
+    assert_eq!(narrow.id_px(), narrow.c.m.label);
 }

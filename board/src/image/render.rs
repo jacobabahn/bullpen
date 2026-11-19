@@ -7,8 +7,9 @@
 //! faint fill and an edge, its mark inside, its first key in a cap at its lower right)
 //! with its whole title (a task that's yours gets two lines), a task that needs you on
 //! a wash of its colour with a round bar at its left, and a risk is a chip
-//! (chip.rs). The title is the loudest thing on a row: the ID, the age and the group's
-//! name are a detail's size. The marks that move are left out when the image look
+//! (chip.rs). A task is one block: its mark and ID in a gutter, its title's lines and
+//! its details from the title's left edge. The title is the loudest thing on a row: the
+//! ID, the age and the group's name are a detail's size. The marks that move are left out when the image look
 //! places them over the list (sprite.rs draws their frames with `Draw`). The list's
 //! last column has the scroll marks. Nothing here touches the terminal: given rows and
 //! a size in pixels, it lays them out and returns an image, or a window of pixels of
@@ -194,7 +195,7 @@ const YOURS_LINES: usize = 2;
 /// narrow board one that's yours), a detail's text wrapped by pixels to the room its
 /// type has, and how tall each row is.
 pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
-    let idw = id_width(rows, fonts, c.m.detail);
+    let idw = id_width(rows, fonts, Geo { c: *c, idw: 0.0 }.id_px());
     let g = Geo { c: *c, idw };
     let mut all = Vec::new();
     let mut heights = Vec::new();
@@ -410,33 +411,6 @@ fn blocks<'r>(rows: &'r Rows, places: &[Place], pad: f32) -> Vec<Block<'r>> {
     out
 }
 
-/// The room each side of a key a detail's text names, inside its cap, of the type's size.
-const KEY_SIDE: f32 = 0.28;
-
-/// The keys a detail's text names ("Its agent exited. r resumes it."), as which of its
-/// letters they are, spaces not counted (so they're found on its wrapped lines): a
-/// lowercase letter alone, first or after a full stop, in the form the board's own
-/// phrases have (core's words.rs: "r resumes it", "p shows its screen", "t tells it
-/// to continue"): the letter, a verb of four letters or more ending in s, then "it"
-/// or "its". A detail is often an agent's own words, where a letter alone ("a token
-/// is needed") is no key. The first `lead` columns are the task's age.
-fn key_letters(text: &str, lead: usize) -> Vec<usize> {
-    let (age, rest) = crate::model::split_at_width(text, lead);
-    let mut n = age.chars().filter(|c| !c.is_whitespace()).count();
-    let words: Vec<&str> = rest.split_whitespace().collect();
-    let mut out = Vec::new();
-    for (i, w) in words.iter().enumerate() {
-        let alone = w.len() == 1 && w.chars().all(|c| c.is_ascii_lowercase());
-        let verb = words.get(i + 1).is_some_and(|v| v.len() >= 4 && v.ends_with('s') && v.chars().all(|c| c.is_ascii_lowercase()));
-        let it = words.get(i + 2).is_some_and(|o| matches!(o.trim_end_matches(['.', ',', ';', ':']), "it" | "its"));
-        if alone && verb && it && (i == 0 || words[i - 1].ends_with('.')) {
-            out.push(n);
-        }
-        n += w.chars().count();
-    }
-    out
-}
-
 /// The ID column's width in pixels: the widest ID in the list, so titles line up as it scrolls.
 fn id_width(rows: &Rows, fonts: &Fonts, px: f32) -> f32 {
     rows.rows
@@ -492,17 +466,24 @@ impl Geo {
         1.15 * self.mark_r() * scale + (self.mark_r() * 0.3).max(1.2) + 2.0
     }
 
-    /// Where a task's text starts (its ID, and its lines under it): two columns past
-    /// its mark's left edge, or past a larger type's mark and a little space.
+    /// Where a task's ID starts: two columns past its mark's left edge, or past a
+    /// larger type's mark and a little space.
     fn text_x(&self) -> f32 {
         let c = self.c.c();
         (self.c.left() + 2.0 * c).max(self.mark_x() + self.mark_r() + 0.4 * self.c.m.title)
     }
 
-    /// Where a title starts: past the ID column and a gap, narrower on a board under 44
-    /// columns, where every pixel of title counts.
+    /// Where a title starts, and every line of it and of the task's details under it
+    /// (the ID and the mark hang in a gutter at their left): past the ID column and a
+    /// gap, narrower on a board under 44 columns, where every pixel counts.
     fn title_x(&self) -> f32 {
-        self.text_x() + self.idw + if self.narrow() { 0.5 } else { 0.8 } * self.c.m.title
+        self.text_x() + self.idw + if self.narrow() { 0.4 } else { 0.8 } * self.c.m.title
+    }
+
+    /// An ID's type: a detail's, or on a board under 44 columns a label's, so the
+    /// gutter it's in takes less of the lines beside it.
+    fn id_px(&self) -> f32 {
+        if self.narrow() { self.c.m.label } else { self.c.m.detail }
     }
 
     /// A board under 44 columns (the image's are one fewer, the last column the text's).
@@ -539,9 +520,9 @@ impl Geo {
         }
     }
 
-    /// A detail line's room: from under the ID to where text ends.
+    /// A detail line's room: from the title's left edge to where text ends.
     fn detail_room(&self) -> f32 {
-        self.c.right() - self.text_x()
+        self.c.right() - self.title_x()
     }
 
     /// The room the selected task's key takes at the right of its last line: its cap,
@@ -821,7 +802,7 @@ impl<'a> Draw<'a> {
             Row::Detail(d) => {
                 // a step under the title, but the selected task's and what you must act on
                 let color = if d.selected || (d.loud && d.flag.is_some()) { fg } else { dim };
-                let x = self.text_x();
+                let x = self.title_x();
                 let keys = key_letters(&d.text, d.lead);
                 let mut seen = 0;
                 for (k, line) in lines.iter().enumerate() {
@@ -853,42 +834,10 @@ impl<'a> Draw<'a> {
             }
             Row::Item(i) => self.item(i, lines, y + m.pad, bare),
             Row::ItemDetail(..) => {
-                let x = self.text_x();
+                let x = self.title_x();
                 for (k, line) in lines.iter().enumerate() {
                     self.text(line, Weight::Regular, x, y + k as f32 * m.detail_line, self.right() - x, fg);
                 }
-            }
-        }
-    }
-
-    /// A detail's line from x, on the line whose top is y: its text in `color`, the
-    /// keys it names (`keys`: which of the text's letters, `seen` of them drawn on the
-    /// lines before) semibold in the foreground, each in a small cap.
-    fn said(&mut self, line: &str, x: f32, y: f32, color: [u8; 4], keys: &[usize], seen: &mut usize) {
-        let fg = self.theme.text();
-        let (mut x, mut run, mut key) = (x, String::new(), false);
-        for c in line.chars().chain(std::iter::once('\0')) {
-            let is_key = !c.is_whitespace() && keys.contains(seen);
-            if (is_key != key || c == '\0') && !run.is_empty() {
-                let (weight, color) = if key { (Weight::Bold, fg) } else { (Weight::Regular, color) };
-                if key {
-                    // in a small cap, as the key row's (lay left room for its sides)
-                    let (w, px) = (self.width(&run, weight), self.px());
-                    let (side, ch) = (KEY_SIDE * px, (1.25 * px).round());
-                    let top = (y + (self.h() - ch) / 2.0).round();
-                    let (cap, edge) = (self.theme.cap(), self.theme.cap_edge());
-                    self.rounded_fill(x, top, w + 2.0 * side, ch, 0.25 * px, cap);
-                    self.rounded_edge(x, top, w + 2.0 * side, ch, 0.25 * px, 1.0, edge);
-                    x = self.text(&run, weight, x + side, y, f32::MAX, color) + side;
-                } else {
-                    x = self.text(&run, weight, x, y, f32::MAX, color);
-                }
-                run.clear();
-            }
-            key = is_key;
-            if c != '\0' {
-                run.push(c);
-                *seen += usize::from(!c.is_whitespace());
             }
         }
     }
@@ -952,7 +901,7 @@ impl<'a> Draw<'a> {
     /// `washed`, where dim is fainter), or semibold in the foreground when selected, or
     /// in `tone` when it's asked about. Returns where it ends.
     fn id(&mut self, id: &str, selected: bool, washed: bool, tone: Option<[u8; 4]>, y: f32) -> f32 {
-        let (x, px) = (self.text_x(), self.m().detail);
+        let (x, px) = (self.text_x(), self.g.id_px());
         let (weight, color) = match tone {
             Some(c) => (Weight::Bold, c),
             None if selected => (Weight::Bold, self.theme.text()),
@@ -989,6 +938,9 @@ impl<'a> Draw<'a> {
 
 #[path = "marks.rs"]
 mod marks;
+#[path = "said.rs"]
+mod said;
+use said::{key_letters, KEY_SIDE};
 pub use marks::Marks;
 
 #[cfg(test)]

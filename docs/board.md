@@ -153,7 +153,11 @@ and ends that far from its right, the rules and the status bar run between the t
 and a card or a wash reaches three quarters of a column past each, so type is clear
 of their edges and they're as far from one side of the pane as the other. The ages
 have a column of their own at the right, two figures wide, so the risks' chips before
-it line up down the list; a title's lines after its first stop short of it.
+it line up down the list; a title's lines after its first stop short of it. A task
+is one block with a hanging indent: its mark and its ID are in a gutter at the left,
+and its title, every line the title wraps to and every line under it start at the
+title's left edge. On a board under 44 columns the ID is a size smaller and the gap
+after it narrower, so the gutter takes less of those lines.
 
 The selected task sits on a card, and nothing else is boxed: a faint fill and an
 edge three pixels wide in the terminal's blue, its mark inside it, its ID in the
@@ -167,7 +171,7 @@ corners; selected, its fill is that colour stronger and the blue edge stands in 
 bar's place. An age that has waited too long is a chip of its task's colour, whole.
 
 A title is the loudest thing on a row: a task's ID (dim, on the title's baseline)
-and age, and the groups' names (a little dim), are a detail line's size. A title
+and age, and the groups' names (a little dim), are a detail line's size at most. A title
 that's yours (it needs you, stopped, or is ready) gets two lines, at medium and
 large; another's is cut to its line, and is the foreground a step back (the
 coordinator's, and a closed one's, a step further), so yours lead the list. A cut is
