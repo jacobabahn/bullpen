@@ -1,6 +1,6 @@
 //! The header's status bar, on a tall board: under the top line, a segment for each open
 //! task, in its group's colour (theme.rs's `group`) and the board's order, and under it
-//! each group's count and word, as many as fit, the rest dropped from the end. It says
+//! each group's count and word (the counts alone when the words don't all fit). It says
 //! the whole repository at a glance, however the list is scrolled. It shows counts
 //! only (ui/list.rs's `Tally`), so the header's image changes, and is sent again, only
 //! when a count does.
@@ -64,18 +64,18 @@ pub fn segments(tallies: &[Tally], l: f32, r: f32, gap: f32) -> Vec<(f32, f32, &
 }
 
 /// The counts' line, whose top is y, `h` high, in type `px`: each group's dot in its
-/// colour, its number and its word, dim; those that don't fit before r are dropped from
-/// the end.
+/// colour, its number and its word, dim. When they don't all fit before r the words go,
+/// so every colour in the bar still has its count (the groups' names are in the list);
+/// counts that don't fit even so are dropped from the end.
 fn counts(d: &mut Draw, tallies: &[Tally], l: f32, r: f32, y: f32, h: f32, px: f32) {
     let theme = d.theme();
+    let words = fits(d, tallies, r - l, px, true);
     let mut x = l;
     for (i, t) in tallies.iter().enumerate() {
         let num = t.n.to_string();
-        let word = format!(" {}", t.word);
-        let fonts = d.fonts();
-        let w = DOT * px + fonts.width(&num, Weight::Bold, px) + fonts.width(&word, Weight::Regular, px);
+        let word = if words { format!(" {}", t.word) } else { String::new() };
         let start = if i == 0 { x } else { x + PAIR * px };
-        if start + w > r {
+        if start + pair_width(d, t, px, words) > r {
             break;
         }
         let dot = (DOT_R * 2.0 * px).round();
@@ -83,6 +83,19 @@ fn counts(d: &mut Draw, tallies: &[Tally], l: f32, r: f32, y: f32, h: f32, px: f
         let end = d.boxed(px, &num, Weight::Bold, start + DOT * px, y, h, theme.text());
         x = d.boxed(px, &word, Weight::Regular, end, y, h, theme.dim());
     }
+}
+
+/// How wide a group's dot, number and (with `words`) word are.
+fn pair_width(d: &Draw, t: &Tally, px: f32, words: bool) -> f32 {
+    let fonts = d.fonts();
+    let word = if words { fonts.width(&format!(" {}", t.word), Weight::Regular, px) } else { 0.0 };
+    DOT * px + fonts.width(&t.n.to_string(), Weight::Bold, px) + word
+}
+
+/// Whether every group's count fits in `room` pixels.
+fn fits(d: &Draw, tallies: &[Tally], room: f32, px: f32, words: bool) -> bool {
+    let all: f32 = tallies.iter().map(|t| pair_width(d, t, px, words)).sum();
+    all + PAIR * px * tallies.len().saturating_sub(1) as f32 <= room
 }
 
 /// A dot's radius, and how far its number starts from its left, of the type's size.

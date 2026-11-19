@@ -71,12 +71,21 @@ fn the_bar_sits_under_the_top_line_in_its_groups_colours() {
 }
 
 #[test]
-fn the_counts_under_the_bar_drop_from_the_end_when_they_dont_fit() {
+fn the_counts_under_the_bar_lose_their_words_when_they_dont_all_fit_and_every_group_keeps_its_count() {
     let line = (TOP * 34.0 + HEIGHT * 34.0 + UNDER * 34.0 + 17.0) as u32;
-    // wide: every group's count; narrow: the last ones go, and nothing passes the bar's end
     let (wide, _) = drawn(&fixture(), 120);
     let (narrow, c) = drawn(&fixture(), 35);
     let end = |pm: &Pixmap| (line - 8..line + 8).flat_map(|y| inked(pm, y, 0)).max().unwrap();
-    assert!(end(&narrow) <= c.grid.width() - c.grid.cell_w);
+    assert!(end(&narrow) <= c.right() as u32);
     assert!(end(&wide) > end(&narrow) + 200);
+    // the dots: one a group on both, the narrow one's closer together (no words between)
+    let t = c.theme;
+    let blue = |pm: &Pixmap| inked(pm, line, 0).into_iter().find(|&x| {
+        let p = pm.pixels()[(line * pm.width() + x) as usize].demultiply();
+        (p.red(), p.green(), p.blue()) == (t.blue.0, t.blue.1, t.blue.2)
+    });
+    assert!(blue(&narrow).unwrap() < blue(&wide).unwrap() - 100, "in review's dot is on both");
+    // far too narrow even for the counts alone: the last ones go
+    let (tiny, c) = drawn(&fixture(), 12);
+    assert!(end(&tiny) <= c.right() as u32);
 }

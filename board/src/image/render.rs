@@ -793,8 +793,9 @@ impl<'a> Draw<'a> {
         }
         let color = match tone {
             Some(c) => c,
-            None if t.quiet && !t.selected => self.theme.dim(),
-            None => self.theme.text(),
+            None if t.selected || t.yours => self.theme.text(),
+            None if t.quiet => self.theme.quiet(),
+            None => self.theme.soft(),
         };
         let first = self.g.task_right(t, self.fonts);
         self.title(lines, title_weight(tone.is_some()), first, y, color);

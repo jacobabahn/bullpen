@@ -361,6 +361,18 @@ fn the_title_leads_its_row_the_id_and_age_are_a_details_size() {
 }
 
 #[test]
+fn a_title_thats_yours_is_the_foreground_and_anothers_a_step_back() {
+    let theme = Theme::default();
+    let full = |t: TaskRow| has(&row_px(&draw(&rows(vec![Row::Task(TaskRow { age: String::new(), ..t })])), 0), theme.fg);
+    assert!(full(TaskRow { yours: true, ..task("BP-1", "ready") }));
+    assert!(!full(task("BP-1", "working")));
+    assert!(!full(TaskRow { quiet: true, ..task("BP-1", "triage") }));
+    // selected, it's the foreground whoever's it is
+    assert!(full(TaskRow { selected: true, ..task("BP-1", "working") }));
+    assert!(theme.quiet()[3] < theme.soft()[3] && theme.dim()[3] < theme.quiet()[3]);
+}
+
+#[test]
 fn a_groups_name_is_a_little_dim_so_its_titles_lead() {
     let s = draw(&rows(vec![Row::Head { name: "Ready".into(), count: 1 }]));
     let px = row_px(&s, 0);

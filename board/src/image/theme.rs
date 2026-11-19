@@ -100,6 +100,18 @@ impl Theme {
         faint(self.fg, 0.82)
     }
 
+    /// The title of a task that isn't waiting on you (working, in review, queued): the
+    /// foreground a step back, so the titles that are yours lead the list.
+    pub fn soft(&self) -> [u8; 4] {
+        faint(self.fg, 0.86)
+    }
+
+    /// A quiet title (the coordinator's task, a closed one): dimmer than the rest, a
+    /// step above its own lines.
+    pub fn quiet(&self) -> [u8; 4] {
+        faint(self.fg, 0.76)
+    }
+
     /// The selected card's fill: the foreground, faintly.
     pub fn tint(&self) -> [u8; 4] {
         faint(self.fg, 0.085)
@@ -170,9 +182,9 @@ impl Theme {
             "ready" => solid(self.green),
             "finished" => faint(self.green, 0.55),
             "review" => solid(self.blue),
-            "working" => faint(self.fg, 0.55),
-            "triage" => faint(self.fg, 0.38),
-            _ => faint(self.fg, 0.2),
+            "working" => faint(self.fg, 0.62),
+            "triage" => faint(self.fg, 0.46),
+            _ => faint(self.fg, 0.32),
         }
     }
 
