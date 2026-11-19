@@ -46,9 +46,11 @@ impl Picture {
         let cell = self.cell().ok_or("no cell size")?;
         let canvas = Canvas::new(Grid { cols: view.cols as usize, cell_w: cell.0, cell_h: cell.1 }, app.cfg.text_size, self.theme);
         let fonts = fonts(&mut self.fonts, app.cfg.font.as_deref())?;
-        let plan = super::meter::time(|| "plan".into(), || super::pieces::plan(view, &canvas, fonts));
-        let paint = Paint { canvas, size: app.cfg.text_size, motion: app.cfg.motion, settling: &self.settling, ms: self.ms };
-        let wants = wants(view, &plan, &paint, &self.screen, fonts)?;
+        let prev = self.list.as_ref().map(|l| l.win);
+        let plan = super::meter::time(|| "plan".into(), || super::pieces::plan(view, &canvas, fonts, prev));
+        let list = self.list.as_ref();
+        let paint = Paint { canvas, size: app.cfg.text_size, motion: app.cfg.motion, settling: &self.settling, ms: self.ms, list };
+        let (wants, ..) = wants(view, plan, &paint, &self.screen, fonts)?;
         self.screen.preload(wants, out).map_err(|e| e.to_string())
     }
 }

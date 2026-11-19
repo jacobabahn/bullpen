@@ -617,35 +617,53 @@ fn under_an_overlay_a_mark_settling_doesnt_keep_the_board_waking() {
 }
 
 #[test]
-fn scrolling_a_row_moves_the_lists_crops_and_sends_the_list_again_only_a_page_on() {
-    // the list's image is sent again when its ID changes
-    let walk = |n: usize| {
-        let (mut app, mut p) = (board(n), picture());
-        asked(&mut app, &mut p);
-        frame(&mut app, &mut p);
-        let (mut ids, mut tops) = (vec![p.screen.id(&Slot::List)], vec![]);
-        for k in 2..=n {
-            app.sel = Some(format!("BP-{k}"));
-            frame(&mut app, &mut p);
-            ids.push(p.screen.id(&Slot::List));
-            tops.push(app.top);
-        }
-        ids.dedup();
-        assert!(tops.last() > tops.first(), "the list scrolled: {tops:?}");
-        // the list's pages, as the image lays it out
-        let view = app.view.clone().unwrap();
-        let c = Canvas::new(Grid { cols: view.cols as usize, cell_w: 10, cell_h: 20 }, app.cfg.text_size, Theme::default());
-        let plan = pieces::plan(&view, &c, &Fonts::builtin());
-        let pages = plan.base.tall(0, plan.base.heights.len()).div_ceil(view.rows_n as u32 * 20) as usize;
-        (ids.len(), pages)
-    };
-    // a few tasks, under three pages of a six-row list: its image is all of them
-    let (sent, pages) = walk(5);
-    assert_eq!((sent, pages <= 3), (1, true), "{pages} pages");
-    // thirty, many pages: two pages at a time, sent again a page on (a task or two
-    // takes a page here), not at each of the 29 moves
-    let (sent, pages) = walk(30);
-    assert!(sent > 1 && sent <= pages + 1 && sent < 29, "{sent} for {pages} pages");
+fn the_list_is_sent_again_for_a_change_on_screen_or_scrolling_out_of_its_window_only() {
+    let (mut app, mut p) = (board(40), picture());
+    asked(&mut app, &mut p);
+    frame_in(&mut app, &mut p, 40, 40);
+    let list = |p: &Picture| p.screen.id(&Slot::List);
+    // down until the list scrolls out of its first window (the page): sent again, the
+    // page and the next one
+    let mut k = 1;
+    while app.top == 0 {
+        k += 1;
+        app.sel = Some(format!("BP-{k}"));
+        frame_in(&mut app, &mut p, 40, 40);
+    }
+    let first = list(&p);
+    // on down a little: the crops move, the list isn't sent
+    let top = app.top;
+    while app.top == top {
+        k += 1;
+        app.sel = Some(format!("BP-{k}"));
+        frame_in(&mut app, &mut p, 40, 40);
+        assert_eq!(list(&p), first, "BP-{k}");
+    }
+    assert_eq!(list(&p), first, "scrolled to {} at BP-{k}", app.top);
+    // a task off screen but in the window changes: nothing is sent; one shown changes:
+    // the list is
+    let view = app.view.clone().unwrap();
+    let c = Canvas::new(Grid { cols: view.cols as usize, cell_w: 10, cell_h: 20 }, app.cfg.text_size, Theme::default());
+    let plan = pieces::plan(&view, &c, &Fonts::builtin(), p.list.as_ref().map(|l| l.win));
+    let off = (plan.shown.end..plan.win.end).find_map(|i| match &view.base.rows[i] {
+        crate::ui::rows::Row::Task(t) => Some(t.id.clone()),
+        _ => None,
+    });
+    let off = off.expect("a task under the list, in its window");
+    app.tasks.iter_mut().find(|t| t.id == off).unwrap().title = "Renamed".into();
+    assert_eq!(frame_in(&mut app, &mut p, 40, 40), "", "{off}");
+    app.tasks[k].title = "Renamed".into();
+    let out = frame_in(&mut app, &mut p, 40, 40);
+    assert!(list(&p) != first && out.contains(&format!("a=t,f=100,t=d,i={},", list(&p).unwrap())));
+    // on to the end: sent again a page on, not at each of the moves
+    let mut ids = vec![list(&p)];
+    for k in k + 1..=40 {
+        app.sel = Some(format!("BP-{k}"));
+        frame_in(&mut app, &mut p, 40, 40);
+        ids.push(list(&p));
+    }
+    ids.dedup();
+    assert!(ids.len() > 1 && ids.len() * 2 < 40 - k, "{} for {} moves", ids.len(), 40 - k);
 }
 
 #[test]

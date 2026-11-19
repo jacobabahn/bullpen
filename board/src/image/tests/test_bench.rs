@@ -1,7 +1,8 @@
 //! The image look's benchmark: how long a j or a k takes, from the key reaching the
 //! board to the last byte of its frame written, where that time goes and what it
 //! sends, on a fixed board (a state folder on disk, read as the board reads it), for
-//! every width, cell, text size and motion; then a held-down j, keys 30 ms apart. The
+//! every width, cell, text size and motion; then the first frame and a task's title
+//! changing, on screen and off; then a held-down j, keys 30 ms apart. The
 //! text look's numbers are beside them. No terminal: the output is counted, not shown.
 //!
 //!     bin/bullpen-cargo test -p bullpen-board --release bench -- --ignored --nocapture --test-threads 1
@@ -333,6 +334,40 @@ struct Held {
     most: f64,
 }
 
+/// Set a task's title on disk.
+fn retitle(dir: &Path, id: &str, title: &str) {
+    let path = dir.join("tasks").join(format!("{id}.json"));
+    let mut t: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    t["title"] = json!(title);
+    std::fs::write(&path, serde_json::to_string_pretty(&t).unwrap()).unwrap();
+}
+
+/// The list changing under the board: the first frame (with the board's start), then,
+/// with the first task selected, one task's title changed on disk and the board's
+/// frame after (the tasks read again and drawn), for a task shown and for the last
+/// task, off screen. Each its ms and KB, and whether the last task was off screen.
+fn change(dir: &Path, case: Case) -> [f64; 7] {
+    let t = Instant::now();
+    let mut b = Board::new(dir, case);
+    let first = [t.elapsed().as_secs_f64() * 1000.0, b.out.bytes.get() as f64 / 1024.0];
+    b.app.sel = b.app.order().first().map(|t| t.id.clone());
+    b.frame();
+    while b.ahead() {}
+    let order: Vec<String> = b.app.order().iter().map(|t| t.id.clone()).collect();
+    let off = order.len() > b.app.top + b.app.page + 1;
+    let mut out = vec![];
+    for id in [&order[1], order.last().unwrap()] {
+        let was = b.app.tasks.iter().find(|t| &t.id == id).unwrap().title.clone();
+        retitle(dir, id, &format!("Changed: {was}"));
+        let (t, before) = (Instant::now(), b.out.bytes.get());
+        b.frame();
+        out.extend([t.elapsed().as_secs_f64() * 1000.0, (b.out.bytes.get() - before) as f64 / 1024.0]);
+        retitle(dir, id, &was);
+        b.frame();
+    }
+    [first[0], first[1], out[0], out[1], out[2], out[3], if off { 1.0 } else { 0.0 }]
+}
+
 #[test]
 #[ignore = "a benchmark: run it by name with --release (docs/code.md)"]
 fn bench() {
@@ -361,6 +396,13 @@ fn bench() {
     for &case in &cases {
         let mut b = Board::new(&dir, case);
         println!("{}", report(case, &sweep(&mut b)));
+    }
+    println!("\nThe list changing: the first frame, then a task's title changed on disk, one shown and one off screen\n");
+    println!("| case | first frame ms | first frame KB | a task shown: ms | KB | the last task: ms | KB | the last task off screen |");
+    println!("|---|---|---|---|---|---|---|---|");
+    for &case in &cases {
+        let c = change(&dir, case);
+        println!("| {} | {:.1} | {:.1} | {:.1} | {:.1} | {:.1} | {:.1} | {} |", case.name(), c[0], c[1], c[2], c[3], c[4], c[5], c[6] == 1.0);
     }
     println!("\nA held-down j: 20 keys 30 ms apart\n");
     println!("| case | frames | first key to last frame ms | last frame after last key ms | a key to its frame: median ms | most ms |");

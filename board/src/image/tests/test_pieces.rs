@@ -96,7 +96,7 @@ fn the_pieces_put_together_are_the_list_drawn_whole() {
         let mut app = board();
         for sel in ["BP-1", "BP-2", "BP-3", "BP-5", "BP-7", "BP-9"] {
             let view = view_of(&mut app, sel);
-            let p = plan(&view, &c, &Fonts::builtin());
+            let p = plan(&view, &c, &Fonts::builtin(), None);
             app.top = p.top;
             assert!(p.sel.is_some(), "{sel} at {size:?}: the selected block is an image of its own");
             assert_eq!(most_apart(&put_together(&view, &p, &c, false), &whole(&view, &p, &c)), 0, "{sel} at {size:?}");
@@ -110,7 +110,7 @@ fn the_marks_placed_over_the_list_are_where_it_draws_them() {
         let c = canvas(size);
         let mut app = board();
         let view = view_of(&mut app, "BP-3");
-        let p = plan(&view, &c, &Fonts::builtin());
+        let p = plan(&view, &c, &Fonts::builtin(), None);
         // BP-3's working mark and BP-5's review mark (above it) are sprites; their first
         // frame is the still mark
         assert!(view.rows.rows[p.top..p.end].iter().filter(|r| bare(r, true, &|_| false)).count() >= 2);
@@ -127,11 +127,11 @@ fn the_marks_placed_over_the_list_are_where_it_draws_them() {
 fn moving_the_selection_keeps_the_base_image_and_moves_its_crops() {
     let c = canvas(TextSize::Medium);
     let mut app = board();
-    let a = plan(&view_of(&mut app, "BP-4"), &c, &Fonts::builtin());
+    let a = plan(&view_of(&mut app, "BP-4"), &c, &Fonts::builtin(), None);
     app.top = a.top;
     // the next task down (the board groups them: BP-2 is under BP-4), still on the page
     let view = view_of(&mut app, "BP-2");
-    let b = plan(&view, &c, &Fonts::builtin());
+    let b = plan(&view, &c, &Fonts::builtin(), None);
     assert_eq!((a.top, &a.win, a.win_y, a.win_h, &a.base), (b.top, &b.win, b.win_y, b.win_h, &b.base));
     assert!(!a.whole && !b.whole);
     assert_ne!(a.crops, b.crops);
@@ -151,7 +151,7 @@ fn the_rows_under_the_block_move_by_whole_cells() {
     let c = canvas(TextSize::Medium);
     let mut app = board();
     let view = view_of(&mut app, "BP-2");
-    let p = plan(&view, &c, &Fonts::builtin());
+    let p = plan(&view, &c, &Fonts::builtin(), None);
     let s0 = view.rows.rows.iter().position(Row::is_selected).unwrap();
     let after = s0 + 1 + view.rows.rows[s0 + 1..].iter().take_while(|r| r.is_detail()).count();
     let b1 = s0 + 1 + view.base.rows[s0 + 1..].iter().take_while(|r| r.is_detail()).count();
@@ -167,7 +167,7 @@ fn with_nothing_selected_in_view_the_base_image_is_the_list() {
     let mut app = App::for_test(vec![]);
     app.look = Look::Image;
     let view = view_of(&mut app, "BP-1");
-    let p = plan(&view, &c, &Fonts::builtin());
+    let p = plan(&view, &c, &Fonts::builtin(), None);
     assert!(p.whole && p.sel.is_none());
     // its crop, down to the cell where the last whole row ends, and the rest of that cell
     let last = p.laid.tall(p.top, p.end) / c.grid.cell_h;

@@ -131,6 +131,8 @@ pub struct Picture {
     clock: Option<u128>,
     /// a cell's size from the terminal's window size (tests have none)
     window: fn() -> Option<(u32, u32)>,
+    /// the list's base image on the terminal (list.rs)
+    list: Option<list::ListImage>,
     /// the view last drawn, and the keys whose images are still to be drawn ahead for
     /// it (ahead.rs)
     ahead_of: Option<View>,
@@ -155,6 +157,7 @@ impl Picture {
             ms: 0,
             clock: None,
             window: window_cell,
+            list: None,
             ahead_of: None,
             todo: Vec::new(),
         }
@@ -270,7 +273,8 @@ impl Picture {
         let fonts = fonts(&mut self.fonts, font)?;
         let ms = self.ms;
         settle(&mut self.seen, &mut self.settling, &view.rows, motion, ms);
-        let plan = meter::time(|| "plan".into(), || pieces::plan(view, &canvas, fonts));
+        let prev = self.list.as_ref().map(|l| l.win);
+        let plan = meter::time(|| "plan".into(), || pieces::plan(view, &canvas, fonts, prev));
         let f = list::Frame { view, plan: &plan, c: &canvas, size, bare: &|_| false, began: &|_| 0, ms };
         // the list's image is drawn again: the marks done settling go back in it
         let shows = list::base_shows(&f);
@@ -278,9 +282,10 @@ impl Picture {
             self.base_shows = shows;
             self.settling.retain(|_, t| ms.saturating_sub(*t) < sprite::settling_ms());
         }
-        let paint = Paint { canvas, size, motion, settling: &self.settling, ms };
-        let wants = wants(view, &plan, &paint, &self.screen, fonts)?;
+        let paint = Paint { canvas, size, motion, settling: &self.settling, ms, list: self.list.as_ref() };
+        let (wants, plan, list) = wants(view, plan, &paint, &self.screen, fonts)?;
         self.screen.show(wants, out).map_err(|e| format!("Drawing the list as text: {e}."))?;
+        self.list = Some(list);
         Ok(Drawn { top: plan.top, page: plan.page })
     }
 
@@ -296,7 +301,7 @@ impl Picture {
     pub fn resized(&mut self) {
         self.due = true;
         self.screen.forget();
-        self.ahead_of = None;
+        (self.list, self.ahead_of) = (None, None);
     }
 
     /// Take the images off the screen, keeping them for when the board shows again.
@@ -310,23 +315,27 @@ impl Picture {
         self.screen.clear(out);
         self.seen.clear();
         self.settling.clear();
-        self.ahead_of = None;
+        (self.list, self.ahead_of) = (None, None);
     }
 }
 
 /// What a frame's images are drawn with, besides its view and plan: the canvas, the
-/// type size, motion, the tasks whose marks are settling in (and since when) and the time.
+/// type size, motion, the tasks whose marks are settling in (and since when), the time,
+/// and the list's base image on the terminal.
 struct Paint<'a> {
     canvas: Canvas,
     size: TextSize,
     motion: bool,
     settling: &'a HashMap<String, u128>,
     ms: u128,
+    list: Option<&'a list::ListImage>,
 }
 
 /// The images a frame of `view` wants, in the order they're sent, each drawn when the
-/// screen doesn't have it.
-fn wants(view: &View, plan: &pieces::Plan, p: &Paint, screen: &Screen, fonts: &mut Fonts) -> Result<Vec<Want>, String> {
+/// screen doesn't have it; with its plan and the list's base image then. The base image
+/// on the terminal stays while it shows the rows shown as they are; when one of them
+/// changes, the page is drawn again; scrolled out of it, its plan's window is.
+fn wants(view: &View, plan: pieces::Plan, p: &Paint, screen: &Screen, fonts: &mut Fonts) -> Result<(Vec<Want>, pieces::Plan, list::ListImage), String> {
     let (canvas, settling, motion) = (&p.canvas, p.settling, p.motion);
     let bare = |row: &Row| pieces::bare(row, motion, &|id| settling.contains_key(id));
     // a turning mark turns with the text board's, from the board's start
@@ -334,7 +343,27 @@ fn wants(view: &View, plan: &pieces::Plan, p: &Paint, screen: &Screen, fonts: &m
         Row::Task(t) if !sprite::turns(&t.mark) => settling.get(&t.id).copied().unwrap_or(0),
         _ => 0,
     };
-    let f = list::Frame { view, plan, c: canvas, size: p.size, bare: &bare, began: &began, ms: p.ms };
+    // (a macro, not a closure: each frame borrows its own plan)
+    macro_rules! frame {
+        ($plan:expr) => {
+            list::Frame { view, plan: $plan, c: canvas, size: p.size, bare: &bare, began: &began, ms: p.ms }
+        };
+    }
+    let now = list::list_image(&frame!(&plan));
+    let kept = p.list.filter(|d| screen.has(&Slot::List, d.key) && list::still(d, &now, plan.shown.clone()));
+    let (plan, image) = match kept {
+        _ if screen.has(&Slot::List, now.key) => (plan, now),
+        Some(d) => (plan, d.clone()),
+        // the same window, but the rows shown changed: the page alone
+        None if p.list.is_some_and(|d| d.win == now.win) => {
+            let plan = pieces::plan(view, canvas, fonts, None);
+            let image = list::list_image(&frame!(&plan));
+            (plan, image)
+        }
+        // a window of its own (scrolled out of the last, or the first)
+        None => (plan, now),
+    };
+    let f = frame!(&plan);
     let head_n = view.row - view.row0;
     let foot_n = if view.foot.is_some() { view.foot_n } else { 0 };
     let mut wants = Vec::new();
@@ -343,7 +372,7 @@ fn wants(view: &View, plan: &pieces::Plan, p: &Paint, screen: &Screen, fonts: &m
         let png = (!screen.has(&Slot::Head, k)).then(|| list::encode(&Slot::Head, || frame::head(&view.head, head_n, canvas, fonts))).transpose()?;
         wants.push(Want { slot: Slot::Head, key: k, png, places: vec![whole(view, canvas, view.row0, head_n)] });
     }
-    let mut list = list::wants(&f, screen, fonts)?;
+    let mut list = list::wants(&f, image.key, screen, fonts)?;
     let sprites = list.split_off(list.iter().position(|w| matches!(w.slot, Slot::Sel | Slot::Tail | Slot::Cap | Slot::Sprite(_))).unwrap_or(list.len()));
     wants.extend(list);
     if let Some(foot) = view.foot.as_ref().filter(|_| foot_n > 0) {
@@ -352,7 +381,8 @@ fn wants(view: &View, plan: &pieces::Plan, p: &Paint, screen: &Screen, fonts: &m
         wants.push(Want { slot: Slot::Foot, key: k, png, places: vec![whole(view, canvas, view.row + view.rows_n, foot_n)] });
     }
     wants.extend(sprites);
-    Ok(wants)
+    drop(f);
+    Ok((wants, plan, image))
 }
 
 /// Note the tasks' marks: one that changed to a still mark settles in from now (`ms`).

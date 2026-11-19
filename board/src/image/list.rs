@@ -43,11 +43,47 @@ fn base_rows<'a>(f: &Frame<'a>) -> &'a [Row] {
     &rows.rows[f.plan.win.clone()]
 }
 
-/// What the base image shows, but for which of its marks are left out: when this
-/// changes, the image is drawn again anyway (marks done settling go back in it).
+/// What the base image shows of the rows shown, but for which of its marks are left
+/// out: when this changes, the image is drawn again anyway (marks done settling go
+/// back in it).
 pub fn base_shows(f: &Frame) -> u64 {
     let p = f.plan;
-    key(&Slot::List, f, (base_rows(f), p.win_y, p.win_h, p.base.idw.to_bits()))
+    let rows = if p.whole { &f.view.rows } else { &f.view.base };
+    key(&Slot::List, f, (&rows.rows[p.shown.clone()], p.base.idw.to_bits()))
+}
+
+/// The base image as drawn: its key, its window (pixels from the list's top, and how
+/// many), the layout of its rows (their spans, hashed, with the window and the rest of
+/// what places them) and how each of them looks (hashed), from its first row.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListImage {
+    pub key: u64,
+    pub win: (u32, u32),
+    layout: u64,
+    first: usize,
+    rows: Vec<u64>,
+}
+
+/// The base image a frame's plan would draw.
+pub fn list_image(f: &Frame) -> ListImage {
+    let p = f.plan;
+    let one = |what: &dyn Fn(&mut std::collections::hash_map::DefaultHasher)| {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        what(&mut h);
+        h.finish()
+    };
+    let rows: Vec<u64> = base_rows(f).iter().map(|r| one(&|h| (r, (f.bare)(r)).hash(h))).collect();
+    let spans: Vec<u32> = p.win.clone().map(|i| p.base.span(i)).collect();
+    let layout = key(&Slot::List, f, (&p.win, p.win_at, p.win_y, p.win_h, spans, p.base.idw.to_bits(), p.whole));
+    let key = one(&|h| (layout, &rows).hash(h));
+    ListImage { key, win: (p.win_at + p.win_y, p.win_h), layout, first: p.win.start, rows }
+}
+
+/// Does the base image `drawn` show what `now` would, of the rows shown (`shown`): the
+/// same layout, and each of those rows the same? A row off screen that changed is drawn
+/// when it comes on screen.
+pub fn still(drawn: &ListImage, now: &ListImage, shown: std::ops::Range<usize>) -> bool {
+    drawn.layout == now.layout && shown.into_iter().all(|i| drawn.rows.get(i - drawn.first) == now.rows.get(i - now.first))
 }
 
 /// The slot's image drawn and made a PNG, or why it couldn't be drawn, as the message
@@ -65,16 +101,14 @@ fn across(f: &Frame, p: u32, row: u16, rows: u16, crop_y: u32) -> Place {
     Place { id: 0, p, col: v.col, row: v.row + row, crop_x: 0, crop_y, crop_w: w, crop_h: rows as u32 * ch, cols: v.cols, rows, z: 0 }
 }
 
-/// The list's images this frame, the ones `screen` doesn't show yet drawn.
-pub fn wants(f: &Frame, screen: &Screen, fonts: &mut Fonts) -> Result<Vec<Want>, String> {
+/// The list's images this frame, the ones `screen` doesn't show yet drawn; the base
+/// image is the one keyed `k` (list_image's, or one drawn before that still does).
+pub fn wants(f: &Frame, k: u64, screen: &Screen, fonts: &mut Fonts) -> Result<Vec<Want>, String> {
     let (p, c, v) = (f.plan, f.c, f.view);
     let ch = c.grid.cell_h;
     let mut wants = Vec::new();
 
     // the base image, as its crops
-    let rows = base_rows(f);
-    let flags: Vec<bool> = rows.iter().map(f.bare).collect();
-    let k = key(&Slot::List, f, (base_shows(f), flags));
     let png = if screen.has(&Slot::List, k) {
         None
     } else {

@@ -5,10 +5,11 @@
 //! twice, as crops: the cells above the selected block, and the cells under it, moved
 //! down by the whole cells the block grew by (the rows under it start that many cells
 //! lower; the space left over is under the block). The base image is a window of the
-//! whole list (all of it under three pages, else two pages at a page's steps), so
-//! scrolling moves the crops too. So the base image is sent only when what it shows
-//! changes or the list scrolls a page on, and a j or k sends the selected block's image
-//! (or places one sent before) and moves the two crops. Every piece draws its rows
+//! list, kept while the rows shown are in it, so scrolling moves the crops too: the
+//! page when the list changed where it's shown, and the page and the next one the way
+//! it scrolls when it scrolls out. So the base image is sent only when what it shows of
+//! the rows shown changes or the list scrolls out of the window, and a j or k sends the
+//! selected block's image (or places one sent before) and moves the two crops. Every piece draws its rows
 //! where they are in the whole list (render's `Cut::at`), so they match it to the bit.
 //!
 //! The list shows only whole rows: the crops end at the cell where the last whole row
@@ -42,6 +43,8 @@ pub struct Plan {
     /// the base image: of the rows `win`, the first `win_at` pixels down the list, the
     /// pixels [win_y, win_y + win_h) from the first one's top (window)
     pub win: Range<usize>,
+    /// the base image's rows the list shows (of `base`'s)
+    pub shown: Range<usize>,
     pub win_at: u32,
     pub win_y: u32,
     pub win_h: u32,
@@ -81,8 +84,9 @@ fn block(rows: &Rows, base: &Rows) -> Option<(usize, usize, usize)> {
 }
 
 /// Lay the list out as pieces in its `rows_n` cells, scrolled from `view.top` to keep
-/// the selection in view.
-pub fn plan(view: &View, c: &Canvas, fonts: &Fonts) -> Plan {
+/// the selection in view; the base image's window is `prev` (pixels from the list's
+/// top, and how many), the one on the terminal, while the rows shown are in it.
+pub fn plan(view: &View, c: &Canvas, fonts: &Fonts, prev: Option<(u32, u32)>) -> Plan {
     let ch = c.grid.cell_h;
     let rows_n = view.rows_n;
     let room = rows_n as u32 * ch;
@@ -103,10 +107,11 @@ pub fn plan(view: &View, c: &Canvas, fonts: &Fonts) -> Plan {
     let scroll = Marks { up: top > 0, down: end < view.rows.rows.len() };
     let in_view = block.filter(|(s0, ..)| (top..end).contains(s0));
     let base = if in_view.is_some() { base } else { laid.clone() };
-    let (win, win_y, win_h) = window(&base, top, room, ch);
+    let (win, win_y, win_h) = window(&base, top, room, prev);
     let win_at = base.tall(0, win.start);
     let at0 = base.tall(0, top) - win_at - win_y;
-    let mut p = Plan { top, end, page, laid, base, whole: in_view.is_none(), win, win_at, win_y, win_h, crops: vec![], sel: None, tail: None, cap: None, ys, scroll };
+    let shown = top..fitting(&base, top, room);
+    let mut p = Plan { top, end, page, laid, base, whole: in_view.is_none(), win, shown, win_at, win_y, win_h, crops: vec![], sel: None, tail: None, cap: None, ys, scroll };
     // the cell where the last whole row ends: what's past it mustn't show, and the rest
     // of that cell is an image of its own (the tail)
     let last = (p.laid.tall(top, end) / ch).min(rows_n as u32) as u16;
@@ -158,13 +163,25 @@ fn cap(p: &mut Plan, ch: u32) {
 }
 
 /// The base image's window of the rows laid out, for a list scrolled to `top` with
-/// `room` pixels: its rows, and the pixels from the first one's top it shows. The whole
-/// list when it's under three pages; else two pages, at a page's steps, so scrolling
-/// a row moves the crops and sends nothing, and a page sends the image again.
-fn window(base: &Laid, top: usize, room: u32, ch: u32) -> (Range<usize>, u32, u32) {
+/// `room` pixels: its rows, and the pixels from the first one's top it shows. `prev`
+/// (the window on the terminal) while the rows shown are in it. Scrolled out of it, the
+/// page and the next one the way it scrolled, so scrolling on sends the image again a
+/// page on, not at each row. With no window (the list changed where it's shown), the
+/// page alone, so a change sends what it did when the image was the page.
+fn window(base: &Laid, top: usize, room: u32, prev: Option<(u32, u32)>) -> (Range<usize>, u32, u32) {
     let n = base.heights.len();
-    let total = base.tall(0, n);
-    let (y, h) = if total <= 3 * room { (0, total.max(ch)) } else { (base.tall(0, top) / room * room, 2 * room) };
+    let total = base.tall(0, n).max(1);
+    let y0 = base.tall(0, top);
+    let fits = |&(y, h): &(u32, u32)| y <= y0 && (y0 + room).min(total) <= y + h;
+    let (y, h) = match prev {
+        Some(w) if fits(&w) => w,
+        // down: the page and the next; up: the one before and the page
+        Some((y, _)) if y < y0 => (y0, 2 * room),
+        Some(_) => (y0.saturating_sub(room), y0.min(room) + room),
+        None => (y0, room),
+    };
+    // not past the list's end
+    let (y, h) = (y.min(total.saturating_sub(1)), h.min(total.saturating_sub(y.min(total.saturating_sub(1)))).max(1));
     // the rows it draws: those it shows, and one more each way for what reaches in
     let starts: Vec<u32> = (0..n).scan(0, |at, i| Some(std::mem::replace(at, *at + base.span(i)))).collect();
     let first = (0..n).find(|&i| starts[i] + base.span(i) > y).unwrap_or(n).saturating_sub(1);
