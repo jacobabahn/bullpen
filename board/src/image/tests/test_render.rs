@@ -165,7 +165,7 @@ fn the_selected_tasks_title_wraps_and_another_is_cut_to_its_row() {
 
 #[test]
 fn the_rows_that_fit_are_whole_rows_and_one_at_least() {
-    let laid = Laid { heights: vec![30, 30, 30, 30], after: vec![0; 4], lines: vec![vec![]; 4], idw: 0.0 };
+    let laid = Laid { heights: vec![30, 30, 30, 30], after: vec![0; 4], lines: vec![vec![]; 4], idw: 0.0, keyed: true };
     assert_eq!(fitting(&laid, 0, 100), 3);
     assert_eq!(fitting(&laid, 2, 100), 4);
     assert_eq!(fitting(&laid, 1, 10), 2); // too tall to fit: cut, but drawn
@@ -247,27 +247,44 @@ fn a_title_thats_yours_takes_two_lines_at_any_width() {
 }
 
 #[test]
-fn a_cut_leaves_no_stub_of_a_word_and_no_comma_before_its_ellipsis() {
+fn a_cut_is_at_a_words_end_with_no_comma_before_its_ellipsis() {
     let f = Fonts::builtin();
     let w = |s: &str| f.width(s, Weight::Regular, 12.0);
-    // room for "one two, t" and the ellipsis: the cut goes back to the word before, and its comma goes
-    assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two, t…") + 0.5), "one two…");
-    // most of a long word fits: it's cut in the word
-    assert_eq!(f.fit("one background jobs", Weight::Regular, 12.0, w("one backgrou…") + 0.5), "one backgrou…");
+    // room for "one two, three fo" and the ellipsis: the cut goes back to the word before
+    assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two, three fo…") + 0.5), "one two, three…");
+    // and its comma goes
+    assert_eq!(f.fit("one two, three four", Weight::Regular, 12.0, w("one two, thr…") + 0.5), "one two…");
+    // a long word after a short one: cutting before it would leave most of the room empty
+    assert_eq!(f.fit("in board/src/image/shown.rs", Weight::Regular, 12.0, w("in board/src/ima…") + 0.5), "in board/src/ima…");
     // a single word is cut where it must be
     assert_eq!(f.fit("background", Weight::Regular, 12.0, w("bac…") + 0.5), "bac…");
 }
 
 #[test]
-fn a_wrapped_texts_last_word_isnt_left_alone() {
+fn a_details_last_word_isnt_left_alone_and_a_titles_first_line_stays_full() {
     let f = Fonts::builtin();
     let w = |s: &str| f.width(s, Weight::Regular, 12.0);
+    let text = "probably with a question. p shows its screen.";
     let room = w("probably with a question. p shows its") + 0.5;
-    let lines = f.wrap("probably with a question. p shows its screen.", Weight::Regular, 12.0, (room, room), 3);
+    let mut lines = f.wrap(text, Weight::Regular, 12.0, (room, room), 3);
+    // a title's wrap fills its first line
+    assert_eq!(lines, vec!["probably with a question. p shows its", "screen."]);
+    // a detail's gives its last word company
+    f.no_widow(&mut lines, Weight::Regular, 12.0, room);
     assert_eq!(lines, vec!["probably with a question. p shows", "its screen."]);
     // a line of two words keeps both
-    let room = w("shows its") + 0.5;
-    assert_eq!(f.wrap("shows its screen.", Weight::Regular, 12.0, (room, room), 3), vec!["shows its", "screen."]);
+    let mut two = vec!["shows its".to_string(), "screen.".to_string()];
+    f.no_widow(&mut two, Weight::Regular, 12.0, room);
+    assert_eq!(two, vec!["shows its", "screen."]);
+    // as the list lays a detail out
+    let c = canvas(TextSize::Medium);
+    let g = Geo { c, idw: 0.0 };
+    let mut long = String::from("one");
+    while f.width(&format!("{long} more"), Weight::Regular, c.m.detail) <= g.detail_room() {
+        long.push_str(" more");
+    }
+    let lines = g.detail_lines(&format!("{long} last."), 2, 0.0, 0.0, &f);
+    assert_eq!(lines[1], "more last.");
 }
 
 #[test]
@@ -535,7 +552,7 @@ fn the_selected_tasks_key_is_in_a_cap_at_its_cards_lower_right_and_its_last_line
 }
 
 #[test]
-fn a_last_line_the_key_would_cut_keeps_its_text_and_the_key_goes_under_it() {
+fn a_last_line_the_key_would_cut_keeps_its_text_and_the_key_is_left_out() {
     let fonts = Fonts::builtin();
     let c = canvas(TextSize::Medium);
     let g = Geo { c, idw: 0.0 };
@@ -544,17 +561,16 @@ fn a_last_line_the_key_would_cut_keeps_its_text_and_the_key_goes_under_it() {
     while fonts.width(&format!("{text} more"), Weight::Regular, c.m.detail) <= g.detail_room() {
         text.push_str(" more");
     }
-    let with = |key: Option<(String, String)>, size| {
+    let with = |key: Option<(String, String)>| {
         let t = TaskRow { selected: true, key, ..task("BP-1", "ready") };
-        lay(&rows(vec![Row::Task(t), Row::Detail(DetailRow { selected: true, ..detail_row(&text) })]), &canvas(size), &fonts)
+        rows(vec![Row::Task(t), Row::Detail(DetailRow { selected: true, ..detail_row(&text) })])
     };
-    let key = || Some(("a".to_string(), "accept".to_string()));
-    let (laid, bare) = (with(key(), TextSize::Medium), with(None, TextSize::Medium));
-    assert_eq!(laid.lines[1], vec![text.clone(), String::new()]);
-    assert_eq!(laid.heights[1], bare.heights[1] + c.m.detail_line as u32);
-    // small type keeps its rows a cell each: the line is cut
-    let small = with(key(), TextSize::Small);
-    assert_eq!(small.lines[1].len(), 1);
+    let (laid, s) = draw_in(&with(Some(("a".into(), "accept".into()))), TextSize::Medium);
+    let (bare_laid, bare) = draw_in(&with(None), TextSize::Medium);
+    assert_eq!(laid.lines[1], vec![text.clone()]);
+    assert_eq!(laid.heights, bare_laid.heights);
+    // the block is as it is with no key
+    assert!(!differ(&s, &bare, (0, s.pixmap.width()), (0, s.pixmap.height())));
 }
 
 #[test]

@@ -160,6 +160,8 @@ pub struct Laid {
     pub after: Vec<u32>,
     lines: Vec<Vec<String>>,
     pub idw: f32,
+    /// the selected task's key is drawn: its block's last line has room for it
+    keyed: bool,
 }
 
 impl Laid {
@@ -193,8 +195,9 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
     let g = Geo { c: *c, idw };
     let mut all = Vec::new();
     let mut heights = Vec::new();
-    // the room the selected task's key takes on its block's last line
-    let mut key_w = 0.0;
+    // the room the selected task's key takes on its block's last line, and whether
+    // it has that room
+    let (mut key_w, mut keyed) = (0.0, true);
     for (i, row) in rows.rows.iter().enumerate() {
         let (title, most, weight, right) = match row {
             Row::Task(t) => {
@@ -211,12 +214,12 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
                 let mut lines = g.detail_lines(&d.text, d.lines, bolder, 0.0, fonts);
                 let last = !rows.rows.get(i + 1).is_some_and(Row::is_detail);
                 // the key goes after its last line, which makes room when it must; when
-                // that would cut its text, the key gets a line of its own under it
+                // that would cut its text, the key is left out (the key row has it)
                 if last && key_w > 0.0 && lines.last().is_some_and(|l| fonts.width(l, Weight::Regular, c.m.detail) > g.detail_room() - key_w) {
                     let narrower = g.detail_lines(&d.text, d.lines, bolder, key_w, fonts);
                     let cut = |l: &[String]| l.last().is_some_and(|l| l.ends_with('…'));
-                    if cut(&narrower) && !cut(&lines) && !c.m.cells {
-                        lines.push(String::new());
+                    if cut(&narrower) && !cut(&lines) {
+                        keyed = false;
                     } else {
                         lines = narrower;
                     }
@@ -249,7 +252,7 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
         all.push(lines);
     }
     let after = vec![0; heights.len()];
-    Laid { heights, after, lines: all, idw }
+    Laid { heights, after, lines: all, idw, keyed }
 }
 
 /// The rows from `top` that fit in `room` pixels whole: [top, end). One at least, cut if
@@ -342,7 +345,7 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
         }
     }
     // the selected task's key, at its card's lower right (lay made room for it)
-    for b in blocks.iter().filter(|b| b.ends) {
+    for b in blocks.iter().filter(|b| b.ends && laid.keyed) {
         if let Some((key, what)) = b.key {
             d.action(key, what, b.bottom);
         }
@@ -470,7 +473,8 @@ impl Geo {
     /// "…" when there's more. One line at least, so a row is never empty.
     fn detail_lines(&self, text: &str, most: usize, less: f32, key: f32, fonts: &Fonts) -> Vec<String> {
         let room = self.detail_room() - key;
-        let lines = fonts.wrap(text, Weight::Regular, self.c.m.detail, (room - less, room), most);
+        let mut lines = fonts.wrap(text, Weight::Regular, self.c.m.detail, (room - less, room), most);
+        fonts.no_widow(&mut lines, Weight::Regular, self.c.m.detail, room);
         if lines.is_empty() { vec![String::new()] } else { lines }
     }
 
@@ -482,8 +486,14 @@ impl Geo {
     /// The room the selected task's key takes at the right of its last line: its cap,
     /// what it does, and a gap before it.
     fn key_width(&self, key: &str, what: &str, fonts: &Fonts) -> f32 {
-        let px = self.c.m.label;
+        let px = self.key_px();
         chip::keycap_width(fonts, key, what, px) + 0.8 * px
+    }
+
+    /// The type of the selected task's key: a little under a label's, so its cap is
+    /// clear of the card's edge by as much as the card's type is.
+    fn key_px(&self) -> f32 {
+        (0.9 * self.c.m.label).round()
     }
 
     /// The age column's width: an age of two figures', so the risks' chips before it
@@ -666,7 +676,7 @@ impl<'a> Draw<'a> {
     /// A task's key in a cap and what it does, at the right of its block's last line,
     /// whose bottom is `bottom`.
     fn action(&mut self, key: &str, what: &str, bottom: f32) {
-        let px = self.m().label;
+        let px = self.g.key_px();
         let x = self.right() - chip::keycap_width(self.fonts, key, what, px);
         chip::keycap(self, key, what, px, x, bottom - self.m().detail_line / 2.0);
     }
