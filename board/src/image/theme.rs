@@ -120,12 +120,18 @@ impl Theme {
     /// The selected card's edge: the foreground, clearly stronger than its fill, so the
     /// card stands out among washed tasks.
     pub fn edge(&self) -> [u8; 4] {
-        faint(self.fg, 0.4)
+        faint(self.fg, 0.45)
     }
 
     /// The selected card's edge when its task needs you or stopped: its flag's colour.
     pub fn flag_edge(&self, flag: Flag) -> [u8; 4] {
-        faint(self.flag(flag), 0.85)
+        solid(self.flag(flag))
+    }
+
+    /// The age of a task that has waited on you too long (semibold too): its flag's
+    /// colour, so an amber task's isn't the red of one that stopped; red with no flag.
+    pub fn stale(&self, flag: Option<Flag>) -> [u8; 4] {
+        solid(flag.map_or(self.red, |f| self.flag(f)))
     }
 
     /// The hairline round a wash: its flag's colour, faint, so a wash has an edge on a

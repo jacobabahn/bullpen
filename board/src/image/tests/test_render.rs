@@ -376,6 +376,27 @@ fn a_title_thats_yours_is_the_foreground_and_anothers_a_step_back() {
 }
 
 #[test]
+fn a_line_is_dim_but_the_selected_tasks_and_what_a_task_that_needs_you_says() {
+    let theme = Theme::default();
+    let full = |d: DetailRow| has(&row_px(&draw(&rows(vec![Row::Detail(d)])), 0), theme.fg);
+    assert!(!full(detail_row("approved by full review")));
+    assert!(!full(DetailRow { loud: true, ..detail_row("approved by full review") }), "a ready task's line is a step under its title");
+    assert!(full(DetailRow { loud: true, flag: Some(Flag::Needs), ..detail_row("Asks: which one?") }));
+    assert!(full(DetailRow { selected: true, ..detail_row("approved by full review") }));
+}
+
+#[test]
+fn a_stale_age_is_its_flags_colour_not_always_red() {
+    let theme = Theme::default();
+    let aged = |flag| draw(&rows(vec![Row::Task(TaskRow { stale: true, flag, age: "12m".into(), ..task("BP-1", "todo") })]));
+    let all = |s: &Sheet| -> Vec<[u8; 4]> { (0..s.pixmap.height()).flat_map(|y| (0..s.pixmap.width()).map(move |x| (x, y))).map(|(x, y)| px_at(s, x, y)).collect() };
+    let amber = all(&aged(Some(Flag::Needs)));
+    assert!(has(&amber, theme.yellow) && !has(&amber, theme.red));
+    assert!(has(&all(&aged(Some(Flag::Stopped))), theme.red));
+    assert!(has(&all(&aged(None)), theme.red));
+}
+
+#[test]
 fn a_groups_name_is_a_little_dim_so_its_titles_lead() {
     let s = draw(&rows(vec![Row::Head { name: "Ready".into(), count: 1 }]));
     let px = row_px(&s, 0);
@@ -428,14 +449,16 @@ fn a_task_that_needs_you_is_washed_in_its_colour_over_the_cards_rectangle_with_a
 }
 
 #[test]
-fn the_selected_card_keeps_its_wash_and_its_bar_with_an_edge_of_its_flags_colour() {
+fn the_selected_card_is_the_cards_fill_over_its_wash_with_its_bar_and_an_edge_of_its_flags_colour() {
     let theme = Theme::default();
     let (_, s) = draw_in(&flagged(Flag::Needs, true), TextSize::Medium);
     let (x0, x1, y0, y1) = drawn_box(&s);
-    assert!(faintly(px_at(&s, x1 - 4, y1 / 2), theme.wash(Flag::Needs)));
+    let (_, washed) = draw_in(&flagged(Flag::Needs, false), TextSize::Medium);
+    // the card's fill over the wash: more there than the wash alone, and amber in it
+    let (inside, wash) = (px_at(&s, x1 - 4, y1 / 2), px_at(&washed, x1 - 4, y1 / 2));
+    assert!(inside[3] > wash[3] && inside[0] > inside[2], "{inside:?} {wash:?}");
     assert_eq!(px_at(&s, 9, y1 / 2), solid(theme.yellow));
     // its edge is amber, stronger than the hairline round a wash that isn't selected
-    let (_, washed) = draw_in(&flagged(Flag::Needs, false), TextSize::Medium);
     let mid = (x0 + x1) / 2;
     let (edge, line) = (px_at(&s, mid, y0), px_at(&washed, mid, y0));
     assert!(edge[3] > 2 * line[3] && line[3] > theme.wash(Flag::Needs)[3], "{edge:?} {line:?}");

@@ -624,17 +624,19 @@ impl<'a> Draw<'a> {
         (x, top - inset, self.right() + out - x, bottom - top + 2.0 * inset)
     }
 
-    /// The selected task's (or item's) card: a faint fill with an edge; one that needs
-    /// you or stopped keeps its wash, and its edge is its flag's colour.
+    /// The selected task's (or item's) card, the same wherever it is: the faint fill
+    /// (over its wash, when it needs you or stopped) and an edge two pixels wide, the
+    /// foreground's or its flag's colour.
     fn card(&mut self, top: f32, bottom: f32, flag: Option<Flag>) {
         let (x, y, w, h) = self.panel(top, bottom);
         let r = self.radius();
-        let (fill, edge) = match flag {
-            Some(f) => (self.theme.wash(f), self.theme.flag_edge(f)),
-            None => (self.theme.tint(), self.theme.edge()),
-        };
+        if let Some(f) = flag {
+            let wash = self.theme.wash(f);
+            self.rounded_fill(x, y, w, h, r, wash);
+        }
+        let (fill, edge) = (self.theme.tint(), flag.map_or(self.theme.edge(), |f| self.theme.flag_edge(f)));
         self.rounded_fill(x, y, w, h, r, fill);
-        self.rounded_edge(x, y, w, h, r, 1.5, edge);
+        self.rounded_edge(x, y, w, h, r, 2.0, edge);
     }
 
     /// A card's and a wash's corners.
@@ -722,13 +724,14 @@ impl<'a> Draw<'a> {
             }
             Row::Task(t) => self.task(t, lines, y, bare),
             Row::Detail(d) => {
-                let color = if d.selected || d.loud { fg } else { dim };
+                // a step under the title, but the selected task's and what you must act on
+                let color = if d.selected || (d.loud && d.flag.is_some()) { fg } else { dim };
                 let x = self.text_x();
                 for (k, line) in lines.iter().enumerate() {
                     let y = y + k as f32 * m.detail_line;
                     // a narrow board's age starts the first line
                     let (age, rest) = crate::model::split_at_width(line, if k == 0 { d.lead } else { 0 });
-                    let age_color = if d.stale { solid(self.theme.red) } else { dim };
+                    let age_color = if d.stale { self.theme.stale(d.flag) } else { dim };
                     let weight = if d.stale { Weight::Bold } else { Weight::Regular };
                     let end = self.text(&age, weight, x, y, self.right() - x, age_color);
                     self.text(&rest, Weight::Regular, end, y, self.right() - end, color);
@@ -779,7 +782,7 @@ impl<'a> Draw<'a> {
         let age_w = self.g.age_width(&t.age, self.fonts);
         let age_color = match tone {
             Some(c) => c,
-            None if t.stale => solid(self.theme.red),
+            None if t.stale => self.theme.stale(t.flag),
             None => self.theme.dim(),
         };
         let weight = if t.stale || tone.is_some() { Weight::Bold } else { Weight::Regular };
