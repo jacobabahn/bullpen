@@ -41,7 +41,7 @@ pub struct Fonts {
 const SMALL: [&str; 16] = ["a", "an", "the", "of", "for", "in", "as", "to", "and", "or", "with", "on", "at", "by", "from", "its"];
 
 /// The least of its room a text cut at a word's end fills: under it, it's cut in the word.
-const FILL: f32 = 0.6;
+const FILL: f32 = 0.7;
 
 impl Fonts {
     /// Inter, built in.
@@ -133,7 +133,7 @@ impl Fonts {
                 out.truncate(space);
                 // and not after a small word that leads nowhere ("a…", "for the…")
                 while let Some((rest, word)) = out.trim_end().rsplit_once(char::is_whitespace) {
-                    if !SMALL.contains(&word.to_lowercase().as_str()) || self.width(rest, weight, px) < FILL * room {
+                    if !SMALL.contains(&word.to_lowercase().as_str()) || self.width(rest, weight, px) < (FILL - 0.2) * room {
                         break;
                     }
                     out.truncate(rest.len());
@@ -187,8 +187,8 @@ impl Fonts {
     }
 
     /// A title on two lines, neither cut: words go from the first line's end to the
-    /// second's start while that leaves the two closer in width, so the second isn't a
-    /// word or two under a full line.
+    /// second's start until the second is half the first's width (and while that leaves
+    /// the two closer in width), so the second isn't a word or two under a full line.
     pub fn balance(&self, lines: &mut [String], weight: Weight, px: f32, max: f32) {
         let [first, second] = lines else { return };
         if second.ends_with('…') {
@@ -198,7 +198,7 @@ impl Fonts {
         while let Some((rest, word)) = first.rsplit_once(' ') {
             let moved = format!("{word} {second}");
             let (now, then) = ((w(first) - w(second)).abs(), (w(rest) - w(&moved)).abs());
-            if w(&moved) > max || then >= now {
+            if w(&moved) > max || then >= now || 2.0 * w(second) >= w(first) {
                 break;
             }
             (*first, *second) = (rest.to_string(), moved);

@@ -270,7 +270,8 @@ fn a_title_on_two_lines_is_balanced() {
     let w = |s: &str| f.width(s, Weight::Regular, 12.0);
     let mut lines = vec!["Accept: merge a stack of ready tasks in dependency order, one".to_string(), "rebase each".to_string()];
     f.balance(&mut lines, Weight::Regular, 12.0, 1000.0);
-    assert!((w(&lines[0]) - w(&lines[1])).abs() < w("dependency "), "{lines:?}");
+    assert!(2.0 * w(&lines[1]) >= w("Accept: merge a stack of ready tasks in"), "{lines:?}");
+    assert!(lines[1].split(' ').count() >= 3 && w(&lines[1]) < w(&lines[0]), "{lines:?}");
     assert_eq!(lines.join(" "), "Accept: merge a stack of ready tasks in dependency order, one rebase each");
     // the second line never passes its room, and a cut title stays as it is
     let mut tight = vec!["one two three four".to_string(), "five".to_string()];
