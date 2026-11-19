@@ -72,6 +72,9 @@ mod triage;
 mod up;
 mod watcher;
 
+// the tests read no settings or state of this machine's (core's isolated.rs)
+bullpen_core::isolate_tests!();
+
 use bullpen_core::paths;
 use std::ffi::OsString;
 

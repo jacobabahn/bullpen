@@ -60,6 +60,39 @@ its module (below). Each test removes its temp folder when it ends.
 Each module runs inside a temp folder of its own and fails if anything is left in it
 afterwards.
 
+## The machine's settings
+
+No test reads this machine's settings or state, so a setting you changed (`bullpen
+config --global --board-look image`) never changes what a test sees. bullpen finds them
+through two variables: the global config.json is `$XDG_CONFIG_HOME/bullpen/config.json`
+(else under `~/.config`), and the state folder, with each repo's own config.json and its
+tasks, is `$BULLPEN_STATE` (else `~/.local/state/bullpen`). Every test process has both
+set, before any test runs, to folders that don't exist
+(`/nonexistent/bullpen-tests/config` and `.../state`): a test reads the defaults, and a
+write there fails rather than landing in your own.
+
+- The Python tests: `tests/support.py` sets them in its own environment as it loads, so
+  everything a test runs has them. A test built on `BullpenTest` has its own on top
+  (`self.env`: `xdg/` and `state/` in its temp folder), for the settings it writes.
+- The Rust tests: `bullpen_core::isolate_tests!()`, in the root of core, the command
+  line and the board (`core/src/isolated.rs`), sets them as the test program starts:
+  a constructor, as C++'s statics are run, in test builds only. A test that wants
+  settings makes its own: core's `testenv::Env` (its own home, state and config, the
+  environment put back when it ends), the board's `Config::with` or a `Scratch` folder.
+  A test never sets or clears either variable for the whole program while others run.
+
+A test in each checks that it holds: `the_tests_read_no_settings_of_this_machines` in
+`tests/test_config.py`, and `..._read_no_settings_of_this_machine_s` in core's, the
+command line's and the board's tests. To see it, run both suites with settings that
+aren't the defaults (here every board setting changed); they pass as they do without:
+
+```sh
+d=$(mktemp -d) && mkdir -p "$d/bullpen" && echo '{"board_layout": "compact", "board_look": "image",
+  "board_text_size": "large", "board_motion": false, "board_font": "/nonexistent/font.ttf",
+  "board_bottom_gap": 3, "board_repos": false, "merge": "squash", "review": false}' > "$d/bullpen/config.json"
+XDG_CONFIG_HOME=$d python3 tests/run.py && XDG_CONFIG_HOME=$d bin/bullpen-cargo test --workspace
+```
+
 ## The tables
 
 The command table (`cli/src/commands.rs`), the settings table (`SETTINGS` in

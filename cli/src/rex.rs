@@ -123,14 +123,14 @@ pub fn capture_vt(session: &str, block: &str) -> Res<String> {
 /// Panes Rex starts don't inherit our environment: carry bullpen's own settings
 /// (BULLPEN_BOARD too, so a board runs the program doctor and `up` expect of it).
 pub fn with_state(argv: &[String]) -> Vec<String> {
+    with_env(argv, |k| std::env::var(k).ok())
+}
+
+/// with_state, with the environment's values from var.
+fn with_env(argv: &[String], var: impl Fn(&str) -> Option<String>) -> Vec<String> {
     let env: Vec<String> = ["BULLPEN_STATE", "BULLPEN_GH", "BULLPEN_REX", "BULLPEN_BOARD"]
         .iter()
-        .filter_map(|k| {
-            std::env::var(k)
-                .ok()
-                .filter(|v| !v.is_empty())
-                .map(|v| format!("{k}={v}"))
-        })
+        .filter_map(|k| var(k).filter(|v| !v.is_empty()).map(|v| format!("{k}={v}")))
         .collect();
     if env.is_empty() {
         return argv.to_vec();

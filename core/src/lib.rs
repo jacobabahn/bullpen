@@ -7,6 +7,7 @@ pub mod config;
 pub mod coordinators;
 pub mod fail;
 pub mod fleet;
+pub mod isolated;
 pub mod json;
 pub mod lock;
 pub mod paths;
@@ -25,6 +26,7 @@ pub mod words;
 
 #[cfg(test)]
 mod testenv;
+crate::isolate_tests!();
 
 pub use fail::{fail, Fail, Res};
 pub use json::Obj;

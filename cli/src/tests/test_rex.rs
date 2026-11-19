@@ -59,22 +59,15 @@ fn a_vt_screens_gaps_are_spaces_and_its_colours_can_go() {
 #[test]
 fn with_state_carries_bullpens_settings_into_a_pane() {
     let argv = vec!["bullpen".to_string(), "board".into()];
-    let keys = ["BULLPEN_STATE", "BULLPEN_GH", "BULLPEN_REX", "BULLPEN_BOARD"];
-    let was: Vec<_> = keys.iter().map(|k| std::env::var_os(k)).collect();
-    for k in keys {
-        std::env::remove_var(k);
-    }
-    assert_eq!(with_state(&argv), argv);
-    std::env::set_var("BULLPEN_REX", "/x/rex");
-    std::env::set_var("BULLPEN_STATE", "/s");
+    assert_eq!(with_env(&argv, |_| None), argv);
+    assert_eq!(with_env(&argv, |_| Some(String::new())), argv);
+    let env = |k: &str| {
+        [("BULLPEN_REX", "/x/rex"), ("BULLPEN_STATE", "/s")]
+            .into_iter()
+            .find(|e| e.0 == k)
+    };
     assert_eq!(
-        with_state(&argv),
+        with_env(&argv, |k| env(k).map(|e| e.1.to_string())),
         ["env", "BULLPEN_STATE=/s", "BULLPEN_REX=/x/rex", "bullpen", "board"]
     );
-    for (k, v) in keys.iter().zip(was) {
-        match v {
-            Some(v) => std::env::set_var(k, v),
-            None => std::env::remove_var(k),
-        }
-    }
 }

@@ -52,3 +52,8 @@ fn every_setting_with_a_flag_is_in_the_spec_once_with_its_default() {
     assert!(help.contains("--prefix PREFIX") && help.contains("--worker-model MODEL"));
     assert!(help.contains("--merge {rebase,squash,merge}"));
 }
+
+#[test]
+fn the_command_line_s_tests_read_no_settings_of_this_machine_s() {
+    bullpen_core::isolated::assert_isolated();
+}

@@ -23,6 +23,9 @@ mod mission;
 mod model;
 mod ui;
 
+// the tests read no settings or state of this machine's (core's isolated.rs)
+bullpen_core::isolate_tests!();
+
 // ui reads App, Kind and Mode from here
 use app::{parse_args, App, Kind, Mode, Msg, Note};
 use notify::{RecursiveMode, Watcher};

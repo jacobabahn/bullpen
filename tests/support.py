@@ -22,6 +22,15 @@ ROOT = Path(__file__).resolve().parent.parent
 BULLPEN = ROOT / "bin" / "bullpen"
 sys.path.insert(0, str(ROOT))  # the bullpen package, for the tests that call it directly
 
+# No test reads this machine's settings or state: the global config.json
+# ($XDG_CONFIG_HOME/bullpen) and the state folder ($BULLPEN_STATE, with each repo's own
+# config.json) are folders that don't exist, for this process and all it runs, as for
+# the Rust tests (core/src/isolated.rs). A test built on BullpenTest has its own (self.env).
+NO_CONFIG = "/nonexistent/bullpen-tests/config"
+NO_STATE = "/nonexistent/bullpen-tests/state"
+os.environ["XDG_CONFIG_HOME"] = NO_CONFIG
+os.environ["BULLPEN_STATE"] = NO_STATE
+
 def sh(*cmd, cwd=None):
     return subprocess.run(cmd, cwd=cwd, check=True, text=True, capture_output=True).stdout
 

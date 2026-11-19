@@ -3,10 +3,11 @@
 import json
 import os
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
-from support import setUpModule, tearDownModule, sh, BullpenTest, ROOT  # a temp folder for each module
+from support import setUpModule, tearDownModule, sh, BullpenTest, ROOT, BULLPEN, NO_CONFIG, NO_STATE  # a temp folder for each module
 
 
 class ConfigTest(BullpenTest):
@@ -312,6 +313,18 @@ class ConfigTest(BullpenTest):
             p = self.bp("config", "--global", flag, "0", ok=False)
             self.assertIn("1 or more", p.stderr)
         self.assertEqual(self.cfg("--max-running", "4")["max_running"], 4)
+
+    def test_the_tests_read_no_settings_of_this_machines(self):
+        # what every test process has (support.py), and a bullpen run with it: never ~/.config/bullpen
+        self.assertEqual((os.environ["XDG_CONFIG_HOME"], os.environ["BULLPEN_STATE"]), (NO_CONFIG, NO_STATE))
+        p = subprocess.run([str(BULLPEN), "config", "--global"], cwd=self.tmp,
+                           env={**os.environ, "BULLPEN_NO_BUILD": "1"}, text=True, capture_output=True, check=True)
+        self.assertIn(f"global: {NO_CONFIG}/bullpen/config.json (none yet)", p.stdout)
+        self.assertRegex(p.stdout, r"\n  board_look +text +default\n")
+        self.assertFalse(Path(NO_CONFIG).exists() or Path(NO_STATE).exists())
+        # a test's own: in its temp folder
+        self.assertEqual((self.env["XDG_CONFIG_HOME"], self.env["BULLPEN_STATE"]),
+                         (str(self.tmp / "xdg"), str(self.tmp / "state")))
 
     def test_doctor_and_config_write_home_as_a_tilde(self):
         self.healthy()

@@ -56,3 +56,11 @@ fn motion_is_on_unless_the_setting_turns_it_off() {
     assert!(!config(json!({"board_motion": false})).motion);
     assert!(config(json!({"board_motion": "off"})).motion); // the wrong shape: the default
 }
+
+#[test]
+fn the_board_s_tests_read_no_settings_of_this_machine_s() {
+    bullpen_core::isolated::assert_isolated();
+    let c = Config::load(Path::new("/nonexistent/bullpen-board-test"));
+    assert_eq!(c.obj(), &bullpen_core::settings::defaults());
+    assert_eq!((c.look, c.layout, c.text_size), (Look::Text, Layout::Grouped, TextSize::Medium));
+}
