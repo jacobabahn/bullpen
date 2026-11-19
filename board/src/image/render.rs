@@ -9,11 +9,11 @@
 //! a wash of its colour with a round bar at its left, and a risk is a chip
 //! (chip.rs). A task is one block: its mark and ID in a gutter, its title's lines and
 //! its details from the title's left edge. The title is the loudest thing on a row: the
-//! ID, the age and the group's name are a detail's size. The marks that move are left out when the image look
-//! places them over the list (sprite.rs draws their frames with `Draw`). The list's
-//! last column has the scroll marks. Nothing here touches the terminal: given rows and
-//! a size in pixels, it lays them out and returns an image, or a window of pixels of
-//! them (pieces.rs), drawn as that part of the whole would be.
+//! ID, the age and the group's name are a detail's size. The marks that move are left
+//! out when the image look places them over the list (sprite.rs draws their frames
+//! with `Draw`). The list's last column has the scroll marks. Nothing here touches the
+//! terminal: given rows and a size in pixels, it lays them out and returns an image, or
+//! a window of pixels of them (pieces.rs), drawn as that part of the whole would be.
 
 use super::chip;
 use super::font::{Fonts, Weight};
