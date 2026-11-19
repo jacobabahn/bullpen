@@ -28,6 +28,7 @@ use ink::{Ink, Type};
 use serde_json::Value;
 use shown::Shown;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use tiny_skia::{IntRect, Pixmap};
@@ -95,6 +96,8 @@ pub struct Look {
     patch: PatchFn,
     /// the pages drawn, the latest last (three at most)
     pages: Vec<Drawn>,
+    /// the rows of every page drawn, by its key, kept when its pixels aren't
+    rows: HashMap<u64, i64>,
     /// the layout last drawn, and whether text was under the page
     last: Option<Lay>,
     texted: bool,
@@ -115,6 +118,7 @@ impl Look {
             shown: Shown::new(FIRST),
             patch,
             pages: Vec::new(),
+            rows: HashMap::new(),
             last: None,
             texted: false,
         }
@@ -123,12 +127,6 @@ impl Look {
     /// The scale things are drawn at: 1 at a 2× cell (34 pixels high).
     fn scale(&self) -> f32 {
         self.cell.1 as f32 / 34.0
-    }
-
-    /// The bytes written to the terminal so far.
-    #[cfg(test)]
-    pub fn sent(&self) -> usize {
-        self.shown.sent
     }
 
     /// How many images are kept on the terminal.
@@ -147,52 +145,57 @@ impl Look {
             .collect()
     }
 
-    /// What page i says (the end's at i == the number of steps), and its key.
-    fn page_of<'a>(&self, st: &'a Stepper, i: usize, width: u32) -> (u64, page::Page<'a>) {
+    /// What page i shows, as a key: the step and your comments on it (or the end and all
+    /// of them), at this width, cell and theme.
+    fn page_key(&self, st: &Stepper, i: usize, width: u32) -> u64 {
         let what = (width, self.cell, self.th);
         if i >= st.steps.len() {
-            let comments: Vec<(String, String, String)> = st
+            let comments: Vec<(String, String, &str)> = st
+                .comments
+                .iter()
+                .map(|c| (field(c, "step"), field(c, "title"), s(c, "text")))
+                .collect();
+            return key((what, "end", &st.tid, st.steps.len(), comments));
+        }
+        let step = &st.steps[i];
+        let (title, note) = (s(step, "title"), s(step, "note"));
+        key((what, i, title, note, Self::on_step(st, i)))
+    }
+
+    /// What page i says (the end's at i == the number of steps), its code from git.
+    fn page_of<'a>(&self, st: &'a Stepper, i: usize) -> page::Page<'a> {
+        if i >= st.steps.len() {
+            let comments = st
                 .comments
                 .iter()
                 .map(|c| (field(c, "step"), field(c, "title"), s(c, "text").to_string()))
                 .collect();
-            let k = key((what, "end", &st.tid, st.steps.len(), &comments));
-            return (
-                k,
-                page::Page::End(page::End {
-                    tid: &st.tid,
-                    steps: st.steps.len(),
-                    comments,
-                }),
-            );
+            return page::Page::End(page::End {
+                tid: &st.tid,
+                steps: st.steps.len(),
+                comments,
+            });
         }
         let step = &st.steps[i];
-        let comments = Self::on_step(st, i);
-        let k = key((
-            what,
-            i,
-            step.get("title").map(Value::to_string),
-            step.get("note").map(Value::to_string),
-            &comments,
-        ));
-        let patch = (self.patch)(i);
-        let p = page::Step {
+        page::Page::Step(page::Step {
             title: s(step, "title"),
             refs: refs(step),
             note: s(step, "note"),
-            comments,
-            files: code::parse(&patch),
-        };
-        (k, page::Page::Step(p))
+            comments: Self::on_step(st, i),
+            files: code::parse(&(self.patch)(i)),
+        })
     }
 
-    /// Page i, drawn (or as drawn before): its index in `pages`.
+    /// Page i, drawn (or as drawn before, the latest used last): its index in `pages`.
     fn page(&mut self, st: &Stepper, i: usize, lay: Lay) -> Option<usize> {
         let width = lay.page_cols as u32 * self.cell.0;
-        let (k, p) = self.page_of(st, i, width);
+        let k = self.page_key(st, i, width);
         if let Some(at) = self.pages.iter().position(|d| d.key == k) {
-            return Some(at);
+            let d = self.pages.remove(at);
+            self.pages.push(d);
+            return Some(self.pages.len() - 1);
         }
+        let p = self.page_of(st, i);
         let (th, s, ch) = (self.th, self.scale(), self.cell.1);
         let h = page::draw(&mut Ink::new(width, 1, &mut self.ty, th, s)?, &p);
         let rows = ((h / ch as f32).ceil() as i64).max(1);
@@ -201,6 +204,7 @@ impl Look {
         if self.pages.len() >= 3 {
             self.pages.remove(0);
         }
+        self.rows.insert(k, rows);
         self.pages.push(Drawn {
             key: k,
             pm: ink.pm,
@@ -209,12 +213,17 @@ impl Look {
         Some(self.pages.len() - 1)
     }
 
-    /// The rows page i has.
+    /// The rows page i has (drawing it only when it hasn't been).
     pub fn page_rows(&mut self, st: &Stepper, i: usize, lay: Lay) -> i64 {
+        let k = self.page_key(st, i, lay.page_cols as u32 * self.cell.0);
+        if let Some(rows) = self.rows.get(&k) {
+            return *rows;
+        }
         self.page(st, i, lay).map_or(1, |p| self.pages[p].rows)
     }
 
-    /// Tile t of page i sent: its ID, and the rows it has.
+    /// Tile t of page i sent: its ID, and the rows it has. A tile sent before is placed
+    /// again without drawing its page.
     fn tile(
         &mut self,
         st: &Stepper,
@@ -223,18 +232,20 @@ impl Look {
         lay: Lay,
         out: &mut impl Write,
     ) -> std::io::Result<Option<(u32, i64)>> {
-        let Some(p) = self.page(st, i, lay) else {
-            return Ok(None);
-        };
-        let (from, rows) = (t * lay.tile as i64, self.pages[p].rows);
+        let rows = self.page_rows(st, i, lay);
+        let from = t * lay.tile as i64;
         if from >= rows || t < 0 {
             return Ok(None);
         }
         let n = (rows - from).min(lay.tile as i64);
-        let k = key((self.pages[p].key, t, lay.tile));
+        let pk = self.page_key(st, i, lay.page_cols as u32 * self.cell.0);
+        let k = key((pk, t, lay.tile));
         if let Some(id) = self.shown.id(k) {
             return Ok(Some((id, n)));
         }
+        let Some(p) = self.page(st, i, lay) else {
+            return Ok(None);
+        };
         let ch = self.cell.1 as i64;
         let pm = &self.pages[p].pm;
         let crop =
@@ -433,7 +444,6 @@ impl Look {
     }
 
     fn put(&mut self, out: &mut impl Write, text: &str) -> std::io::Result<()> {
-        self.shown.sent += text.len();
         out.write_all(text.as_bytes())
     }
 

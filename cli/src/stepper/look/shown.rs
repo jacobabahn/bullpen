@@ -19,8 +19,6 @@ pub struct Shown {
     order: VecDeque<u64>,
     /// the placements on screen, by image and placement number
     placed: HashMap<(u32, u32), Place>,
-    /// the bytes written so far
-    pub sent: usize,
 }
 
 impl Shown {
@@ -31,12 +29,10 @@ impl Shown {
             ids: HashMap::new(),
             order: VecDeque::new(),
             placed: HashMap::new(),
-            sent: 0,
         }
     }
 
     fn put(&mut self, out: &mut impl Write, bytes: &str) -> std::io::Result<()> {
-        self.sent += bytes.len();
         out.write_all(bytes.as_bytes())
     }
 
