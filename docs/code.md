@@ -159,9 +159,12 @@ when the terminal draws images it shows the stepper with `look/` instead of as t
 the window's) and draws a frame: the rail (`rail.rs`, every step's title, the step
 shown in blue), a window on the page, and the foot (the message and keys); what's typed
 is text where the foot was. A page (`page.rs`: a step's title, files, note, comments and
-code, `code.rs`; or the end) is drawn once as one tall image, measured first on an image
-a pixel high, and sent as tiles a window high (`shown.rs` sends each image once, places
-crops of it, and keeps it hidden to place again). The window is one or two tile crops,
+code, `code.rs`; or the end) is measured once, on an image a pixel high (its rows are
+kept), and sent as tiles a window high, each drawn on an image the tile's height with the
+page shifted up by its top (`Ink`'s window: code outside it isn't drawn), so no image is
+bigger than the pane however long a step is (`shown.rs` sends each image once, places
+crops of it, and keeps it hidden to place again). An image it can't make is an error,
+and `view.rs` turns the tour to text, saying why. The window is one or two tile crops,
 so a scroll is placements. While no key waits, `Look::ahead` sends what `j`, `k`, `n` and
 `p` would want next, unplaced. Its tests (`look/tests/`) check the bytes each key
 writes; `render_bp195` (ignored) writes pictures of a tour fixture

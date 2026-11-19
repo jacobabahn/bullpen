@@ -67,8 +67,13 @@ pub struct Wanted {
 fn draw(out: &mut impl Write, st: &mut Stepper, show: &mut Show) {
     let (cols, rows) = term_size();
     if let Show::Image(look) = show {
-        let _ = look.frame(st, (cols, rows), out);
-        return;
+        let Err(e) = look.frame(st, (cols, rows), out) else {
+            return;
+        };
+        // an image it can't make (or write): the rest of the tour is text
+        let _ = look.close(out);
+        *show = Show::Text;
+        st.msg = format!("Drawing the tour as text: {e}.");
     }
     let lines = st.screen(cols, rows);
     let cursor = if st.mode == Mode::Read {

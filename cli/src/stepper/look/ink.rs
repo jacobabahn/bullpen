@@ -1,6 +1,8 @@
 //! What the drawn tour draws with: an image (`Ink`) in the terminal's colours, its type
 //! (Inter for prose, JetBrains Mono for code), shapes, prose with `code` in it wrapped
 //! by pixels (a code span on a faint chip, in the monospace), and the board's keycaps.
+//! An image is a window on what's drawn on it: a tile of a page is the page drawn
+//! shifted up by the tile's top, so a long page is never an image of its own.
 //! Sizes are the tour's at a 2× cell (34 pixels high), scaled to the terminal's (`s`).
 
 use bullpen_draw::font::{Fonts, Weight};
@@ -110,6 +112,8 @@ pub fn words(text: &str) -> Vec<Word> {
 /// cell's 34 pixels).
 pub struct Ink<'a> {
     pub pm: Pixmap,
+    /// where the image's top is in what's drawn: what's above it or under it isn't drawn
+    pub oy: f32,
     pub ty: &'a mut Type,
     pub th: Theme,
     pub s: f32,
@@ -119,6 +123,7 @@ impl Ink<'_> {
     pub fn new(w: u32, h: u32, ty: &mut Type, th: Theme, s: f32) -> Option<Ink<'_>> {
         Some(Ink {
             pm: Pixmap::new(w.max(1), h.max(1))?,
+            oy: 0.0,
             ty,
             th,
             s,
@@ -129,21 +134,33 @@ impl Ink<'_> {
         self.pm.width() as f32
     }
 
+    /// An image `h` high showing what's drawn from `oy` down.
+    pub fn window(w: u32, h: u32, oy: f32, ty: &mut Type, th: Theme, s: f32) -> Option<Ink<'_>> {
+        let mut ink = Ink::new(w, h, ty, th, s)?;
+        ink.oy = oy;
+        Some(ink)
+    }
+
+    /// Does the band from y, h high, show in the image?
+    pub fn shows(&self, y: f32, h: f32) -> bool {
+        y + h > self.oy && y < self.oy + self.pm.height() as f32
+    }
+
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, c: [u8; 4]) {
-        if let Some(r) = Rect::from_xywh(x, y, w, h) {
+        if let Some(r) = Rect::from_xywh(x, y - self.oy, w, h) {
             self.pm.fill_rect(r, &paint(c), Transform::identity(), None);
         }
     }
 
     pub fn rrect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, c: [u8; 4]) {
-        if let Some(p) = rounded(x, y, w, h, r) {
+        if let Some(p) = rounded(x, y - self.oy, w, h, r) {
             self.pm
                 .fill_path(&p, &paint(c), FillRule::Winding, Transform::identity(), None);
         }
     }
 
     pub fn rstroke(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, width: f32, c: [u8; 4]) {
-        if let Some(p) = rounded(x, y, w, h, r) {
+        if let Some(p) = rounded(x, y - self.oy, w, h, r) {
             let st = Stroke {
                 width,
                 ..Stroke::default()
@@ -162,8 +179,12 @@ impl Ink<'_> {
 
     /// Text from (x, its baseline); where the pen ends.
     pub fn text(&mut self, text: &str, face: Face, px: f32, x: f32, base: f32, c: [u8; 4]) -> f32 {
+        let shows = self.shows(base - 1.5 * px, 2.5 * px);
         let (f, w) = self.ty.face(face);
-        f.draw(&mut self.pm, text, w, px, (x, base), c)
+        if !shows {
+            return x + f.width(text, w, px);
+        }
+        f.draw(&mut self.pm, text, w, px, (x, base - self.oy), c)
     }
 
     /// Text in a band `h` high from `top`, centred on its capitals; where the pen ends.

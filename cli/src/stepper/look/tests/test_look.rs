@@ -5,6 +5,7 @@ use super::*;
 use crate::stepper::screen::DiffFn;
 use bullpen_draw::font::Fonts;
 use serde_json::json;
+use tiny_skia::Pixmap;
 
 fn as_obj(v: Value) -> Obj {
     v.as_object().cloned().unwrap_or_default()
@@ -196,6 +197,80 @@ fn the_end_page_follows_the_last_step() {
     assert_eq!(uploads(&out), 3);
 }
 
+/// A step whose patch is `lines` added lines long.
+fn long(lines: usize) -> PatchFn {
+    Box::new(move |_| {
+        let mut p = format!("diff --git a/big.rs b/big.rs\n--- a/big.rs\n+++ b/big.rs\n@@ -0,0 +1,{lines} @@\n");
+        for n in 0..lines {
+            p += &format!("+let line_{n} = \"{n}\";\n");
+        }
+        p
+    })
+}
+
+#[test]
+fn a_long_steps_page_is_never_an_image_of_its_own() {
+    let size = (160, 46);
+    let (cell, mut st) = ((16, 34), stepper());
+    let mut l = Look::new(Theme::default(), cell, Type::new(Fonts::builtin()), long(4000));
+    let started = std::time::Instant::now();
+    frame(&mut l, &mut st, size);
+    l.ahead(&st, &|| false, &mut Vec::new()).unwrap();
+    st.key("G", 44);
+    frame(&mut l, &mut st, size);
+    let lay = Lay::new(size.0, size.1, 0);
+    assert!(
+        l.page_rows(&st, 0, lay) > 3600,
+        "the page is as long as its code (4,000 lines of 31 pixels)"
+    );
+    // the biggest image drawn is the pane's, not the page's
+    let pane = size.0 as usize * 16 * size.1 as usize * 34 * 4;
+    assert!(l.largest <= pane, "{} bytes of pixels", l.largest);
+    eprintln!(
+        "4,000 lines: first frame, ahead, G and its frame in {:?}; largest image {} bytes",
+        started.elapsed(),
+        l.largest
+    );
+    assert!(started.elapsed().as_secs() < 20);
+}
+
+#[test]
+fn a_pages_tiles_are_the_page_drawn_whole_cut_up() {
+    let (mut l, st) = (look(CELL), stepper());
+    let lay = Lay::new(SIZE.0, SIZE.1, 0);
+    let (w, ch) = (lay.page_cols as u32 * CELL.0, CELL.1);
+    let rows = l.page_rows(&st, 0, lay);
+    let page = l.page_of(&st, 0);
+    let mut whole = l.ink(w, rows as u32 * ch, 0.0).unwrap();
+    page::draw(&mut whole, &page);
+    let whole = whole.pm;
+    let tile = lay.tile as i64;
+    for t in 0..(rows + tile - 1) / tile {
+        let n = (rows - t * tile).min(tile);
+        let mut ink = l.ink(w, n as u32 * ch, (t * tile * ch as i64) as f32).unwrap();
+        page::draw(&mut ink, &page);
+        let cut = whole
+            .clone_rect(tiny_skia::IntRect::from_xywh(0, (t * tile * ch as i64) as i32, w, n as u32 * ch).unwrap())
+            .unwrap();
+        assert!(
+            ink.pm.data() == cut.data(),
+            "tile {t} differs from the page drawn whole"
+        );
+    }
+}
+
+#[test]
+fn an_image_that_cant_be_made_is_an_error_the_tour_falls_back_on() {
+    let mut l = Look::new(
+        Theme::default(),
+        (5_000_000, 17),
+        Type::new(Fonts::builtin()),
+        Box::new(patch),
+    );
+    let e = l.frame(&mut stepper(), SIZE, &mut Vec::new()).unwrap_err();
+    assert!(e.to_string().starts_with("can't make an image"), "{e}");
+}
+
 /// The bytes of the keys that matter, at a large floating pane (160×46) with a 2× cell.
 #[test]
 fn bytes_at_a_large_pane() {
@@ -245,15 +320,21 @@ fn picture(l: &mut Look, st: &mut Stepper, (cols, rows): (i64, i64)) -> Pixmap {
         rail::draw(&mut ink, &r);
         pm.draw_pixmap(0, 0, ink.pm.as_ref(), &paint, id, None);
     }
-    let p = l.page(st, st.at, lay).unwrap();
-    let page = &l.pages[p].pm;
-    let view = IntRect::from_xywh(0, (st.top * ch as i64) as i32, page.width(), lay.view as u32 * ch);
-    if let Some(window) = view.and_then(|r| page.clone_rect(r)) {
-        pm.draw_pixmap((lay.rail as u32 * cw) as i32, 0, window.as_ref(), &paint, id, None);
-    }
+    let page_rows = l.page_rows(st, st.at, lay);
+    let page = l.page_of(st, st.at);
+    let mut window = l
+        .ink(
+            lay.page_cols as u32 * cw,
+            lay.view as u32 * ch,
+            (st.top * ch as i64) as f32,
+        )
+        .unwrap();
+    page::draw(&mut window, &page);
+    let window = window.pm;
+    pm.draw_pixmap((lay.rail as u32 * cw) as i32, 0, window.as_ref(), &paint, id, None);
     let f = rail::Foot {
         msg: st.msg.clone(),
-        more: l.pages[p].rows - st.top - lay.view as i64 > 0,
+        more: page_rows - st.top - lay.view as i64 > 0,
         end: st.at_end(),
     };
     let s = l.scale();

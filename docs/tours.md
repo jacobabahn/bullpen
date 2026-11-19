@@ -115,8 +115,8 @@ The keys and what they do are the text tour's. The drawn code can't be selected 
 searched: `v` opens the task's whole diff as text (in delta when it's installed), to
 copy from or search. `board_font` sets the prose's font, as on the board.
 
-It keeps a remote link cheap the way the board does. A page is drawn once and sent in
-tiles a window high; the window is placed as crops of them, so `j` or `k` sends a
+It keeps a remote link cheap the way the board does. A page is sent in tiles a window
+high, each drawn on its own (so no image is bigger than the pane, however long a step); the window is placed as crops of them, so `j` or `k` sends a
 couple of placements (about 160 bytes), and a tile only the first time the window
 reaches it. While no key waits, the tour sends what the next key would want, unplaced:
 the tiles above and under the window and the next and previous steps' rail, first tile

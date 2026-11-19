@@ -1,8 +1,9 @@
 //! The drawn tour's page: a step (its title, the files and lines it covers, its note,
 //! your comments on it, then its code, code.rs) or, after the last step, the end (your
 //! comments under their steps' titles, and the two ways out, s and a, as large keys).
-//! A page is one tall image as wide as the page's columns; the tour shows a window of
-//! it, scrolled (mod.rs).
+//! A page is as wide as the page's columns and as tall as it is; it's drawn a tile at
+//! a time, on an image that tile's height (`Ink`'s window), and the tour shows a window
+//! of it, scrolled (mod.rs).
 
 use super::code::{self, File};
 use super::ink::{Face, Ink};

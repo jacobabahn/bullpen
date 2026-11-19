@@ -329,7 +329,9 @@ pub fn draw(ink: &mut Ink, files: &[File], x: f32, top: f32, w: f32) {
         if k > 0 {
             y += FILE_GAP * s;
         }
-        strip(ink, file, x, y, w);
+        if ink.shows(y, STRIP * s) {
+            strip(ink, file, x, y, w);
+        }
         y += (STRIP + 6.0) * s;
         if let Some(note) = &file.note {
             ink.boxed(note, Face::Ui, 19.0 * s, x + gutter, y, lh, th.dim());
@@ -337,6 +339,16 @@ pub fn draw(ink: &mut Ink, files: &[File], x: f32, top: f32, w: f32) {
         }
         for (hk, hunk) in file.hunks.iter().enumerate() {
             let hh = HUNK * s;
+            if !ink.shows(y, hh) {
+                y += hh;
+                for line in &hunk.lines {
+                    if ink.shows(y, lh) {
+                        code_line(ink, &file.name, line, (x, y, w, lh), gutter);
+                    }
+                    y += lh;
+                }
+                continue;
+            }
             let label = format!("lines {}–{}", hunk.from, hunk.to);
             let end = ink.boxed(&label, Face::Ui, 19.0 * s, x + gutter, y, hh, th.dim());
             if !hunk.within.is_empty() {
@@ -356,7 +368,9 @@ pub fn draw(ink: &mut Ink, files: &[File], x: f32, top: f32, w: f32) {
             }
             y += hh;
             for line in &hunk.lines {
-                code_line(ink, &file.name, line, (x, y, w, lh), gutter);
+                if ink.shows(y, lh) {
+                    code_line(ink, &file.name, line, (x, y, w, lh), gutter);
+                }
                 y += lh;
             }
         }

@@ -4,9 +4,12 @@
 //! drawn (page.rs, code.rs), and a foot under the page with the message and the keys.
 //! What's typed (a comment, a tell) stays text, in the foot's place.
 //!
-//! A page is drawn once, as tall as it is, and sent in tiles a window high: the window
-//! on the page is one or two crops of tiles, so scrolling places crops (a few dozen
-//! bytes each) and sends a tile only the first time it's reached. While no key waits
+//! A page is measured once (its rows kept) and sent in tiles a window high, each drawn
+//! on an image the tile's height, the page shifted up by the tile's top: a long step is
+//! never an image of its own, so no image is bigger than the pane. The window on the
+//! page is one or two crops of tiles, so scrolling places crops (a few dozen bytes
+//! each) and sends a tile only the first time it's reached. An image the tour can't
+//! make (past `MOST`) is an error, and the tour is text from then on (view.rs). While no key waits
 //! (`ahead`), the tiles above and under the window, and the next and previous steps'
 //! rail, first tile and foot are drawn and sent unplaced, so `n` and `p` usually only
 //! place images. Images are kept on the terminal, hidden, to place again, and deleted
@@ -31,7 +34,6 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
-use tiny_skia::{IntRect, Pixmap};
 
 /// The tour's images get IDs from here up (the graphics query's is FIRST - 1).
 pub const FIRST: u32 = 0x5450_0001;
@@ -54,6 +56,10 @@ pub struct Lay {
 
 /// The rows the foot has.
 const FOOT: u16 = 2;
+
+/// The most pixels (bytes) an image is drawn on: a pane's, at a 2× cell, is a few tens
+/// of MB; past this the tour is text rather than risk the memory.
+const MOST: usize = 256 << 20;
 
 impl Lay {
     pub fn new(cols: i64, rows: i64, typed: usize) -> Lay {
@@ -80,13 +86,6 @@ impl Lay {
     }
 }
 
-/// A page drawn: what it shows (its key), its pixels, and its rows.
-struct Drawn {
-    key: u64,
-    pm: Pixmap,
-    rows: i64,
-}
-
 pub struct Look {
     pub th: Theme,
     /// a cell's width and height in pixels
@@ -94,10 +93,10 @@ pub struct Look {
     ty: Type,
     shown: Shown,
     patch: PatchFn,
-    /// the pages drawn, the latest last (three at most)
-    pages: Vec<Drawn>,
-    /// the rows of every page drawn, by its key, kept when its pixels aren't
+    /// the rows of every page measured, by its key: a page is never kept as pixels
     rows: HashMap<u64, i64>,
+    /// the most pixels (bytes) an image drawn has had
+    largest: usize,
     /// the layout last drawn, and whether text was under the page
     last: Option<Lay>,
     texted: bool,
@@ -117,8 +116,8 @@ impl Look {
             ty,
             shown: Shown::new(FIRST),
             patch,
-            pages: Vec::new(),
             rows: HashMap::new(),
+            largest: 0,
             last: None,
             texted: false,
         }
@@ -186,44 +185,39 @@ impl Look {
         })
     }
 
-    /// Page i, drawn (or as drawn before, the latest used last): its index in `pages`.
-    fn page(&mut self, st: &Stepper, i: usize, lay: Lay) -> Option<usize> {
+    /// The rows page i has: measured once, on an image a pixel high (the code under it
+    /// isn't drawn), and kept.
+    pub fn page_rows(&mut self, st: &Stepper, i: usize, lay: Lay) -> i64 {
         let width = lay.page_cols as u32 * self.cell.0;
         let k = self.page_key(st, i, width);
-        if let Some(at) = self.pages.iter().position(|d| d.key == k) {
-            let d = self.pages.remove(at);
-            self.pages.push(d);
-            return Some(self.pages.len() - 1);
-        }
-        let p = self.page_of(st, i);
-        let (th, s, ch) = (self.th, self.scale(), self.cell.1);
-        let h = page::draw(&mut Ink::new(width, 1, &mut self.ty, th, s)?, &p);
-        let rows = ((h / ch as f32).ceil() as i64).max(1);
-        let mut ink = Ink::new(width, rows as u32 * ch, &mut self.ty, th, s)?;
-        page::draw(&mut ink, &p);
-        if self.pages.len() >= 3 {
-            self.pages.remove(0);
-        }
-        self.rows.insert(k, rows);
-        self.pages.push(Drawn {
-            key: k,
-            pm: ink.pm,
-            rows,
-        });
-        Some(self.pages.len() - 1)
-    }
-
-    /// The rows page i has (drawing it only when it hasn't been).
-    pub fn page_rows(&mut self, st: &Stepper, i: usize, lay: Lay) -> i64 {
-        let k = self.page_key(st, i, lay.page_cols as u32 * self.cell.0);
         if let Some(rows) = self.rows.get(&k) {
             return *rows;
         }
-        self.page(st, i, lay).map_or(1, |p| self.pages[p].rows)
+        let p = self.page_of(st, i);
+        let (th, s, ch) = (self.th, self.scale(), self.cell.1);
+        let Some(mut ink) = Ink::new(width, 1, &mut self.ty, th, s) else {
+            return 1;
+        };
+        let rows = ((page::draw(&mut ink, &p) / ch as f32).ceil() as i64).max(1);
+        self.rows.insert(k, rows);
+        rows
     }
 
-    /// Tile t of page i sent: its ID, and the rows it has. A tile sent before is placed
-    /// again without drawing its page.
+    /// An image w by h pixels to draw on, from oy down what's drawn; an error when it
+    /// can't be made.
+    fn ink(&mut self, w: u32, h: u32, oy: f32) -> std::io::Result<Ink<'_>> {
+        let bytes = w as usize * h as usize * 4;
+        let (th, s) = (self.th, self.scale());
+        let ink = (bytes <= MOST)
+            .then(|| Ink::window(w, h, oy, &mut self.ty, th, s))
+            .flatten();
+        let ink = ink.ok_or_else(|| std::io::Error::other(format!("can't make an image {w}×{h} pixels")))?;
+        self.largest = self.largest.max(bytes);
+        Ok(ink)
+    }
+
+    /// Tile t of page i sent: its ID, and the rows it has. A tile is the page drawn on an
+    /// image the tile's height, shifted up by its top; one sent before is placed again.
     fn tile(
         &mut self,
         st: &Stepper,
@@ -238,21 +232,18 @@ impl Look {
             return Ok(None);
         }
         let n = (rows - from).min(lay.tile as i64);
-        let pk = self.page_key(st, i, lay.page_cols as u32 * self.cell.0);
-        let k = key((pk, t, lay.tile));
+        let width = lay.page_cols as u32 * self.cell.0;
+        let k = key((self.page_key(st, i, width), t, lay.tile));
         if let Some(id) = self.shown.id(k) {
             return Ok(Some((id, n)));
         }
-        let Some(p) = self.page(st, i, lay) else {
-            return Ok(None);
-        };
-        let ch = self.cell.1 as i64;
-        let pm = &self.pages[p].pm;
-        let crop =
-            IntRect::from_xywh(0, (from * ch) as i32, pm.width(), (n * ch) as u32).and_then(|r| pm.clone_rect(r));
-        let Some(crop) = crop else { return Ok(None) };
-        let id = self.shown.send(k, &png::encode(&crop), out)?;
-        Ok(Some((id, n)))
+        let ch = self.cell.1;
+        let p = self.page_of(st, i);
+        let mut ink = self.ink(width, n as u32 * ch, (from * ch as i64) as f32)?;
+        page::draw(&mut ink, &p);
+        let png = png::encode(&ink.pm);
+        drop(ink);
+        Ok(Some((self.shown.send(k, &png, out)?, n)))
     }
 
     /// The rail at step i sent: its ID.
@@ -270,12 +261,11 @@ impl Look {
             return Ok(Some(id));
         }
         let (w, h) = (lay.rail as u32 * self.cell.0, lay.rows as u32 * self.cell.1);
-        let (th, s) = (self.th, self.scale());
-        let Some(mut ink) = Ink::new(w, h, &mut self.ty, th, s) else {
-            return Ok(None);
-        };
+        let mut ink = self.ink(w, h, 0.0)?;
         rail::draw(&mut ink, &r);
-        Ok(Some(self.shown.send(k, &png::encode(&ink.pm), out)?))
+        let png = png::encode(&ink.pm);
+        drop(ink);
+        Ok(Some(self.shown.send(k, &png, out)?))
     }
 
     /// The foot sent: its ID.
@@ -285,12 +275,12 @@ impl Look {
             return Ok(Some(id));
         }
         let (w, h) = (lay.page_cols as u32 * self.cell.0, FOOT as u32 * self.cell.1);
-        let (th, s, ch) = (self.th, self.scale(), self.cell.1 as f32);
-        let Some(mut ink) = Ink::new(w, h, &mut self.ty, th, s) else {
-            return Ok(None);
-        };
+        let ch = self.cell.1 as f32;
+        let mut ink = self.ink(w, h, 0.0)?;
         rail::foot(&mut ink, f, ch);
-        Ok(Some(self.shown.send(k, &png::encode(&ink.pm), out)?))
+        let png = png::encode(&ink.pm);
+        drop(ink);
+        Ok(Some(self.shown.send(k, &png, out)?))
     }
 
     fn place(&self, id: u32, p: u32, (col, row): (u16, u16), crop_y: i64, (cols, rows): (u16, u16)) -> Place {
