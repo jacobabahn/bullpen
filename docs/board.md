@@ -262,7 +262,11 @@ never taken for keys, and an `esc` typed meanwhile counts once nothing follows i
 tenth of a second (an answer that was cut right after its own esc gives the board that
 `esc`, never the rest as keys). The type is Inter (built into the board, SIL Open Font
 License); `bullpen config --board-font PATH` draws with another font file (TTF or
-OTF) instead, with Inter for the characters it lacks.
+OTF) instead, with Inter for the characters it lacks. Its strokes are put on whole
+pixels, as a hinted font's are: each upright stem and each bar a whole number of pixels
+wide, edge on edge with the pixels, and the baseline, the x-height and the capitals'
+height on rows, so a letter is solid where it would be grey-edged, and nothing moves
+(the widths and the line heights are the font's).
 
 The board is images: the top line, the list's rows shown and the bottom rows, each
 drawn at the terminal's cell size and sent only when what it shows changes (a task's

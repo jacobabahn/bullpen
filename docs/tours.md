@@ -114,8 +114,8 @@ terminal's colours, so it follows the Rex theme:
 Its type is the terminal's size. Code is on the terminal's own grid: drawn at the
 size where a character's advance is the pane's cell width (unless that would be too
 tall for a row), a character a cell (two for a wide one) and a line a row, each glyph
-starting on a whole pixel, so its strokes land where the terminal's would and it reads
-as sharp as the text beside it; a file's strip and a hunk's line are a row each, and
+starting on a whole pixel and its strokes put on whole pixels (as the board's type is),
+so it reads as sharp as the text beside it; a file's strip and a hunk's line are a row each, and
 the line numbers are on the grid too. The rest is sized from the cell's height as the
 board's [image look](board.md#the-image-look) sizes its type, at medium or larger
 (`board_text_size large` is larger; `small` is medium here): the note, your comments
@@ -144,9 +144,9 @@ want, unplaced, one image at a time, looking for a key before each: the tile und
 window and the one above, the next step's rail, first window and foot, a page of tiles
 each way, and the previous step's rail, first tile and foot. So `n`, `p` and a page
 down usually only place images (a few hundred bytes). At 217×65 cells of 19×37 pixels
-the first frame is about 490 KB, drawing ahead after it about 830 KB in images of at
-most about 130 KB, and a step not drawn ahead about 460 KB; at 160×46 (17×34 pixels)
-about 280 KB, 530 KB and 250 KB. Images are kept on the terminal, hidden, to place again
+the first frame is about 425 KB, drawing ahead after it about 730 KB in images of at
+most about 115 KB, and a step not drawn ahead about 400 KB; at 160×46 (17×34 pixels)
+about 250 KB, 465 KB and 225 KB. Images are kept on the terminal, hidden, to place again
 (the step you go back to) and deleted when the tour closes.
 
 On a terminal that doesn't draw images, or with `board_look text`, the tour is text, as

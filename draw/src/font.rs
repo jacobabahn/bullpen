@@ -1,13 +1,14 @@
 //! The image look's type: Inter (built in, regular and semibold), or a font file the
 //! `board_font` setting names, and for code JetBrains Mono (built in, regular; its
-//! bold drawn heavier), measured and drawn glyph by glyph. A glyph is drawn
-//! once per size into a coverage mask and kept; a character the font lacks is drawn
-//! from Inter, else as the font's empty box.
+//! bold drawn heavier), measured and drawn glyph by glyph. A glyph is drawn once per
+//! size into a coverage mask, its strokes on whole pixels (hint.rs), and kept; a
+//! character the font lacks is drawn from Inter, else as the font's empty box.
 
 use std::collections::HashMap;
 use std::path::Path;
-use tiny_skia::{FillRule, Mask, PathBuilder, Pixmap, Stroke, Transform};
-use ttf_parser::{Face, GlyphId, OutlineBuilder};
+use crate::hint::{self, Outline};
+use tiny_skia::{FillRule, Mask, Pixmap, Stroke, Transform};
+use ttf_parser::{Face, GlyphId};
 
 static REGULAR: &[u8] = include_bytes!("../fonts/Inter-Regular.ttf");
 static SEMIBOLD: &[u8] = include_bytes!("../fonts/Inter-SemiBold.ttf");
@@ -246,27 +247,30 @@ impl Fonts {
         pen
     }
 
-    /// Draw one glyph's outline into a mask, `dx` of a pixel to the right.
+    /// Draw one glyph's outline into a mask, `dx` of a pixel to the right, its strokes
+    /// on whole pixels (hint.rs).
     fn raster(&self, weight: Weight, c: char, px: f32, dx: f32) -> Glyph {
         let (_, face, gid) = self.glyph_of(weight, c);
-        let scale = px / face.units_per_em() as f32;
-        let mut pb = Outline(PathBuilder::new());
         let none = Glyph { mask: None, left: 0, top: 0 };
-        let Some(bbox) = face.outline_glyph(gid, &mut pb) else { return none };
-        let Some(path) = pb.0.finish() else { return none };
+        let Some(outline) = Outline::of(face, gid) else { return none };
+        let upem = face.units_per_em() as f32;
+        let grid = outline.fitted(px / upem, upem, dx, hint::blues(face));
+        let Some(path) = outline.path(&grid) else { return none };
         let heavier = weight == Weight::Bold && self.fake_bold;
         let pad = 2.0 + if heavier { px / 30.0 } else { 0.0 };
-        let left = (bbox.x_min as f32 * scale + dx - pad).floor();
-        let top = (bbox.y_max as f32 * scale + pad).ceil();
-        let w = ((bbox.x_max - bbox.x_min) as f32 * scale + 2.0 * pad + 2.0).ceil() as u32;
-        let h = ((bbox.y_max - bbox.y_min) as f32 * scale + 2.0 * pad + 2.0).ceil() as u32;
+        let b = path.bounds();
+        let left = (b.left() - pad).floor();
+        let top = (pad - b.top()).ceil();
+        let w = ((b.right() + pad).ceil() - left) as u32;
+        let h = ((b.bottom() + pad).ceil() + top) as u32;
         let Some(mut mask) = Mask::new(w.max(1), h.max(1)) else { return none };
-        // font units, y up, to the mask's pixels, y down
-        let t = Transform::from_row(scale, 0.0, 0.0, -scale, dx - left, top);
+        // from the pen's baseline to the mask's corner
+        let t = Transform::from_translate(-left, top);
         mask.fill_path(&path, FillRule::Winding, true, t);
         if heavier {
-            let stroke = Stroke { width: px / 30.0 / scale, ..Stroke::default() };
-            if let Some(outline) = path.stroke(&stroke, 1.0) {
+            let stroke = Stroke { width: px / 30.0, ..Stroke::default() };
+            // (a quarter of a pixel's precision on its curves)
+            if let Some(outline) = path.stroke(&stroke, 4.0) {
                 mask.fill_path(&outline, FillRule::Winding, true, t);
             }
         }
@@ -302,26 +306,5 @@ fn blend(pm: &mut Pixmap, mask: &Mask, x: i32, y: i32, color: [u8; 4]) {
             }
             data[i + 3] = (a + data[i + 3] as u32 * (255 - a) / 255) as u8;
         }
-    }
-}
-
-/// A glyph's outline, as a path.
-struct Outline(PathBuilder);
-
-impl OutlineBuilder for Outline {
-    fn move_to(&mut self, x: f32, y: f32) {
-        self.0.move_to(x, y);
-    }
-    fn line_to(&mut self, x: f32, y: f32) {
-        self.0.line_to(x, y);
-    }
-    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
-        self.0.quad_to(x1, y1, x, y);
-    }
-    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
-        self.0.cubic_to(x1, y1, x2, y2, x, y);
-    }
-    fn close(&mut self) {
-        self.0.close();
     }
 }
