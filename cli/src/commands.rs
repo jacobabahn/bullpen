@@ -46,6 +46,7 @@ pub const COMMANDS: &[Command] = &[
     c("drop", YOU, "stop a task, close its PR, remove its worktree", crate::close::cmd_drop),
     c("tour", YOU, "a guided tour of a ready task's change: step through it (its path, off a terminal), or start writing one", crate::stepper::cmd_tour),
     c("_tour", INTERNAL, "", crate::tours::write::cmd_tour_bg),
+    c("_sharpness_sample", INTERNAL, "", crate::stepper::look::sample::cmd_sharpness_sample),
     c("tour-comment", YOU, "draft comments on a tour's steps: add, list (no STEP) or remove", crate::tours::comments::cmd_tour_comment),
     c("stats", YOU, "where tasks' time went: one task's timeline and totals, or the totals across closed tasks", crate::stats::cmd_stats),
     c("mission", YOU, "mission control: every repository on one screen, in a Rex session of its own (cmd+; m)", crate::mission::cmd_mission),

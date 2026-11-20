@@ -179,7 +179,12 @@ crop to the cells it draws. The Rex app's cell can be a hair narrower than the p
 reports (18.97 pixels against 19 on a Retina Mac), so every image is resampled by about
 0.998: a small softening, and a one-pixel pattern turns to grey moiré. Bullpen can't
 avoid it: the pane reports whole pixels, the app's cell isn't one, and an image left to
-its own size wouldn't stay pinned to the text around it.
+its own size wouldn't stay pinned to the text around it. `bin/kitty-sharpness-check`
+(`--float` in a floating pane, as the tour's) shows the terminal's own line of code over
+the same sample placed three ways: pinned as bullpen pins, pinned with the image a pixel
+over its cells, and unpinned. The sample (`bullpen _sharpness_sample`, `look/sample.rs`)
+is a line of code drawn as the tour draws it, one-pixel lines and checkerboards, white
+on black, so a screenshot shows which way the screen keeps pixel for pixel.
 
 ## The tour's drawing
 

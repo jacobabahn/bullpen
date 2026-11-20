@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""Show where drawn text loses its sharpness on screen: run it in a Rex pane, then take
+a screenshot.
+
+    bin/kitty-sharpness-check            # in this pane: run it in an ordinary split pane
+    bin/kitty-sharpness-check --float    # in a floating pane, where the tour opens
+
+It shows a line of the terminal's own text, then the same sample placed several ways
+under it, each under a label. The sample is white on black (as is the terminal's line):
+a line of code drawn as the drawn tour draws it (bullpen-draw's JetBrains Mono at the
+pane's cell size, a character a cell: `bullpen _sharpness_sample` draws it), then
+one-pixel lines (upright at the left, across at the right, every third pixel), then
+checkerboards (squares one pixel across at the left, two at the right).
+
+  1. the terminal's own text, the same line, to compare the others with.
+  2. pinned: placed on its block of cells with `c,r` (and the crop `x,y,w,h`), as the
+     board and the tour place every image. The image is exactly the cells' pixels.
+  3. pinned, a pixel over: `c,r` as in 2, the image one pixel wider and taller than the
+     cells, so the terminal has to shrink it a little.
+  4. unpinned: placed with no `c,r`, so the terminal shows it at its own size in pixels
+     (last, so that if the terminal shows it bigger it covers nothing).
+
+A sample shown pixel for pixel keeps its lines and checkerboards black and white; one
+resampled, or placed between two screen pixels, turns them grey (a one-pixel pattern
+first) and widens the text's edges. Comparing 2 with 4 says whether unpinned placement
+is sharper; 3 says what a slight scale does.
+
+With --float it opens itself in a floating pane over this pane's window, at the bounds
+the tour's floating pane has (cli/src/stepper/mod.rs's TOUR_BOUNDS), and runs there.
+
+Press Enter to take the images off and delete them.
+"""
+
+import base64
+import fcntl
+import json
+import os
+import struct
+import subprocess
+import sys
+import termios
+
+IDS = (0x53480001, 0x53480002, 0x53480003)
+TEXT = "import logging  mmm 0O1lI {} -> 'x';"
+SAMPLE_ROWS = 3  # the code, the lines, the checkerboards
+CHUNK = 4096
+WHITE_ON_BLACK = "\x1b[38;2;255;255;255;48;2;0;0;0m"
+OWN = "1. the terminal's own text"
+WAYS = (  # each way's label, how many pixels over its cells the image is, and whether it's pinned
+    ("2. pinned (c,r: as bullpen places images)", 0, True),
+    ("3. pinned, the image a pixel wider and taller than its cells", 1, True),
+    ("4. unpinned (no c,r: at its own size in pixels)", 0, False),
+)
+HERE = os.path.dirname(os.path.realpath(__file__))
+TOUR_BOUNDS = [0.05, 0.04, 0.9, 0.9]  # the tour's floating pane (cli/src/stepper/mod.rs)
+TERMINAL = "com.superlogical.terminal.shell"
+
+
+def pane():
+    """The pane's columns, rows, and its size in pixels (0 when the terminal doesn't say)."""
+    for fd in (sys.stdout.fileno(), sys.stdin.fileno()):
+        try:
+            rows, cols, xpix, ypix = struct.unpack("HHHH", fcntl.ioctl(fd, termios.TIOCGWINSZ, b"\0" * 8))
+            return cols, rows, xpix, ypix
+        except OSError:
+            continue
+    return 0, 0, 0, 0
+
+
+def plan(cols, rows, xpix, ypix):
+    """The cell's size, the sample's columns and its text, and each way's image: its label,
+    its size in pixels, the row of its label (1-based; the image is under it), and whether
+    it's pinned. None when the terminal doesn't say its size in pixels or the pane is too
+    small."""
+    need = 1 + 2 + len(WAYS) * (1 + SAMPLE_ROWS) + 2
+    if not (cols and rows and xpix and ypix) or cols < 12 or rows < need:
+        return None
+    cw, ch = xpix // cols, ypix // rows
+    n = min(len(TEXT), cols - 1)
+    w, h = n * cw, SAMPLE_ROWS * ch
+    ways = []
+    for k, (label, over, pinned) in enumerate(WAYS):
+        ways.append({"label": label, "row": 4 + k * (1 + SAMPLE_ROWS), "w": w + over, "h": h + over,
+                     "pinned": pinned})
+    return {"cell": (cw, ch), "cols": n, "text": TEXT[:n], "ways": ways, "foot": 4 + len(WAYS) * (1 + SAMPLE_ROWS)}
+
+
+def sample(cell, w, h, text):
+    """The sample as a PNG, drawn by bullpen (the checkout's own build)."""
+    cmd = [os.path.join(HERE, "bullpen"), "_sharpness_sample", str(cell[0]), str(cell[1]), str(w), str(h), text]
+    return subprocess.run(cmd, check=True, capture_output=True).stdout
+
+
+def apc(control, payload=""):
+    return f"\x1b_G{control};{payload}\x1b\\" if payload else f"\x1b_G{control}\x1b\\"
+
+
+def upload(id, png):
+    data = base64.b64encode(png).decode()
+    chunks = [data[k:k + CHUNK] for k in range(0, len(data), CHUNK)] or [""]
+    out = []
+    for k, c in enumerate(chunks):
+        more = int(k + 1 < len(chunks))
+        control = f"a=t,f=100,t=d,i={id},q=2,m={more}" if k == 0 else f"q=2,m={more}"
+        out.append(apc(control, c))
+    return "".join(out)
+
+
+def place(id, way, cols):
+    """The placement's bytes: pinned to the sample's cells with c,r (the crop the whole
+    image, as bullpen-draw's kitty.rs writes it), or at its own size."""
+    if way["pinned"]:
+        control = f"a=p,i={id},p=1,x=0,y=0,w={way['w']},h={way['h']},c={cols},r={SAMPLE_ROWS},C=1,q=2"
+    else:
+        control = f"a=p,i={id},p=1,C=1,q=2"
+    return f"\x1b[{way['row'] + 1};1H" + apc(control)
+
+
+def rex_api(session, method, args):
+    out = subprocess.run(["rex", "api", "call", "-s", session, method, json.dumps(args)], check=True,
+                         capture_output=True, text=True).stdout
+    return json.loads(out) if out.strip() else {}
+
+
+def float_pane():
+    """Open this check in a floating pane over this pane's window, as the tour opens."""
+    session, block = os.environ.get("REX_SESSION", ""), os.environ.get("REX_BLOCK", "")
+    if not session:
+        sys.exit("kitty-sharpness-check: --float needs a Rex pane (no REX_SESSION)")
+    view = rex_api(session, "session.view", {})
+    window = view.get("active_window_id")
+    for w in view.get("windows", []):
+        if any(b.get("block_id") == block for layer in w.get("layers", []) for b in layer.get("blocks", [])):
+            window = w["window_id"]
+    spec = {"bounds": TOUR_BOUNDS, "window_id": window, "layout": {"block": {
+        "flavor": TERMINAL, "label": "kitty-sharpness-check",
+        "options": {"command": [os.path.realpath(__file__)], "cwd": os.getcwd()}}}}
+    layer = rex_api(session, "session.new_layer", spec).get("layer_id", "")
+    rex_api(session, "session.set_layer_state", {"layer_id": layer, "state": "normal", "focus": True})
+
+
+def main():
+    if sys.argv[1:] == ["--float"]:
+        return float_pane()
+    cols, rows, xpix, ypix = pane()
+    p = plan(cols, rows, xpix, ypix)
+    if p is None:
+        sys.exit("kitty-sharpness-check: the terminal doesn't say its size in pixels, or the pane is too small")
+    cw, ch = p["cell"]
+    head = f"pane {cols}x{rows} cells, {xpix}x{ypix} px: a cell {cw}x{ch} (or {xpix / cols:.2f}x{ypix / rows:.2f})"
+    out = ["\x1b[2J\x1b[H", head[:cols], f"\x1b[2;1H{OWN}", f"\x1b[3;1H{WHITE_ON_BLACK}{p['text']}\x1b[0m"]
+    for id, way in zip(IDS, p["ways"]):
+        label = f"{way['label']}: {way['w']}x{way['h']} px"
+        out.append(f"\x1b[{way['row']};1H{label[:cols]}")
+        out.append(upload(id, sample(p["cell"], way["w"], way["h"], p["text"])))
+        out.append(place(id, way, p["cols"]))
+    out.append(f"\x1b[{p['foot']};1H{'Take a screenshot, then press Enter to clear. '[:cols]}")
+    os.write(sys.stdout.fileno(), "".join(out).encode())
+    try:
+        input()
+    except (EOFError, KeyboardInterrupt):
+        pass
+    os.write(sys.stdout.fileno(), ("".join(apc(f"a=d,d=I,i={id},q=2") for id in IDS) + "\x1b[2J\x1b[H").encode())
+
+
+if __name__ == "__main__":
+    main()

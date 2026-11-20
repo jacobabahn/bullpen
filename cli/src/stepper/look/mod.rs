@@ -25,6 +25,7 @@ pub mod code;
 pub mod ink;
 pub mod page;
 pub mod rail;
+pub mod sample;
 mod shown;
 
 use super::screen::{Mode, Stepper};
