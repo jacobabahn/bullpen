@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""Find how many bytes of kitty graphics images the terminal keeps: run it in a Rex pane.
+
+    bin/kitty-quota-check                 # 60 images of 9,500,000 bytes each
+    bin/kitty-quota-check 9500000 100     # another size (bytes decoded) and count
+
+A kitty-protocol terminal keeps the images a program sends up to a quota of bytes
+(decoded: width × height × 4) and deletes the oldest past it, without a word to the
+program when it was told not to answer (q=2, as bullpen sends everything). kitty's
+quota is 320 MB, as is ghostty's (Rex's terminal is libghostty's); Rex's app may keep
+its own. This sends images as the drawn tour does (PNG, q=2, none placed), each a
+solid colour, then places each in a numbered square, asking the terminal to answer
+(q=0), so the server says which it still has (OK, or "ENOENT" for one it deleted).
+
+Then look at the squares: one the server has but the app doesn't draw is blank. Type
+the numbers of the blank squares (or "none") and Enter. It prints what it found: which
+images are gone, the bytes sent and the bytes kept. Paste that text back; it's all
+that's needed.
+
+The images are deleted when it ends. It runs on the terminal's other screen, as the
+tour does (a terminal keeps that screen's images apart).
+"""
+
+import base64
+import fcntl
+import os
+import re
+import select
+import struct
+import sys
+import termios
+import time
+import tty
+import zlib
+
+SIZE = 9_500_000  # bytes decoded: bullpen's largest image (cut::MAX_BYTES)
+COUNT = 60
+WIDTH = 2000  # pixels; each image is WIDTH × (size / WIDTH / 4)
+FIRST = 0x51430001
+CHUNK = 4096
+SQUARE = (4, 2)  # a square's cells, and a row under it for its number
+WAIT = 10.0  # seconds for the terminal's answers
+
+
+def pane():
+    """The pane's columns and rows."""
+    for fd in (sys.stdout.fileno(), sys.stdin.fileno()):
+        try:
+            rows, cols, _, _ = struct.unpack("HHHH", fcntl.ioctl(fd, termios.TIOCGWINSZ, b"\0" * 8))
+            return cols, rows
+        except OSError:
+            continue
+    return 80, 24
+
+
+def colour(k):
+    """Image k's colour: hues apart, so squares side by side differ."""
+    h = (k * 0.381966) % 1.0
+    i, f = int(h * 6), (h * 6) % 1.0
+    v, q, t = 230, int(230 * (1 - f)), int(230 * f)
+    r, g, b = [(v, t, 40), (q, v, 40), (40, v, t), (40, q, v), (t, 40, v), (v, 40, q)][i]
+    return bytes((r, g, b, 255))
+
+
+def png(w, h, rgba):
+    """A w by h PNG (8-bit RGBA) of one colour."""
+    row = b"\0" + rgba * w
+    raw = row * h
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b"")
+
+
+def apc(control, payload=""):
+    return f"\x1b_G{control};{payload}\x1b\\" if payload else f"\x1b_G{control}\x1b\\"
+
+
+def upload(id, data):
+    """As bullpen sends an image: PNG, base64 in chunks, q=2 on each."""
+    text = base64.b64encode(data).decode()
+    chunks = [text[k:k + CHUNK] for k in range(0, len(text), CHUNK)] or [""]
+    out = []
+    for k, c in enumerate(chunks):
+        more = int(k + 1 < len(chunks))
+        control = f"a=t,f=100,t=d,i={id},q=2,m={more}" if k == 0 else f"q=2,m={more}"
+        out.append(apc(control, c))
+    return "".join(out)
+
+
+def where(k, cols):
+    """Square k's top-left cell (0-based) under the two lines of text at the top."""
+    across = max(1, cols // (SQUARE[0] + 1))
+    return (k % across) * (SQUARE[0] + 1), 2 + (k // across) * (SQUARE[1] + 2)
+
+
+def place(id, k, cols):
+    """Image id on square k, a crop of its top-left corner, answered (q=0)."""
+    col, row = where(k, cols)
+    control = f"a=p,i={id},p=1,x=0,y=0,w=40,h=40,c={SQUARE[0]},r={SQUARE[1]},C=1,q=0"
+    label = f"\x1b[{row + SQUARE[1] + 1};{col + 1}H{k + 1}"
+    return f"\x1b[{row + 1};{col + 1}H" + apc(control) + label
+
+
+def write(text):
+    data = text.encode()
+    while data:
+        n = os.write(sys.stdout.fileno(), data)
+        data = data[n:]
+
+
+def answers(fd):
+    """The terminal's answers up to its device attributes (asked last): {id: answer}."""
+    write("\x1b[c")
+    got, end = b"", time.monotonic() + WAIT
+    while time.monotonic() < end and not re.search(rb"\x1b\[\?[0-9;]*c", got):
+        ready, _, _ = select.select([fd], [], [], 0.2)
+        if ready:
+            got += os.read(fd, 65536)
+    out = {}
+    for control, said in re.findall(rb"\x1b_G([^;\x1b]*);([^\x1b]*)\x1b\\", got):
+        m = re.search(rb"i=(\d+)", control)
+        if m:
+            out[int(m.group(1))] = said.decode(errors="replace")
+    return out
+
+
+def runs(numbers):
+    """1 2 3 5 as "1–3, 5"."""
+    out, start, prev = [], None, None
+    for n in sorted(numbers) + [None]:
+        if start is not None and (n is None or n != prev + 1):
+            out.append(f"{start}" if start == prev else f"{start}–{prev}")
+            start = None
+        if n is not None and start is None:
+            start = n
+        prev = n
+    return ", ".join(out) or "none"
+
+
+def main():
+    size = int(sys.argv[1]) if len(sys.argv) > 1 else SIZE
+    count = int(sys.argv[2]) if len(sys.argv) > 2 else COUNT
+    w = WIDTH
+    h = max(1, size // (4 * w))
+    each = w * h * 4
+    cols, rows = pane()
+    if where(count - 1, cols)[1] + SQUARE[1] + 2 > rows:
+        sys.exit(f"kitty-quota-check: {count} squares don't fit a pane {cols}×{rows}; make it bigger or ask for fewer")
+    ids = [FIRST + k for k in range(count)]
+    fd = sys.stdin.fileno()
+    saved = termios.tcgetattr(fd)
+    blank = ""
+    try:
+        tty.setcbreak(fd)
+        write("\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l")
+        for k, id in enumerate(ids):
+            write(f"\x1b[1;1H\x1b[KSending image {k + 1} of {count}, {w}×{h} ({each:,} bytes each)…")
+            write(upload(id, png(w, h, colour(k))))
+        time.sleep(0.5)
+        write("\x1b[1;1H\x1b[KPlacing each, asking the terminal which it still has…")
+        write("".join(place(id, k, cols) for k, id in enumerate(ids)))
+        said = answers(fd)
+        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+        write("\x1b[1;1H\x1b[K\x1b[?25hType the numbers of the blank squares (or none), then Enter: ")
+        try:
+            blank = input().strip()
+        except (EOFError, KeyboardInterrupt):
+            blank = "(not answered)"
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+        write("".join(apc(f"a=d,d=I,i={id},q=2") for id in ids) + "\x1b[2J\x1b[?1049l\x1b[?25h")
+    kept = [k + 1 for k, id in enumerate(ids) if said.get(id, "").startswith("OK")]
+    gone = [k + 1 for k, id in enumerate(ids) if id in said and not said[id].startswith("OK")]
+    silent = [k + 1 for k, id in enumerate(ids) if id not in said]
+    errors = sorted({said[ids[k - 1]] for k in gone})
+    print(f"kitty-quota-check: {count} images of {w}×{h} ({each:,} bytes decoded each), sent as PNG with q=2, none placed")
+    print(f"  sent:                  {count * each:,} bytes")
+    print(f"  the server still has:  {runs(kept)}  ({len(kept) * each:,} bytes)")
+    print(f"  the server deleted:    {runs(gone)}  {'; '.join(errors)}")
+    print(f"  no answer for:         {runs(silent)}")
+    print(f"  squares blank:         {blank or 'none'}")
+    print(f"  pane {cols}×{rows}, TERM={os.environ.get('TERM', '')}, TERM_PROGRAM={os.environ.get('TERM_PROGRAM', '')}")
+
+
+if __name__ == "__main__":
+    main()
