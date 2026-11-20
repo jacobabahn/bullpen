@@ -155,10 +155,11 @@ about 160×46 (17×34 pixels) all of the above fits: `n`, `p` and a page down on
 images (a few hundred bytes); the first frame is about 280 KB, drawing ahead after it
 about 530 KB, a step not drawn ahead about 250 KB. On a larger one each window is
 bigger than the budget holds many of: at 211×65 cells of 19×37 pixels (a window about
-39 MB, the first frame about 490 KB) a page down still only places, but `n` from the
-top of a long step sends the rest of its first window (about 240 KB), `p` back to it
-sends it again (about 470 KB), and a page up past the strip over the window sends that
-page again (about 380 to 530 KB).
+39 MB, the first frame about 490 KB) the first page down only places, later pages
+down send a strip or two (about 80 to 140 KB), `n` from the top of a long step sends
+the rest of its first window (about 240 KB), `p` back to it sends it again (about 470
+KB), and a page up past the strip over the window sends that page again (about 380 to
+530 KB).
 
 On a terminal that doesn't draw images, or with `board_look text`, the tour is text, as
 above, the message line saying why when the image look was asked for.
