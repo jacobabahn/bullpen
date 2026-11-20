@@ -157,6 +157,14 @@ impl Shown {
         Ok(())
     }
 
+    /// The terminal's cell is now `cell` pixels: every image sent is deleted (each was
+    /// drawn for the old one), and what's sent from now on is cut for the new one.
+    pub fn recut(&mut self, cell: (u32, u32), out: &mut impl Write) -> std::io::Result<()> {
+        self.delete_all(out)?;
+        self.cell = cell;
+        Ok(())
+    }
+
     /// How many images (pieces) are kept on the terminal.
     #[cfg(test)]
     pub fn kept(&self) -> usize {

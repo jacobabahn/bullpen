@@ -383,6 +383,32 @@ fn after_a_resize_the_image_is_sent_again() {
     assert!([HEAD, LIST, FOOT, SEL].iter().all(|id| out.contains(&kitty::delete(*id))));
 }
 
+thread_local! {
+    /// The cell the test's window says it has.
+    static WINDOW: std::cell::Cell<(u32, u32)> = const { std::cell::Cell::new((8, 16)) };
+}
+
+#[test]
+fn a_board_in_a_pane_not_sized_yet_is_drawn_again_at_its_cell_once_it_is() {
+    // Rex opens a pane at 80x24 cells of 8x16 pixels and sizes it a moment later: the
+    // board reads its cell from the window every frame, so a resize draws it at the new one
+    WINDOW.with(|w| w.set((8, 16)));
+    let (mut app, mut p) = (board(3), Picture { window: || Some(WINDOW.with(|w| w.get())), ..picture() });
+    asked(&mut app, &mut p);
+    let at = |out: &str, (cw, ch): (u32, u32)| {
+        let field = |c: &str, k: &str| c.split(',').find_map(|f| f.strip_prefix(k)).and_then(|v| v.parse::<u32>().ok());
+        let places: Vec<String> = commands(out).into_iter().filter(|c| c.starts_with("a=p")).collect();
+        !places.is_empty()
+            && places.iter().all(|c| field(c, "w=") == field(c, "c=").map(|n| n * cw) && field(c, "h=") == field(c, "r=").map(|n| n * ch))
+    };
+    assert!(at(&frame(&mut app, &mut p), (8, 16)));
+    WINDOW.with(|w| w.set((19, 37)));
+    p.resized();
+    let out = frame(&mut app, &mut p);
+    assert!(at(&out, (19, 37)), "each image its cells' pixels at the new cell: {:?}", commands(&out));
+    assert!(out.contains(&kitty::delete(HEAD)), "the header drawn at 8x16 is deleted");
+}
+
 /// The key reader reads the answers asked: back to keys, with these answers.
 fn answer_with(p: &mut Picture, a: &term::Answers) {
     let mut out = Vec::new();

@@ -122,7 +122,10 @@ board's [image look](board.md#the-image-look) sizes its type, at medium or large
 and the rail's steps at the board's title size (0.8 of a cell's height), the files
 line and the rail's task at its detail size (0.7), the foot's keys at its label size
 (0.6), and the step's title a step above (1.15). The rail is about a quarter of the
-pane (24 to 48 columns) for its titles at that size. Everything you read is at 4.5:1
+pane (24 to 48 columns) for its titles at that size. The cell is the pane's as it is now:
+read again as the tour runs, so a pane resized (or a floating pane Rex has only just
+sized: until then the tour is text, for a second or so) has the tour drawn anew at its
+cell, never stretched from another. Everything you read is at 4.5:1
 or more against what's under it, on dark and light themes; the line numbers are quieter.
 
 The keys and what they do are the text tour's. The drawn code can't be selected or

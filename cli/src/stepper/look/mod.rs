@@ -148,6 +148,23 @@ impl Look {
         }
     }
 
+    /// The terminal's cell is now `cell` pixels (the pane was sized, or resized): what was
+    /// drawn at the old one (the images sent, the pages' heights) goes, and the next
+    /// frame draws everything at the new one, so no image is drawn at one cell and shown
+    /// stretched to another. Whether it changed.
+    pub fn set_cell(&mut self, cell: (u32, u32), out: &mut impl Write) -> std::io::Result<bool> {
+        if cell == self.cell || cell.0 == 0 || cell.1 == 0 {
+            return Ok(false);
+        }
+        self.shown.recut(cell, out)?;
+        self.cell = cell;
+        self.sz = Sizes::of(cell, &mut self.ty);
+        self.rows.clear();
+        self.last = None;
+        self.put(out, "\x1b[2J")?;
+        Ok(true)
+    }
+
     /// How many images are kept on the terminal.
     #[cfg(test)]
     pub fn kept(&self) -> usize {

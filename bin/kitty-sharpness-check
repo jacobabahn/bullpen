@@ -27,6 +27,13 @@ is sharper; 3 says what a slight scale does.
 
 With --float it opens itself in a floating pane over this pane's window, at the bounds
 the tour's floating pane has (cli/src/stepper/mod.rs's TOUR_BOUNDS), and runs there.
+Rex opens a pane at 80x24 cells of 8x16 pixels and sizes it a moment later, so the check
+waits for its pane's real size first (`UNSIZED`, as the tour does: look/ask.rs).
+
+What it showed (Rex on a Retina Mac, 19x37 cells, Nov 2026): pinned and unpinned alike
+are pixel for pixel and as sharp as the terminal's own text; a pixel over is resampled
+and its one-pixel patterns go grey. So an image must be exactly its cells' pixels, at the
+cell the pane has now.
 
 Press Enter to take the images off and delete them.
 """
@@ -39,6 +46,7 @@ import struct
 import subprocess
 import sys
 import termios
+import time
 
 IDS = (0x53480001, 0x53480002, 0x53480003)
 TEXT = "import logging  mmm 0O1lI {} -> 'x';"
@@ -54,6 +62,8 @@ WAYS = (  # each way's label, how many pixels over its cells the image is, and w
 HERE = os.path.dirname(os.path.realpath(__file__))
 TOUR_BOUNDS = [0.05, 0.04, 0.9, 0.9]  # the tour's floating pane (cli/src/stepper/mod.rs)
 TERMINAL = "com.superlogical.terminal.shell"
+UNSIZED = (80, 24, 640, 384)  # Rex's size for a pane it hasn't sized yet (cells, then pixels)
+SETTLE = 1.5  # seconds to wait for a pane to be sized
 
 
 def pane():
@@ -65,6 +75,14 @@ def pane():
         except OSError:
             continue
     return 0, 0, 0, 0
+
+
+def sized_pane():
+    """The pane's size once Rex has sized it: while it's UNSIZED, wait (SETTLE at most)."""
+    until = time.monotonic() + SETTLE
+    while pane() == UNSIZED and time.monotonic() < until:
+        time.sleep(0.05)
+    return pane()
 
 
 def plan(cols, rows, xpix, ypix):
@@ -142,7 +160,7 @@ def float_pane():
 def main():
     if sys.argv[1:] == ["--float"]:
         return float_pane()
-    cols, rows, xpix, ypix = pane()
+    cols, rows, xpix, ypix = sized_pane()
     p = plan(cols, rows, xpix, ypix)
     if p is None:
         sys.exit("kitty-sharpness-check: the terminal doesn't say its size in pixels, or the pane is too small")

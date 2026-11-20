@@ -18,11 +18,11 @@ more). Rex's bug report: "Kitty graphics: inline images of 10 MB or more are sil
 dropped by the client" (21 Oct 2026). bullpen's images are kept under bullpen-draw's
 `cut::MAX_BYTES` because of it (docs/code.md).
 
-Why squares 4 pixels across, and three times over: the Rex app's real cell can be a hair
-narrower than the pixels the pane reports (18.97 against 19), so every image pinned to
-cells is resampled by about 0.998, and a one-pixel pattern turns to grey moire under
-that, under the limit or not. Squares 4 pixels across survive it. And an image only a
-row over the limit, scaled down to fit, would change by less than that resampling.
+Why squares 4 pixels across, and three times over: an image even a pixel bigger or
+smaller than its cells is resampled to fit them, and a one-pixel pattern turns to grey
+moire under that, under the limit or not (bin/kitty-sharpness-check shows it). Squares 4
+pixels across survive it. And an image only a row over the limit, scaled down to fit,
+would be hard to tell from one under it.
 
 Press Enter to take the images off and delete them.
 """

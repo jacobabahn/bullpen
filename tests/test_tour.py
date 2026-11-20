@@ -444,6 +444,64 @@ class TourTest(unittest.TestCase):
         os.close(master)
         return screens, p.wait(10)
 
+    def test_a_drawn_tour_waits_for_its_pane_to_be_sized_and_follows_its_cell(self):
+        """Rex opens a floating pane at 80x24 cells of 8x16 pixels and sizes it a moment
+        later: the drawn tour is text until then, and drawn at the cell the pane has."""
+        import fcntl, pty, struct, termios
+        tid = self.toured()
+        self.bp("config", "--board-look", "image")
+        master, slave = pty.openpty()
+
+        def size(cols, rows, w, h):
+            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, w, h))
+
+        size(80, 24, 640, 384)
+        p = subprocess.Popen([str(BULLPEN), "tour", tid, "--view"], cwd=self.repo, env=self.env,
+                             stdin=slave, stdout=slave, stderr=slave)
+        seen = b""
+
+        def read_until(done, secs=10):
+            nonlocal seen
+            end = time.time() + secs
+            while not done(seen) and time.time() < end:
+                if select.select([master], [], [], 0.1)[0]:
+                    seen += os.read(master, 1 << 20)
+
+        def crops(out):
+            fields = [dict(f.split("=") for f in c.split(",") if "=" in f)
+                      for c in re.findall(r"\x1b_Ga=p,([^\x1b;]*)", out.decode(errors="replace"))]
+            return [(int(f["w"]), int(f["h"]), int(f["c"]), int(f["r"])) for f in fields]
+
+        read_until(lambda b: b"\x1b[c" in b)
+        query = re.search(rb"\x1b_Gi=(\d+),s=1", seen)
+        os.write(master, b"\x1b_Gi=" + query.group(1) + b";OK\x1b\\\x1b[?62c")
+        read_until(lambda b: b"step 1 of 2" in b)
+        time.sleep(0.4)
+        read_until(lambda b: False, 0.2)
+        self.assertNotIn(b"a=t,", seen, "nothing drawn at the unsized pane's 8x16 cell")
+        seen = b""
+        size(100, 30, 1900, 1110)  # sized: cells of 19x37
+        read_until(lambda b: b"\x1b[?25l" in b and b"a=p," in b)
+        self.assertIn(b"a=t,", seen)
+        self.assertTrue(crops(seen))
+        self.assertTrue(all((w, h) == (19 * c, 37 * r) for w, h, c, r in crops(seen)), crops(seen))
+        time.sleep(0.6)  # drawing ahead
+        read_until(lambda b: False, 0.2)
+        seen = b""
+        size(100, 30, 2000, 1200)  # the same cells, bigger (a font size changed): 20x40
+        read_until(lambda b: b"\x1b[?25l" in b and b"a=p," in b)
+        self.assertIn(b"a=d,d=I", seen, "what was drawn at 19x37 is deleted")
+        self.assertTrue(all((w, h) == (20 * c, 40 * r) for w, h, c, r in crops(seen)), crops(seen))
+        os.write(master, b"q")
+        os.close(slave)
+        try:  # read what it writes as it closes, so it isn't blocked writing it
+            while select.select([master], [], [], 10)[0] and os.read(master, 1 << 20):
+                pass
+        except OSError:
+            pass
+        os.close(master)
+        self.assertEqual(p.wait(10), 0)
+
     def test_tour_on_a_terminal_opens_the_stepper_and_elsewhere_prints_the_path(self):
         tid = self.toured()
         path = self.bp("tour", tid).stdout.strip()  # not a terminal (an agent): its path

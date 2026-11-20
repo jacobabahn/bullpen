@@ -175,16 +175,24 @@ does with the second.
 
 Every placement is pinned to cells: its crop is the cells' size in pixels, as the pane
 reports them (its pixel size over its cells, rounded down), and the terminal scales the
-crop to the cells it draws. The Rex app's cell can be a hair narrower than the pane
-reports (18.97 pixels against 19 on a Retina Mac), so every image is resampled by about
-0.998: a small softening, and a one-pixel pattern turns to grey moiré. Bullpen can't
-avoid it: the pane reports whole pixels, the app's cell isn't one, and an image left to
-its own size wouldn't stay pinned to the text around it. `bin/kitty-sharpness-check`
-(`--float` in a floating pane, as the tour's) shows the terminal's own line of code over
-the same sample placed three ways: pinned as bullpen pins, pinned with the image a pixel
-over its cells, and unpinned. The sample (`bullpen _sharpness_sample`, `look/sample.rs`)
-is a line of code drawn as the tour draws it, one-pixel lines and checkerboards, white
-on black, so a screenshot shows which way the screen keeps pixel for pixel.
+crop to the cells it draws. So an image must be exactly its cells' pixels at the cell
+the pane has now: then Rex shows it pixel for pixel, as sharp as its own text, and one
+even a pixel over (a scale of 0.9985) is visibly resampled, its one-pixel patterns
+grey. `bin/kitty-sharpness-check` shows this: the terminal's own line of code over the
+same sample placed three ways (pinned as bullpen pins, pinned with the image a pixel
+over its cells, and unpinned), with `--float` in a floating pane as the tour's. The
+sample (`bullpen _sharpness_sample`, `look/sample.rs`) is a line of code drawn as the
+tour draws it, one-pixel lines and checkerboards, white on black. On a Retina Mac at
+19×37 pixels a cell, pinned and unpinned were alike and sharp.
+
+Rex opens a pane at 80×24 cells of 8×16 pixels and sizes it a moment later (the tour's
+floating pane, just opened, says that size), so a cell read once at the start can be
+wrong for good: drawn at 8×16 and stretched about 2.3 times to the real cells, the tour
+was big, bold and blurry. The board reads its cell from the window every frame (its
+images' keys have it) and a resize draws it again. The tour reads it every time round
+its loop too: a new cell deletes every image and page height kept and draws anew
+(`Look::set_cell`). Opened at that unsized size, the tour is text until the pane is
+sized (`look/ask.rs`'s `UNSIZED`, 1.5 seconds at most, `view.rs`'s `SETTLE`).
 
 ## The tour's drawing
 

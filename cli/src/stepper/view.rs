@@ -2,6 +2,9 @@
 //! time; what a key asks for (save a comment, tell the worker, send, accept, open the
 //! task's pane or diff) is done here. With `board_look image` the tour is drawn as
 //! images (look/) when the terminal says it draws them, else it's text, saying why.
+//! The cell is read from the window every time round the loop: a new one has the look
+//! draw everything anew (`Look::set_cell`), and in a pane Rex hasn't sized yet
+//! (`ask::UNSIZED`) the tour is text until it is (`SETTLE` at most).
 
 use super::look::ink::Type;
 use super::look::{ask, Look, PatchFn};
@@ -23,6 +26,7 @@ use serde_json::{json, Value};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 /// The drafts as objects.
 fn drafts(repo: &Repo, t: &Obj) -> Res<Vec<Obj>> {
@@ -67,9 +71,15 @@ pub struct Wanted {
     patch: PatchFn,
 }
 
-fn draw(out: &mut impl Write, st: &mut Stepper, show: &mut Show) {
+/// How long a tour opened in a pane Rex hasn't sized yet (`ask::UNSIZED`: a floating
+/// pane just opened) waits for its size before it draws images, as text meanwhile.
+const SETTLE: Duration = Duration::from_millis(1500);
+
+/// Draw a frame: as images when the look is drawn and `images` (the pane is sized), else
+/// as text.
+fn draw(out: &mut impl Write, st: &mut Stepper, show: &mut Show, images: bool) {
     let (cols, rows) = term_size();
-    if let Show::Image(look) = show {
+    if let (Show::Image(look), true) = (&mut *show, images) {
         let Err(e) = look.frame(st, (cols, rows), out) else {
             return;
         };
@@ -137,25 +147,39 @@ fn stepper_tui(
     let mut typed = Vec::new();
     let mut show = image_look(st, wanted, &mut out, &mut typed);
     let mut run = || -> Res<()> {
-        let mut size = (0, 0);
+        let (mut size, mut win) = ((0, 0), None);
         let mut dirty = true;
+        // in a pane Rex hasn't sized yet, text until it's sized (or SETTLE passes)
+        let mut settling = (ask::window(0) == Some(ask::UNSIZED)).then(|| Instant::now() + SETTLE);
         loop {
             let now = term_size();
-            if dirty || now != size || matches!(show, Show::Text) {
-                draw(&mut out, st, &mut show);
-                (size, dirty) = (now, false);
+            let w = ask::window(0);
+            if settling.is_some_and(|until| w != Some(ask::UNSIZED) || Instant::now() >= until) {
+                settling = None;
+                dirty = true;
+                let _ = write!(out, "\x1b[H\x1b[2J");
+            }
+            // the cell is read again every time round: a pane resized, or sized at last,
+            // has the tour drawn anew at its cell, never stretched from the old one
+            if let (Show::Image(look), Some(w), None) = (&mut show, w, settling) {
+                dirty |= look.set_cell(ask::cell_of(w), &mut out).unwrap_or(false);
+            }
+            let images = settling.is_none();
+            if dirty || now != size || w != win || matches!(show, Show::Text) {
+                draw(&mut out, st, &mut show, images);
+                (size, win, dirty) = (now, w, false);
             }
             if typed.is_empty() {
-                if let Show::Image(look) = &mut show {
+                if let (Show::Image(look), true) = (&mut show, images) {
                     let _ = look.ahead(st, &|| ready(0, 0), &mut out);
                 }
-                if !ready(0, 500) {
+                if !ready(0, if images { 500 } else { 50 }) {
                     continue; // redraw: the pane may have changed size
                 }
                 typed = read_keys(0, &mut decoder);
             }
             let rows = term_size().1;
-            let page = if matches!(show, Show::Image(_)) {
+            let page = if matches!(show, Show::Image(_)) && images {
                 rows - 2
             } else {
                 rows - 4
@@ -165,7 +189,7 @@ fn stepper_tui(
                 if let Some(a) = st.key(&k, page) {
                     if a == Act::Accept {
                         st.msg = format!("Accepting {}…", st.tid);
-                        draw(&mut out, st, &mut show);
+                        draw(&mut out, st, &mut show, images);
                     }
                     if act(st, a)? {
                         return Ok(());

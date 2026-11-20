@@ -179,6 +179,51 @@ fn a_resize_takes_the_images_off_and_draws_them_at_the_new_width() {
     assert_eq!(uploads(&out), 3);
 }
 
+/// Each placement's crop and its cells: (w, h, c, r).
+fn crops(out: &str) -> Vec<(u32, u32, u32, u32)> {
+    let field = |c: &str, k: &str| {
+        c.split(',')
+            .find_map(|f| f.strip_prefix(k))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    };
+    out.split("\x1b_Ga=p,")
+        .skip(1)
+        .map(|c| c.split('\x1b').next().unwrap_or(""))
+        .map(|c| (field(c, "w="), field(c, "h="), field(c, "c="), field(c, "r=")))
+        .collect()
+}
+
+#[test]
+fn a_new_cell_deletes_what_was_drawn_at_the_old_one_and_draws_at_the_new() {
+    // a floating pane just opened says 8x16 cells; Rex sizes it to 19x37 a moment later
+    let (mut l, mut st) = (look((8, 16)), stepper());
+    let first = frame(&mut l, &mut st, SIZE);
+    let mut out = Vec::new();
+    assert!(!l.set_cell((8, 16), &mut out).unwrap(), "the same cell changes nothing");
+    assert!(out.is_empty());
+    assert!(l.set_cell((19, 37), &mut out).unwrap());
+    let out = String::from_utf8(out).unwrap();
+    assert_eq!(
+        out.matches("a=d,d=I").count(),
+        uploads(&first),
+        "every image drawn at 8x16 is deleted"
+    );
+    assert!(out.ends_with("\x1b[2J"));
+    assert_eq!(l.kept(), 0);
+    let next = frame(&mut l, &mut st, SIZE);
+    assert_eq!(uploads(&next), 3, "rail, tile and foot drawn again");
+    let placed = crops(&next);
+    assert_eq!(placed.len(), 3);
+    for (w, h, c, r) in placed {
+        assert_eq!(
+            (w, h),
+            (19 * c, 37 * r),
+            "each image is its cells' pixels at the new cell, not stretched"
+        );
+    }
+}
+
 #[test]
 fn a_narrow_pane_has_no_rail() {
     assert_eq!(Lay::new(70, 30, 0).rail, 0);
