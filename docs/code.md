@@ -149,7 +149,9 @@ and drawing, or the network.
 The board's image look draws with `draw/` (`bullpen-draw`): the type (`font.rs`; its
 glyphs' strokes put on whole pixels by `hint.rs`, a light auto-hinting: stems and bars
 found from the outline's edges, each a whole number of pixels, the baseline, x-height
-and capitals' height on rows, the rest of the outline moved straight between them),
+and capitals' height on rows, the rest of the outline moved straight between them; a
+bold the font lacks is its regular made heavier before it's fitted, as FreeType's
+embolden does),
 shapes, the terminal's colours and their tones (`theme.rs`; a flag's colours stay the
 board's, `image/theme.rs`'s `Flags`), PNG, the kitty protocol's bytes, cutting an image
 under the terminal's limit (`cut.rs`) and the terminal's answers to its questions

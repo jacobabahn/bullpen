@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use crate::hint::{self, Outline};
-use tiny_skia::{FillRule, Mask, Pixmap, Stroke, Transform};
+use tiny_skia::{FillRule, Mask, Pixmap, Transform};
 use ttf_parser::{Face, GlyphId};
 
 static REGULAR: &[u8] = include_bytes!("../fonts/Inter-Regular.ttf");
@@ -252,12 +252,15 @@ impl Fonts {
     fn raster(&self, weight: Weight, c: char, px: f32, dx: f32) -> Glyph {
         let (_, face, gid) = self.glyph_of(weight, c);
         let none = Glyph { mask: None, left: 0, top: 0 };
-        let Some(outline) = Outline::of(face, gid) else { return none };
+        let Some(mut outline) = Outline::of(face, gid) else { return none };
         let upem = face.units_per_em() as f32;
+        if weight == Weight::Bold && self.fake_bold {
+            // a thirtieth of the em heavier, before it's fitted: its stems are solid too
+            outline = outline.heavier(upem / 30.0);
+        }
         let grid = outline.fitted(px / upem, upem, dx, hint::blues(face));
         let Some(path) = outline.path(&grid) else { return none };
-        let heavier = weight == Weight::Bold && self.fake_bold;
-        let pad = 2.0 + if heavier { px / 30.0 } else { 0.0 };
+        let pad = 2.0;
         let b = path.bounds();
         let left = (b.left() - pad).floor();
         let top = (pad - b.top()).ceil();
@@ -267,13 +270,6 @@ impl Fonts {
         // from the pen's baseline to the mask's corner
         let t = Transform::from_translate(-left, top);
         mask.fill_path(&path, FillRule::Winding, true, t);
-        if heavier {
-            let stroke = Stroke { width: px / 30.0, ..Stroke::default() };
-            // (a quarter of a pixel's precision on its curves)
-            if let Some(outline) = path.stroke(&stroke, 4.0) {
-                mask.fill_path(&outline, FillRule::Winding, true, t);
-            }
-        }
         Glyph { mask: Some(mask), left: left as i32, top: top as i32 }
     }
 }

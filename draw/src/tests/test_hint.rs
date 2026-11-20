@@ -139,3 +139,34 @@ fn a_stem_that_would_cross_one_fitted_before_it_is_left_as_it_falls() {
     m.add(&[(13.0, 13.0), (15.0, 15.0)]);
     assert_eq!(m.at.len(), 4);
 }
+
+#[test]
+fn the_code_fonts_bold_has_its_stems_solid_too() {
+    // drawn heavier (it has no bold of its own) before it's fitted, not stroked after:
+    // a stroke put every edge back on a half pixel (128/255/255/128)
+    let mut f = Fonts::mono();
+    for cw in [19.0, 16.0] {
+        let px = code_px(cw);
+        let rows = drawn(&mut f, "m lIl", Weight::Bold, px, 0.0, 40.0);
+        let mid = &rows[(40.0 - 0.55 * px / 2.0) as usize];
+        let stems = runs(mid);
+        assert_eq!(stems.len(), 6, "{cw}: {mid:?}");
+        for s in stems {
+            assert!(s.len() >= 3 && s.iter().all(|a| *a == 255), "{cw}: {s:?}");
+        }
+    }
+}
+
+#[test]
+fn heavier_moves_each_edge_out_by_half() {
+    // a clockwise square (TrueType's way round), 100 across, made 20 heavier
+    let mut o = Outline { cmds: vec![] };
+    o.move_to(0.0, 0.0);
+    o.line_to(0.0, 100.0);
+    o.line_to(100.0, 100.0);
+    o.line_to(100.0, 0.0);
+    o.close();
+    let ps = o.heavier(20.0).points().concat();
+    assert_eq!(ps, vec![P(-10.0, -10.0), P(-10.0, 110.0), P(110.0, 110.0), P(110.0, -10.0)]);
+}
+

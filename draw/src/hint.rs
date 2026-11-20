@@ -79,8 +79,9 @@ impl Outline {
         Some(o)
     }
 
-    /// Its contours' points in order, on the curve and off it (the control polygon).
-    fn contours(&self) -> Vec<Vec<P>> {
+    /// Its contours' points in order, on the curve and off it (the control polygon),
+    /// every contour's, however few.
+    fn points(&self) -> Vec<Vec<P>> {
         let mut out: Vec<Vec<P>> = Vec::new();
         for c in &self.cmds {
             let ps: &[P] = match c {
@@ -97,8 +98,37 @@ impl Outline {
                 c.extend_from_slice(ps);
             }
         }
+        out
+    }
+
+    /// The contours with an edge, as points.
+    fn contours(&self) -> Vec<Vec<P>> {
+        let mut out = self.points();
         out.retain(|c| c.len() > 1);
         out
+    }
+
+    /// The outline made heavier, `by` font units across each stroke, as FreeType's
+    /// `FT_Outline_Embolden` does it: each point moves out along the bisector of its two
+    /// edges' normals, so each edge is `by / 2` further out (less at a corner that would
+    /// fold over). It's fitted after, so a bold stem is whole pixels too.
+    pub fn heavier(&self, by: f32) -> Outline {
+        let points = self.points();
+        let cw = clockwise(&points);
+        let mut moved = points.iter().flat_map(|c| (0..c.len()).map(|i| outward(c, i, by / 2.0, cw)));
+        let mut next = || moved.next().unwrap_or(P(0.0, 0.0));
+        let cmds = self
+            .cmds
+            .iter()
+            .map(|c| match c {
+                Cmd::Move(_) => Cmd::Move(next()),
+                Cmd::Line(_) => Cmd::Line(next()),
+                Cmd::Quad(..) => Cmd::Quad(next(), next()),
+                Cmd::Cubic(..) => Cmd::Cubic(next(), next(), next()),
+                Cmd::Close => Cmd::Close,
+            })
+            .collect();
+        Outline { cmds }
     }
 
     /// Where the outline goes at `scale` pixels to the unit, `dx` of a pixel right of
@@ -151,6 +181,31 @@ fn clockwise(contours: &[Vec<P>]) -> bool {
         }
     }
     area < 0.0
+}
+
+/// Point i of a contour moved `by` out from its ink (FreeType's `FT_Outline_Embolden`):
+/// along the sum of its edges' outward normals, as far as moves each edge `by`, and no
+/// further than its shorter edge is long for its turn; a spike (turning back on itself)
+/// stays where it is.
+fn outward(c: &[P], i: usize, by: f32, cw: bool) -> P {
+    let (n, p) = (c.len(), c[i]);
+    let prev = (1..n).map(|k| c[(i + n - k) % n]).find(|q| *q != p);
+    let next = (1..n).map(|k| c[(i + k) % n]).find(|q| *q != p);
+    let (Some(a), Some(b)) = (prev, next) else { return p };
+    let (li, lo) = ((p.0 - a.0).hypot(p.1 - a.1), (b.0 - p.0).hypot(b.1 - p.1));
+    let (ix, iy, ox, oy) = ((p.0 - a.0) / li, (p.1 - a.1) / li, (b.0 - p.0) / lo, (b.1 - p.1) / lo);
+    let cos = ix * ox + iy * oy;
+    if cos <= -0.9375 {
+        return p;
+    }
+    // out is left of the way a clockwise contour goes (its ink is on its right)
+    let side = if cw { 1.0 } else { -1.0 };
+    let (sx, sy) = (-(iy + oy) * side, (ix + ox) * side);
+    let d = 1.0 + cos;
+    // the turn's sine, positive where the contour turns away from its ink
+    let q = (ox * iy - oy * ix) * side;
+    let k = if by * q <= li.min(lo) * d { by / d } else { li.min(lo) / q };
+    P(p.0 + sx * k, p.1 + sy * k)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
