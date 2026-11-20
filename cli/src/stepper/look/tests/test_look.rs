@@ -439,7 +439,9 @@ fn going_back_a_step_places_only_images_the_terminal_has() {
         "{}",
         term.most
     );
-    assert!(sent[1] < 2_000, "n only places: {sent:?}");
+    // the budget holds the next step's first tile, not its whole window, nor all of the
+    // step before: n sends the rest of the window, p sends its step again
+    assert!(sent[1] < 300_000 && sent[2] < 600_000, "{sent:?}");
 }
 
 #[test]
@@ -447,12 +449,11 @@ fn a_long_step_paged_down_and_back_up_places_only_images_the_terminal_has() {
     let (sent, term, _) = tour_on_rex(&DOWN_UP, shown::BUDGET);
     assert!(term.blanks.is_empty(), "placed but gone: {:?}", term.blanks);
     assert!(term.most <= shown::BUDGET, "{}", term.most);
-    // a page down only places; a page up past the tile over the window sends again
-    // what was deleted for room
-    assert!(
-        sent[1..8].iter().all(|n| *n < 2_000),
-        "each page down only places: {sent:?}"
-    );
+    // the first page down only places, the rest send a strip or two (the budget holds
+    // part of a page down and the next step's start); a page up past the tile over the
+    // window sends again what was deleted for room
+    assert!(sent[1] < 2_000, "{sent:?}");
+    assert!(sent[2..8].iter().all(|n| *n < 200_000), "{sent:?}");
 }
 
 #[test]
