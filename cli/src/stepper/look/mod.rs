@@ -27,6 +27,9 @@ pub mod page;
 pub mod rail;
 pub mod sample;
 mod shown;
+#[cfg(test)]
+#[path = "tests/terminal.rs"]
+mod terminal;
 
 use super::screen::{Mode, Stepper};
 use bullpen_core::json::{s, Obj};
@@ -133,6 +136,14 @@ fn key(of: impl Hash) -> u64 {
 }
 
 impl Look {
+    /// The same, keeping at most `budget` bytes of images on the terminal.
+    #[cfg(test)]
+    pub fn budgeted(th: Theme, cell: (u32, u32), ty: Type, patch: PatchFn, budget: usize) -> Look {
+        let mut l = Look::new(th, cell, ty, patch);
+        l.shown = Shown::budgeted(FIRST, cell, budget);
+        l
+    }
+
     pub fn new(th: Theme, cell: (u32, u32), mut ty: Type, patch: PatchFn) -> Look {
         Look {
             th,
@@ -169,6 +180,12 @@ impl Look {
     #[cfg(test)]
     pub fn kept(&self) -> usize {
         self.shown.kept()
+    }
+
+    /// The bytes (decoded) of the images kept on the terminal.
+    #[cfg(test)]
+    pub fn kept_bytes(&self) -> usize {
+        self.shown.kept_bytes()
     }
 
     /// The step's comments, for this tour's commit.
@@ -253,6 +270,20 @@ impl Look {
         Ok(ink)
     }
 
+    /// What tile t of page i shows, as a key, and the rows it has: None past the page.
+    fn tile_key(&mut self, st: &Stepper, i: usize, t: i64, lay: Lay) -> Option<(u64, i64)> {
+        let rows = self.page_rows(st, i, lay);
+        let from = t * lay.tile as i64;
+        if from >= rows || t < 0 {
+            return None;
+        }
+        let width = lay.page_cols as u32 * self.cell.0;
+        Some((
+            key((self.page_key(st, i, width), t, lay.tile)),
+            (rows - from).min(lay.tile as i64),
+        ))
+    }
+
     /// Tile t of page i sent: its ID, and the rows it has. A tile is the page drawn on an
     /// image the tile's height, shifted up by its top; one sent before is placed again.
     fn tile(
@@ -263,18 +294,13 @@ impl Look {
         lay: Lay,
         out: &mut impl Write,
     ) -> std::io::Result<Option<(u32, i64)>> {
-        let rows = self.page_rows(st, i, lay);
-        let from = t * lay.tile as i64;
-        if from >= rows || t < 0 {
+        let Some((k, n)) = self.tile_key(st, i, t, lay) else {
             return Ok(None);
-        }
-        let n = (rows - from).min(lay.tile as i64);
-        let width = lay.page_cols as u32 * self.cell.0;
-        let k = key((self.page_key(st, i, width), t, lay.tile));
+        };
         if let Some(id) = self.shown.id(k) {
             return Ok(Some((id, n)));
         }
-        let ch = self.cell.1;
+        let (width, ch, from) = (lay.page_cols as u32 * self.cell.0, self.cell.1, t * lay.tile as i64);
         let p = self.page_of(st, i);
         let mut ink = self.ink(width, n as u32 * ch, (from * ch as i64) as f32)?;
         page::draw(&mut ink, &p);
@@ -282,8 +308,8 @@ impl Look {
         Ok(Some((self.shown.send(k, &pm, out)?, n)))
     }
 
-    /// The rail at step i sent: its ID.
-    fn rail(&mut self, st: &Stepper, i: usize, lay: Lay, out: &mut impl Write) -> std::io::Result<Option<u32>> {
+    /// The rail at step i, and what it shows as a key.
+    fn rail_of(&self, st: &Stepper, i: usize, lay: Lay) -> (rail::Rail, u64) {
         let comments = (0..st.steps.len()).map(|k| Self::on_step(st, k).len()).collect();
         let r = rail::Rail {
             tid: st.tid.clone(),
@@ -293,6 +319,12 @@ impl Look {
             comments,
         };
         let k = key((&r, lay.rail, lay.rows, self.cell, self.th));
+        (r, k)
+    }
+
+    /// The rail at step i sent: its ID.
+    fn rail(&mut self, st: &Stepper, i: usize, lay: Lay, out: &mut impl Write) -> std::io::Result<Option<u32>> {
+        let (r, k) = self.rail_of(st, i, lay);
         if let Some(id) = self.shown.id(k) {
             return Ok(Some(id));
         }
@@ -303,9 +335,14 @@ impl Look {
         Ok(Some(self.shown.send(k, &pm, out)?))
     }
 
+    /// What the foot shows, as a key.
+    fn foot_key(&self, f: &rail::Foot, lay: Lay) -> u64 {
+        key((f, lay.page_cols, self.cell, self.th))
+    }
+
     /// The foot sent: its ID.
     fn foot(&mut self, f: &rail::Foot, lay: Lay, out: &mut impl Write) -> std::io::Result<Option<u32>> {
-        let k = key((f, lay.page_cols, self.cell, self.th));
+        let k = self.foot_key(f, lay);
         if let Some(id) = self.shown.id(k) {
             return Ok(Some(id));
         }
@@ -345,6 +382,7 @@ impl Look {
             Vec::new()
         };
         let lay = Lay::new(cols, rows, typed.len()).fitted(self.cell);
+        self.shown.begin();
         if self.last.is_some_and(|l| (l.cols, l.rows) != (lay.cols, lay.rows)) {
             self.shown.hide_all(out)?;
             self.put(out, "\x1b[2J")?;
@@ -423,17 +461,64 @@ impl Look {
     }
 
     /// While no key waits: send what a key would want next, unplaced, an image at a
-    /// time. The tile under the window and the one over it, then the next step's rail,
-    /// the tiles of its first window and its foot, then the rest of a window's tiles
-    /// under and over it, then the previous step's rail, first tile and foot. On a large
-    /// pane a tile is a strip under the terminal's limit (a couple of hundred KB of PNG),
-    /// and a key is looked for before each, so a key waits for one image at most. Stops
-    /// when `waiting` says a key came; whether there's more to send.
+    /// time. The tile under the window and the one over it, the next step's rail, first
+    /// tile and foot, the rest of a page down, the rest of the next step's first window,
+    /// the rest of a page up, then the previous step's rail, first tile and foot: those
+    /// that fit in `shown::BUDGET` with what's on screen, in that order. Those are
+    /// held, so sending one deletes none of the others for room (and the next time round
+    /// sends nothing). On a large pane a tile is a strip under the terminal's limit (a
+    /// couple of hundred KB of PNG), and a key is looked for before each, so a key waits
+    /// for one image at most. Stops when `waiting` says a key came; whether there's more
+    /// to send.
     pub fn ahead(&mut self, st: &Stepper, waiting: &dyn Fn() -> bool, out: &mut impl Write) -> std::io::Result<bool> {
         let Some(lay) = self.last else { return Ok(false) };
         if st.mode != Mode::Read {
             return Ok(false);
         }
+        self.shown.begin();
+        let mut room = self.shown.budget().saturating_sub(self.shown.placed_bytes());
+        let mut wanted = Vec::new();
+        for job in self.jobs(st, lay) {
+            let Some((k, bytes)) = self.want(st, &job, lay) else {
+                continue;
+            };
+            if wanted.iter().any(|(_, w)| *w == k) {
+                continue;
+            }
+            if bytes > room {
+                continue;
+            }
+            room -= bytes;
+            wanted.push((job, k));
+        }
+        // those sent before are held first, so sending the rest deletes none of them
+        for (_, k) in &wanted {
+            self.shown.id(*k);
+        }
+        for (job, _) in wanted {
+            if waiting() {
+                out.flush()?;
+                return Ok(true);
+            }
+            match job {
+                Ahead::Tile(i, t) => {
+                    self.tile(st, i, t, lay, out)?;
+                }
+                Ahead::Rail(i) => {
+                    self.rail(st, i, lay, out)?;
+                }
+                Ahead::Foot(i) => {
+                    let f = self.foot_ahead(st, i, lay);
+                    self.foot(&f, lay, out)?;
+                }
+            }
+        }
+        out.flush()?;
+        Ok(false)
+    }
+
+    /// What drawing ahead would send, the likeliest first.
+    fn jobs(&self, st: &Stepper, lay: Lay) -> Vec<Ahead> {
         let tile = lay.tile as i64;
         let (first, last) = (st.top / tile, (st.top + lay.view as i64 - 1) / tile);
         let n = st.steps.len();
@@ -449,34 +534,45 @@ impl Look {
                 .collect()
         };
         let mut jobs = vec![Ahead::Tile(st.at, last + 1), Ahead::Tile(st.at, first - 1)];
-        jobs.extend(step(st.at + 1, window));
-        jobs.extend((2..=window).flat_map(|k| [Ahead::Tile(st.at, last + k), Ahead::Tile(st.at, first - k)]));
+        jobs.extend(step(st.at + 1, 1));
+        jobs.extend((2..=window).map(|k| Ahead::Tile(st.at, last + k)));
+        jobs.extend((1..window).map(|t| Ahead::Tile(st.at + 1, t)));
+        jobs.extend((2..=window).map(|k| Ahead::Tile(st.at, first - k)));
         jobs.extend(step(st.at.wrapping_sub(1), 1));
-        for job in jobs {
-            if waiting() {
-                out.flush()?;
-                return Ok(true);
+        jobs
+    }
+
+    /// An image drawn ahead as a key, and the bytes it's sent as: None for a tile past
+    /// its page.
+    fn want(&mut self, st: &Stepper, job: &Ahead, lay: Lay) -> Option<(u64, usize)> {
+        let (cw, ch) = self.cell;
+        match *job {
+            Ahead::Tile(i, t) => {
+                let (k, n) = self.tile_key(st, i, t, lay)?;
+                Some((k, self.shown.bytes_of(lay.page_cols as u32 * cw, n as u32 * ch)))
             }
-            match job {
-                Ahead::Tile(i, t) => {
-                    self.tile(st, i, t, lay, out)?;
-                }
-                Ahead::Rail(i) => {
-                    self.rail(st, i, lay, out)?;
-                }
-                Ahead::Foot(i) => {
-                    let rows = self.page_rows(st, i, lay);
-                    let f = rail::Foot {
-                        msg: String::new(),
-                        more: rows > lay.view as i64,
-                        end: i == n,
-                    };
-                    self.foot(&f, lay, out)?;
-                }
+            Ahead::Rail(i) => {
+                let k = self.rail_of(st, i, lay).1;
+                Some((k, self.shown.bytes_of(lay.rail as u32 * cw, lay.rows as u32 * ch)))
+            }
+            Ahead::Foot(i) => {
+                let f = self.foot_ahead(st, i, lay);
+                Some((
+                    self.foot_key(&f, lay),
+                    self.shown.bytes_of(lay.page_cols as u32 * cw, FOOT as u32 * ch),
+                ))
             }
         }
-        out.flush()?;
-        Ok(false)
+    }
+
+    /// Step i's foot as it first shows: no message.
+    fn foot_ahead(&mut self, st: &Stepper, i: usize, lay: Lay) -> rail::Foot {
+        let rows = self.page_rows(st, i, lay);
+        rail::Foot {
+            msg: String::new(),
+            more: rows > lay.view as i64,
+            end: i == st.steps.len(),
+        }
     }
 
     fn put(&mut self, out: &mut impl Write, text: &str) -> std::io::Result<()> {

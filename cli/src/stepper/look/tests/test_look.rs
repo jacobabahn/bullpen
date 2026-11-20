@@ -1,6 +1,7 @@
 //! The drawn tour's frames as bytes: what's sent once, what a key places, what typing
 //! shows as text, and what closing deletes. `render_tour` (ignored) writes pictures.
 
+use super::terminal::{Terminal, REX_QUOTA};
 use super::*;
 use crate::stepper::screen::DiffFn;
 use bullpen_draw::font::Fonts;
@@ -382,9 +383,97 @@ fn bytes_at_large_panes() {
             "{}×{} at {}×{}: first frame {first} B, then drawn ahead {ahead} B (its largest image {largest} B); j {j} B, a page down {down} B, n {n} B (not drawn ahead {n_cold} B)",
             size.0, size.1, cell.0, cell.1
         );
+        // at 217×65 the budget holds a page down and the next step's first tile, not its
+        // whole first window: from the top of a long step, n sends the rest of it
+        let n_most = if size.0 > 200 { n_cold * 2 / 3 } else { 2_000 };
         assert!(
-            j < 400 && largest < 1_000_000 && n < 2_000 && n_cold > 100_000,
+            j < 400 && largest < 1_000_000 && n < n_most && n_cold > 100_000,
             "{j} {largest} {n} {n_cold}"
+        );
+    }
+}
+
+/// The person's pane: 211×65 cells of 19×37 pixels, a page 16 rows a tile.
+const PANE: ((i64, i64), (u32, u32)) = ((211, 65), (19, 37));
+
+/// A tour of three long steps at the person's pane, every byte fed to a terminal with
+/// Rex's quota, keys pressed with drawing ahead between them as the tour does: the
+/// bytes each key's frame wrote, and the terminal.
+fn tour_on_rex(keys: &[&str], budget: usize) -> (Vec<usize>, Terminal, Look) {
+    let (size, cell) = PANE;
+    let mut l = Look::budgeted(Theme::default(), cell, Type::new(Fonts::builtin()), long(300), budget);
+    let mut st = stepper();
+    let mut term = Terminal::new(REX_QUOTA);
+    let mut feed = |l: &mut Look, out: Vec<u8>| {
+        term.feed(&String::from_utf8(out).unwrap());
+        if budget <= REX_QUOTA {
+            assert_eq!(l.kept_bytes(), term.bytes(), "the tour and the terminal keep the same");
+        }
+    };
+    let mut sent = Vec::new();
+    for k in std::iter::once("").chain(keys.iter().copied()) {
+        if !k.is_empty() {
+            st.key(k, size.1 - 2);
+        }
+        let mut out = Vec::new();
+        l.frame(&mut st, size, &mut out).unwrap();
+        sent.push(out.len());
+        feed(&mut l, out);
+        let mut out = Vec::new();
+        l.ahead(&st, &|| false, &mut out).unwrap();
+        feed(&mut l, out);
+    }
+    (sent, term, l)
+}
+
+/// n and p, and a long step paged down to its end and back up.
+const BACK: [&str; 2] = ["n", "p"];
+const DOWN_UP: [&str; 14] = [" ", " ", " ", " ", " ", " ", " ", "b", "b", "b", "b", "b", "b", "b"];
+
+#[test]
+fn going_back_a_step_places_only_images_the_terminal_has() {
+    let (sent, term, l) = tour_on_rex(&BACK, shown::BUDGET);
+    assert!(term.blanks.is_empty(), "placed but gone: {:?}", term.blanks);
+    assert!(
+        term.most <= shown::BUDGET && l.kept_bytes() <= shown::BUDGET,
+        "{}",
+        term.most
+    );
+    assert!(sent[1] < 2_000, "n only places: {sent:?}");
+}
+
+#[test]
+fn a_long_step_paged_down_and_back_up_places_only_images_the_terminal_has() {
+    let (sent, term, _) = tour_on_rex(&DOWN_UP, shown::BUDGET);
+    assert!(term.blanks.is_empty(), "placed but gone: {:?}", term.blanks);
+    assert!(term.most <= shown::BUDGET, "{}", term.most);
+    // a page down only places; a page up past the tile over the window sends again
+    // what was deleted for room
+    assert!(
+        sent[1..8].iter().all(|n| *n < 2_000),
+        "each page down only places: {sent:?}"
+    );
+}
+
+#[test]
+fn a_budget_over_the_terminals_quota_leaves_blanks() {
+    // what the tour did before it kept a budget: it placed images Rex had deleted
+    let (_, term, _) = tour_on_rex(&BACK, usize::MAX);
+    assert!(!term.blanks.is_empty(), "the fake terminal deletes past its quota");
+}
+
+/// The bytes of n then p, and of paging a long step down and back up, at the person's
+/// pane, and the most kept (`bin/bullpen-cargo test -p bullpen-cli bytes_going_back --
+/// --ignored --nocapture`).
+#[test]
+#[ignore]
+fn bytes_going_back() {
+    for (what, keys) in [("n, p", &BACK[..]), ("down 7 pages, up 7", &DOWN_UP[..])] {
+        let (sent, term, _) = tour_on_rex(keys, shown::BUDGET);
+        eprintln!(
+            "{what}: frames {sent:?} B; most kept {} B; blanks {}",
+            term.most,
+            term.blanks.len()
         );
     }
 }

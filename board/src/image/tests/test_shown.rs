@@ -20,7 +20,7 @@ fn the_images_kept_are_the_latest_few() {
     assert!(!s.has(&Slot::Sel, 3) && s.has(&Slot::Sel, 4) && s.has(&Slot::Sel, KEEP as u64 + 3));
     // the oldest three were deleted
     assert_eq!(String::from_utf8(out).unwrap().matches("a=d,d=I,").count(), 3);
-    // and so many pixels: one image as big as all of them leaves just itself
+    // and so many bytes: one image as big as the budget leaves just itself
     s.preload(vec![Want { png: Some(png(10_000, 2_400)), ..want(Slot::Foot, 1) }], &mut Vec::new()).unwrap();
     assert_eq!(s.kept().len(), 1);
 }
@@ -29,11 +29,31 @@ fn the_images_kept_are_the_latest_few() {
 fn one_of_the_lists_images_is_kept_its_latest() {
     let mut s = Screen::new(1);
     for k in 1..=3 {
-        s.preload(vec![Want { png: Some(png(10_000, 6_000)), ..want(Slot::List, k) }, want(Slot::Sel, k)], &mut Vec::new()).unwrap();
+        s.preload(vec![Want { png: Some(png(3_000, 3_000)), ..want(Slot::List, k) }, want(Slot::Sel, k)], &mut Vec::new()).unwrap();
     }
     assert!(s.has(&Slot::List, 3) && !s.has(&Slot::List, 2) && !s.has(&Slot::List, 1));
-    // they don't count against the others' pixels
     assert!((1..=3).all(|k| s.has(&Slot::Sel, k)));
+}
+
+#[test]
+fn the_images_on_the_terminal_stay_under_the_budget_and_room_is_made_before_a_send() {
+    // a big board: the list's window in four strips on screen (38 MB), windows more drawn
+    // ahead, each as big
+    let mut s = Screen::new(1);
+    let list = || Some(Pngs { cell: (10, 20), pieces: (0..4).map(|k| (Piece { x: 0, y: k * 900, w: 2_500, h: 950 }, b"png".to_vec())).collect() });
+    s.show(vec![Want { png: list(), places: vec![at(1, 0, 0, 10)], ..want(Slot::List, 1) }], &mut Vec::new()).unwrap();
+    for k in 2..=5 {
+        let mut out = Vec::new();
+        s.preload(vec![want(Slot::Sel, k), Want { png: list(), ..want(Slot::List, k) }], &mut out).unwrap();
+        assert!(s.bytes() <= BUDGET as u64, "{}", s.bytes());
+        // past the second, what's kept is deleted before the list is sent, not after
+        let out = String::from_utf8(out).unwrap();
+        if k > 2 {
+            let (deleted, list_sent) = (out.find("a=d,d=I,").unwrap(), out.rfind("a=t,").unwrap());
+            assert!(deleted < list_sent, "{out:?}");
+        }
+    }
+    assert!(s.has(&Slot::List, 1) && s.has(&Slot::List, 5), "the one shown, the latest kept");
 }
 
 #[test]

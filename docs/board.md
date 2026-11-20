@@ -283,7 +283,9 @@ it draws what `j` and `k` would show next (the block a task down and up, and the
 row for it) and sends it without showing it; the list's next window, when the page
 comes near the window's edge, is drawn on a thread of its own, so a key doesn't wait
 for it. An image a key replaces is kept on the terminal, hidden, a while (the last 16,
-and one of the list's). So `j` and `k` send only a few placements, a few hundred
+and one of the list's, all the board's images under 96 MB: Rex keeps 128 MiB of images
+a pane and silently deletes the oldest past that, so the board deletes its own oldest
+first and never places one Rex may have deleted). So `j` and `k` send only a few placements, a few hundred
 bytes, and draw nothing. The board draws a key's frame before it reads the tasks again
 (then reads them, and draws what changed), so a key doesn't wait for the task files.
 Everything is deleted when the board is text again or quits. The marks that move and

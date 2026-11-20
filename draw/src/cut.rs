@@ -5,6 +5,8 @@
 //! sends is over `MAX_BYTES`: one that would be is sent as pieces, each an image of its
 //! own, and a placement of the whole is placed as the pieces' placements, each a run of
 //! whole cells, so nothing moves on screen (`bin/kitty-limit-check` shows the limit).
+//! The terminal also keeps only so many bytes of images in a pane (`QUOTA`), so the
+//! board and the tour each keep theirs under `BUDGET`.
 //!
 //! An image is cut into strips its whole width, as tall as fit; only when a strip two
 //! cells high is over the limit is it cut into pieces side by side too. Pieces overlap
@@ -17,6 +19,17 @@ use tiny_skia::{IntRect, Pixmap};
 
 /// The most bytes (decoded RGBA) an image sent is: a margin under Rex's 10,000,000.
 pub const MAX_BYTES: usize = 9_500_000;
+
+/// The bytes (decoded) of images Rex's terminal keeps in a pane: past it, an upload
+/// deletes the oldest images not on screen, without a word to a program that sent with
+/// q=2 (`bin/kitty-quota-check`: 14 images of 9,496,000 bytes kept, a 15th deleting the
+/// first).
+pub const QUOTA: usize = 128 << 20;
+
+/// The most bytes (decoded) of images the board or the tour keeps on the terminal,
+/// shown and hidden, about three quarters of `QUOTA`: each deletes what it keeps past
+/// this itself before it sends more, so the terminal never deletes one for it.
+pub const BUDGET: usize = 96_000_000;
 
 /// A piece of an image: its pixels from (x, y), w by h.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

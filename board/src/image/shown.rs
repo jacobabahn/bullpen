@@ -7,11 +7,18 @@
 //! data kept to place again.
 //!
 //! An image a frame replaces isn't deleted at once: the last few are kept on the
-//! terminal, hidden (at most KEEP of them and KEEP_PX pixels, and one of the list's
-//! base images, which are big), so going back to what
-//! one showed (k after j) only places it again; the oldest is deleted past that. Images
-//! drawn ahead (`preload`, what a j or k would want next) are kept the same way, sent
-//! but not placed. All of them are deleted when the board is text again or quits.
+//! terminal, hidden (at most KEEP of them, one of the list's base images, which are
+//! big, and all the images, shown and kept, under bullpen-draw's `cut::BUDGET` bytes),
+//! so going back to what one showed (k after j) only places it again; the oldest is
+//! deleted past that. Images drawn ahead (`preload`, what a j or k would want next) are
+//! kept the same way, sent but not placed. All of them are deleted when the board is
+//! text again or quits.
+//!
+//! The budget is because Rex's terminal keeps 128 MiB of images a pane (`cut::QUOTA`)
+//! and deletes the oldest not on screen past that without a word: an image the board
+//! believes it kept would be placed and show nothing. So the board deletes the oldest it
+//! keeps itself, before it sends what would take it past the budget, and what it hasn't
+//! deleted is there to place.
 //!
 //! An image over the terminal's limit (bullpen-draw's cut.rs: Rex draws none over
 //! 10,000,000 bytes, and the list's window of two pages is several times that on a tall
@@ -19,7 +26,7 @@
 //! of it is placed as its pieces' (`cut::split`), so it shows as one image would.
 
 use super::{kitty, meter};
-use bullpen_draw::cut::{Piece, Pngs};
+use bullpen_draw::cut::{Piece, Pngs, BUDGET};
 use super::sprite::Sprite;
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -90,11 +97,9 @@ impl Shown {
     }
 }
 
-/// The images kept on the terminal, hidden, at most: how many, and their pixels (a
-/// selected block at a 2x cell is about 1 million), but for the one list's base image
-/// kept (a 2x board's two pages are about 15 million).
+/// The images kept on the terminal, hidden, at most (besides `cut::BUDGET` bytes for
+/// all of them and those shown).
 const KEEP: usize = 16;
-const KEEP_PX: u64 = 24_000_000;
 
 /// The images sent, by slot; those kept, hidden, the latest first; the next ID to give one.
 pub struct Screen {
@@ -115,8 +120,25 @@ impl Screen {
         self.shown.get(slot).is_some_and(|s| s.key == key) || self.kept.iter().any(|(k, s)| k == slot && s.key == key)
     }
 
-    /// Send an image, a piece at a time, each as the next ID.
+    /// The bytes (decoded) of every image on the terminal, shown or kept.
+    fn bytes(&self) -> u64 {
+        self.shown.values().chain(self.kept.iter().map(|(_, s)| s)).map(|s| s.px * 4).sum()
+    }
+
+    /// Delete the oldest images kept until `more` bytes fit under the budget (or none is
+    /// left to delete).
+    fn room(&mut self, more: u64, out: &mut impl Write) -> std::io::Result<()> {
+        while self.bytes() + more > BUDGET as u64 {
+            let Some((_, s)) = self.kept.pop() else { break };
+            s.delete(out)?;
+        }
+        Ok(())
+    }
+
+    /// Send an image, a piece at a time, each as the next ID, after making room for it.
     fn send(&mut self, png: &Pngs, key: u64, out: &mut impl Write, slot: &Slot) -> std::io::Result<Shown> {
+        let px: u64 = png.pieces.iter().map(|(p, _)| p.w as u64 * p.h as u64).sum();
+        self.room(px * 4, out)?;
         let mut ids = Vec::new();
         for (_, piece) in &png.pieces {
             let id = self.next_id;
@@ -126,7 +148,6 @@ impl Screen {
             ids.push(id);
         }
         let cut: Vec<Piece> = png.pieces.iter().map(|(p, _)| *p).collect();
-        let px = cut.iter().map(|p| p.w as u64 * p.h as u64).sum();
         Ok(Shown { ids, cut, cell: png.cell, key, places: BTreeMap::new(), px })
     }
 
@@ -183,7 +204,8 @@ impl Screen {
     }
 
     /// Take an image off the screen and keep it, the latest first; delete the oldest
-    /// past KEEP images or KEEP_PX pixels. One forgotten (a resize) is deleted, and so are those kept before it.
+    /// past KEEP images or the budget. One forgotten (a resize) is deleted, and so are
+    /// those kept before it.
     fn keep(&mut self, slot: Slot, mut s: Shown, out: &mut impl Write) -> std::io::Result<()> {
         if !s.places.is_empty() {
             s.hide(out)?;
@@ -197,17 +219,11 @@ impl Screen {
         for i in lists.into_iter().rev() {
             self.kept.remove(i).1.delete(out)?;
         }
-        // the rest by count and pixels
-        let mut px = 0;
-        let fits = self.kept.iter().take_while(|(k, s)| {
-            px += if *k == Slot::List { 0 } else { s.px };
-            px <= KEEP_PX
-        });
-        let n = fits.count().clamp(1, KEEP).min(self.kept.len());
-        for (_, s) in self.kept.split_off(n) {
+        // the rest by count, then all by bytes
+        for (_, s) in self.kept.split_off(KEEP.min(self.kept.len())) {
             s.delete(out)?;
         }
-        Ok(())
+        self.room(0, out)
     }
 
     /// Place a wanted image's placements, move those that moved, take off the rest: each

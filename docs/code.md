@@ -111,7 +111,7 @@ list's images leave those marks out. `list.rs` says which images a frame wants, 
 with a key for what it shows and its placements, and `shown.rs` sends, places, moves
 and hides only what changed, with the kitty graphics protocol (`kitty.rs`); an
 image a frame replaces is kept on the terminal, hidden, to be placed again (bounded
-by count and pixels). An image over the terminal's limit is sent as pieces (see
+by count, and with what's shown by the pane's budget: see below). An image over the terminal's limit is sent as pieces (see
 [Images under the terminal's limit](#images-under-the-terminals-limit)): on a tall
 pane the list's window of two pages is several pieces, each placed where its cells
 are. While no key is waiting, `ahead.rs` presses j and k on the board,
@@ -178,6 +178,20 @@ strips that fit to begin with (below). `bin/kitty-limit-check`, run in a Rex pan
 places an image under the limit beside one three times over, to see what the terminal
 does with the second.
 
+Rex's terminal also keeps only so many bytes of images in a pane: 128 MiB decoded
+(`cut::QUOTA`). An upload past that deletes the oldest images not on screen, and with
+q=2 nothing says so, so an image kept hidden to place again was simply gone and its
+place blank (going back a step in the tour, at 211×65 cells of 19×37 pixels, its rail
+and first strip). `bin/kitty-quota-check` finds the quota: it sends 60 images of 9.5 MB
+as the tour does, then places each asking for an answer; Rex kept the last 14 (133 MB)
+and answered "ENOENT: image not found" for the rest. So the board and the tour each
+keep at most `cut::BUDGET` (96,000,000 bytes, about three quarters of it) on the
+terminal, shown and hidden, and delete the oldest they keep themselves before sending
+what would pass it: the terminal never deletes one for them, and what they haven't
+deleted is there to place. What they have is sent again when it's wanted. The quota is
+a pane's (each screen's, as libghostty's): the tour's floating pane and the board's
+are counted apart.
+
 Every placement is pinned to cells: its crop is the cells' size in pixels, as the pane
 reports them (its pixel size over its cells, rounded down), and the terminal scales the
 crop to the cells it draws. So an image must be exactly its cells' pixels at the cell
@@ -222,11 +236,16 @@ and foot are cut when they're over the limit). An image it can't make is an erro
 `view.rs` turns the tour to text, saying why. The window is crops of the tiles it
 covers, so a scroll is placements. While no key waits, `Look::ahead` sends what `j`,
 `k`, `n`, `p` and a page down would want next, unplaced, an image at a time with a key
-looked for before each, so a key waits behind one strip at most. Its tests
-(`look/tests/`) check the bytes each key writes and that no image is over the limit at
-a 300×100 pane; `bytes_at_large_panes` (ignored) prints the bytes at 160×46 and
-217×65; `render_tour` (ignored) writes pictures of a tour fixture
-(`TOUR_FIXTURE`, `TOUR_RENDER`).
+looked for before each, so a key waits behind one strip at most. It sends only what
+fits in the budget with what's on screen, likeliest first, and holds it (`Shown::begin`)
+so sending one never deletes another it wants; `shown.rs` deletes the least recently
+wanted of the rest for room. Its tests (`look/tests/`) check the bytes each key writes
+and that no image is over the limit at a 300×100 pane, and play `n`, `p` and a long
+step paged down and up into a fake terminal with Rex's quota (`tests/terminal.rs`),
+checking every image placed is there; `bytes_at_large_panes` and `bytes_going_back`
+(ignored) print the bytes at 160×46 and 217×65, and of those keys at 211×65;
+`render_tour` (ignored) writes pictures of a tour fixture (`TOUR_FIXTURE`,
+`TOUR_RENDER`).
 
 ## Closing a task
 

@@ -2,7 +2,16 @@
 //! says what it shows, then only placed (a crop of it on a block of cells: a few dozen
 //! bytes) as often as it's wanted, and taken off when it isn't. Images sent and no
 //! longer shown are kept, hidden, to place again (the step you go back to, a page
-//! scrolled back), the oldest deleted past `KEEP`; all are deleted when the tour closes.
+//! scrolled back); all are deleted when the tour closes.
+//!
+//! A terminal keeps images up to a quota of bytes (decoded, width × height × 4) and
+//! deletes the oldest past it without a word (every command is sent with q=2), so an
+//! image placed again after that is simply not there. So the tour keeps at most
+//! `BUDGET` bytes on the terminal, well under the quota, and deletes what it keeps past
+//! that itself, the least recently wanted first: what it hasn't deleted is there to
+//! place, and what it has is sent again when it's wanted. What's on screen and what's
+//! wanted since `begin` (the frame's images, what's drawn ahead) is never deleted for
+//! room.
 //!
 //! An image over the terminal's limit (bullpen-draw's cut.rs: a rail on a tall pane) is
 //! sent as pieces, each an image of its own, and a placement of it is placed as theirs;
@@ -10,23 +19,31 @@
 
 use bullpen_draw::cut::{self, Piece};
 use bullpen_draw::kitty::{self, Place};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write;
 use tiny_skia::Pixmap;
 
-/// The images kept on the terminal, shown or hidden.
-const KEEP: usize = 40;
+/// The most bytes (decoded) of images kept on the terminal, shown or hidden: about
+/// three quarters of Rex's quota, 128 MiB a pane (bullpen-draw's `cut::QUOTA`).
+pub const BUDGET: usize = cut::BUDGET;
 
 pub struct Shown {
     next: u32,
+    /// the most bytes kept (BUDGET)
+    budget: usize,
     /// a cell's size in pixels, which pieces are cut by
     cell: (u32, u32),
     /// what each image shows, by key: its ID
     ids: HashMap<u64, u32>,
     /// each image's pieces, by its ID: their own IDs, and where each is in it
     pieces: HashMap<u32, Vec<(u32, Piece)>>,
+    /// each image's bytes decoded (its pieces'), by its ID, and all of theirs
+    bytes: HashMap<u32, usize>,
+    total: usize,
     /// the keys, least recently wanted first
     order: VecDeque<u64>,
+    /// the keys wanted since `begin`: not deleted for room
+    held: HashSet<u64>,
     /// the placements on screen, by image and placement number (as wanted, of the whole
     /// image)
     placed: HashMap<(u32, u32), Place>,
@@ -37,33 +54,104 @@ impl Shown {
     pub fn new(first: u32, cell: (u32, u32)) -> Shown {
         Shown {
             next: first,
+            budget: BUDGET,
             cell,
             ids: HashMap::new(),
             pieces: HashMap::new(),
+            bytes: HashMap::new(),
+            total: 0,
             order: VecDeque::new(),
+            held: HashSet::new(),
             placed: HashMap::new(),
         }
+    }
+
+    /// The same, keeping at most `budget` bytes.
+    #[cfg(test)]
+    pub fn budgeted(first: u32, cell: (u32, u32), budget: usize) -> Shown {
+        Shown {
+            budget,
+            ..Shown::new(first, cell)
+        }
+    }
+
+    /// The most bytes kept.
+    pub fn budget(&self) -> usize {
+        self.budget
     }
 
     fn put(&mut self, out: &mut impl Write, bytes: &str) -> std::io::Result<()> {
         out.write_all(bytes.as_bytes())
     }
 
-    /// The image for key, when it's been sent: its ID (and it's wanted now).
+    /// What's wanted from now on is held (a frame starts, or drawing ahead): what was
+    /// held before can be deleted for room again, unless it's on screen.
+    pub fn begin(&mut self) {
+        self.held.clear();
+    }
+
+    /// The image for key, when it's been sent: its ID (and it's wanted now, and held).
     pub fn id(&mut self, key: u64) -> Option<u32> {
         let id = *self.ids.get(&key)?;
         self.order.retain(|k| *k != key);
         self.order.push_back(key);
+        self.held.insert(key);
         Some(id)
     }
 
+    /// The bytes of the images on screen.
+    pub fn placed_bytes(&self) -> usize {
+        let ids: HashSet<u32> = self.placed.keys().map(|(id, _)| *id).collect();
+        ids.iter().map(|id| self.bytes.get(id).copied().unwrap_or(0)).sum()
+    }
+
+    /// The bytes of every image kept on the terminal.
+    #[cfg(test)]
+    pub fn kept_bytes(&self) -> usize {
+        self.total
+    }
+
+    /// The bytes an image w by h pixels is sent as (its pieces', which overlap).
+    pub fn bytes_of(&self, w: u32, h: u32) -> usize {
+        match cut::pieces(w, h, self.cell) {
+            Some(pieces) => pieces.iter().map(|p| p.w as usize * p.h as usize * 4).sum(),
+            None => w as usize * h as usize * 4,
+        }
+    }
+
+    /// Delete the least recently wanted images neither on screen nor held until `more`
+    /// bytes fit in the budget (or none is left to delete).
+    fn room(&mut self, more: usize, out: &mut impl Write) -> std::io::Result<()> {
+        let shown: HashSet<u32> = self.placed.keys().map(|(id, _)| *id).collect();
+        while self.total + more > self.budget {
+            let Some(pos) = self
+                .order
+                .iter()
+                .position(|k| !self.held.contains(k) && !shown.contains(&self.ids[k]))
+            else {
+                break;
+            };
+            let old = self.order.remove(pos).expect("a key");
+            if let Some(old_id) = self.ids.remove(&old) {
+                self.total -= self.bytes.remove(&old_id).unwrap_or(0);
+                for (id, _) in self.pieces.remove(&old_id).unwrap_or_default() {
+                    self.put(out, &kitty::delete(id))?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Send an image for key, unplaced, as PNG (in pieces, over the terminal's limit):
-    /// its ID. The oldest hidden images go past KEEP.
+    /// its ID. The least recently wanted images are deleted first to keep it all under
+    /// BUDGET.
     pub fn send(&mut self, key: u64, pm: &Pixmap, out: &mut impl Write) -> std::io::Result<u32> {
         if let Some(id) = self.id(key) {
             return Ok(id);
         }
         let pngs = cut::encode(pm, self.cell).map_err(std::io::Error::other)?.pieces;
+        let bytes: usize = pngs.iter().map(|(p, _)| p.w as usize * p.h as usize * 4).sum();
+        self.room(bytes, out)?;
         let id = self.next;
         let mut pieces = Vec::new();
         for (piece, png) in pngs {
@@ -72,20 +160,11 @@ impl Shown {
             self.next += 1;
         }
         self.pieces.insert(id, pieces);
+        self.bytes.insert(id, bytes);
+        self.total += bytes;
         self.ids.insert(key, id);
         self.order.push_back(key);
-        while self.ids.len() > KEEP {
-            let shown: Vec<u32> = self.placed.keys().map(|(id, _)| *id).collect();
-            let Some(pos) = self.order.iter().position(|k| !shown.contains(&self.ids[k])) else {
-                break;
-            };
-            let old = self.order.remove(pos).expect("a key");
-            if let Some(old_id) = self.ids.remove(&old) {
-                for (id, _) in self.pieces.remove(&old_id).unwrap_or_default() {
-                    self.put(out, &kitty::delete(id))?;
-                }
-            }
-        }
+        self.held.insert(key);
         Ok(id)
     }
 
@@ -152,7 +231,10 @@ impl Shown {
             }
         }
         self.ids.clear();
+        self.bytes.clear();
+        self.total = 0;
         self.order.clear();
+        self.held.clear();
         self.placed.clear();
         Ok(())
     }
@@ -171,3 +253,7 @@ impl Shown {
         self.pieces.values().map(Vec::len).sum()
     }
 }
+
+#[cfg(test)]
+#[path = "tests/test_shown.rs"]
+mod tests;

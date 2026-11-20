@@ -141,13 +141,24 @@ image is over the limit however long a step. The window is placed as crops of th
 `j` or `k` sends a few placements (about 160 to 320 bytes), and a tile only the first
 time the window reaches it. While no key waits, the tour sends what the next key would
 want, unplaced, one image at a time, looking for a key before each: the tile under the
-window and the one above, the next step's rail, first window and foot, a page of tiles
-each way, and the previous step's rail, first tile and foot. So `n`, `p` and a page
-down usually only place images (a few hundred bytes). At 217×65 cells of 19×37 pixels
-the first frame is about 425 KB, drawing ahead after it about 730 KB in images of at
-most about 115 KB, and a step not drawn ahead about 400 KB; at 160×46 (17×34 pixels)
-about 250 KB, 465 KB and 225 KB. Images are kept on the terminal, hidden, to place again
-(the step you go back to) and deleted when the tour closes.
+window and the one above, the next step's rail, first tile and foot, the rest of a
+page down, the rest of the next step's first window, the rest of a page up, and the
+previous step's rail, first tile and foot. Images are kept on the terminal, hidden, to
+place again (the step you go back to, a page scrolled back) and deleted when the tour
+closes.
+
+Rex keeps 128 MiB of images a pane and silently deletes the oldest past that, so the
+tour keeps at most 96 MB of them (decoded, shown and hidden), deletes the least
+recently wanted itself to stay under it, and draws ahead only what fits: it never
+places an image Rex may have deleted, and sends one again instead. On a pane up to
+about 160×46 (17×34 pixels) all of the above fits: `n`, `p` and a page down only place
+images (a few hundred bytes); the first frame is about 280 KB, drawing ahead after it
+about 530 KB, a step not drawn ahead about 250 KB. On a larger one each window is
+bigger than the budget holds many of: at 211×65 cells of 19×37 pixels (a window about
+39 MB, the first frame about 490 KB) a page down still only places, but `n` from the
+top of a long step sends the rest of its first window (about 240 KB), `p` back to it
+sends it again (about 470 KB), and a page up past the strip over the window sends that
+page again (about 380 to 530 KB).
 
 On a terminal that doesn't draw images, or with `board_look text`, the tour is text, as
 above, the message line saying why when the image look was asked for.
