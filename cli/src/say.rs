@@ -6,8 +6,8 @@ use crate::args::{pos, value, Arg, Args, Nargs};
 use crate::coordinators::{alive, calling_coordinator, coordinator, coordinators};
 use crate::go::relink::relink;
 use crate::go::repo_or_here;
-use crate::news::{has_draft, type_news, LINE_BREAK};
-use crate::rex::type_into;
+use crate::host::Agent;
+use crate::news::{type_news, LINE_BREAK};
 use bullpen_core::json::{s, Obj};
 use bullpen_core::{fail, Repo, Res};
 
@@ -82,15 +82,15 @@ fn which(repo: &Repo, named: &str) -> Res<String> {
 /// Type text into c's pane now, or, while something is half-typed there, once it's
 /// empty (the watcher types it, as it does news).
 fn say_to(repo: &Repo, c: &Obj, text: &str) -> Res<i32> {
-    let (cid, session, block) = (s(c, "id"), s(c, "session"), s(c, "block"));
+    let (cid, agent) = (s(c, "id"), Agent::of(c));
     let to = format!("{cid} in {}", repo.name());
-    if has_draft(session, block)? {
+    if agent.has_draft()? {
         let line = text.replace("\r\n", "\n").replace('\n', LINE_BREAK);
         type_news(repo, &line, &[cid.to_string()])?;
         println!("something is half-typed in {to}'s input: this is typed once it's empty");
         return Ok(0);
     }
-    if let Some(why) = type_into(session, block, text)? {
+    if let Some(why) = agent.tell(text)? {
         return fail(format!("couldn't type into {to}'s pane: {why}"));
     }
     println!("typed to {to}");

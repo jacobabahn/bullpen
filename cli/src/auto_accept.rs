@@ -14,7 +14,7 @@
 use crate::accept::accept;
 use crate::accept::left_in_review;
 use crate::accept::rebase::{base_conflict, names_of, send_back_conflict};
-use crate::agents::pane;
+use crate::agents::agent;
 use crate::args::{pos, Arg, Args, Nargs};
 use crate::become_ready::{make_ready, How};
 use crate::jobs::{background, Job};
@@ -23,7 +23,6 @@ use crate::news::{ready_news, say};
 use crate::notes::with_notes;
 use crate::ready::{summary_text, SUMMARY, SUMMARY_FILE};
 use crate::review::{remove_scratch, review_kind, rounds};
-use crate::rex::close_last;
 use crate::start::launch::hand_back;
 use crate::stops::stop;
 use bullpen_core::json::{obj, py_str, s, truthy, write_obj, Obj};
@@ -78,7 +77,7 @@ pub fn cmd_verdict(argv: &[String]) -> Res<i32> {
     let findings = findings.display().to_string();
     remove_scratch(&r)?; // the findings are copied: the reviewer's own files can go
     let rounds = rounds(&repo);
-    let reviewer = pane(&t, "reviewer");
+    let reviewer = agent(&t, "reviewer");
     unindex_block(s(&r, "block"))?;
     if let Some(Value::Object(r)) = t.get_mut("review") {
         r.insert("verdict".into(), json!(if approve { "approved" } else { "changes" }));
@@ -156,7 +155,7 @@ pub fn cmd_verdict(argv: &[String]) -> Res<i32> {
         make_ready(&repo, &mut t, &base_ref, how)?;
     }
     println!("verdict recorded: {}", a.arg("verdict").unwrap_or(""));
-    close_last(&reviewer.0, &reviewer.1)?; // last: this closes the pane we may be running in
+    reviewer.close_last()?; // last: this closes the pane we may be running in
     Ok(0)
 }
 

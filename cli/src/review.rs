@@ -15,12 +15,12 @@
 //! as a round); a change anywhere else gets a review after a rebase (rebased: only that
 //! the change still fits, as there are no findings to check).
 
-use crate::agents::{pane, running};
+use crate::agents::{agent, running};
 use crate::args::{pos, Arg, Args, Nargs};
 use crate::coordinators::session_for;
 use crate::git_names::{unquote, Changed};
 use crate::modes::task_base_ref;
-use crate::rex::{review_label, rex_close};
+use crate::rex::review_label;
 use crate::rules::task_rules;
 use crate::saves::save;
 use crate::start::launch::py_format;
@@ -686,13 +686,13 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
         "" => session_for(repo, None)?,
         own => own.to_string(),
     };
-    let (block, at) = crate::panes::place(repo, t, &session, &review_label(t), &argv, "reviewer", true, false)?;
-    index_block(&block, repo, &format!("{id} review"))?;
+    let host = crate::host::for_new(repo, t);
+    let (reviewer, at) = host.start(repo, t, &session, &review_label(t), &argv, "reviewer")?;
+    index_block(&reviewer.id, repo, &format!("{id} review"))?;
     set_status(t, "review", None, None);
     let mut r = Obj::new();
     r.insert("round".into(), json!(n));
-    r.insert("block".into(), json!(block));
-    r.insert("session".into(), json!(session));
+    reviewer.record(&mut r);
     r.insert("pane".into(), json!(at));
     r.insert("verdict".into(), Value::Null);
     r.insert("findings".into(), Value::Null);
@@ -789,8 +789,7 @@ pub fn close_reviewer(t: &mut Obj) -> Res<()> {
         return Ok(());
     }
     unindex_block(&block)?;
-    let (session, block) = pane(t, "reviewer");
-    rex_close(&session, &block)?;
+    agent(t, "reviewer").close()?;
     if let Some(Value::Object(r)) = t.get_mut("review") {
         r.insert("block".into(), Value::Null);
     }

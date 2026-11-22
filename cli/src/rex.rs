@@ -1,6 +1,6 @@
 //! Rex: running its commands, and finding (`find_pane`, by ID or label), typing into,
 //! focusing and closing panes; a pane's terminal and program, and the end of its screen
-//! (`screen_end`). A session or block that Python has as None is "" here: Rex is given `-s` only
+//! (`screen_end`). The host interface (`host/`) calls these for an agent on Rex. A session or block that Python has as None is "" here: Rex is given `-s` only
 //! for a session there is.
 
 use bullpen_core::fail::Res;
@@ -34,17 +34,17 @@ pub fn alive(session: &str, block: &str) -> Res<bool> {
     Ok(run(&argv, false)?.ok())
 }
 
-/// Type a message (a line, or several) into a terminal and press Enter.
-pub fn rex_type(session: &str, block: &str, text: &str) -> Res<()> {
+/// Type text into a terminal (no Enter).
+pub fn rex_send(session: &str, block: &str, text: &str) -> Res<()> {
     run(&rex_argv(session, &["send"], &["-b", block, text]), true)?;
-    run(&rex_argv(session, &["send-key"], &["-b", block, "enter"]), true)?;
     Ok(())
 }
 
-/// Type msg into the task's worker. None if it went through, else why not (the caller
-/// leaves the task where it was and says so).
-pub fn type_to_worker(t: &Obj, msg: &str) -> Res<Option<String>> {
-    type_into(s(t, "session"), s(t, "block"), msg)
+/// Type a message (a line, or several) into a terminal and press Enter.
+pub fn rex_type(session: &str, block: &str, text: &str) -> Res<()> {
+    rex_send(session, block, text)?;
+    run(&rex_argv(session, &["send-key"], &["-b", block, "enter"]), true)?;
+    Ok(())
 }
 
 /// Type msg into a pane and press Enter. None if it went through, else why not.

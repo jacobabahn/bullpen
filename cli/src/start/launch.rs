@@ -8,7 +8,7 @@ use crate::coordinators::{calling_coordinator, session_for};
 use crate::hooks::{hook_log, set_up};
 use crate::limit::{limit_active, limit_phrase};
 use crate::modes::task_base_ref;
-use crate::rex::{alive, rex_type};
+use crate::host::Agent;
 use crate::rules::{committed_rules_on, rule_sources, rules_text};
 use crate::saves::save;
 use bullpen_core::json::{py_str, s, truthy, Obj};
@@ -344,7 +344,7 @@ pub fn py_format(text: &str, fields: &[(&str, String)]) -> String {
     out
 }
 
-/// Start the task's worker in a new pane, with first as its first message (resume:
+/// Start the task's worker (in a new pane, on Rex), with first as its first message (resume:
 /// continuing its conversation), and save it as working.
 pub fn launch(repo: &Repo, t: &mut Obj, session: &str, first: &str, resume: bool) -> Res<()> {
     let worker: Vec<String> = bullpen_core::json::strs(&repo.cfg, "worker");
@@ -364,11 +364,11 @@ pub fn launch(repo: &Repo, t: &mut Obj, session: &str, first: &str, resume: bool
     argv.extend(["-n".into(), format!("{}: {}", s(t, "id"), s(t, "title")), first.into()]);
     unindex_block(s(t, "block"))?;
     let label = format!("bullpen: {}", s(t, "id"));
-    let (block, at) = crate::panes::place(repo, t, session, &label, &argv, "worker", true, false)?;
-    index_block(&block, repo, s(t, "id"))?;
+    let host = crate::host::for_new(repo, t);
+    let (worker, at) = host.start(repo, t, session, &label, &argv, "worker")?;
+    index_block(&worker.id, repo, s(t, "id"))?;
     set_status(t, "working", None, None);
-    t.insert("block".into(), json!(block));
-    t.insert("session".into(), json!(session));
+    worker.record(t);
     t.insert("last".into(), Value::Null);
     t.insert("pane".into(), json!(at));
     save(repo, t)
@@ -381,7 +381,7 @@ pub fn launch(repo: &Repo, t: &mut Obj, session: &str, first: &str, resume: bool
 /// can't be started. back: why it goes back to work, for its timeline ("review",
 /// "rebase", "person", "pr", "limit").
 pub fn hand_back(repo: &Repo, t: &mut Obj, msg: &str, back: &str) -> Res<Option<String>> {
-    if !alive(s(t, "session"), s(t, "block"))? {
+    if !Agent::of(t).alive()? {
         timeline::send_back(t, back);
         let mut session = session_for(repo, None)?;
         if session.is_empty() {
@@ -390,7 +390,7 @@ pub fn hand_back(repo: &Repo, t: &mut Obj, msg: &str, back: &str) -> Res<Option<
         launch(repo, t, &session, msg, true)?;
         return Ok(None);
     }
-    if let Some(failed) = crate::rex::type_to_worker(t, msg)? {
+    if let Some(failed) = Agent::of(t).tell(msg)? {
         return Ok(Some(failed));
     }
     if s(t, "status") != "working" {
@@ -408,7 +408,7 @@ pub fn cmd_resume(argv: &[String]) -> Res<i32> {
     let repo = Repo::new(repo_root()?)?;
     let mut t = repo.task(a.arg("id").unwrap_or(""))?;
     let id = s(&t, "id").to_string();
-    if alive(s(&t, "session"), s(&t, "block"))? {
+    if Agent::of(&t).alive()? {
         return fail(format!("{id}'s agent is still running; use `tell`"));
     }
     if !truthy(t.get("worktree")) {
@@ -456,11 +456,11 @@ pub fn cmd_tell(argv: &[String]) -> Res<i32> {
     let repo = Repo::new(repo_root()?)?;
     let mut t = repo.task(a.arg("id").unwrap_or(""))?;
     let id = s(&t, "id").to_string();
-    if !alive(s(&t, "session"), s(&t, "block"))? {
+    if !Agent::of(&t).alive()? {
         return fail(format!("{id}'s agent isn't running; use `resume {id} \"...\"`"));
     }
     let words = told(&a.args("message").join(" "), calling_coordinator(&repo).is_some());
-    rex_type(s(&t, "session"), s(&t, "block"), &words)?;
+    Agent::of(&t).send(&words)?;
     if matches!(s(&t, "status"), "needs" | "triage" | "ready" | "finished") {
         if matches!(s(&t, "status"), "ready" | "finished") {
             timeline::send_back(&mut t, "person"); // a ready task told more: sent back

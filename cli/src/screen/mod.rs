@@ -1,14 +1,12 @@
-//! What Claude Code's screen in a pane says, for events, check and answer: a background
+//! What Claude Code's screen in a pane says, for the Rex host (host/rex.rs): a background
 //! shell of its own still running, compacting, what it is doing (a spinner, a question,
 //! its prompt: `screen_state`), and the prompt it is at (prompt.rs). The Python's regexes
 //! are matched by hand.
 
 pub mod prompt;
 
-use crate::rex::screen;
 use bullpen_core::paths::is_word;
 use bullpen_core::text::{is_space, splitlines, strip};
-use bullpen_core::Res;
 
 const COMPACTING: [&str; 3] = [
     "Compacting conversation",
@@ -111,16 +109,6 @@ pub fn stripped_lines(text: &str, n: usize) -> Vec<&str> {
 /// Does the status message, or else the screen, say it is compacting?
 pub fn compacting_in(msg: &str, text: &str) -> bool {
     COMPACTING.iter().any(|w| msg.starts_with(w)) || stripped_lines(text, 12).iter().any(|l| compact_re_match(l))
-}
-
-/// Is Claude Code compacting its conversation (auto-compaction)? Its status record says
-/// only that it's working, so this goes by its message, else its spinner line: "✽
-/// Compacting conversation…" (or the PreCompact hooks it runs first).
-pub fn compacting(session: &str, block: &str, msg: &str) -> Res<bool> {
-    if COMPACTING.iter().any(|w| msg.starts_with(w)) {
-        return Ok(true);
-    }
-    Ok(compacting_in("", &screen(session, block)?))
 }
 
 /// What Claude Code's screen shows: working (a spinner), blocked (a question), idle (its

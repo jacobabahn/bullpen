@@ -2,7 +2,7 @@
 
 use crate::args::{flag, pos, Arg, Args, Nargs};
 use crate::coordinators::{coordinators, owner};
-use crate::rex;
+use crate::host::Agent;
 use crate::task_line::{colored, task_line, task_rows, term_width};
 use bullpen_core::fleet;
 use bullpen_core::json::{dumps, get, obj, py_str, s, truthy, Obj};
@@ -162,7 +162,7 @@ fn model_line(repo: &Repo, t: &Obj) -> Res<String> {
         "{own} (its own, over the config's{})",
         cfg.map_or(String::new(), |c| format!(" {c}"))
     );
-    let alive = rex::alive(s(t, "session"), s(t, "block"))?;
+    let alive = Agent::of(t).alive()?;
     if let Some(now_on) = t.get("model").filter(|v| alive && truthy(Some(v))) {
         let now_on = py_str(now_on);
         if now_on != own {

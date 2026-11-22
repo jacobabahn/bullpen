@@ -31,6 +31,7 @@ mod git_names;
 mod go;
 mod guide;
 mod help;
+mod host;
 mod hooks;
 mod issues;
 mod jobs;

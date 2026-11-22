@@ -198,10 +198,10 @@ pub fn session_for(repo: &Repo, given: Option<&str>) -> Res<String> {
     Ok(if here.is_empty() { c.into() } else { here })
 }
 
-/// Is the coordinator's pane running?
+/// Is the coordinator running?
 pub fn alive(c: Option<&Obj>) -> Res<bool> {
     match c {
-        Some(c) if !c.is_empty() => crate::rex::alive(s(c, "session"), s(c, "block")),
+        Some(c) if !c.is_empty() => crate::host::Agent::of(c).alive(),
         _ => Ok(false),
     }
 }

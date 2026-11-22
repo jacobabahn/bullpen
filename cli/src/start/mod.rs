@@ -356,7 +356,7 @@ pub fn cmd_model(argv: &[String]) -> Res<i32> {
         (true, None) => format!("{id} uses the worker command's own model"),
         _ => format!("{id} uses {model}"),
     };
-    if crate::rex::alive(s(&t, "session"), s(&t, "block"))? {
+    if crate::host::Agent::of(&t).alive()? {
         let on = t
             .get("model")
             .filter(|v| truthy(Some(v)))

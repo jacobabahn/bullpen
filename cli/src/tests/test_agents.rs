@@ -15,9 +15,9 @@ fn stopped(status: &str, by: &str, kind: &str, more: Value) -> Obj {
 fn a_task_waits_on_its_reviewers_pane_when_stopped_on_it() {
     let more = json!({"review": {"block": "blk2", "session": "s"}, "block": "blk1"});
     let mut x = stopped("needs", "reviewer", "ended", more);
-    assert_eq!(waited_on(&x), Some(("reviewer", "s".into(), "blk2".into())));
+    assert_eq!(waited_on(&x), Some(("reviewer", Agent::on_rex("s", "blk2"))));
     x.insert("stop".into(), json!({"by": "worker", "kind": "failed"}));
-    assert_eq!(waited_on(&x), Some(("worker", "".into(), "blk1".into())));
+    assert_eq!(waited_on(&x), Some(("worker", Agent::on_rex("", "blk1"))));
 }
 
 #[test]
@@ -39,4 +39,13 @@ fn where_a_pane_was_placed() {
     assert_eq!(placed(&x, "worker"), "tabs");
     assert_eq!(placed(&x, "reviewer"), "background");
     assert_eq!(placed(&t(json!({"pane": null})), "worker"), "");
+}
+
+#[test]
+fn a_reviewer_is_on_its_reviews_host_in_its_workers_session_unless_its_own() {
+    let x = t(json!({"session": "s", "block": "b1", "host": "rex", "review": {"block": "b2"}}));
+    assert_eq!(agent(&x, "reviewer"), Agent::on_rex("s", "b2"));
+    assert_eq!(agent(&x, "worker"), Agent::on_rex("s", "b1"));
+    let own = t(json!({"session": "s", "block": "b1", "review": {"block": "b2", "session": "r"}}));
+    assert_eq!(agent(&own, "reviewer"), Agent::on_rex("r", "b2"));
 }

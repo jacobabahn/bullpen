@@ -2,14 +2,13 @@
 //! finish's auto-accept share, `close_task`, and the `close` and `drop` commands
 //! (docs/code.md, "Closing a task").
 
-use crate::agents::pane;
+use crate::agents::agent;
 use crate::args::{flag, pos, value, Arg, Args, Nargs};
 use crate::hooks::remove_worktree;
 use crate::modes::withdraw;
 use crate::news::kind::Kind;
 use crate::news::{news, tell_coordinator, Opts};
 use crate::review::close_reviewer;
-use crate::rex::close_last;
 use crate::saves::save;
 use bullpen_core::json::{s, truthy, Obj};
 use bullpen_core::proc::git;
@@ -49,7 +48,7 @@ pub fn close(
     fields: &[(&str, Value)],
 ) -> Res<()> {
     std::env::set_current_dir(&repo.root)?; // we may be running in the worktree this removes
-    let worker = pane(t, "worker");
+    let worker = agent(t, "worker");
     unindex_block(s(t, "block"))?;
     close_reviewer(t)?;
     if withdraw_pr {
@@ -69,7 +68,7 @@ pub fn close(
         crate::issues::write::unstarted(repo, t)?;
     }
     then(t)?;
-    close_last(&worker.0, &worker.1)
+    worker.close_last()
 }
 
 /// Did the task's work reach its base: merged locally (`merged`), by bullpen on GitHub

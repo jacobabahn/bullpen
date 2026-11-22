@@ -17,9 +17,9 @@
 use super::kind::Kind;
 use super::read::{news_cursor, news_size, set_news_cursor};
 use super::record::{self, Record};
-use super::{has_draft, touch, LINE_BREAK, NEWS_MARK};
+use super::{touch, LINE_BREAK, NEWS_MARK};
 use crate::coordinators::{alive, coordinators};
-use crate::rex;
+use crate::host::Agent;
 use bullpen_core::json::{self, s, Obj};
 use bullpen_core::paths::{safe, state};
 use bullpen_core::timeutil::{iso_now, now, seconds_since};
@@ -241,7 +241,7 @@ fn check(repo: &Repo, c: &Obj, listed: &[String]) -> Res<Left> {
     if unread_for < UNREAD_FOR || live_reader(repo, cid, &w)? {
         return Ok(Left::Waits);
     }
-    if has_draft(s(c, "session"), s(c, "block"))? {
+    if Agent::of(c).has_draft()? {
         held_by_draft(repo, c, cursor)?;
         return Ok(Left::Waits);
     }
@@ -252,7 +252,7 @@ fn check(repo: &Repo, c: &Obj, listed: &[String]) -> Res<Left> {
     let cursor = news_cursor(repo, cid)?.unwrap_or(cursor).min(news_size(repo));
     for r in unread(repo, cursor, cid, listed)? {
         if let Some(said) = &r.said {
-            rex::rex_type(s(c, "session"), s(c, "block"), &said.replace(LINE_BREAK, "\n"))?;
+            Agent::of(c).send(&said.replace(LINE_BREAK, "\n"))?;
         }
         set_news_cursor(repo, r.end, cid)?; // after typing: each line is typed once
     }

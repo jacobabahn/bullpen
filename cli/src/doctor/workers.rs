@@ -3,7 +3,7 @@
 //! one isn't a problem: its worker does without, until it starts again.
 
 use super::{Check, DoctorCheck, Fix, Fixer};
-use crate::rex::alive;
+use crate::host::Agent;
 use crate::stop_hook::{missing, rewrite};
 use bullpen_core::json::{s, truthy, Obj};
 use bullpen_core::task::is_closed;
@@ -15,7 +15,7 @@ pub(super) const CHECKS: &[DoctorCheck] = &[WORKERS];
 fn running(repo: &Repo) -> Res<Vec<Obj>> {
     let mut out = Vec::new();
     for t in repo.tasks()? {
-        if !is_closed(s(&t, "status")) && truthy(t.get("block")) && alive(s(&t, "session"), s(&t, "block"))? {
+        if !is_closed(s(&t, "status")) && truthy(t.get("block")) && Agent::of(&t).alive()? {
             out.push(t);
         }
     }

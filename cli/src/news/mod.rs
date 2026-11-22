@@ -1,6 +1,6 @@
 //! News for the coordinators: a news line, logged (`news`, `tell_coordinator`,
 //! `ready_news`), and the outboxes the watcher types into their panes (`deliver`,
-//! waiting behind a draft: `has_draft`). `bullpen news` (one-off and `--follow`) is in
+//! waiting behind a draft: the host's `has_draft`, `draft_in` on Rex). `bullpen news` (one-off and `--follow`) is in
 //! read.rs, `news --recent` in recent.rs; record.rs reads the log back.
 
 pub mod hook;
@@ -13,6 +13,7 @@ pub mod waiter;
 pub mod wake;
 
 use crate::coordinators::{alive, calling_coordinator, coordinators, sees_to};
+use crate::host::Agent;
 use crate::rex;
 use bullpen_core::json::{s, Obj};
 use bullpen_core::paths::{safe, state};
@@ -331,26 +332,22 @@ pub fn deliver(repo: &Repo) -> Res<bool> {
         if !path.exists() {
             continue;
         }
-        if has_draft(s(c, "session"), s(c, "block"))? {
+        if Agent::of(c).has_draft()? {
             done = false;
             continue;
         }
         for line in take_lines(&path)? {
-            rex::rex_type(s(c, "session"), s(c, "block"), &line.replace(LINE_BREAK, "\n"))?;
+            Agent::of(c).send(&line.replace(LINE_BREAK, "\n"))?;
         }
     }
     Ok(done)
 }
 
-/// Is something half-typed in the coordinator's input? Typing news there would send it
-/// along. (Reads Claude Code's input box: the last line starting ❯. Faint text there is
-/// Claude Code's suggestion or placeholder, not the person's: a suggestion can show for
-/// as long as the pane is idle, so it mustn't hold news.)
-pub fn has_draft(session: &str, block: &str) -> Res<bool> {
-    Ok(draft_in(&rex::capture_vt(session, block)?))
-}
-
-/// has_draft, for a captured screen.
+/// Is something half-typed in the input of the Claude Code on this captured screen (in
+/// colour)? Typing news there would send it along (the Rex host's `has_draft`). Reads
+/// Claude Code's input box: the last line starting ❯. Faint text there is Claude Code's
+/// suggestion or placeholder, not the person's: a suggestion can show for as long as the
+/// pane is idle, so it mustn't hold news.
 pub fn draft_in(screen: &str) -> bool {
     let mut faint = false;
     let lines: Vec<Vec<(String, bool)>> = splitlines(screen)

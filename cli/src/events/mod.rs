@@ -4,7 +4,7 @@
 
 pub mod stuck;
 
-use crate::agents::pane;
+use crate::agents::agent;
 use crate::args::{pos, Arg, Args, Nargs};
 use crate::become_ready::{make_ready, How};
 use crate::coordinators::{coordinator_at, coordinator_gone};
@@ -13,9 +13,8 @@ use crate::modes::task_base_ref;
 use crate::news::kind::Kind;
 use crate::news::say;
 use crate::review::{keep_approval, rebase_check, Check};
-use crate::rex::screen;
+use crate::host::Agent;
 use crate::saves::save;
-use crate::screen::{compacting, shell_running};
 use crate::stop_hook::turn::{ended_line, jobs_phrase, this_turn, wait_on_job};
 use crate::stops::stop;
 use bullpen_core::json::{s, truthy, Obj};
@@ -91,7 +90,7 @@ pub fn event(ev: &Event) -> Res<()> {
         return Ok(());
     }
     let status = s(&t, "status").to_string();
-    if state == "working" && status != "working" && compacting(s(&t, "session"), &ev.block, msg)? {
+    if state == "working" && status != "working" && Agent::of(&t).compacting(msg)? {
         // Claude Code compacting the conversation by itself: not a new turn
         if !truthy(t.get("compacting")) {
             t.insert("compacting".into(), json!(iso_now()));
@@ -197,7 +196,7 @@ pub fn event(ev: &Event) -> Res<()> {
             let waited = t.contains_key("job");
             if shell_min.is_none() {
                 let jobs = turn.as_ref().and_then(jobs_phrase).is_some();
-                if shell_running(&screen(s(&t, "session"), s(&t, "block"))?) || (jobs && !waited) {
+                if Agent::of(&t).shell_running()? || (jobs && !waited) {
                     // a background job of its own still runs: it takes another turn when that ends
                     wait_on_job(&mut t, turn.as_ref());
                     return save(&repo, &mut t);
@@ -295,8 +294,8 @@ fn review_event(repo: &Repo, t: &mut Obj, ev: &Event) -> Res<()> {
     {
         return Ok(());
     }
-    let (session, block) = pane(t, "reviewer");
-    if state == "working" && stuck && compacting(&session, &block, msg)? {
+    let reviewer = agent(t, "reviewer");
+    if state == "working" && stuck && reviewer.compacting(msg)? {
         // compacting by itself: it stays where its coordinator or the person has it
         let r = review_mut(t).expect("a review");
         if !truthy(r.get("compacting")) {
@@ -343,7 +342,7 @@ fn review_event(repo: &Repo, t: &mut Obj, ev: &Event) -> Res<()> {
             )?;
         }
         "done" | "idle" | "error" if status == "review" => {
-            if state != "error" && ev.shell_min.is_none() && shell_running(&screen(&session, &block)?) {
+            if state != "error" && ev.shell_min.is_none() && reviewer.shell_running()? {
                 // a background shell of its own still runs (the tests?): it takes another turn
                 if woke {
                     save(repo, t)?;

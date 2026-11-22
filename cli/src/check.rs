@@ -3,7 +3,7 @@
 //!
 //! A task's status follows its agent's events; a missed one (a watcher or Rex restart, a
 //! bug) leaves it out of step. `check` compares each task that has an agent in a pane
-//! with what Rex says that agent is doing right now, and `--fix` applies the event that
+//! with what its host says that agent is doing right now, and `--fix` applies the event that
 //! was missed, through the same paths (and news) as the watcher (`events::event`,
 //! `events::gone`). It also
 //! labels a ready task that has no risk label (risk_late.rs).
@@ -12,8 +12,7 @@ use crate::agents::waited_on;
 use crate::args::{flag, pos, Arg, Args, Nargs};
 use crate::events::{event, gone, Event};
 use crate::modes::task_base_ref;
-use crate::rex::{alive, program_status, screen};
-use crate::screen::{compacting, screen_state, shell_running};
+use crate::host::{State, SETTLE};
 use crate::stops::{escalate, overdue};
 use bullpen_core::json::{self, py_str, s, truthy, Obj};
 use bullpen_core::proc::git;
@@ -24,9 +23,6 @@ use bullpen_core::timeutil::seconds_since;
 use bullpen_core::{Repo, Res};
 use serde_json::Value;
 
-/// Seconds a new idle, blocked or error state is left alone: its event may still be on the way.
-const SETTLE: f64 = 60.0;
-
 const CHECK: &[Arg] = &[
     pos("ID", Nargs::Any, "only these tasks"),
     flag(
@@ -36,69 +32,6 @@ const CHECK: &[Arg] = &[
     flag("--quiet", "print nothing"),
     flag("--all-repos", "every repo bullpen knows (the watcher's)"),
 ];
-
-/// What the agent in a pane is doing now. state: gone, working, blocked, error, idle or
-/// shell (its turn ended, but a background shell of its own runs, so it takes another).
-/// age: seconds in that state, None if unknown (the screen doesn't say).
-pub struct Agent {
-    pub state: &'static str,
-    pub kind: String,
-    pub msg: String,
-    pub age: Option<f64>,
-}
-
-/// A record's value as text: "" when it's falsy.
-fn text_of(r: &Obj, key: &str) -> String {
-    r.get(key).filter(|v| truthy(Some(v))).map_or(String::new(), py_str)
-}
-
-/// The agent's state by its status record, else its screen. None: unsure, or it just changed.
-fn agent_state(session: &str, block: &str) -> Res<Option<Agent>> {
-    if !alive(session, block)? {
-        return Ok(Some(Agent {
-            state: "gone",
-            kind: String::new(),
-            msg: String::new(),
-            age: None,
-        }));
-    }
-    let mut a = match program_status(session, block)?.filter(|r| !r.is_empty()) {
-        Some(r) => {
-            let age = truthy(r.get("updated_at")).then(|| seconds_since(&text_of(&r, "updated_at"), None));
-            let state = match text_of(&r, "state").as_str() {
-                "working" => "working",
-                "blocked" => "blocked",
-                "error" => "error",
-                _ => "idle",
-            };
-            if state != "working" && age.is_some_and(|a| a < SETTLE) {
-                // its event may still be on the way (the watcher holds an end of turn back).
-                // Not working: the watcher forwards that at once, and a busy agent's record
-                // is new every few seconds, as its message changes.
-                return Ok(None);
-            }
-            Agent {
-                state,
-                kind: text_of(&r, "kind"),
-                msg: text_of(&r, "msg"),
-                age,
-            }
-        }
-        None => match screen_state(&screen(session, block)?) {
-            Some(state) => Agent {
-                state,
-                kind: String::new(),
-                msg: String::new(),
-                age: None,
-            },
-            None => return Ok(None),
-        },
-    };
-    if a.state == "idle" && shell_running(&screen(session, block)?) {
-        a.state = "shell";
-    }
-    Ok(Some(a))
-}
 
 /// "permission" for "Needs you (permission): ...", else the why in a few words.
 pub fn needs_label(why: Option<&Value>) -> String {
@@ -119,7 +52,7 @@ pub fn needs_label(why: Option<&Value>) -> String {
 }
 
 /// What the agent is doing, in words: "its agent is idle at its prompt".
-fn doing(a: &Agent, who: &str) -> String {
+fn doing(a: &State, who: &str) -> String {
     match a.state {
         "idle" => format!("its {who} is idle at its prompt"),
         "blocked" => format!(
@@ -133,7 +66,7 @@ fn doing(a: &Agent, who: &str) -> String {
 
 /// Minutes an agent has been idle with a background shell running, once that's past
 /// limit (minutes): a server or a watch it left running, not a test run. Else None.
-pub fn shell_minutes(a: &Agent, limit: f64) -> Option<i64> {
+pub fn shell_minutes(a: &State, limit: f64) -> Option<i64> {
     let age = a.age.filter(|age| a.state == "shell" && *age >= limit * 60.0)?;
     Some((age / 60.0).floor() as i64)
 }
@@ -141,7 +74,7 @@ pub fn shell_minutes(a: &Agent, limit: f64) -> Option<i64> {
 /// (line, fix) when the worker's task status disagrees with what it does, else None. fix
 /// is the event the watcher missed: "gone", "shell" (idle for long with a shell running),
 /// or the agent's state.
-pub fn worker_drift(t: &Obj, a: &Agent, limit: f64) -> Option<(String, &'static str)> {
+pub fn worker_drift(t: &Obj, a: &State, limit: f64) -> Option<(String, &'static str)> {
     let (tid, st) = (s(t, "id"), s(t, "status"));
     if a.state == "gone" {
         return Some((format!("{tid} is marked {st} but its pane is gone"), "gone"));
@@ -179,7 +112,7 @@ pub fn worker_drift(t: &Obj, a: &Agent, limit: f64) -> Option<(String, &'static 
 }
 
 /// The same for a task waiting on its reviewer.
-pub fn reviewer_drift(t: &Obj, a: &Agent, limit: f64) -> Option<(String, &'static str)> {
+pub fn reviewer_drift(t: &Obj, a: &State, limit: f64) -> Option<(String, &'static str)> {
     let (tid, st) = (s(t, "id"), s(t, "status"));
     let idle = format!("{tid} is in review but its reviewer is idle without a verdict");
     if a.state == "shell" {
@@ -214,7 +147,7 @@ pub fn reviewer_drift(t: &Obj, a: &Agent, limit: f64) -> Option<(String, &'stati
 }
 
 /// A line for an idle worker whose work looks finished but never ran ready, or None.
-fn unready_hint(repo: &Repo, t: &Obj, a: &Agent) -> Res<Option<String>> {
+fn unready_hint(repo: &Repo, t: &Obj, a: &State) -> Res<Option<String>> {
     let st = s(t, "status");
     if a.state != "idle" || !(st == "working" || is_waiting(st)) {
         return Ok(None);
@@ -240,7 +173,7 @@ fn unready_hint(repo: &Repo, t: &Obj, a: &Agent) -> Res<Option<String>> {
 }
 
 /// Apply the event the watcher missed, through its own path (and news).
-fn fix_drift(repo: &Repo, t: &Obj, who: &str, block: &str, fix: &str, a: &Agent) -> Res<()> {
+fn fix_drift(repo: &Repo, t: &Obj, who: &str, block: &str, fix: &str, a: &State) -> Res<()> {
     if fix == "gone" {
         return gone(block);
     }
@@ -301,13 +234,14 @@ fn check_repo(repo: &Repo, ids: &[String], fix: bool, quiet: bool) -> Res<usize>
         if stamp(&t).map_or(0.0, |st| seconds_since(st, None)) < SETTLE {
             continue; // bullpen just changed it (start, tell, ready): its agent has yet to say
         }
-        let Some((who, session, block)) = waited_on(&t) else {
+        let Some((who, agent)) = waited_on(&t) else {
             continue;
         };
-        let Some(a) = agent_state(&session, &block)? else {
+        let Some(a) = agent.state()? else {
             continue;
         };
-        if a.state == "working" && compacting(&session, &block, &a.msg)? {
+        let block = agent.id.clone();
+        if a.state == "working" && agent.compacting(&a.msg)? {
             continue; // compacting by itself: no turn, so no drift
         }
         // How long an idle agent's shell may run before it is drift. stuck_after 0 turns

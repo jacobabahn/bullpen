@@ -2,23 +2,20 @@
 //! `prompt`, `answer` and `reply`.
 //!
 //! A task whose agent is at a prompt can be answered from the board: `prompt` reads the
-//! question and its options off the pane's screen (screen/prompt.rs), and `answer`
-//! presses one of them, once it has read the screen again and found the same question
+//! question and its options from its host (Rex: off the pane's screen, screen/prompt.rs), and `answer`
+//! presses one of them, once it has read it again and found the same question
 //! there. A task the coordinator asked the person about (`ask`) is answered with `reply`:
 //! the answer goes to the coordinator, never to the worker.
 
-use crate::agents::{pane, running};
+use crate::agents::{agent, running};
+use crate::host::Agent;
 use crate::args::{pos, usage_error, value, Arg, Args, Nargs};
 use crate::coordinators::sees_to;
 use crate::news::kind::Kind;
 use crate::news::{news, Opts};
-use crate::rex::{alive, screen, screen_end};
 use crate::saves::save;
-use crate::screen::prompt::read_prompt;
 use crate::start::peek::py_int;
 use bullpen_core::json::{dumps_line, obj, s, truthy, Obj};
-use bullpen_core::paths::rex;
-use bullpen_core::proc::run;
 use bullpen_core::repo::repo_root;
 use bullpen_core::task::{clip, ok, set_status, waits_on};
 use bullpen_core::text::squash;
@@ -39,19 +36,19 @@ const ANSWER: &[Arg] = &[
 const REPLY: &[Arg] = &[ID, pos("answer", Nargs::Some, "the answer")];
 const PROMPT: &[Arg] = &[ID, value("--lines", "LINES", "how many lines of screen (default 40)")];
 
-/// (who, session, block) of the agent the task is stopped on at a prompt. Fails when it
-/// isn't at one, or its pane is gone.
-pub fn prompt_pane(t: &Obj) -> Res<(&'static str, String, String)> {
+/// (who, agent) the task is stopped on at a prompt. Fails when it isn't at one, or its
+/// agent isn't running.
+pub fn prompt_pane(t: &Obj) -> Res<(&'static str, Agent)> {
     let id = s(t, "id");
     let who = waits_on(t);
     let Some(who) = who.filter(|_| s(t, "status") == "needs" && s(obj(t, "stop"), "kind") == "prompt") else {
         return fail(format!("{id} isn't waiting at a prompt"));
     };
-    let (session, block) = pane(t, who);
-    if !alive(&session, &block)? {
+    let agent = agent(t, who);
+    if !agent.alive()? {
         return fail(format!("{id}'s {who} isn't running"));
     }
-    Ok((who, session, block))
+    Ok((who, agent))
 }
 
 /// `prompt`: the prompt a task's agent is at, with the end of its screen (in colour), as
@@ -65,10 +62,10 @@ pub fn cmd_prompt(argv: &[String]) -> Res<i32> {
     };
     let repo = Repo::new(repo_root()?)?;
     let t = repo.task(a.arg("id").unwrap_or(""))?;
-    let (who, session, block) = prompt_pane(&t)?;
+    let (who, agent) = prompt_pane(&t)?;
     let mut out = json!({"who": who});
     let o = out.as_object_mut().expect("an object");
-    match read_prompt(&screen(&session, &block)?) {
+    match agent.question()? {
         Some(p) => {
             let options: Vec<Value> = p.options.iter().map(|(k, l)| json!([k, l])).collect();
             o.insert("question".into(), json!(p.question));
@@ -81,7 +78,7 @@ pub fn cmd_prompt(argv: &[String]) -> Res<i32> {
             o.insert("id".into(), Value::Null);
         }
     }
-    o.insert("screen".into(), json!(screen_end(&session, &block, n, true)?));
+    o.insert("screen".into(), json!(agent.read_end(n, true)?));
     println!("{}", dumps_line(&out));
     Ok(0)
 }
@@ -94,8 +91,8 @@ pub fn cmd_answer(argv: &[String]) -> Res<i32> {
     let repo = Repo::new(repo_root()?)?;
     let t = repo.task(a.arg("id").unwrap_or(""))?;
     let id = s(&t, "id");
-    let (who, session, block) = prompt_pane(&t)?;
-    let p = read_prompt(&screen(&session, &block)?);
+    let (who, agent) = prompt_pane(&t)?;
+    let p = agent.question()?;
     let Some(p) = p.filter(|p| a.opt("--prompt").is_none_or(|want| p.id == want)) else {
         return fail(format!("{id}'s {who} isn't at that prompt any more: nothing was sent"));
     };
@@ -108,12 +105,7 @@ pub fn cmd_answer(argv: &[String]) -> Res<i32> {
             keys.join(", ")
         ));
     };
-    let mut argv = vec![rex(), "send".into()];
-    if !session.is_empty() {
-        argv.extend(["-s".into(), session.clone()]);
-    }
-    argv.extend(["-b".into(), block, key.clone()]);
-    run(&argv, true)?;
+    agent.answer(&key)?;
     println!("answered {id}'s {who}: {key} ({label})");
     Ok(0)
 }

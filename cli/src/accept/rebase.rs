@@ -12,7 +12,7 @@ use crate::modes::{is_local, quiet_git, refresh, task_base_ref};
 use crate::news::kind::Kind;
 use crate::news::{news, Opts};
 use crate::review::{is_doc, keep_approval, rebase_check, shortstat, start_review, Check};
-use crate::rex::{alive, rex_type};
+use crate::host::Agent;
 use crate::saves::save;
 use crate::start::launch::hand_back;
 use bullpen_core::json::{obj, py_str, s, truthy, Obj};
@@ -99,7 +99,7 @@ fn rebase_other(repo: &Repo, t: &mut Obj, accepted: &Obj, touched: Option<&BTree
         super::left_in_review::mark(repo, &id, s(accepted, "id"))?;
         return Ok(Some(format!("{id} left in review")));
     }
-    if status == "working" && alive(s(t, "session"), s(t, "block"))? {
+    if status == "working" && Agent::of(t).alive()? {
         return tell_to_rebase(t, accepted, &base_ref, touched).map(Some);
     }
     if !worker_idle(t) {
@@ -292,7 +292,7 @@ fn tell_to_rebase(t: &Obj, accepted: &Obj, base_ref: &str, touched: Option<&BTre
     };
     let base = py_str(t.get("base").unwrap_or(&Value::Null));
     let msg = told(&base, accepted, &need, base_ref);
-    rex_type(s(t, "session"), s(t, "block"), &msg)?;
+    Agent::of(t).send(&msg)?;
     Ok(format!("{id} told to rebase ({said})"))
 }
 

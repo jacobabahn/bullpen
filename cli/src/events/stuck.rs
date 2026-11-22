@@ -2,14 +2,14 @@
 //! (`_stuck`), and the usage limit's reset (`_limit`), which continues the agents that
 //! stopped at it.
 
-use crate::agents::pane;
+use crate::agents::{agent, pane};
 use crate::args::{pos, usage_error, Arg, Args, Nargs};
 use crate::limit::{limit_active, limit_file, LIMIT_CONTINUE, LIMIT_GRACE};
 use crate::modes::task_base_ref;
 use crate::news::kind::Kind;
 use crate::news::{news, say, Opts};
 use crate::review::start_review;
-use crate::rex::{alive, rex_type};
+use crate::host::Agent;
 use crate::saves::save;
 use crate::start::launch::hand_back;
 use crate::start::peek::py_int;
@@ -147,9 +147,9 @@ fn continue_limited(repo: &Repo, t: &mut Obj) -> Res<String> {
 
 fn try_continue(repo: &Repo, t: &mut Obj, who: &str, id: &str) -> Res<String> {
     if who == "reviewer" {
-        let (session, block) = pane(t, "reviewer");
-        if alive(&session, &block)? {
-            rex_type(&session, &block, LIMIT_CONTINUE)?;
+        let reviewer = agent(t, "reviewer");
+        if reviewer.alive()? {
+            reviewer.send(LIMIT_CONTINUE)?;
             save(repo, t)?;
             return Ok(format!("{id}'s reviewer"));
         }
@@ -165,7 +165,7 @@ fn try_continue(repo: &Repo, t: &mut Obj, who: &str, id: &str) -> Res<String> {
         start_review(repo, t, &base_ref, None)?;
         return Ok(format!("{id}'s reviewer (its pane was gone: started again)"));
     }
-    let was_alive = alive(s(t, "session"), s(t, "block"))?;
+    let was_alive = Agent::of(t).alive()?;
     if let Some(failed) = hand_back(repo, t, LIMIT_CONTINUE, "limit")? {
         return fail(failed);
     }

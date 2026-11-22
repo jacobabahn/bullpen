@@ -1,7 +1,8 @@
 //! A task's agents: its worker and its reviewer, where each one's
-//! pane is, and whether the one the task waits on (core's `waits_on`) is running.
-//! A session or block Python has as None is "".
+//! pane is (`pane`; `agent` as the host interface has it), and whether the one the task
+//! waits on (core's `waits_on`) is running. A session or block Python has as None is "".
 
+use crate::host::Agent;
 use bullpen_core::json::{obj, py_str, truthy, Obj};
 use bullpen_core::task::waits_on;
 use bullpen_core::Res;
@@ -27,6 +28,18 @@ pub fn pane(t: &Obj, who: &str) -> (String, String) {
     (text(t.get("session")), text(t.get("block")))
 }
 
+/// The task's worker or reviewer, on the host its record names. A reviewer runs in its
+/// worker's session unless its own is recorded.
+pub fn agent(t: &Obj, who: &str) -> Agent {
+    let rec = if who == "reviewer" { obj(t, "review") } else { t };
+    let (within, id) = pane(t, who);
+    Agent {
+        within,
+        id,
+        ..Agent::of(rec)
+    }
+}
+
 /// The placement the task's worker or reviewer pane was made with ("float", "tabs",
 /// "background"), or "" for one made before bullpen recorded it.
 pub fn placed(t: &Obj, who: &str) -> String {
@@ -34,12 +47,12 @@ pub fn placed(t: &Obj, who: &str) -> String {
     o.get("pane").filter(|v| !v.is_null()).map_or(String::new(), py_str)
 }
 
-/// (who, session, block) of the agent the task waits on now, or None: it waits on none,
-/// or that agent has no pane.
-pub fn waited_on(t: &Obj) -> Option<(&'static str, String, String)> {
+/// (who, agent) the task waits on now, or None: it waits on none, or that agent has no
+/// pane.
+pub fn waited_on(t: &Obj) -> Option<(&'static str, Agent)> {
     let who = waits_on(t)?;
-    let (session, block) = pane(t, who);
-    (!block.is_empty()).then_some((who, session, block))
+    let a = agent(t, who);
+    (!a.id.is_empty()).then_some((who, a))
 }
 
 /// Is the pane of the task's worker or reviewer (by default the one it waits on) alive?
@@ -47,8 +60,7 @@ pub fn running(t: &Obj, who: Option<&str>) -> Res<bool> {
     let Some(who) = who.or_else(|| waits_on(t)) else {
         return Ok(false);
     };
-    let (session, block) = pane(t, who);
-    crate::rex::alive(&session, &block)
+    agent(t, who).alive()
 }
 
 #[cfg(test)]

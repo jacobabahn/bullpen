@@ -10,7 +10,7 @@ use crate::args::{pos, value, Arg, Args, Nargs};
 use crate::guide::unified_diff;
 use crate::news::kind::Kind;
 use crate::review::close_reviewer;
-use crate::rex::{alive, type_to_worker};
+use crate::host::Agent;
 use crate::rules::task_rules;
 use crate::saves::save;
 use crate::start::launch::{hand_back, write_full};
@@ -265,13 +265,13 @@ fn tell(repo: &Repo, t: &mut Obj, msg: &str) -> Res<Told> {
         stop(repo, t, "worker", "not_sent", stopped, &[], Kind::NotSent)?;
         return Ok(Told::ReviewStopped(why));
     }
-    if !alive(s(t, "session"), s(t, "block"))? {
+    if !Agent::of(t).alive()? {
         return Ok(Told::NotRunning);
     }
     if at_prompt(t) {
         return Ok(Told::AtPrompt);
     }
-    if let Some(why) = type_to_worker(t, msg)? {
+    if let Some(why) = Agent::of(t).tell(msg)? {
         return Ok(Told::Failed(why));
     }
     if is_waiting(&status) {

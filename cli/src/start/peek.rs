@@ -2,7 +2,6 @@
 //! (`peek --review`).
 
 use crate::args::{flag, pos, usage_error, value, Arg, Args, Nargs};
-use crate::rex::screen_end;
 use bullpen_core::json::s;
 use bullpen_core::repo::repo_root;
 use bullpen_core::{fail, Repo, Res};
@@ -48,14 +47,14 @@ pub fn cmd_peek(argv: &[String]) -> Res<i32> {
     let repo = Repo::new(repo_root()?)?;
     let t = repo.task(a.arg("id").unwrap_or(""))?;
     let review = a.flag("--review");
-    let (session, block) = crate::agents::pane(&t, if review { "reviewer" } else { "worker" });
-    if review && block.is_empty() {
+    let agent = crate::agents::agent(&t, if review { "reviewer" } else { "worker" });
+    if review && agent.id.is_empty() {
         return fail(format!("{} has no reviewer running", s(&t, "id")));
     }
-    if !crate::rex::alive(&session, &block)? {
+    if !agent.alive()? {
         let whose = if review { "reviewer" } else { "agent" };
         return fail(format!("{}'s {whose} isn't running", s(&t, "id")));
     }
-    println!("{}", screen_end(&session, &block, n, a.flag("--vt"))?.join("\n"));
+    println!("{}", agent.read_end(n, a.flag("--vt"))?.join("\n"));
     Ok(0)
 }

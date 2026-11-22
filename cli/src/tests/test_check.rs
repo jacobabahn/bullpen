@@ -1,8 +1,8 @@
 use super::*;
 use serde_json::json;
 
-fn agent(state: &'static str, kind: &str, age: Option<f64>) -> Agent {
-    Agent {
+fn agent(state: &'static str, kind: &str, age: Option<f64>) -> State {
+    State {
         state,
         kind: kind.into(),
         msg: String::new(),

@@ -44,11 +44,11 @@ fn too_old(repo: &Repo) -> Option<String> {
 /// Seconds after a turn's end before a missing waiter counts: the hook is just starting.
 const PARKS_WITHIN: f64 = 10.0;
 
-/// Has the coordinator in this pane been idle a moment, by Rex's status of its program
-/// (as `check` asks it)? With no status it isn't known, so not said. Rex is asked, not
-/// the watcher's `doing/` note, which may lag it by a few seconds.
-fn idle(session: &str, block: &str) -> bool {
-    let Some(status) = crate::rex::program_status(session, block).ok().flatten() else {
+/// Has the coordinator been idle a moment, by its host's status of it (as `check` asks
+/// it)? With no status it isn't known, so not said. The host is asked, not the watcher's
+/// `doing/` note, which may lag it by a few seconds.
+fn idle(c: &bullpen_core::json::Obj) -> bool {
+    let Some(status) = crate::host::Agent::of(c).status().ok().flatten() else {
         return false;
     };
     let since = s(&status, "updated_at");
@@ -62,7 +62,7 @@ fn unwatched(repo: &Repo) -> Vec<String> {
     let mut out = Vec::new();
     for c in coordinators(repo) {
         let cid = s(c, "id");
-        let is_idle = || idle(s(c, "session"), s(c, "block"));
+        let is_idle = || idle(c);
         if !paused(repo, cid) && !has_waiter(repo, cid) && alive(Some(c)).unwrap_or(false) && is_idle() {
             out.push(cid.to_string());
         }

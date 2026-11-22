@@ -8,7 +8,7 @@ use crate::auto_accept::{checks, first_of, pr_view, run_auto_accept};
 use crate::news::kind::Kind;
 use crate::news::{news, Opts};
 use crate::review::close_reviewer;
-use crate::rex::alive;
+use crate::host::Agent;
 use crate::saves::{followed, save};
 use crate::start::launch::hand_back;
 use crate::stops::stop;
@@ -270,7 +270,7 @@ fn send_back(repo: &Repo, t: &mut Obj, lines: &[String], ask: &str) -> Res<()> {
         }
         return Ok(());
     }
-    if alive(s(t, "session"), s(t, "block"))? {
+    if Agent::of(t).alive()? {
         let msg = clip(&format!("{ask} Then commit and run your ready command again."), 2000);
         if let Some(failed) = hand_back(repo, t, &msg, "pr")? {
             // its reviewer, if it had one, is closed: the coordinator passes this on
