@@ -20,6 +20,7 @@ fn task(id: &str, status: &str) -> TaskRow {
         quiet: false,
         yours: false,
         key: None,
+        repo: String::new(),
     }
 }
 
@@ -176,7 +177,7 @@ fn a_title_is_laid_out_the_same_selected_or_not() {
 
 #[test]
 fn the_rows_that_fit_are_whole_rows_and_one_at_least() {
-    let laid = Laid { heights: vec![30, 30, 30, 30], lines: vec![vec![]; 4], idw: 0.0 };
+    let laid = Laid { heights: vec![30, 30, 30, 30], lines: vec![vec![]; 4], idw: 0.0, repow: 0.0 };
     assert_eq!(fitting(&laid, 0, 100), 3);
     assert_eq!(fitting(&laid, 2, 100), 4);
     assert_eq!(fitting(&laid, 1, 10), 2); // too tall to fit: cut, but drawn
@@ -210,7 +211,7 @@ fn a_detail_is_wrapped_by_pixels_no_line_breaking_with_room_for_its_next_word() 
         // room under its block's last line
         assert!(lines.len() > 1 && lines.len() <= 3, "{size:?}: {lines:?}");
         assert_eq!(laid.heights[1], (lines.len() as f32 * c.m.body_line).round() as u32 + c.m.below as u32);
-        let room = Geo { c, idw: laid.idw }.detail_room();
+        let room = Geo { c, idw: laid.idw, repow: 0.0 }.detail_room();
         for (k, line) in lines.iter().enumerate() {
             assert!(fonts.width(line, Weight::Regular, c.m.body) <= room, "{size:?}: {line}");
             // the next line's first word didn't fit on this one (but the last line's, which
@@ -287,7 +288,7 @@ fn a_titles_lines_after_its_first_stop_short_of_the_ages_column() {
     let t = TaskRow { title: long.into(), yours: true, ..task("BP-1", "ready") };
     let r = rows(vec![Row::Task(t.clone())]);
     let laid = lay(&r, &c, &fonts);
-    let g = Geo { c, idw: laid.idw };
+    let g = Geo { c, idw: laid.idw, repow: 0.0 };
     let room = g.title_right(&t, &fonts) - g.title_x();
     assert!(room < c.right() - g.title_x() - fonts.width("00m", Weight::Bold, c.m.detail));
     assert!(laid.lines[0].len() == 2 && laid.lines[0][1..].iter().all(|l| fonts.width(l, Weight::Regular, c.m.title) <= room), "{:?}", laid.lines[0]);
@@ -313,7 +314,7 @@ fn a_wrapped_texts_last_word_isnt_left_alone() {
     assert_eq!(two, vec!["shows its", "screen."]);
     // as the list lays a detail out
     let c = canvas(TextSize::Medium);
-    let g = Geo { c, idw: 0.0 };
+    let g = Geo { c, idw: 0.0, repow: 0.0 };
     let mut long = String::from("one");
     while f.width(&format!("{long} more"), Weight::Regular, c.m.body) <= g.detail_room() {
         long.push_str(" more");
@@ -411,7 +412,7 @@ fn the_title_leads_its_row_the_id_and_age_are_a_details_size() {
     assert_eq!(laid.idw, fonts.width("BP-123", Weight::Bold, c.m.label));
     let wide = Canvas::new(Grid { cols: 60, ..GRID }, TextSize::Medium, Theme::default());
     assert_eq!(lay(&r, &wide, &fonts).idw, fonts.width("BP-123", Weight::Bold, wide.m.detail));
-    let g = Geo { c, idw: laid.idw };
+    let g = Geo { c, idw: laid.idw, repow: 0.0 };
     let t = task("BP-123", "todo");
     assert_eq!(g.right_side(&t, &fonts), fonts.width("00m", Weight::Bold, c.m.detail));
     // an unselected ID is dim, never the foreground
@@ -485,7 +486,7 @@ fn an_age_that_has_waited_too_long_is_a_chip_of_its_tasks_flags_colour() {
     assert!(has(&all(aged(true, None)), theme.red) && has(&all(aged(true, None)), theme.bg));
     assert!(!has(&all(aged(false, None)), theme.red) && !has(&all(aged(false, None)), theme.bg));
     // and the title makes room for the chip
-    let g = Geo { c, idw: 0.0 };
+    let g = Geo { c, idw: 0.0, repow: 0.0 };
     assert_eq!(g.right_side(&aged(true, None), &fonts), chip::width(&fonts, "12m", c.m.label));
     assert!(g.right_side(&aged(true, None), &fonts) > g.right_side(&aged(false, None), &fonts));
     // not while it's asked about: its age is the question's y / n
@@ -593,13 +594,13 @@ fn a_risk_is_a_chip_a_dot_of_its_colour_and_its_word_dim_inside_a_faint_line_bef
     let tall = ys.clone().max().unwrap() - ys.min().unwrap() + 1;
     assert!(tall as f32 >= 1.5 * c.m.label - 2.0 && tall as f32 <= 1.5 * c.m.label, "{tall}");
     // the title makes room for it: the chip's width and the age's
-    let g = Geo { c, idw: 0.0 };
+    let g = Geo { c, idw: 0.0, repow: 0.0 };
     let fonts = Fonts::builtin();
     let t = TaskRow { risk: Some("high".into()), ..task("BP-1", "ready") };
     // the age's column is two figures wide, so chips line up whatever the ages
     let want = fonts.width("00m", Weight::Bold, c.m.detail) + 0.5 * c.m.detail + chip::risk_width(&fonts, "high", c.m.label);
     // on a board under 44 columns, the chip has the level's first letter
-    let narrow = Geo { c: Canvas::new(Grid { cols: 35, ..GRID }, TextSize::Medium, Theme::default()), idw: 0.0 };
+    let narrow = Geo { c: Canvas::new(Grid { cols: 35, ..GRID }, TextSize::Medium, Theme::default()), idw: 0.0, repow: 0.0 };
     assert_eq!(narrow.risk_word("high"), "H");
     assert_eq!(narrow.right_side(&t, &fonts), fonts.width("00m", Weight::Bold, c.m.detail) + 0.5 * c.m.detail + chip::risk_width(&fonts, "H", c.m.label));
     let wide = TaskRow { age: "100m".into(), ..t.clone() };
@@ -624,7 +625,7 @@ fn the_selected_tasks_key_is_in_a_cap_at_its_cards_lower_right() {
         let (bare_laid, bare) = draw_in(&block(None), size);
         // the key takes no room of the line's: the layout is the same with it or without
         assert_eq!(laid, bare_laid, "{size:?}");
-        let key_w = Geo { c, idw: laid.idw }.key_width("a", "accept", &fonts);
+        let key_w = Geo { c, idw: laid.idw, repow: 0.0 }.key_width("a", "accept", &fonts);
         // on the block's last line, at the right; nothing else on the title's lines
         let (top, bottom) = (laid.heights[0], laid.heights[0] + laid.heights[1] - c.m.below as u32);
         let at = ((c.right() - key_w + 0.8 * c.m.label) as u32, c.right() as u32);
@@ -657,7 +658,7 @@ fn a_short_last_line_keeps_its_room_beside_the_key_and_a_task_with_no_key_has_no
 fn the_key_is_on_the_last_line_only_where_it_fits_as_it_is() {
     let fonts = Fonts::builtin();
     let c = canvas(TextSize::Medium);
-    let g = Geo { c, idw: 0.0 };
+    let g = Geo { c, idw: 0.0, repow: 0.0 };
     let w = |s: &str| fonts.width(s, Weight::Regular, c.m.body);
     let mut full = String::from("one");
     while w(&format!("{full} more")) <= g.detail_room() {
@@ -697,7 +698,7 @@ fn a_tasks_lines_start_at_its_titles_left_edge_with_its_id_in_a_gutter() {
         let laid = lay(&r, &c, &fonts);
         let mut f = Fonts::builtin();
         let s = render(&r, &laid, Cut::rows(0..2, laid.heights[0] + laid.heights[1]), &c, &mut f).unwrap();
-        let g = Geo { c, idw: laid.idw };
+        let g = Geo { c, idw: laid.idw, repow: 0.0 };
         // the first inked column of the detail's row is where the title starts: nothing under the ID
         let (y0, y1) = (laid.heights[0], laid.heights[0] + laid.heights[1]);
         let first = (0..s.pixmap.width()).find(|&x| (y0..y1).any(|y| px_at(&s, x, y)[3] > 0)).unwrap();
@@ -705,6 +706,6 @@ fn a_tasks_lines_start_at_its_titles_left_edge_with_its_id_in_a_gutter() {
         assert!(g.title_x() > g.text_x() + laid.idw && g.detail_room() == c.right() - g.title_x());
     }
     // a board under 44 columns has a narrower gutter: its IDs are a label's size
-    let narrow = Geo { c: Canvas::new(Grid { cols: 35, cell_w: 16, cell_h: 34 }, TextSize::Medium, Theme::default()), idw: 0.0 };
+    let narrow = Geo { c: Canvas::new(Grid { cols: 35, cell_w: 16, cell_h: 34 }, TextSize::Medium, Theme::default()), idw: 0.0, repow: 0.0 };
     assert_eq!(narrow.id_px(), narrow.c.m.label);
 }

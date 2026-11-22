@@ -14,7 +14,7 @@
 //! the board does, and its questions, answers and lines to type are the board's.
 
 mod draw;
-mod items;
+pub(crate) mod items;
 pub mod run;
 #[cfg(test)]
 #[path = "tests/testing.rs"]

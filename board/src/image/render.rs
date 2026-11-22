@@ -191,6 +191,8 @@ pub struct Laid {
     pub heights: Vec<u32>,
     lines: Vec<Vec<String>>,
     pub idw: f32,
+    /// the repositories' names' column (mission control's inbox): the widest name's width
+    pub repow: f32,
 }
 
 impl Laid {
@@ -208,8 +210,10 @@ const YOURS_LINES: usize = 2;
 /// text wrapped by pixels to the room its type has, and how tall each row is: a
 /// block's last row with the room its card has under it.
 pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
-    let idw = id_width(rows, fonts, Geo { c: *c, idw: 0.0 }.id_px());
-    let g = Geo { c: *c, idw };
+    let idw = id_width(rows, fonts, Geo { c: *c, idw: 0.0, repow: 0.0 }.id_px());
+    // (at most a fifth of the image: a longer name is cut)
+    let repow = repo_width(rows, fonts, c.m.title).min((REPO_MOST * c.grid.width() as f32).round());
+    let g = Geo { c: *c, idw, repow };
     let mut all = Vec::new();
     let mut heights = Vec::new();
     // the room under a block's last row
@@ -218,7 +222,8 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
         let (title, most, weight, right, rest) = match row {
             Row::Task(t) => {
                 let most = if t.yours && !c.m.cells { YOURS_LINES } else { 1 };
-                (&t.title, most, title_weight(), g.task_right(t, fonts), g.title_right(t, fonts))
+                // (its repository's name before it, on mission control, takes its first line's room)
+                (&t.title, most, title_weight(), g.task_right(t, fonts) - g.repo_width(t, fonts), g.title_right(t, fonts))
             }
             Row::Item(i) => (&i.title, 1, title_weight(), c.right(), c.right()),
             Row::Detail(d) => {
@@ -261,7 +266,7 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
         heights.push(g.height(row, lines.len().max(1)) + under(i));
         all.push(lines);
     }
-    Laid { heights, lines: all, idw }
+    Laid { heights, lines: all, idw, repow }
 }
 
 /// The rows from `top` that fit in `room` pixels whole: [top, end). One at least, cut if
@@ -275,6 +280,12 @@ pub fn fitting(laid: &Laid, top: usize, room: u32) -> usize {
     }
     end
 }
+
+/// The space after a task's repository's name, before its title, of a title's size.
+const REPO_GAP: f32 = 0.5;
+
+/// The most of an image's width the repositories' names' column takes.
+const REPO_MOST: f32 = 0.2;
 
 /// The selected card's edge, in pixels.
 const RING: f32 = 2.0;
@@ -314,6 +325,7 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
     // as they do in any other
     let mut pm = Pixmap::new(width, height + 2 * EDGE).ok_or_else(made)?;
     let mut d = Draw::new(&mut pm, fonts, c, laid.idw);
+    d.g.repow = laid.repow;
     let mut places = Vec::new();
     let mut y = cut.at;
     for i in range.clone() {
@@ -416,15 +428,27 @@ fn id_width(rows: &Rows, fonts: &Fonts, px: f32) -> f32 {
         .fold(0.0, f32::max)
 }
 
+/// The repositories' names' column in pixels (mission control's inbox): the widest, so
+/// its titles line up.
+fn repo_width(rows: &Rows, fonts: &Fonts, px: f32) -> f32 {
+    rows.rows
+        .iter()
+        .filter_map(|r| match r {
+            Row::Task(t) if !t.repo.is_empty() => Some(fonts.width(&t.repo, Weight::Regular, px)),
+            _ => None,
+        })
+        .fold(0.0, f32::max)
+}
+
 /// Where a task's (or item's) mark is in its row: across from the image's left edge,
 /// down from the row's top.
 pub(super) fn mark_at(c: &Canvas) -> (f32, f32) {
-    (Geo { c: *c, idw: 0.0 }.mark_x(), c.m.pad + c.m.line / 2.0)
+    (Geo { c: *c, idw: 0.0, repow: 0.0 }.mark_x(), c.m.pad + c.m.line / 2.0)
 }
 
 /// How far a mark reaches from its centre at `scale` (Geo::mark_reach).
 pub(super) fn mark_reach(c: &Canvas, scale: f32) -> f32 {
-    Geo { c: *c, idw: 0.0 }.mark_reach(scale)
+    Geo { c: *c, idw: 0.0, repow: 0.0 }.mark_reach(scale)
 }
 
 /// A title is semibold, whatever the task: its lines under it are regular.
@@ -437,6 +461,7 @@ fn title_weight() -> Weight {
 struct Geo {
     c: Canvas,
     idw: f32,
+    repow: f32,
 }
 
 impl Geo {
@@ -570,6 +595,16 @@ impl Geo {
         self.c.right() - if age > 0.0 { age + 0.8 * self.c.m.title } else { 0.0 }
     }
 
+    /// The room a task's repository's name takes before its title's first line (mission
+    /// control's inbox): the name at a title's size and a gap; none on a board.
+    fn repo_width(&self, t: &TaskRow, fonts: &Fonts) -> f32 {
+        if t.repo.is_empty() {
+            return 0.0;
+        }
+        let _ = fonts;
+        self.repow + REPO_GAP * self.c.m.title
+    }
+
     /// Where a task's title's first line must end: short of its risk and age, by less
     /// before a chip, whose own room around its word is a gap too.
     fn task_right(&self, t: &TaskRow, fonts: &Fonts) -> f32 {
@@ -608,7 +643,7 @@ pub(super) struct Draw<'a> {
 
 impl<'a> Draw<'a> {
     pub(super) fn new(pm: &'a mut Pixmap, fonts: &'a mut Fonts, c: &Canvas, idw: f32) -> Draw<'a> {
-        Draw { pm, fonts, theme: c.theme, g: Geo { c: *c, idw }, px: c.m.title, line_h: c.m.line, scale: 1.0, shift: 0.0 }
+        Draw { pm, fonts, theme: c.theme, g: Geo { c: *c, idw, repow: 0.0 }, px: c.m.title, line_h: c.m.line, scale: 1.0, shift: 0.0 }
     }
 
     /// Draw in this type from here on, centred in lines this high.
@@ -876,14 +911,21 @@ impl<'a> Draw<'a> {
             None => self.theme.soft(),
         };
         let (first, rest) = (self.g.task_right(t, self.fonts), self.g.title_right(t, self.fonts));
-        self.title(lines, title_weight(), (first, rest), y, color);
+        // mission control's inbox: its repository's name first, regular and dim
+        let lead = self.g.repo_width(t, self.fonts);
+        if lead > 0.0 {
+            let (x, dim) = (self.title_x(), self.theme.dim());
+            self.text(&t.repo, Weight::Regular, x, y, lead, dim);
+        }
+        self.title(lines, title_weight(), (first, rest), lead, y, color);
     }
 
-    /// A title's lines from the title column, the first ending at `first`, the rest at `rest`.
-    fn title(&mut self, lines: &[String], weight: Weight, (first, rest): (f32, f32), y: f32, color: [u8; 4]) {
+    /// A title's lines from the title column (the first `lead` further in), the first
+    /// ending at `first`, the rest at `rest`.
+    fn title(&mut self, lines: &[String], weight: Weight, (first, rest): (f32, f32), lead: f32, y: f32, color: [u8; 4]) {
         let x = self.title_x();
         for (k, line) in lines.iter().enumerate() {
-            let end = if k == 0 { first } else { rest };
+            let (x, end) = if k == 0 { (x + lead, first) } else { (x, rest) };
             self.text(line, weight, x, y + k as f32 * self.h(), end - x + 1.0, color);
         }
     }
@@ -923,7 +965,7 @@ impl<'a> Draw<'a> {
         self.id(&i.id, i.selected, false, i.asked.then_some(red), y);
         let color = if i.asked { red } else { self.theme.text() };
         let right = self.right();
-        self.title(lines, title_weight(), (right, right), y, color);
+        self.title(lines, title_weight(), (right, right), 0.0, y, color);
     }
 }
 
@@ -937,3 +979,7 @@ pub use marks::Marks;
 #[cfg(test)]
 #[path = "tests/test_render.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "options.rs"]
+mod options;

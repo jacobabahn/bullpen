@@ -80,6 +80,9 @@ pub(crate) struct TaskRow {
     /// selected (and not asked about): its first key and what it does, which the image
     /// look puts in a cap at its card's lower right
     pub key: Option<(String, String)>,
+    /// the repository it's in, before its title, dim: mission control's inbox, which
+    /// lists every repository's; empty on a board
+    pub repo: String,
 }
 
 /// A line under a task.
@@ -212,7 +215,7 @@ const YOURS_LINES: usize = 3;
 
 /// A task's detail lines (the grouped layout's): what its agent is doing now, or
 /// what there is to say about it; then its stat line.
-fn details(rows: &mut Vec<Row>, app: &App, t: &Task, cur: bool, age_on_detail: bool, detail_w: usize, now: Now) {
+pub(crate) fn details(rows: &mut Vec<Row>, app: &App, t: &Task, cur: bool, age_on_detail: bool, detail_w: usize, now: Now) {
     // a working or in-review task: what its agent is doing now, on one line
     let doing = model::doing_now(t, now);
     // what a task needs from you, GitHub said, or the usage limit gets two lines,
@@ -271,7 +274,7 @@ pub(super) fn detail_lines(app: &App, text: &str, w: usize, lines: usize) -> Vec
 /// A task's own row. Asked y/n about, it keeps its title, in the question's colour,
 /// with "y / n" for the age; without `with_age` (a narrow board's) its age is on its
 /// detail line.
-fn task_row(app: &App, t: &Task, selected: bool, with_age: bool, now: Now) -> TaskRow {
+pub(crate) fn task_row(app: &App, t: &Task, selected: bool, with_age: bool, now: Now) -> TaskRow {
     let asked = app.pending.as_ref().filter(|(_, tid)| *tid == t.id).map(|(action, _)| model::confirm_risky(*action, t, &app.cfg));
     let age = match asked {
         Some(_) => "y / n".to_string(),
@@ -293,6 +296,7 @@ fn task_row(app: &App, t: &Task, selected: bool, with_age: bool, now: Now) -> Ta
         quiet: t.closed() || t.triage() || app.cfg.theirs(t, app.me.as_deref()),
         yours: (t.flagged() || t.status == "ready") && !app.cfg.theirs(t, app.me.as_deref()),
         key: model::task_keys(Some(t)).first().filter(|_| selected && asked.is_none()).map(|(k, what)| (k.to_string(), what.to_string())),
+        repo: String::new(),
     }
 }
 
