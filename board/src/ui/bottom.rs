@@ -99,6 +99,9 @@ pub(crate) enum FootLine {
     Msg(String, Tone),
     /// the key row: each key and what it does; `?` goes at the right edge
     Keys(Vec<(String, String)>),
+    /// mission control's key row: the selected task's keys, then its own (n, /, q),
+    /// with no `?`; the task's drop from their end to fit
+    Mission(Vec<(String, String)>, Vec<(String, String)>),
 }
 
 /// A message's colour: bold, bold red (a failure, a risky question), bold green (what

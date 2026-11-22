@@ -32,7 +32,7 @@ pub(super) fn draw_list(buf: &mut Buffer, area: Rect, app: &mut App, s: &Sizes, 
         let cols = w.saturating_sub(1) as u16;
         let rows = Rows { rows, idw };
         let base = meter::time(|| "rows".into(), || rows::unselected(app, w, s.narrow, now));
-        app.view = Some(View { rows, base, top: app.top, head, foot: None, col: area.x, row0: area.y, row, rows_n, foot_n, cols });
+        app.view = Some(View { rows, base, top: app.top, head, foot: None, col: area.x, row0: area.y, row, rows_n, foot_n, cols, full: cols, fleet: None, side: None });
         return;
     }
     draw_head(buf, area, &head, w);
@@ -98,6 +98,8 @@ fn draw_row(buf: &mut Buffer, area: Rect, app: &App, s: &Sizes, y: usize, row: &
         }
         Row::Gap => {}
         Row::Empty { text, first } => put(buf, area, y, 1, span(fit(text, w.saturating_sub(2)), if *first { bold() } else { dim() })),
+        // (mission control's image look's alone)
+        Row::Repo(_) => {}
         Row::Later { text, amber } => draw_later_line(buf, area, y, app, text, *amber, w),
         Row::Item(i) => draw_item(buf, area, y, app, i, idw, w),
         Row::ItemDetail(text, ..) => draw_item_detail(buf, area, y, text, detail_w),
@@ -130,7 +132,7 @@ fn counts(parts: &[(String, &'static str)], sep: &'static str) -> Line<'static> 
 
 /// The board's top line as values, fit to its columns: the text header and the image
 /// look's (image/frame.rs) draw it.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub(crate) struct Head {
     /// the repository's name (bold)
     pub name: String,

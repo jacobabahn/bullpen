@@ -117,6 +117,16 @@ pub fn foot(foot: &Foot, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pix
                 d.text(text, weight, left, y, right - left, color);
             }
             FootLine::Keys(keys) => key_row(&mut d, keys, left, y + ch / 2.0, c.m.label),
+            FootLine::Mission(task, own) => {
+                let room = d.right() - left;
+                let mut keys: Keys = task.iter().chain(own).cloned().collect();
+                let mut n = task.len();
+                while n > 0 && keys_width(d.fonts(), &keys, c.m.label) > room {
+                    n -= 1;
+                    keys.remove(n);
+                }
+                draw_keys(&mut d, &keys, left, y + ch / 2.0, c.m.label);
+            }
         }
     }
     Ok(pm)

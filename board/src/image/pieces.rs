@@ -209,7 +209,7 @@ impl Plan {
 pub fn bare(row: &Row, motion: bool, settling: &dyn Fn(&str) -> bool) -> bool {
     motion
         && match row {
-            Row::Task(t) => turns(&t.mark) || settling(&t.id),
+            Row::Task(t) => turns(&t.mark) || settling(&t.who()),
             Row::Item(i) => i.job,
             _ => false,
         }

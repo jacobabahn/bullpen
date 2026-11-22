@@ -21,6 +21,7 @@ fn task(id: &str, status: &str) -> TaskRow {
         yours: false,
         key: None,
         repo: String::new(),
+        dir: String::new(),
     }
 }
 

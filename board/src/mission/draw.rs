@@ -32,6 +32,9 @@ const SELECTED_LINES: usize = 6;
 /// How many rows a message wraps to, at most.
 const MESSAGE_LINES: usize = 3;
 
+/// Mission control's own keys, after the selected task's on the bottom row.
+pub(super) const OWN_KEYS: [(&str, &str); 3] = [("n", "next"), ("/", "find"), ("q", "quit")];
+
 /// The layout for a width.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Size {
@@ -53,7 +56,7 @@ impl Size {
 }
 
 /// The list's width in two columns: under half of a wide screen, half of a smaller one.
-fn list_width(w: usize, size: Size) -> usize {
+pub(super) fn list_width(w: usize, size: Size) -> usize {
     match size {
         Size::Wide => (w * 45 / 100).clamp(60, 90),
         _ => w / 2,
@@ -63,6 +66,7 @@ fn list_width(w: usize, size: Size) -> usize {
 pub fn draw(f: &mut Frame, m: &mut Mission) {
     let area = f.area();
     m.height = area.height;
+    m.view = None;
     let (w, h) = (area.width as usize, area.height as usize);
     // a prompt being answered, or a coordinator's question, takes the whole screen
     if let Some(app) = m.active() {
@@ -86,6 +90,20 @@ pub fn draw(f: &mut Frame, m: &mut Mission) {
     let now = model::now();
     let size = Size::of(w);
     let msg = message_rows(m, w);
+    // the image look: the images are drawn over these blank cells (look.rs); what's typed
+    // or asked at the bottom stays text
+    if m.image {
+        if let Some(view) = super::look::view(m, area, &msg, now) {
+            let typed = view.foot.is_none();
+            m.view = Some(view);
+            if typed {
+                if let Some(x) = bottom(f.buffer_mut(), area, m, msg) {
+                    f.set_cursor_position(Position::new(area.x + x as u16, area.y + area.height.saturating_sub(1)));
+                }
+            }
+            return;
+        }
+    }
     top_line(f.buffer_mut(), area, m, size, now);
     // the rows between the top line and the message and keys
     let body = Rect { x: area.x, y: area.y + 1, width: area.width, height: h.saturating_sub(2 + msg.len()) as u16 };
@@ -418,7 +436,7 @@ fn detail_texts(app: &App, t: &Task, ts: &TaskState, now: Now) -> Vec<(String, S
 }
 
 /// A status in a few words, for the detail.
-fn status_word(st: &str) -> &str {
+pub(super) fn status_word(st: &str) -> &str {
     match st {
         "needs" => "needs you",
         "stopped" => "stopped: its agent exited",
@@ -434,7 +452,7 @@ fn status_word(st: &str) -> &str {
 
 /// The message rows above the keys: a y/n being asked, what just happened, else what's
 /// still running in any repo.
-fn message_rows(m: &Mission, w: usize) -> Vec<Span<'static>> {
+pub(super) fn message_rows(m: &Mission, w: usize) -> Vec<Span<'static>> {
     if let Some(app) = m.active().filter(|a| a.pending.is_some()) {
         return message(app, w, MESSAGE_LINES);
     }
@@ -491,9 +509,8 @@ fn bottom(buf: &mut Buffer, area: Rect, m: &Mission, msg: Vec<Span<'static>>) ->
 /// task's end until the row fits.
 fn key_row(m: &Mission, w: usize) -> Line<'static> {
     let mut keys: Vec<(&str, &str)> = m.current_task().map_or(Vec::new(), |(_, t, _)| model::task_keys(Some(t)));
-    let own = [("n", "next"), ("/", "find"), ("q", "quit")];
     loop {
-        let all: Vec<(&str, &str)> = keys.iter().chain(own.iter()).copied().collect();
+        let all: Vec<(&str, &str)> = keys.iter().chain(OWN_KEYS.iter()).copied().collect();
         let line = key_line(&all);
         if line.width() + 2 <= w || keys.is_empty() {
             return line;

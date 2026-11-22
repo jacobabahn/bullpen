@@ -223,7 +223,7 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
             Row::Task(t) => {
                 let most = if t.yours && !c.m.cells { YOURS_LINES } else { 1 };
                 // (its repository's name before it, on mission control, takes its first line's room)
-                (&t.title, most, title_weight(), g.task_right(t, fonts) - g.repo_width(t, fonts), g.title_right(t, fonts))
+                (&t.title, most, title_weight(), g.task_right(t, fonts) - g.repo_width(t), g.title_right(t, fonts))
             }
             Row::Item(i) => (&i.title, 1, title_weight(), c.right(), c.right()),
             Row::Detail(d) => {
@@ -597,11 +597,10 @@ impl Geo {
 
     /// The room a task's repository's name takes before its title's first line (mission
     /// control's inbox): the name at a title's size and a gap; none on a board.
-    fn repo_width(&self, t: &TaskRow, fonts: &Fonts) -> f32 {
+    fn repo_width(&self, t: &TaskRow) -> f32 {
         if t.repo.is_empty() {
             return 0.0;
         }
-        let _ = fonts;
         self.repow + REPO_GAP * self.c.m.title
     }
 
@@ -622,6 +621,8 @@ impl Geo {
             Row::Detail(_) | Row::ItemDetail(..) => lines as f32 * m.body_line,
             Row::Gap => m.gap,
             Row::Empty { .. } => m.line,
+            // (a blocked coordinator's question under it, and a block's room under that)
+            Row::Repo(r) => m.head_pad + m.line + if r.question.is_some() { m.body_line + m.below } else { m.title_gap },
         };
         h.round() as u32
     }
@@ -858,6 +859,7 @@ impl<'a> Draw<'a> {
                 self.text(rest, Weight::Regular, end, y, self.right() - end, rc);
             }
             Row::Item(i) => self.item(i, lines, y + m.pad, bare),
+            Row::Repo(r) => self.repo(r, y + m.head_pad, y + h),
             Row::ItemDetail(_, _, selected) => {
                 let x = self.title_x();
                 for (k, line) in lines.iter().enumerate() {
@@ -912,7 +914,7 @@ impl<'a> Draw<'a> {
         };
         let (first, rest) = (self.g.task_right(t, self.fonts), self.g.title_right(t, self.fonts));
         // mission control's inbox: its repository's name first, regular and dim
-        let lead = self.g.repo_width(t, self.fonts);
+        let lead = self.g.repo_width(t);
         if lead > 0.0 {
             let (x, dim) = (self.title_x(), self.theme.dim());
             self.text(&t.repo, Weight::Regular, x, y, lead, dim);
@@ -973,13 +975,13 @@ impl<'a> Draw<'a> {
 mod marks;
 #[path = "said.rs"]
 mod said;
+#[path = "fleet.rs"]
+pub mod fleet;
+#[path = "page.rs"]
+pub mod page;
 use said::{key_letters, KEY_SIDE};
 pub use marks::Marks;
 
 #[cfg(test)]
 #[path = "tests/test_render.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "options.rs"]
-mod options;

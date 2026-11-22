@@ -55,6 +55,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub use font::Fonts;
+pub use render::fleet::{self, Fleet, FleetRepo};
+pub use render::page::{self, Ink, Page};
 pub use render::{render, Canvas, Grid};
 pub use theme::Theme;
 
@@ -62,8 +64,9 @@ pub use theme::Theme;
 pub const PROBE: u32 = 0x4250_0000;
 const FIRST: u32 = PROBE + 1;
 
-/// The board as the frame laid it out, for the images: its top line, its rows (and which
-/// was shown first last frame) and its bottom rows, and the blocks of cells they have.
+/// The board (or mission control) as the frame laid it out, for the images: its top
+/// line, its rows (and which was shown first last frame) and its bottom rows, and the
+/// blocks of cells they have; mission control's header and the page beside its list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct View {
     pub rows: Rows,
@@ -81,7 +84,49 @@ pub struct View {
     pub row: u16,
     pub rows_n: u16,
     pub foot_n: u16,
+    /// the list's columns
     pub cols: u16,
+    /// the top line's and the bottom rows' columns: the list's on the board, the
+    /// pane's on mission control, whose list has the page beside it
+    pub full: u16,
+    /// mission control's header, drawn in the top line's place (fleet.rs)
+    pub fleet: Option<Fleet>,
+    /// mission control's page beside the list (page.rs)
+    pub side: Option<Side>,
+}
+
+/// The page beside mission control's list: its first column (from the view's), its
+/// columns, and what it says. It's placed from the list's first row, as many rows as it
+/// needs.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Side {
+    pub col: u16,
+    pub cols: u16,
+    pub page: Page,
+}
+
+/// What the image look draws for: the board, or mission control. It says the look and
+/// the type, hands over the frame's view, takes back where the list starts and a page's
+/// tasks, and goes back to text when the images can't be drawn; drawing ahead presses
+/// j and k on it off screen.
+pub trait Host {
+    fn look(&self) -> Look;
+    /// the type's size, the font file it's drawn with, and whether the marks move
+    fn style(&self) -> (TextSize, Option<PathBuf>, bool);
+    fn started(&self) -> std::time::Instant;
+    /// the frame's view; None when nothing is images this frame (an overlay)
+    fn view(&self) -> Option<View>;
+    /// the list's first row and the tasks a page has, as the images scrolled it
+    fn placed(&mut self, top: usize, page: usize);
+    /// back to text, saying why
+    fn fall_back(&mut self, why: String);
+    /// can it be drawn as images at all (the board's compact layout can't)
+    fn drawable(&self) -> bool;
+    /// nothing asked or typed: j and k only move the selection
+    fn at_rest(&self) -> bool;
+    /// its view after `key`, drawn off screen in `area`, with what the key changed put
+    /// back; None when the key wouldn't move the selection
+    fn moved(&mut self, key: char, area: ratatui::layout::Rect) -> Option<View>;
 }
 
 /// What drawing a frame came to: the list's first row, and the tasks a page has.
@@ -167,19 +212,27 @@ impl Picture {
         }
     }
 
+    /// A picture whose terminal has said it draws images, with cells `cell` pixels (no
+    /// window size), the time standing still: for tests of what's drawn for it.
+    #[cfg(test)]
+    pub fn answered_for_test(cell: (u32, u32)) -> Picture {
+        let p = Picture::new(Arc::new(term::Gate::default()));
+        Picture { window: || None, clock: Some(0), probe: Probe::Yes, cell: Some(cell), on: true, ..p }
+    }
+
     /// Is the list drawn as an image this frame? With the image look, once the terminal
-    /// has said it draws images, in the grouped layout (the compact one stays text).
-    pub fn drawing(&self, app: &App) -> bool {
-        app.look == Look::Image && self.probe == Probe::Yes && app.cfg.layout == Layout::Grouped
+    /// has said it draws images, when it can be (the board's compact layout stays text).
+    pub fn drawing(&self, h: &impl Host) -> bool {
+        h.look() == Look::Image && self.probe == Probe::Yes && h.drawable()
     }
 
     /// After a frame: ask the terminal what the image look needs, then send, place,
     /// move or delete the images as the frame's view says. Returns true when the board
     /// should draw again at once (the list went back to text).
-    pub fn show(&mut self, app: &mut App, out: &mut impl Write) -> bool {
+    pub fn show(&mut self, app: &mut impl Host, out: &mut impl Write) -> bool {
         // the time first: `tick` reads it whether or not the images are drawn
-        self.ms = self.clock.unwrap_or_else(|| app.started.elapsed().as_millis());
-        if app.look != Look::Image {
+        self.ms = self.clock.unwrap_or_else(|| app.started().elapsed().as_millis());
+        if app.look() != Look::Image {
             self.on = false;
             self.clear(out);
             return false;
@@ -192,25 +245,30 @@ impl Picture {
                 return false;
             }
             Probe::Asking => return false,
-            Probe::No(why) => return fall_back(app, why.clone()),
+            Probe::No(why) => {
+                app.fall_back(why.clone());
+                return true;
+            }
             Probe::Yes => {}
         }
         if self.due {
             self.ask(false);
         }
-        let Some(view) = app.view.clone() else {
+        let Some(view) = app.view() else {
             self.hide(out);
             return false;
         };
-        match self.draw(&view, app.cfg.text_size, app.cfg.font.as_deref(), app.cfg.motion, out) {
+        let (size, font, motion) = app.style();
+        match self.draw(&view, size, font.as_deref(), motion, out) {
             Ok(Drawn { top, page }) => {
-                (app.top, app.page) = (top, page);
+                app.placed(top, page);
                 self.plan_ahead(Some(&view));
                 false
             }
             Err(why) => {
                 self.clear(out);
-                fall_back(app, why)
+                app.fall_back(why);
+                true
             }
         }
     }
@@ -273,7 +331,7 @@ impl Picture {
     fn draw(&mut self, view: &View, size: TextSize, font: Option<&Path>, motion: bool, out: &mut impl Write) -> Result<Drawn, String> {
         let (cell_w, cell_h) =
             self.cell().ok_or("Drawing the list as text: the terminal doesn't say its cell size in pixels.")?;
-        let canvas = Canvas::new(Grid { cols: view.cols as usize, cell_w, cell_h }, size, self.theme);
+        let (canvas, frame, side) = canvases(view, (cell_w, cell_h), size, self.theme);
         let fonts = fonts(&mut self.fonts, font)?;
         let ms = self.ms;
         settle(&mut self.seen, &mut self.settling, &view.rows, motion, ms);
@@ -286,7 +344,7 @@ impl Picture {
             self.base_shows = shows;
             self.settling.retain(|_, t| ms.saturating_sub(*t) < sprite::settling_ms());
         }
-        let paint = Paint { canvas, size, motion, settling: &self.settling, ms, list: self.list.as_ref() };
+        let paint = Paint { canvas, frame, side, size, motion, settling: &self.settling, ms, list: self.list.as_ref() };
         let (wants, plan, list) = wants(view, plan, &paint, &self.screen, fonts, None)?;
         self.screen.show(wants, out).map_err(|e| format!("Drawing the list as text: {e}."))?;
         self.list = Some(list);
@@ -352,6 +410,9 @@ impl Picture {
 /// and the list's base image on the terminal.
 struct Paint<'a> {
     canvas: Canvas,
+    /// the top line's and the bottom rows' (`View::full`), and the page's beside the list
+    frame: Canvas,
+    side: Option<Canvas>,
     size: TextSize,
     motion: bool,
     settling: &'a HashMap<String, u128>,
@@ -375,7 +436,7 @@ fn wants(
     let bare = |row: &Row| pieces::bare(row, motion, &|id| settling.contains_key(id));
     // a turning mark turns with the text board's, from the board's start
     let began = |row: &Row| match row {
-        Row::Task(t) if !sprite::turns(&t.mark) => settling.get(&t.id).copied().unwrap_or(0),
+        Row::Task(t) if !sprite::turns(&t.mark) => settling.get(&t.who()).copied().unwrap_or(0),
         _ => 0,
     };
     // (a macro, not a closure: each frame borrows its own plan)
@@ -399,21 +460,33 @@ fn wants(
         None => (plan, now),
     };
     let f = frame!(&plan);
+    let full = &p.frame;
     let head_n = view.row - view.row0;
     let foot_n = if view.foot.is_some() { view.foot_n } else { 0 };
     let mut wants = Vec::new();
-    let k = list::key(&Slot::Head, &f, (&view.head, head_n));
+    let k = list::key(&Slot::Head, &f, (&view.head, &view.fleet, head_n, full.grid));
     if head_n > 0 {
-        let png = (!screen.has(&Slot::Head, k)).then(|| list::encode(&Slot::Head, canvas, || frame::head(&view.head, head_n, canvas, fonts))).transpose()?;
-        wants.push(Want { slot: Slot::Head, key: k, png, places: vec![whole(view, canvas, view.row0, head_n)] });
+        let draw = || match &view.fleet {
+            Some(fleet) => fleet::head(fleet, head_n, full, fonts),
+            None => frame::head(&view.head, head_n, full, fonts),
+        };
+        let png = (!screen.has(&Slot::Head, k)).then(|| list::encode(&Slot::Head, full, draw)).transpose()?;
+        wants.push(Want { slot: Slot::Head, key: k, png, places: vec![whole(view.col, full, view.row0, head_n)] });
     }
     let mut list = list::wants(&f, image.key, screen, fonts, jobs)?;
     let sprites = list.split_off(list.iter().position(|w| matches!(w.slot, Slot::Sel | Slot::Tail | Slot::Cap | Slot::Sprite(_))).unwrap_or(list.len()));
     wants.extend(list);
+    if let (Some(side), Some(c)) = (&view.side, &p.side) {
+        // as tall as the page says, from the list's first row
+        let rows = page::rows(&side.page, c, fonts, view.rows_n);
+        let k = list::key(&Slot::Side, &f, (&side.page, rows, c.grid));
+        let png = (!screen.has(&Slot::Side, k)).then(|| list::encode(&Slot::Side, c, || page::draw(&side.page, rows, c, fonts))).transpose()?;
+        wants.push(Want { slot: Slot::Side, key: k, png, places: vec![whole(view.col + side.col, c, view.row, rows)] });
+    }
     if let Some(foot) = view.foot.as_ref().filter(|_| foot_n > 0) {
-        let k = list::key(&Slot::Foot, &f, (foot, foot_n));
-        let png = (!screen.has(&Slot::Foot, k)).then(|| list::encode(&Slot::Foot, canvas, || frame::foot(foot, foot_n, canvas, fonts))).transpose()?;
-        wants.push(Want { slot: Slot::Foot, key: k, png, places: vec![whole(view, canvas, view.row + view.rows_n, foot_n)] });
+        let k = list::key(&Slot::Foot, &f, (foot, foot_n, full.grid));
+        let png = (!screen.has(&Slot::Foot, k)).then(|| list::encode(&Slot::Foot, full, || frame::foot(foot, foot_n, full, fonts))).transpose()?;
+        wants.push(Want { slot: Slot::Foot, key: k, png, places: vec![whole(view.col, full, view.row + view.rows_n, foot_n)] });
     }
     wants.extend(sprites);
     drop(f);
@@ -439,20 +512,29 @@ fn settle(seen: &mut HashMap<String, Mark>, settling: &mut HashMap<String, u128>
     let mut now = HashMap::new();
     for row in &rows.rows {
         if let Row::Task(t) = row {
-            if seen.get(&t.id).is_some_and(|m| *m != t.mark) && !sprite::turns(&t.mark) {
-                settling.insert(t.id.clone(), ms);
+            if seen.get(&t.who()).is_some_and(|m| *m != t.mark) && !sprite::turns(&t.mark) {
+                settling.insert(t.who(), ms);
             }
-            now.insert(t.id.clone(), t.mark.clone());
+            now.insert(t.who(), t.mark.clone());
         }
     }
     *seen = now;
 }
 
-/// The placement of an image as wide as the board's images, from the board's row `row`,
+/// The placement of an image `c` wide, from the pane's column `col` and row `row`,
 /// `rows` cells high: all of it.
-fn whole(view: &View, c: &Canvas, row: u16, rows: u16) -> kitty::Place {
+fn whole(col: u16, c: &Canvas, row: u16, rows: u16) -> kitty::Place {
     let (crop_w, crop_h) = (c.grid.width(), rows as u32 * c.grid.cell_h);
-    kitty::Place { id: 0, p: 1, col: view.col, row, crop_x: 0, crop_y: 0, crop_w, crop_h, cols: view.cols, rows, z: 0 }
+    kitty::Place { id: 0, p: 1, col, row, crop_x: 0, crop_y: 0, crop_w, crop_h, cols: c.grid.cols as u16, rows, z: 0 }
+}
+
+/// What a view's images are drawn on at a cell of `cell` pixels: the list's canvas, the
+/// top line's and bottom rows' (as wide as the pane on mission control), and the page's
+/// beside the list (no wider than its lines read well).
+fn canvases(view: &View, cell: (u32, u32), size: TextSize, theme: Theme) -> (Canvas, Canvas, Option<Canvas>) {
+    let canvas = |cols: u16| Canvas::new(Grid { cols: cols as usize, cell_w: cell.0, cell_h: cell.1 }, size, theme);
+    let side = view.side.as_ref().map(|s| canvas(s.cols.min(page::MOST_COLS as u16)));
+    (canvas(view.cols), canvas(view.full), side)
 }
 
 /// The font for `path` (the board_font setting), loaded once into `slot`.
@@ -471,42 +553,89 @@ fn window_cell() -> Option<(u32, u32)> {
         .then(|| (s.width as u32 / s.columns as u32, s.height as u32 / s.rows as u32))
 }
 
-/// Back to text, saying why on the message line.
-fn fall_back(app: &mut App, why: String) -> bool {
-    app.look = Look::Text;
-    app.msg = Note::info(why);
-    true
+/// The board draws for the image look as its frame laid it out (ui/), in its settings'
+/// type; drawing ahead presses j and k on it (ahead.rs).
+impl Host for App {
+    fn look(&self) -> Look {
+        self.look
+    }
+
+    fn style(&self) -> (TextSize, Option<PathBuf>, bool) {
+        (self.cfg.text_size, self.cfg.font.clone(), self.cfg.motion)
+    }
+
+    fn started(&self) -> std::time::Instant {
+        self.started
+    }
+
+    fn view(&self) -> Option<View> {
+        self.view.clone()
+    }
+
+    fn placed(&mut self, top: usize, page: usize) {
+        (self.top, self.page) = (top, page);
+    }
+
+    /// Back to text, saying why on the message line.
+    fn fall_back(&mut self, why: String) {
+        self.look = Look::Text;
+        self.msg = Note::info(why);
+    }
+
+    fn drawable(&self) -> bool {
+        self.cfg.layout == Layout::Grouped
+    }
+
+    fn at_rest(&self) -> bool {
+        matches!(self.mode, crate::Mode::Normal) && self.pending.is_none()
+    }
+
+    fn moved(&mut self, key: char, area: ratatui::layout::Rect) -> Option<View> {
+        ahead::moved(self, key, area)
+    }
 }
 
-/// Write the board as the image look draws it to a PNG file (`bullpen-board … --render
-/// FILE`): its top line, its whole list and its key row, `view.cols` columns wide, at a
-/// cell of `cell` pixels, in `theme`'s colours on its background. For looking at the
-/// image look without a terminal.
+/// Write the board (or mission control) as the image look draws it to a PNG file
+/// (`bullpen-board … --render FILE`): its top line, its whole list (with mission
+/// control's page beside it) and its key row, `view.full` columns wide, at a cell of
+/// `cell` pixels, in `theme`'s colours on its background. For looking at the image look
+/// without a terminal.
 pub fn render_file(view: &View, size: TextSize, cell: (u32, u32), theme: Theme, font: Option<&Path>, path: &Path) -> Result<(), String> {
     let mut fonts = Fonts::load(font)?;
-    let canvas = Canvas::new(Grid { cols: view.cols as usize, cell_w: cell.0, cell_h: cell.1 }, size, theme);
+    let (canvas, full, side) = canvases(view, cell, size, theme);
     let laid = render::lay(&view.rows, &canvas, &fonts);
     // (the list as tall as its rows, not rounded up to cells as on a terminal, where
     // it's cut to the pane: the space a short list leaves isn't the look's)
     let n = view.rows.rows.len();
     let list_h = laid.tall(0, n);
-    let parts = [
-        frame::head(&view.head, view.row - view.row0, &canvas, &mut fonts)?,
-        render(&view.rows, &laid, render::Cut::rows(0..n, list_h), &canvas, &mut fonts)?.pixmap,
-        match &view.foot {
-            Some(foot) => frame::foot(foot, view.foot_n, &canvas, &mut fonts)?,
-            None => tiny_skia::Pixmap::new(1, 1).ok_or("can't make the image")?,
-        },
-    ];
-    // one under the other, on the background, as a terminal shows them
-    let height = parts.iter().map(|p| p.height()).sum();
-    let mut pm = tiny_skia::Pixmap::new(canvas.grid.width(), height).ok_or("can't make the image")?;
+    let head_n = view.row - view.row0;
+    let head = match &view.fleet {
+        Some(fleet) => fleet::head(fleet, head_n, &full, &mut fonts)?,
+        None => frame::head(&view.head, head_n, &full, &mut fonts)?,
+    };
+    let list = render(&view.rows, &laid, render::Cut::rows(0..n, list_h), &canvas, &mut fonts)?.pixmap;
+    let page = match (&view.side, &side) {
+        (Some(s), Some(c)) => Some((s.col, page::draw(&s.page, page::rows(&s.page, c, &mut fonts, u16::MAX), c, &mut fonts)?)),
+        _ => None,
+    };
+    let foot = match &view.foot {
+        Some(foot) => frame::foot(foot, view.foot_n, &full, &mut fonts)?,
+        None => tiny_skia::Pixmap::new(1, 1).ok_or("can't make the image")?,
+    };
+    // one under the other, on the background, as a terminal shows them; the page beside the list
+    let body = list.height().max(page.as_ref().map_or(0, |(_, p)| p.height()));
+    let height = head.height() + body + foot.height();
+    let mut pm = tiny_skia::Pixmap::new(full.grid.width(), height).ok_or("can't make the image")?;
     pm.fill(tiny_skia::Color::from_rgba8(theme.bg.0, theme.bg.1, theme.bg.2, 255));
-    let mut y = 0;
-    for p in &parts {
-        pm.draw_pixmap(0, y, p.as_ref(), &tiny_skia::PixmapPaint::default(), tiny_skia::Transform::identity(), None);
-        y += p.height() as i32;
+    let mut put = |p: &tiny_skia::Pixmap, x: u32, y: u32| {
+        pm.draw_pixmap(x as i32, y as i32, p.as_ref(), &tiny_skia::PixmapPaint::default(), tiny_skia::Transform::identity(), None);
+    };
+    put(&head, 0, 0);
+    put(&list, 0, head.height());
+    if let Some((col, p)) = &page {
+        put(p, *col as u32 * cell.0, head.height());
     }
+    put(&foot, 0, head.height() + body);
     std::fs::write(path, png::encode(&pm)).map_err(|e| format!("can't write {}: {e}", path.display()))
 }
 

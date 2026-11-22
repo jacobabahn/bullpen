@@ -15,6 +15,7 @@
 
 mod draw;
 pub(crate) mod items;
+mod look;
 pub mod run;
 #[cfg(test)]
 #[path = "tests/testing.rs"]
@@ -23,13 +24,19 @@ pub(crate) mod testing;
 pub use items::{Item, Row};
 
 use crate::app::{App, Mode, Msg, Note};
-use crate::model::{self, Config, Task};
+use crate::model::{self, Config, Look, Task};
 use bullpen_core::fleet::{Fleet, Reader};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Sender};
 use std::time::{Duration, Instant};
+
+/// The global settings over the defaults; the defaults when they can't be read (each
+/// repository's board says why).
+fn global() -> Config {
+    Config::from_obj(bullpen_core::config::inherited_config().unwrap_or_default())
+}
 
 /// What mission control's loop hears.
 pub enum MMsg {
@@ -42,6 +49,9 @@ pub enum MMsg {
     Board(PathBuf, Msg),
     /// which coordinators' panes are alive: (repo's state folder, coordinator, alive)
     Alive(Vec<(PathBuf, String, bool)>),
+    /// the image look's: the key reader stopped for the terminal's answers, or read
+    /// them; an image drawn ahead is ready (the board's `Msg::Parked`, `Answered`, `Ready`)
+    Look(Msg),
 }
 
 /// The selected task: its repo's state folder and its ID (IDs repeat across repos).
@@ -70,11 +80,21 @@ pub struct Mission {
     pub started: Instant,
     /// the Rex session this runs in: a diff opens over it
     pub session: Option<String>,
+    /// the global settings (the board's look, type and motion are mission control's too)
+    pub cfg: Config,
+    /// drawn as text or images: the board_look setting, until the images can't be drawn
+    pub look: Look,
+    /// the board_look setting as last read: a change to it changes `look`
+    look_set: Look,
+    /// drawn as images this frame (the terminal draws them), and the frame's view for them
+    pub image: bool,
+    pub view: Option<crate::image::View>,
     tx: Sender<MMsg>,
 }
 
 impl Mission {
     pub fn new(state: PathBuf, bullpen: PathBuf, select: Option<Sel>, tx: Sender<MMsg>) -> Mission {
+        let cfg = global();
         Mission {
             state,
             bullpen,
@@ -91,6 +111,11 @@ impl Mission {
             height: 0,
             started: Instant::now(),
             session: std::env::var("REX_SESSION").ok().filter(|s| !s.is_empty()),
+            look: cfg.look,
+            look_set: cfg.look,
+            cfg,
+            image: false,
+            view: None,
             tx,
         }
     }
@@ -98,6 +123,10 @@ impl Mission {
     /// Read the snapshot again (only the files that changed). One that can't be read
     /// (a broken global config) keeps the last, and says why.
     pub fn reload(&mut self) {
+        self.cfg = global();
+        if self.cfg.look != self.look_set {
+            (self.look, self.look_set) = (self.cfg.look, self.cfg.look);
+        }
         match self.reader.read(&self.state) {
             Ok(fleet) => self.take(fleet),
             Err(e) => self.msg = Note::failed(e.0),
@@ -244,7 +273,7 @@ impl Mission {
                 let fleet = std::mem::take(&mut self.fleet);
                 self.take(fleet);
             }
-            MMsg::Redraw | MMsg::Changed => {}
+            MMsg::Redraw | MMsg::Changed | MMsg::Look(_) => {}
         }
         true
     }

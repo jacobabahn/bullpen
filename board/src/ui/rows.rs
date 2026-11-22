@@ -27,6 +27,23 @@ pub(crate) enum Row {
     /// item is selected (the text list's: the selected item's; the image's: any item's
     /// with something to know)
     ItemDetail(String, usize, bool),
+    /// a repository's heading in mission control's image look: its name, where it is,
+    /// its coordinators (never on a board)
+    Repo(RepoRow),
+}
+
+/// A repository's heading (mission control's): its name, its folder and how many tasks
+/// are open, and each coordinator's ID and state; a blocked one's question under it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct RepoRow {
+    pub name: String,
+    /// "~/dev/bullpen · 5 open"
+    pub place: String,
+    /// each coordinator's words ("c4 working", or "no coordinator") and its state's word
+    /// (working, blocked, idle, gone, unknown: core's `Coordinator::word`)
+    pub coordinators: Vec<(String, &'static str)>,
+    /// what a blocked coordinator asks, under the heading: it waits on you
+    pub question: Option<String>,
 }
 
 /// A task's mark: still, or one the text board turns.
@@ -83,6 +100,17 @@ pub(crate) struct TaskRow {
     /// the repository it's in, before its title, dim: mission control's inbox, which
     /// lists every repository's; empty on a board
     pub repo: String,
+    /// on mission control, the state folder of the repository it's in (IDs repeat across
+    /// repositories); empty on a board
+    pub dir: String,
+}
+
+impl TaskRow {
+    /// What tells this task from every other on the screen: its ID, and on mission
+    /// control its repository's.
+    pub(crate) fn who(&self) -> String {
+        if self.dir.is_empty() { self.id.clone() } else { format!("{}\n{}", self.dir, self.id) }
+    }
 }
 
 /// A line under a task.
@@ -297,6 +325,7 @@ pub(crate) fn task_row(app: &App, t: &Task, selected: bool, with_age: bool, now:
         yours: (t.flagged() || t.status == "ready") && !app.cfg.theirs(t, app.me.as_deref()),
         key: model::task_keys(Some(t)).first().filter(|_| selected && asked.is_none()).map(|(k, what)| (k.to_string(), what.to_string())),
         repo: String::new(),
+        dir: String::new(),
     }
 }
 

@@ -40,6 +40,8 @@ pub enum Slot {
     List,
     /// the bottom rows
     Foot,
+    /// the page beside mission control's list
+    Side,
     /// the selected block's cells, the cell where the last whole row ends, and the
     /// list's first cell when rows are scrolled off above it
     Sel,

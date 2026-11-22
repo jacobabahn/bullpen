@@ -31,7 +31,7 @@ pub fn draw(d: &mut Draw, c: &Canvas, tallies: &[Tally]) {
 /// A segment, or a count's dot: a round-ended bar in its group's colour, filled, but
 /// a finished task's, which is a line of its green round a faint fill of it, so it
 /// isn't taken for one that's ready, a full green, nor for an empty place.
-fn mark(d: &mut Draw, x: f32, y: f32, w: f32, h: f32, status: &str) {
+pub(super) fn mark(d: &mut Draw, x: f32, y: f32, w: f32, h: f32, status: &str) {
     let (r, color) = ((h.min(w) / 2.0).floor(), d.theme().group(status));
     if status == "finished" && w >= 6.0 && h >= 6.0 {
         d.rounded_fill(x, y, w, h, r, [color[0], color[1], color[2], 80]);
