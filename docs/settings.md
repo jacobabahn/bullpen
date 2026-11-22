@@ -58,7 +58,8 @@ list of tasks, its top line and its key rows) as images (kitty graphics) instead
 text (`text` by default; the board's `I` switches for one run, and `I` twice redraws
 it in a new theme's colours; the compact layout stays text, and a terminal that
 doesn't draw images gets text with a line saying why), and its guided tours too (see
-[Drawn as images](tours.md#drawn-as-images)). `--board-text-size` sets its
+[Drawn as images](tours.md#drawn-as-images)), and mission control from the global
+setting (see [Drawn as images](mission.md#drawn-as-images)). `--board-text-size` sets its
 type: `medium` (the default, the terminal's own text size, a row a little more than a
 cell), `large`, or `small` (a cell a row, as the text; a drawn tour's prose is never
 under medium). `--board-font PATH` has it

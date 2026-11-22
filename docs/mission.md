@@ -73,6 +73,63 @@ sit side by side and every task gets a line under it. From 80 columns, the same,
 the repositories' tasks are a line each. Under 80 there is one column, the
 coordinators are marks, and the selected task's detail is under it in the list.
 
+## Drawn as images
+
+With `bullpen config --global --board-look image` (the board's [image
+look](board.md#the-image-look); mission control reads the global setting, with
+`board_text_size`, `board_font` and `board_motion`), mission control is drawn as the
+board is: the same type, marks, cards, washes, chips and keycaps, in the terminal's
+own colours. It says everything the text says, through the same keys.
+
+- **The header**: "Mission control" in the pane's largest type, what's under way after
+  it, dim ("3 of 13 running · 4 repos"), then at the right the chips: coordinators
+  blocked and what needs you in amber, what's ready in green (their numbers alone when
+  the words don't fit), and the time. Under it the fleet's bar: a run of segments for
+  each repository, a segment a task in its group's colour (as the board's bar), and
+  under each run its coordinator's mark, its name, and what needs you or is ready there
+  when that fits. A blocked coordinator's repository is named in bold amber, a gone one's
+  in amber. When the names don't fit on one line the runs wrap onto another, so a name
+  is never cut (the words after it go first).
+- **The list**: the board's rows. What needs you, then what's ready, under the
+  board's group names, each task as its repository's board draws it, its
+  repository's name before its title, dim, in a column of its own (cut past a fifth of
+  the pane). Then each repository's heading: its name, its folder and how many are
+  open, its coordinators at the right, each a mark and its state: working the working
+  task's turning ring, blocked the amber disc of one that needs you (in bold amber),
+  idle a dim ring, gone an amber cross. A blocked coordinator's heading sits on the
+  amber wash with its bar, its question under it, as a task that needs you does.
+  Without room, the folder goes first, then the coordinators' words (their marks stay).
+  Under each heading, its other open tasks. The selected task sits on the board's card,
+  with `⏎ open` in its corner.
+- **The page**, beside the list from 80 columns: the selected task's ID, repository and
+  folder, its title large, its mark and status in its colour and its age, its keys in
+  caps (`p peek`, `⏎ go to its pane`, then its own), what its agent is doing, where it
+  stands and the size of its change, and for a task in review, ready or finished what
+  its worker said, under a rule. Under 80 columns there's no page: the list is the
+  pane, and the card's lines are its detail, as on the board.
+- **The bottom rows**: the message and the keys in caps, the selected task's then `n`
+  `/` `q`, the task's dropping from their end to fit.
+
+What's typed or asked at the bottom (a tell, a y/n question, `q`'s), a peek, a
+prompt being answered and a coordinator's question stay text, as on the board; the
+images come back after. With `board_look text`, on a terminal that doesn't draw
+kitty graphics (or doesn't say its cell size), or when the font can't be read, it's
+the text mission control, the message line saying why.
+
+Each image is drawn at the pane's cell size as it is that frame, and drawn again when
+it changes: a floating pane, first opened at a placeholder size, is drawn at its real
+cell once it has one, never stretched. No image is over the terminal's limit (one that
+would be is sent in strips), and everything kept stays under the pane's budget, as the
+board's ([Images under the terminal's limit](code.md#images-under-the-terminals-limit)).
+Moving the selection only places images: the list is the board's pieces, and while it
+waits for a key mission control draws what `j` and `k` would show next (the selected
+block and the page) and sends it unplaced. A key is about a millisecond and under a
+kilobyte, as the board's.
+
+`bullpen-board --mission --state <state folder> --bullpen <program> --render FILE`
+writes mission control as the image look draws it to FILE (`--cols N`, 160 by
+default; `--theme light` or `dark`), without a terminal.
+
 ## Keys
 
 | Key | What it does |

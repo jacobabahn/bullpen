@@ -128,7 +128,22 @@ the image look starts or comes back and on a resize, never on a timer: the key r
 (`main.rs`) stops at the board's wish (a `Gate`), marks itself parked before it tells
 the board, and reads the answers itself, up to the terminal's last; the gate opens to
 keys again when the reader's `Open` drops, on every way out. What's typed or asked at
-the bottom, overlays and mission control stay text.
+the bottom and overlays stay text.
+
+Mission control's image look (docs/mission.md) is the same code: `Picture` draws for a
+`Host` (image/mod.rs), which the board's `App` and mission control's `Mission`
+(mission/look.rs) both are. Each hands it a `View`, says its look and type, takes back
+the list's first row, and lets drawing ahead press j and k on it off screen. Mission
+control's `View` is the board's rows (ui/rows.rs) for every repository's tasks, each
+from its repository's `App` as its board makes them, with a heading for each
+repository (`Row::Repo`, drawn by image/fleet.rs) and the inbox's tasks naming theirs
+(`TaskRow::repo`; `TaskRow::who` tells tasks apart across repositories, whose IDs
+repeat); its header is `fleet` (image/fleet.rs: the chips and the fleet's bar, a run of
+segments a repository, wrapped onto more lines rather than cut a name), as wide as the
+pane (`full`), and the selected task's page beside the list is `side` (image/page.rs),
+an image only as tall as what it says. The page is drawn ahead with the selected block,
+so j and k only place images there too. Its key reader is the board's (`read_keys`,
+stopping for the terminal's answers), whose messages run.rs hands on to its loop.
 
 How fast a j or k is, without a terminal: `bin/bullpen-cargo test -p bullpen-board
 --release bench -- --ignored --nocapture --test-threads 1` (image/tests/test_bench.rs)
@@ -141,7 +156,11 @@ notes them, in tests only), the bytes sent by image, how many keys sent the list
 again, and what drawing ahead took after it; the first frame, and a task's title
 changing on screen and off; then a held-down j (20 keys 30 ms apart):
 the frames, how far the last frame lands after the last key, and each key's wait.
-`BENCH_ONLY="80×45 32px,text"` runs some cases. Sizes come from the renderer, so it
+`BENCH_ONLY="80×45 32px,text"` runs some cases. Mission control's case is `bench_mission`
+(mission/tests/test_bench.rs, run the same way by its name): four repositories with a
+task in every status and a blocked coordinator, at 160×46 cells of 16×34, 211×65 of 19×37
+and 64×48 of 19×37, its text beside its images; for a j or k, the time to its frame's
+last byte, the bytes, how many keys sent the list again, and the first frame. Sizes come from the renderer, so it
 stays right when the look changes; run it before and after a change to the look's
 drawing to see it didn't undo these numbers. It can't see the terminal's own decoding
 and drawing, or the network.

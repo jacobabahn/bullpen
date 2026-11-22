@@ -228,9 +228,10 @@ in their rows, clear of the pane's bottom edge, and the rule over them is above 
 message's row whether there's a message or not. The scroll marks are small chevrons
 at the list's right edge. What you type into stays text: while a tell, a y/n
 question (an accept's, a drop's, `q`'s) or the stale tour's question is open, the
-bottom rows are text, cursor and all, and are drawn again after. `?`, peeks, answers
-and mission control stay text, and so does the compact layout (`l`): with it the
-board is text whatever the look.
+bottom rows are text, cursor and all, and are drawn again after. `?`, peeks and
+answers stay text, and so does the compact layout (`l`): with it the board is text
+whatever the look. Mission control is drawn in the same look (see [Drawn as
+images](mission.md#drawn-as-images)).
 
 `bullpen config --board-text-size` sets the type: `medium` (the default) is the
 terminal's own text size, with the lines under each title smaller and dimmer, a
