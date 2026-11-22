@@ -48,12 +48,31 @@ pub const MOST_COLS: usize = 96;
 const TITLE: f32 = 1.1;
 const TITLE_LINE: f32 = 1.32;
 
-/// How many cells high the page is, at most `most`.
+/// How many cells high the page is, at most `most`. Measured once for a page and a
+/// canvas (kept for the last few), since every frame asks.
 pub fn rows(page: &Page, c: &Canvas, fonts: &mut Fonts, most: u16) -> u16 {
-    let mut pm = Pixmap::new(1, 1).expect("a pixel");
-    let mut d = Draw::new(&mut pm, fonts, c, 0.0);
-    let h = d.page(page, f32::MAX);
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (page, c.grid, c.theme, c.m.title.to_bits()).hash(&mut hasher);
+    let key = hasher.finish();
+    let h = MEASURED.with(|m| m.borrow().get(&key).copied()).unwrap_or_else(|| {
+        let mut pm = Pixmap::new(1, 1).expect("a pixel");
+        let h = Draw::new(&mut pm, fonts, c, 0.0).page(page, f32::MAX);
+        MEASURED.with(|m| {
+            let mut m = m.borrow_mut();
+            if m.len() >= 64 {
+                m.clear();
+            }
+            m.insert(key, h);
+        });
+        h
+    });
     ((h / c.grid.cell_h as f32).ceil() as u16).clamp(1, most.max(1))
+}
+
+thread_local! {
+    /// The pages measured: each one's height in pixels, by what it says and its canvas.
+    static MEASURED: std::cell::RefCell<std::collections::HashMap<u64, f32>> = Default::default();
 }
 
 /// The page drawn, `rows` cells high (what doesn't fit is left out).

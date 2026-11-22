@@ -334,3 +334,7 @@ pub fn render(m: &mut Mission, cols: u16, cell: (u32, u32), theme: crate::image:
 #[cfg(test)]
 #[path = "tests/test_look.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/test_bench.rs"]
+mod bench;

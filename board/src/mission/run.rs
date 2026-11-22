@@ -227,7 +227,7 @@ pub fn main(argv: Vec<String>) {
 
 /// Draw a frame: the text, then the images after it, through the same output. True when
 /// it's to be drawn again at once (the images couldn't be drawn: text now).
-fn draw<B: ratatui::backend::Backend + Write>(term: &mut ratatui::Terminal<B>, m: &mut Mission, picture: &mut Picture) -> std::io::Result<bool> {
+pub(super) fn draw<B: ratatui::backend::Backend + Write>(term: &mut ratatui::Terminal<B>, m: &mut Mission, picture: &mut Picture) -> std::io::Result<bool> {
     m.image = picture.drawing(m);
     // each repository's board says its tasks' lines as the image look does
     for app in m.boards.values_mut() {

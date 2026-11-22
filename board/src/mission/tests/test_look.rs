@@ -169,7 +169,7 @@ fn every_image_is_under_the_terminals_limit_and_cut_up_covers_its_cells_once() {
     for c in under.split("\x1b7\x1b[").skip(1) {
         let (Some(row), Some(col)) = (c.split(';').next().and_then(|r| r.parse::<u16>().ok()), c.split(';').nth(1).and_then(|r| r.split('H').next()?.parse::<u16>().ok())) else { continue };
         let Some(rows) = c.split("\x1b_G").nth(1).and_then(|k| field(k, "r=")) else { continue };
-        let which = if col - 1 >= v.side.as_ref().unwrap().col { &mut page } else { &mut list };
+        let which = if col > v.side.as_ref().unwrap().col { &mut page } else { &mut list };
         (row - 1..row - 1 + rows).for_each(|r| which[r as usize] += 1);
     }
     assert!(list.iter().chain(&page).all(|k| *k <= 1), "{list:?} {page:?}");
@@ -216,4 +216,33 @@ fn render_writes_mission_control_as_the_image_look_draws_it() {
     assert_eq!(&png[1..4], b"PNG");
     let width = u32::from_be_bytes(png[16..20].try_into().unwrap());
     assert_eq!(width, 1190);
+}
+
+#[test]
+fn a_new_cell_size_draws_every_image_again_at_it() {
+    // a floating pane opens at a placeholder cell and is sized a moment later: the
+    // images are drawn at the cell the pane has each frame, never stretched
+    let s = State::new("look-cell");
+    let mut m = fleet(&s);
+    let mut p = Picture::answered_for_test((8, 16));
+    let first = frame(&mut m, &mut p, 160, 50);
+    assert!(first.contains("w=1272,")); // the header, 159 columns of 8 pixels
+    p.answered(&crate::image::term::Answers { done: true, cell: Some((19, 37)), ..Default::default() });
+    let out = frame(&mut m, &mut p, 160, 50);
+    assert!(sent(&out).len() >= 4 && out.contains("w=3021,"), "{}", sent(&out).len());
+    assert!(!out.contains("w=1272,"));
+}
+
+#[test]
+fn a_peek_over_mission_control_is_text_and_takes_the_images_off_the_screen() {
+    let s = State::new("look-peek");
+    let mut m = fleet(&s);
+    let mut p = Picture::answered_for_test((10, 20));
+    frame(&mut m, &mut p, 160, 50);
+    let dir = m.sel.clone().unwrap().0;
+    m.boards.get_mut(&dir).unwrap().mode = crate::app::Mode::Overlay { title: "BP-1".into(), lines: vec!["its screen".into()], peek: Some("BP-1".into()) };
+    let out = frame(&mut m, &mut p, 160, 50);
+    assert!(m.view.is_none() && sent(&out).is_empty());
+    assert!(out.contains("a=d,d=i,"), "{out:?}");
+    assert!(screen(&mut m, 160, 50).iter().any(|l| l.contains("its screen")));
 }
