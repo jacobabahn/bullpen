@@ -5,10 +5,10 @@
 
 use crate::args::Args;
 use crate::auto_accept::{checks, first_of, pr_view, run_auto_accept};
+use crate::host::Agent;
 use crate::news::kind::Kind;
 use crate::news::{news, Opts};
 use crate::review::close_reviewer;
-use crate::host::Agent;
 use crate::saves::{followed, save};
 use crate::start::launch::hand_back;
 use crate::stops::stop;

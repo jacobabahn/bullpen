@@ -1,7 +1,9 @@
 //! Rex: running its commands, and finding (`find_pane`, by ID or label), typing into,
 //! focusing and closing panes; a pane's terminal and program, and the end of its screen
-//! (`screen_end`). The host interface (`host/`) calls these for an agent on Rex. A session or block that Python has as None is "" here: Rex is given `-s` only
-//! for a session there is.
+//! (`screen_end`). An agent on Rex is reached through the host interface (host/rex.rs),
+//! which calls these; the Rex-only code (panes, boards, the watcher) calls them itself.
+//! A session or block that Python has as None is "" here: Rex is given `-s` only for a
+//! session there is.
 
 use bullpen_core::fail::Res;
 use bullpen_core::json::{py_str, s, truthy, Obj};

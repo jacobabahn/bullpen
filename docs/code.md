@@ -309,7 +309,8 @@ steps: `place` (make the pane; one the hide key puts away gets its hint in its l
 `show`, `hide` (False when it has no away, so `hide` exits 3), `find` (by ID, else
 label, after a Rex restart), and what `gather` does to keep it home. Code that makes,
 shows, hides or finds one of these panes calls `panes.place`, `show`, `hide`, `find`
-and `gather`, and never reads the settings. `place` returns the placement's name with
+and `gather` (a worker's or reviewer's is made through its host, below, whose Rex
+side calls `place`), and never reads the settings. `place` returns the placement's name with
 the block, and the caller records it with the pane (the task's `pane`, its review's
 `pane`): a background pane that's up floats like a capsule, so the record is what
 says to detach it rather than minimize it. Otherwise showing and hiding go by where the
@@ -317,6 +318,36 @@ pane is now (`placement_at`), so a pane started before the settings changed keep
 working. Rex's `session.view` lists only placed blocks: `BACKGROUND.find` asks
 `session.list_blocks` for the detached ones, once per view. A new placement is a new
 `Placement` there.
+
+## The host an agent runs on
+
+A task's worker and reviewer, and a coordinator, are agents on a host: Rex now, where
+an agent is a pane. What bullpen asks of a host is the `Host` trait in
+`cli/src/host/mod.rs`, in its own terms: start an agent for a task (with a label, in its
+worktree), tell it something, is it alive, read the end of what it shows, its status
+record and its state (working, blocked, idle, a shell still running, gone), is it
+compacting, the question it's at and answering it, is something half-typed in its
+input, show, hide and close it, and set its title. Code reaches an agent through an
+`Agent` (its host, where on the host it lives and its ID there): `Agent::of(record)`
+for a task or coordinator, `agents::agent(t, who)` for a task's worker or reviewer.
+Nothing there assumes a pane or a screen: Rex reads its screens (`screen/`) to answer
+what another host may report itself.
+
+A task records its agent's host as `host` beside its `session` and `block` (its
+review's, beside the reviewer's), written by `Agent::record`; a record without one is
+on Rex, so older task files read as they did. `host::for_new` picks the host a new
+agent starts on (always Rex for now).
+
+The rest stays Rex's and calls `cli/src/rex.rs` itself: panes and their placements
+(above), boards, diff panes, the watcher, mission control, `go` and the hide key (they
+move between Rex panes, boards included), finding panes again after a Rex restart
+(`go/relink.rs`), starting a coordinator (`up`), notifications sent through a pane's
+terminal, and kitty graphics. `host/mod.rs`'s header lists which parts are which.
+
+To add a host: implement `Host` in a file of its own in `cli/src/host/` (Rex's is
+`rex.rs`), add it to `host::named`, and have `for_new` start agents on it when it
+should. The Rex-only code above goes through tasks' blocks (gather, relink, the block
+index), so a host whose agents aren't Rex panes keeps its tasks out of it.
 
 ## Local mode and remote mode
 

@@ -11,8 +11,8 @@
 use crate::agents::waited_on;
 use crate::args::{flag, pos, Arg, Args, Nargs};
 use crate::events::{event, gone, Event};
-use crate::modes::task_base_ref;
 use crate::host::{State, SETTLE};
+use crate::modes::task_base_ref;
 use crate::stops::{escalate, overdue};
 use bullpen_core::json::{self, py_str, s, truthy, Obj};
 use bullpen_core::proc::git;

@@ -1,16 +1,16 @@
 //! Answering a task's prompt from the board, and replying to what the coordinator asked:
 //! `prompt`, `answer` and `reply`.
 //!
-//! A task whose agent is at a prompt can be answered from the board: `prompt` reads the
-//! question and its options from its host (Rex: off the pane's screen, screen/prompt.rs), and `answer`
-//! presses one of them, once it has read it again and found the same question
-//! there. A task the coordinator asked the person about (`ask`) is answered with `reply`:
+//! A task whose agent is at a prompt can be answered from the board: `prompt` asks its
+//! host for the question and its options (Rex reads them off the pane's screen,
+//! screen/prompt.rs), and `answer` gives one of them, once it has asked again and found
+//! the same question there. A task the coordinator asked the person about (`ask`) is answered with `reply`:
 //! the answer goes to the coordinator, never to the worker.
 
 use crate::agents::{agent, running};
-use crate::host::Agent;
 use crate::args::{pos, usage_error, value, Arg, Args, Nargs};
 use crate::coordinators::sees_to;
+use crate::host::Agent;
 use crate::news::kind::Kind;
 use crate::news::{news, Opts};
 use crate::saves::save;
