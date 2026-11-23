@@ -120,7 +120,7 @@ fn enter_names(m: &Mission) -> Vec<String> {
 fn the_card_the_page_and_the_keys_give_enter_one_name_reviewer_when_it_opens_the_reviewers_pane() {
     let s = State::new("look-enter");
     let mut m = fleet(&s);
-    let mut to = |m: &mut Mission, want: &str| {
+    let to = |m: &mut Mission, want: &str| {
         for c in ['j'; 10].into_iter().chain(['k'; 10]) {
             if crate::mission::testing::selected(m) == want {
                 return;
