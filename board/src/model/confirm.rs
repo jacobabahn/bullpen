@@ -2,20 +2,29 @@
 
 use super::*;
 
+/// What ⏎ is called for this task, wherever it's named: `reviewer` when it opens its
+/// reviewer's pane (its reviewer's turn), else `open`.
+pub fn enter_name(t: &Task) -> &'static str {
+    if t.reviewers_turn() {
+        "reviewer"
+    } else {
+        "open"
+    }
+}
+
 /// The keys that make sense for this task, for the footer: (key, what it does).
 pub fn task_keys(t: Option<&Task>) -> Vec<(&'static str, &'static str)> {
     let Some(t) = t else { return Vec::new() };
-    // ⏎ opens the pane the task is stopped on: its reviewer's, else its worker's
-    let enter = if t.on_reviewer() { "reviewer" } else { "open" };
+    let enter = enter_name(t);
     let mut keys: Vec<(&str, &str)> = match t.status.as_str() {
         "needs" if t.question().is_some() => vec![("i", "answer"), ("⏎", enter), ("t", "tell"), ("p", "peek")],
         "needs" => vec![("⏎", enter), ("t", "tell"), ("p", "peek")],
         "triage" => vec![("⏎", enter), ("p", "peek"), ("t", "tell")],
         "stopped" => vec![("r", "resume"), ("p", "peek"), ("d", "drop")],
-        "review" => vec![("⏎", "reviewer"), ("g", "tour"), ("p", "peek")],
-        "ready" => vec![("a", "accept"), ("g", "tour"), ("d", "drop"), ("⏎", "open")],
-        "finished" => vec![("a", "close"), ("d", "drop"), ("⏎", "open")],
-        "working" => vec![("⏎", "open"), ("t", "tell"), ("p", "peek")],
+        "review" => vec![("⏎", enter), ("g", "tour"), ("p", "peek")],
+        "ready" => vec![("a", "accept"), ("g", "tour"), ("d", "drop"), ("⏎", enter)],
+        "finished" => vec![("a", "close"), ("d", "drop"), ("⏎", enter)],
+        "working" => vec![("⏎", enter), ("t", "tell"), ("p", "peek")],
         "todo" => vec![("s", "start"), ("d", "drop")],
         _ => Vec::new(),
     };

@@ -94,7 +94,8 @@ pub(super) fn list(m: &Mission, selection: bool, now: Now) -> Rows {
 }
 
 /// A task's row and its lines, as its repository's board draws them; in the inbox, its
-/// repository's name before its title; selected, ⏎ in its card's corner.
+/// repository's name before its title; selected, ⏎ in its card's corner, by the name
+/// the footer and the page give it.
 fn task_rows(m: &Mission, i: items::Item, inbox: bool, selected: bool, now: Now) -> Vec<Row> {
     let r = &m.fleet.repos[i.repo];
     let Some(app) = m.boards.get(&r.repo.dir) else { return vec![] };
@@ -106,7 +107,7 @@ fn task_rows(m: &Mission, i: items::Item, inbox: bool, selected: bool, now: Now)
     }
     row.dir = r.repo.dir.display().to_string();
     if row.key.is_some() {
-        row.key = Some(("⏎".into(), "open".into()));
+        row.key = Some(("⏎".into(), model::enter_name(t).into()));
     }
     let mut out = vec![Row::Task(row)];
     rows::details(&mut out, app, t, selected, false, usize::MAX, now);
@@ -199,7 +200,7 @@ fn page(m: &Mission, now: Now) -> Option<Page> {
     let (app, t, item) = m.current_task()?;
     let ts = items::task(&m.fleet, item);
     let rs = &m.fleet.repos[item.repo];
-    let mut keys: Vec<(String, String)> = vec![("p".into(), "peek".into()), ("⏎".into(), "go to its pane".into())];
+    let mut keys: Vec<(String, String)> = vec![("p".into(), "peek".into()), ("⏎".into(), model::enter_name(t).into())];
     let own = model::task_keys(Some(t)).into_iter().filter(|(k, _)| !matches!(*k, "p" | "⏎"));
     keys.extend(own.map(|(k, what)| (k.to_string(), what.to_string())));
     let mut lines = Vec::new();

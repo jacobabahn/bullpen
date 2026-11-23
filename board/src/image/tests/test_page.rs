@@ -16,7 +16,7 @@ fn page(said: usize) -> Page {
         status: "ready".into(),
         words: "ready to accept".into(),
         age: "1h".into(),
-        keys: vec![("p".into(), "peek".into()), ("⏎".into(), "go to its pane".into()), ("a".into(), "accept".into())],
+        keys: vec![("p".into(), "peek".into()), ("⏎".into(), "open".into()), ("a".into(), "accept".into())],
         lines: vec![("Local branch, approved by full review.".into(), Ink::Soft), ("14 files, +455 −228".into(), Ink::Dim)],
         said: (0..said).map(|i| format!("Paragraph {i} of what its worker said, long enough to wrap onto a second line here.")).collect(),
     }

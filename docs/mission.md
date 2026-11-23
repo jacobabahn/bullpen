@@ -100,10 +100,11 @@ own colours. It says everything the text says, through the same keys.
   amber wash with its bar, its question under it, as a task that needs you does.
   Without room, the folder goes first, then the coordinators' words (their marks stay).
   Under each heading, its other open tasks. The selected task sits on the board's card,
-  with `⏎ open` in its corner.
+  with `⏎ open` in its corner (`⏎ reviewer` when ⏎ opens its reviewer's pane, as the
+  board and the keys under the list call it).
 - **The page**, beside the list from 80 columns: the selected task's ID, repository and
   folder, its title large, its mark and status in its colour and its age, its keys in
-  caps (`p peek`, `⏎ go to its pane`, then its own), what its agent is doing, where it
+  caps (`p peek`, `⏎ open`, then its own), what its agent is doing, where it
   stands and the size of its change, and for a task in review, ready or finished what
   its worker said, under a rule. Under 80 columns there's no page: the list is the
   pane, and the card's lines are its detail, as on the board.

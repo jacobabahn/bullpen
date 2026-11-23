@@ -105,6 +105,36 @@ fn the_list_is_the_boards_rows_with_a_heading_for_each_repository_and_the_inbox_
     assert!(list(&m, true, crate::model::now()).rows.iter().any(|r| matches!(r, Row::Task(t) if t.selected && t.id == "BP-3")));
 }
 
+/// What the selected card's corner, the page and the keys under the list call ⏎.
+fn enter_names(m: &Mission) -> Vec<String> {
+    let now = crate::model::now();
+    let name = |keys: &[(String, String)]| keys.iter().find(|(k, _)| k == "⏎").map(|(_, what)| what.clone()).unwrap();
+    let card = list(m, true, now).rows.iter().find_map(|r| if let Row::Task(t) = r { t.key.clone() } else { None });
+    let page = page(m, now).unwrap();
+    let Some(Foot { lines }) = foot(m, 1, &[]) else { panic!("no keys") };
+    let FootLine::Mission(task, _) = &lines[0].1 else { panic!("{lines:?}") };
+    vec![card.unwrap().1, name(&page.keys), name(task)]
+}
+
+#[test]
+fn the_card_the_page_and_the_keys_give_enter_one_name_reviewer_when_it_opens_the_reviewers_pane() {
+    let s = State::new("look-enter");
+    let mut m = fleet(&s);
+    let mut to = |m: &mut Mission, want: &str| {
+        for c in ['j'; 10].into_iter().chain(['k'; 10]) {
+            if crate::mission::testing::selected(m) == want {
+                return;
+            }
+            press(m, c);
+        }
+        panic!("{want} never selected: {}", crate::mission::testing::selected(m));
+    };
+    to(&mut m, "bravo BP-1");
+    assert_eq!(enter_names(&m), vec!["open"; 3]);
+    to(&mut m, "bravo BP-2");
+    assert_eq!(enter_names(&m), vec!["reviewer"; 3]);
+}
+
 #[test]
 fn j_and_k_drawn_ahead_only_place_images() {
     let s = State::new("look-jk");
