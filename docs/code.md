@@ -239,35 +239,33 @@ The tour (`cli/src/stepper/`, docs/tours.md) keeps its state and keys in `screen
 `board_look image` it asks the terminal first (`look/ask.rs`, `draw`'s questions), and
 when the terminal draws images it shows the stepper with `look/` instead of as text.
 `look/mod.rs` lays the pane out (`Lay`: the rail's columns, the page's, a tile's rows and
-the window's) and draws a frame: the rail (`rail.rs`, every step's title, the step
-shown in blue; an image only as many rows as its steps need, `rail::height`, or the
-pane's for a long tour, with its edge on a column's image under a short one, so the
-budget isn't spent on empty rail), a window on the page, and the foot (the message and
-keys); what's typed
-is text where the foot was. The type's sizes come from the cell (`ink.rs`'s `Sizes`):
-code at the em where its advance is a cell, drawn a character a cell on whole pixels
-(`Ink::cells`) and a line a row from a row's top; prose from the cell's height as the
-board's medium or large type. A page (`page.rs`: a step's title, files, note, comments and
-code, `code.rs`; or the end) is measured once, on an image a pixel high (its rows are
-kept), and sent as tiles: strips under the terminal's limit at the page's width, the
-window's rows shared evenly among as few as fit (`Lay::fitted`), each drawn on an image
-the tile's height with the page shifted up by its top (`Ink`'s window: code outside it
-isn't drawn), so no image is bigger than the limit however long a step is (`shown.rs`
-sends each image once, places crops of it, and keeps it hidden to place again; the rail
-and foot are cut when they're over the limit). An image it can't make is an error, and
-`view.rs` turns the tour to text, saying why. The window is crops of the tiles it
-covers, so a scroll is placements. While no key waits, `Look::ahead` sends what `j`,
-`k`, `n`, `p` and a page down would want next, unplaced, an image at a time with a key
-looked for before each, so a key waits behind one strip at most. It sends only what
+the window's) and draws a frame: the rail (`rail.rs`, every step's title, the step shown
+in blue; an image only as many rows as its steps need, `rail::height`, or the pane's for
+a long tour, with its edge on a column's image under a short one, so the budget isn't
+spent on empty rail), a window on the page, and the foot (the message and keys); what's
+typed is text where the foot was. The type's sizes come from the cell (`ink.rs`'s
+`Sizes`): code at the em where its advance is a cell, drawn a character a cell on whole
+pixels (`Ink::cells`) and a line a row from a row's top; prose from the cell's height as
+the board's medium or large type. A page (`page.rs`: a step's title, files, note,
+comments and code, `code.rs`; or the end) is measured once, on an image a pixel high
+(its rows are kept), and sent as tiles: strips under the terminal's limit at the page's
+width, the window's rows shared evenly among as few as fit (`Lay::fitted`), each drawn
+on an image the tile's height with the page shifted up by its top (`Ink`'s window: code
+outside it isn't drawn), so no image is bigger than the limit however long a step is
+(`shown.rs` sends each image once, places crops of it, and keeps it hidden to place
+again; the rail and foot are cut when they're over the limit). An image it can't make is
+an error, and `view.rs` turns the tour to text, saying why. The window is crops of the
+tiles it covers, so a scroll is placements. While no key waits, `Look::ahead` sends what
+`j`, `k`, `n`, `p` and a page down would want next, unplaced, an image at a time with a
+key looked for before each, so a key waits behind one strip at most. It sends only what
 fits in the budget with what's on screen, likeliest first, and holds it (`Shown::begin`)
 so sending one never deletes another it wants; `shown.rs` deletes the least recently
 wanted of the rest for room. Its tests (`look/tests/`) check the bytes each key writes
-and that no image is over the limit at a 300×100 pane, and play `n`, `p` and a long
-step paged down and up into a fake terminal with Rex's quota (`tests/terminal.rs`),
-checking every image placed is there; `bytes_at_large_panes` and `bytes_going_back`
-(ignored) print the bytes at 160×46 and 217×65, and of those keys at 211×65;
-`render_tour` (ignored) writes pictures of a tour fixture (`TOUR_FIXTURE`,
-`TOUR_RENDER`).
+and that no image is over the limit at a 300×100 pane, and play `n`, `p` and a long step
+paged down and up into a fake terminal with Rex's quota (`tests/terminal.rs`), checking
+every image placed is there; `bytes_at_large_panes` and `bytes_going_back` (ignored)
+print the bytes at 160×46 and 217×65, and of those keys at 211×65; `render_tour`
+(ignored) writes pictures of a tour fixture (`TOUR_FIXTURE`, `TOUR_RENDER`).
 
 ## Closing a task
 

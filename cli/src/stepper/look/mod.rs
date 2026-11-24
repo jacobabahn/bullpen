@@ -11,16 +11,17 @@
 //! step is never an image of its own. The window on the page is crops of the tiles it
 //! covers, so scrolling places crops (a few dozen bytes each) and sends a tile only the
 //! first time it's reached. The rail is an image only as tall as its steps (the pane's,
-//! for a long tour), with its edge on an image a column wide under it, so a short tour's
-//! rail isn't a pane of background in the budget. The rail and the foot are cut into
-//! pieces when they're over the limit (shown.rs). An image the tour can't make (past `MOST`, or not cut under the
-//! limit) is an error, and the tour is text from then on (view.rs). While no key waits
-//! (`ahead`), the tile under the window and the one above it, the next step's rail, the
-//! tiles of its first window and its foot, a window's tiles under and over it, and the
-//! previous step's rail, first tile and foot are drawn and sent unplaced, an image at a
-//! time with a key looked for before each, so `n` and `p` usually only place images and
-//! a key waits for one strip at most. Images are kept on the terminal, hidden, to place
-//! again, and deleted when the tour closes (shown.rs).
+//! for a long tour), with its edge on an image a column wide under it, so a short
+//! tour's rail isn't a pane of background in the budget. The rail and the foot are cut
+//! into pieces when they're over the limit (shown.rs). An image the tour can't make
+//! (past `MOST`, or not cut under the limit) is an error, and the tour is text from
+//! then on (view.rs). While no key waits (`ahead`), the tile under the window and the
+//! one above it, the next step's rail, the tiles of its first window and its foot, a
+//! window's tiles under and over it, and the previous step's rail, first tile and foot
+//! are drawn and sent unplaced, an image at a time with a key looked for before each,
+//! so `n` and `p` usually only place images and a key waits for one strip at most.
+//! Images are kept on the terminal, hidden, to place again, and deleted when the tour
+//! closes (shown.rs).
 
 pub mod ask;
 pub mod code;
