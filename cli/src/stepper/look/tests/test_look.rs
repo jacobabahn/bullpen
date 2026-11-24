@@ -332,7 +332,7 @@ fn bytes(size: (i64, i64), cell: (u32, u32)) -> [usize; 7] {
     l.ahead(&st, &|| false, &mut ahead).unwrap();
     let ahead = String::from_utf8(ahead).unwrap();
     let largest = ahead.split("\x1b_Ga=t,").map(str::len).max().unwrap_or(0);
-    let mut key = |l: &mut Look, st: &mut Stepper, k: &str| {
+    let key = |l: &mut Look, st: &mut Stepper, k: &str| {
         st.key(k, page);
         let n = frame(l, st, size).len();
         l.ahead(st, &|| false, &mut Vec::new()).unwrap();
