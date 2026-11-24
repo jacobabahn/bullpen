@@ -146,6 +146,45 @@ class QueueTest(BullpenTest):
         self.assertIn("BP-2 is saved: `bullpen start BP-2` starts it", p.stderr)
         self.assertEqual(self.show("BP-2")["after"], ["BP-1"])
 
+    def break_the_news(self):
+        """news.log can't be written (a folder stands in its place) until the returned
+        function puts it back."""
+        log = next((self.tmp / "state" / "repos").iterdir()) / "news.log"
+        kept = log.read_bytes() if log.exists() else None
+        log.unlink(missing_ok=True)
+        log.mkdir()
+
+        def mend():
+            log.rmdir()
+            if kept is not None:
+                log.write_bytes(kept)
+        return mend
+
+    def test_the_queue_goes_on_when_its_news_cant_be_written(self):
+        dep = self.done_dependency()  # BP-1
+        self.bp("add", "Waiting", "--brief", "x")  # BP-2
+        self.mark("BP-2", after=[dep])  # queued, as if BP-1 landed while nothing ran the queue
+        mend = self.break_the_news()
+        p = self.bp("add", "Next", "--brief", "x", "--after", dep)  # BP-3
+        mend()
+        self.assertEqual(p.stdout.strip(), "BP-3")
+        self.assertEqual((self.show("BP-2")["status"], self.show("BP-3")["status"]), ("working", "working"))
+        self.assertIn("BP-3 started: BP-1 is accepted already", p.stderr)
+        self.assertNotIn("is saved", p.stderr)
+        self.assertEqual(p.stderr.count("bullpen: "), 2)  # one for each start's news line
+
+    def test_the_usage_limit_news_that_cant_be_written_still_says_it_waits(self):
+        dep = self.done_dependency()  # BP-1
+        (self.tmp / "state" / "limit.json").write_text(json.dumps(
+            {"at": "2026-01-01T00:00:00+00:00", "resets": "2999-01-01T00:00:00+00:00", "text": "x"}))
+        mend = self.break_the_news()
+        p = self.bp("add", "Next", "--brief", "x", "--after", dep)  # BP-2
+        mend()
+        self.assertEqual(self.show("BP-2")["status"], "todo")
+        self.assertIn("bullpen: ", p.stderr)
+        self.assertIn("BP-2 can start (BP-1 is accepted already), but the usage limit is reached", p.stderr)
+        self.assertNotIn("is saved", p.stderr)
+
     def test_add_after_a_task_closed_with_nothing_to_merge_starts_it(self):
         self.bp("up")
         dep = self.done_dependency()  # BP-1

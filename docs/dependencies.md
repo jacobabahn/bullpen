@@ -35,7 +35,10 @@ status change, whatever made it, and starts the next tasks once the command that
 made it has done its own work, so their news follows its news. Only tasks with dependencies are queued like this: a plain todo task waits
 for the coordinator (or you) to start it. Each start is one news line, `BP-9
 started (BP-8 was accepted)`. While the usage limit is reached nothing starts;
-the news says which tasks could.
+the news says which tasks could. If a news line can't be written, the error goes
+on stderr (`bullpen: ...`) and the queue goes on: the task it was about still
+started (or didn't), the next queued tasks still start, and `add` and `after`
+still say what became of their task.
 
 If a dependency is dropped, the tasks waiting on it stay todo and one news line
 asks what to do: `bullpen after BP-9 --none` (or other tasks) and `start` it, or

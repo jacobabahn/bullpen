@@ -92,7 +92,8 @@ pub fn done_phrase(t: &Obj, tasks: &super::Tasks) -> String {
 /// After by was accepted, closed or dropped, or went to review, ready or finished, or
 /// was given dependencies all done already ("added") (how): start each queued task, in
 /// ID order, while fewer than max_running work. One news line per start. Plain todo
-/// tasks wait for the coordinator. What became of each queued task, by ID.
+/// tasks wait for the coordinator. What became of each queued task, by ID. A news line
+/// that can't be written is said on stderr (told) and changes none of that.
 pub fn start_queued(repo: &Repo, by: &Obj, how: &str) -> Res<Vec<(String, Outcome)>> {
     let tasks = by_id(repo)?;
     let queued = queued(&tasks);
@@ -112,7 +113,7 @@ pub fn start_queued(repo: &Repo, by: &Obj, how: &str) -> Res<Vec<(String, Outcom
             everyone: true,
             ..Opts::default()
         };
-        news(repo, by, Kind::Queue, &line, o)?;
+        told(news(repo, by, Kind::Queue, &line, o));
         return Ok(ids
             .into_iter()
             .map(|id| (id.to_string(), Outcome::Limit(when.clone())))
@@ -141,23 +142,31 @@ pub fn start_queued(repo: &Repo, by: &Obj, how: &str) -> Res<Vec<(String, Outcom
         let outcome = match started {
             Ok(false) => Outcome::SetupFailed, // that has its own news
             Ok(true) => {
-                say(repo, &t, Kind::Started, &format!("{id} started ({why})"))?;
+                told(say(repo, &t, Kind::Started, &format!("{id} started ({why})")));
                 Outcome::Started
             }
             Err(Fail(e)) => {
                 let e = clip(&e, 200);
-                say(
+                told(say(
                     repo,
                     &t,
                     Kind::QueueFailed,
                     &format!("{id} couldn't start ({why}): {e}. `bullpen start {id}` tries again"),
-                )?;
+                ));
                 Outcome::Failed(e)
             }
         };
         out.push((id, outcome));
     }
     Ok(out)
+}
+
+/// A news line of the queue's that couldn't be written goes on stderr instead: what the
+/// queue did, and what it returns, stay what happened, and it goes on to the next task.
+fn told(said: Res<()>) {
+    if let Err(e) = said {
+        eprintln!("bullpen: {e}");
+    }
 }
 
 /// `add` or `after` gave the task tid dependencies: if they're all done already, run
