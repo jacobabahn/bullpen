@@ -349,6 +349,22 @@ class ConfigTest(BullpenTest):
         self.assertIn("Board\n  board_layout      grouped  default\n", out)
         self.assertRegex(out, r"(?m)^  worker +claude --permission-mode auto +default$")
 
+    def test_piped_config_lines_up_only_the_short_values(self):
+        # piped (no terminal): a long risk_paths is printed whole without padding its section
+        why = "changes something that matters a great deal to everyone who uses it"
+        for n in range(15):
+            self.bp("config", "--risk-path", f"area{n}/", "--level", "high", "--why", why)
+        paths = self.cfg()["risk_paths"]
+        out = self.bp("config").stdout
+        line = next(l for l in out.splitlines() if l.startswith("  risk_paths "))
+        self.assertGreater(len(line), 1000)
+        self.assertRegex(line, rf"^  risk_paths +{re.escape(json.dumps(paths))}  repo$")
+        section = out.split("\n\n")
+        review = next(s for s in section if "\n  risk_paths " in s)
+        for l in review.splitlines()[1:]:
+            if not l.startswith("  risk_paths "):
+                self.assertNotRegex(l, r" {60}", l)
+
     def test_global_config_outside_a_repository(self):
         elsewhere = self.tmp / "elsewhere"
         elsewhere.mkdir()

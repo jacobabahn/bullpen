@@ -18,6 +18,8 @@ use bullpen_core::{fail, Repo, Res};
 use serde_json::Value;
 
 const ON_OFF: &[&str] = &["on", "off"];
+/// With no terminal, the longest value `bullpen config` lines the others up with.
+const LINE_UP: i64 = 60;
 
 fn leak(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
@@ -455,12 +457,15 @@ fn show_config(repo: Option<&Repo>, as_json: bool) -> Res<()> {
             .iter()
             .map(|k| homes(&config_value(cfg.get(k).unwrap_or(&Value::Null))))
             .collect();
-        // on a terminal, a value too long to fit beside the others isn't lined up with them
-        let room = cols.map(|c| c - width as i64 - 6 - group.iter().map(|k| len(source(k))).max().unwrap_or(0) as i64);
+        // a value too long to fit beside the others isn't lined up with them: too long for the
+        // terminal, or with no terminal (piped) longer than LINE_UP
+        let room = cols.map_or(LINE_UP, |c| {
+            c - width as i64 - 6 - group.iter().map(|k| len(source(k))).max().unwrap_or(0) as i64
+        });
         let vwidth = vals
             .iter()
             .map(|v| len(v))
-            .filter(|n| room.is_none_or(|r| *n as i64 <= r))
+            .filter(|n| *n as i64 <= room)
             .max()
             .unwrap_or(0);
         for (k, v) in group.iter().zip(&vals) {
