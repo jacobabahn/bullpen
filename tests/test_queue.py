@@ -123,6 +123,29 @@ class QueueTest(BullpenTest):
         self.assertEqual(self.show("BP-2")["status"], "working")
         self.assertIn("bullpen · BP-2 started (BP-1 is accepted already)", self.news_lines())
 
+    def break_the_queue(self):
+        """The queue's run fails: the usage limit's file doesn't parse."""
+        (self.tmp / "state" / "limit.json").write_text("{")
+
+    def test_add_after_a_done_task_succeeds_even_if_starting_it_fails(self):
+        self.accepted()  # BP-1
+        self.break_the_queue()
+        p = self.bp("add", "Next", "--brief", "x", "--after", "BP-1")  # exits 0: the task is saved
+        self.assertEqual(p.stdout.strip(), "BP-2")
+        self.assertIn("bullpen: ", p.stderr)
+        self.assertIn("BP-2 is saved: `bullpen start BP-2` starts it", p.stderr)
+        self.assertEqual(self.show("BP-2")["status"], "todo")
+
+    def test_after_on_a_done_task_succeeds_even_if_starting_it_fails(self):
+        self.accepted()  # BP-1
+        self.bp("add", "Next", "--brief", "x")  # BP-2
+        self.break_the_queue()
+        p = self.bp("after", "BP-2", "BP-1")  # exits 0: what it waits on is saved
+        self.assertEqual(p.stdout.strip(), "BP-2 waits on BP-1")
+        self.assertIn("bullpen: ", p.stderr)
+        self.assertIn("BP-2 is saved: `bullpen start BP-2` starts it", p.stderr)
+        self.assertEqual(self.show("BP-2")["after"], ["BP-1"])
+
     def test_add_after_a_task_closed_with_nothing_to_merge_starts_it(self):
         self.bp("up")
         dep = self.done_dependency()  # BP-1

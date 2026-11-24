@@ -208,10 +208,24 @@ pub fn read_text(path: &str) -> Res<String> {
 pub fn cmd_add(argv: &[String]) -> Res<i32> {
     let tid = add(argv, Obj::new())?;
     println!("{tid}");
-    if let Some(line) = queue::start_if_done(&Repo::new(repo_root()?)?, &tid)? {
+    if let Some(line) = start_saved(&tid, || Repo::new(repo_root()?)) {
         eprintln!("{line}");
     }
     Ok(0)
+}
+
+/// start_if_done for tid, whose change `add` or `after` saved already: a failure is said
+/// on stderr, with how to start it, and the command still succeeds (a script that took
+/// the exit code for a failed `add` would add the task again).
+fn start_saved(tid: &str, repo: impl FnOnce() -> Res<Repo>) -> Option<String> {
+    match repo().and_then(|repo| queue::start_if_done(&repo, tid)) {
+        Ok(line) => line,
+        Err(e) => {
+            eprintln!("bullpen: {e}");
+            eprintln!("{tid} is saved: `bullpen start {tid}` starts it");
+            None
+        }
+    }
 }
 
 /// Add the task `add` would with these arguments, with extra's fields on it too (the
@@ -325,7 +339,7 @@ pub fn cmd_after(argv: &[String]) -> Res<i32> {
         println!("{tid} waits on nothing");
     } else {
         println!("{tid} waits on {}", after.join(", "));
-        if let Some(line) = queue::start_if_done(&repo, &tid)? {
+        if let Some(line) = start_saved(&tid, || Ok(repo)) {
             println!("{line}");
         }
     }

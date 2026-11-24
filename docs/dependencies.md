@@ -12,8 +12,11 @@ merge), the queue runs as their accept would have run it: the task starts if
 `max_running` leaves room (earlier queued tasks first), and the command says
 what became of it: `BP-9 started: BP-8 is accepted already`, or that it's
 queued for a slot, or that the usage limit holds it. `add` says this on stderr,
-so its stdout is still just the ID; `after` prints it after its own line. A task
-given a mix of done and open tasks waits for the open ones.
+so its stdout is still just the ID; `after` prints it after its own line. If the
+start itself fails (Rex can't be reached, say), the command still exits 0, as the
+task or what it waits on is saved: it prints the error (`bullpen: ...`) on
+stderr, and that `bullpen start BP-9` starts the task. A task given a mix of done
+and open tasks waits for the open ones.
 
 `start` refuses a task whose dependencies aren't all accepted, naming them;
 `--force` starts it anyway. The board, `ls` and `show` say "Waits on BP-8" for it.
