@@ -66,8 +66,12 @@ fn places(out: &str) -> usize {
 fn the_first_frame_sends_the_rail_a_tile_and_the_foot_and_places_them() {
     let (mut l, mut st) = (look(CELL), stepper());
     let out = frame(&mut l, &mut st, SIZE);
-    assert_eq!(uploads(&out), 3, "rail, the page's first tile, the foot");
-    assert_eq!(places(&out), 3);
+    assert_eq!(
+        uploads(&out),
+        4,
+        "rail, its edge under it, the page's first tile, the foot"
+    );
+    assert_eq!(places(&out), 4);
     assert!(out.ends_with("\x1b[?25l"), "no cursor while reading");
     // the same frame again sends nothing but the cursor's state
     assert_eq!(frame(&mut l, &mut st, SIZE), "\x1b[?25l");
@@ -177,7 +181,7 @@ fn a_resize_takes_the_images_off_and_draws_them_at_the_new_width() {
     frame(&mut l, &mut st, SIZE);
     let out = frame(&mut l, &mut st, (100, 30));
     assert!(out.contains("a=d,d=i") && out.contains("\x1b[2J"));
-    assert_eq!(uploads(&out), 3);
+    assert_eq!(uploads(&out), 4);
 }
 
 /// Each placement's crop and its cells: (w, h, c, r).
@@ -213,9 +217,9 @@ fn a_new_cell_deletes_what_was_drawn_at_the_old_one_and_draws_at_the_new() {
     assert!(out.ends_with("\x1b[2J"));
     assert_eq!(l.kept(), 0);
     let next = frame(&mut l, &mut st, SIZE);
-    assert_eq!(uploads(&next), 3, "rail, tile and foot drawn again");
+    assert_eq!(uploads(&next), 4, "rail, its edge, tile and foot drawn again");
     let placed = crops(&next);
-    assert_eq!(placed.len(), 3);
+    assert_eq!(placed.len(), 4);
     for (w, h, c, r) in placed {
         assert_eq!(
             (w, h),
@@ -242,7 +246,7 @@ fn the_end_page_follows_the_last_step() {
     st.go(3);
     assert!(st.at_end());
     let out = frame(&mut l, &mut st, SIZE);
-    assert_eq!(uploads(&out), 3);
+    assert_eq!(uploads(&out), 4);
 }
 
 /// A step whose patch is `lines` added lines long.
@@ -480,8 +484,9 @@ fn bytes_going_back() {
 }
 
 /// Every kind of image at a pane far bigger than the person's (300×100 cells of 19×37
-/// pixels): the rail, the tiles of a long page, the foot and the end page's tiles (what's
-/// drawn ahead is these too).
+/// pixels): the rail (a long tour's, the pane's height) and its edge under a short one,
+/// the tiles of a long page, the foot and the end page's tiles (what's drawn ahead is
+/// these too).
 #[test]
 fn no_image_is_over_the_terminals_limit() {
     let (size, cell) = ((300, 100), (19, 37));
@@ -492,6 +497,11 @@ fn no_image_is_over_the_terminals_limit() {
     out += &frame(&mut l, &mut st, size);
     st.go(3);
     out += &frame(&mut l, &mut st, size);
+    // a rail the pane's height is over the limit (a short tour's is as tall as its steps)
+    let mut long_tour = tour_of(60);
+    out += &frame(&mut l, &mut long_tour, size);
+    long_tour.go(59);
+    out += &frame(&mut l, &mut long_tour, size);
     let sizes = bullpen_draw::cut::uploaded(&out);
     assert!(sizes.len() > 10, "{sizes:?}");
     for (w, h) in &sizes {
@@ -535,8 +545,74 @@ fn a_pages_strips_are_the_page_drawn_whole_cut_up() {
     }
 }
 
-/// A picture of the tour as the terminal would show it: the rail, the window on the
-/// page and the foot, over the pane's background.
+/// A tour of n steps, each titled.
+fn tour_of(n: usize) -> Stepper {
+    let steps: Vec<Value> = (0..n)
+        .map(|i| json!({"title": format!("Step {i} of the tour"), "note": "", "hunks": []}))
+        .collect();
+    let tour = as_obj(json!({"commit": "c1", "steps": steps}));
+    Stepper::new("BP-9", "Issue scoring", &tour, vec![], 0, Box::new(|_, _| vec![]))
+}
+
+/// The rail's rows and bytes at the person's pane: a short tour's rail is as tall as its
+/// steps, with its edge on a column's image under it; a long one's is the pane's. What
+/// drawing ahead counts for each is what's sent.
+#[test]
+fn a_short_tours_rail_is_as_tall_as_its_steps_and_a_long_ones_the_panes() {
+    let (size, cell) = PANE;
+    let lay = Lay::new(size.0, size.1, 0).fitted(cell);
+    for (n, short) in [(3, true), (60, false)] {
+        let (mut l, mut st) = (look(cell), tour_of(n));
+        let (_, _, rows) = l.rail_of(&st, 0, lay);
+        let out = frame(&mut l, &mut st, size);
+        assert!(
+            out.contains(&format!("c={},r={rows},", lay.rail)),
+            "the rail placed {rows} rows"
+        );
+        let edge = format!("c=1,r={},", lay.rows - rows);
+        if short {
+            assert!(rows < lay.rows / 3, "{rows}");
+            assert!(out.contains(&edge), "its edge under it");
+        } else {
+            assert_eq!(rows, lay.rows);
+            assert!(!out.contains("c=1,"), "no edge under a pane-tall rail");
+        }
+        for job in [Ahead::Rail(1), Ahead::Edge(1)] {
+            let Some((_, bytes)) = l.want(&st, &job, lay) else {
+                assert!(!short, "a short rail has an edge under it");
+                continue;
+            };
+            let before = l.kept_bytes();
+            match job {
+                Ahead::Rail(i) => {
+                    l.rail(&st, i, lay, &mut Vec::new()).unwrap();
+                }
+                _ => {
+                    let rows = l.rail_of(&st, 1, lay).2;
+                    l.edge(rows, lay, &mut Vec::new()).unwrap();
+                }
+            }
+            let sent = l.kept_bytes() - before;
+            // the edge is the same under every step's rail: sent once
+            assert!(
+                sent == bytes || (sent == 0 && matches!(job, Ahead::Edge(_))),
+                "{sent} {bytes}"
+            );
+        }
+        let (cw, ch) = cell;
+        eprintln!(
+            "{n} steps at {}×{}: the rail {rows} rows, {} B (pane-tall {} B), its edge {} B",
+            size.0,
+            size.1,
+            lay.rail as usize * cw as usize * rows as usize * ch as usize * 4,
+            lay.rail as usize * cw as usize * lay.rows as usize * ch as usize * 4,
+            cw as usize * (lay.rows - rows) as usize * ch as usize * 4,
+        );
+    }
+}
+
+/// A picture of the tour as the terminal would show it: the rail (and its edge under
+/// it), the window on the page and the foot, over the pane's background.
 fn picture(l: &mut Look, st: &mut Stepper, (cols, rows): (i64, i64)) -> Pixmap {
     let mut sink = Vec::new();
     l.frame(st, (cols, rows), &mut sink).unwrap();
@@ -548,17 +624,14 @@ fn picture(l: &mut Look, st: &mut Stepper, (cols, rows): (i64, i64)) -> Pixmap {
     let paint = tiny_skia::PixmapPaint::default();
     let id = tiny_skia::Transform::identity();
     if lay.rail > 0 {
-        let comments = (0..st.steps.len()).map(|k| Look::on_step(st, k).len()).collect();
-        let r = rail::Rail {
-            tid: st.tid.clone(),
-            title: st.title.clone(),
-            steps: st.steps.iter().map(|o| s(o, "title").to_string()).collect(),
-            at: st.at,
-            comments,
-        };
-        let mut ink = Ink::new(lay.rail as u32 * cw, rows as u32 * ch, &mut l.ty, l.th, l.sz).unwrap();
-        rail::draw(&mut ink, &r);
-        pm.draw_pixmap(0, 0, ink.pm.as_ref(), &paint, id, None);
+        let (r, _, from) = l.rail_of(st, st.at, lay);
+        let rail = l.rail_image(&r, from, lay).unwrap();
+        pm.draw_pixmap(0, 0, rail.as_ref(), &paint, id, None);
+        if from < lay.rows {
+            let edge = l.edge_image(from, lay).unwrap();
+            let (x, y) = ((lay.rail as u32 - 1) * cw, from as u32 * ch);
+            pm.draw_pixmap(x as i32, y as i32, edge.as_ref(), &paint, id, None);
+        }
     }
     let page_rows = l.page_rows(st, st.at, lay);
     let page = l.page_of(st, st.at);

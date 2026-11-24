@@ -70,3 +70,38 @@ fn the_foot_shows_fewer_keys_when_narrow() {
         );
     }
 }
+
+#[test]
+fn a_short_rail_drawn_at_its_height_is_the_tall_one_cut_with_only_its_edge_under() {
+    let mut ty = Type::new(Fonts::builtin());
+    let sz = Sizes::of((8, 17), &mut ty);
+    let r = rail(3, 1);
+    let h = height(&mut ty, sz, 300.0, &r).ceil() as u32;
+    assert!(h < 300, "{h}");
+    let (short, tall) = (drawn(&r, h), drawn(&r, 600));
+    assert_eq!(short.data(), &tall.data()[..h as usize * 300 * 4]);
+    // under it, the edge drawn alone on the rail's last column (8 pixels) and nothing else
+    let mut ink = Ink::new(8, 600 - h, &mut ty, Theme::default(), sz).unwrap();
+    edge(&mut ink);
+    for y in h..600 {
+        for x in 0..300 {
+            let want = if x >= 292 {
+                ink.pm.pixel(x - 292, y - h).unwrap()
+            } else {
+                tiny_skia::PremultipliedColorU8::TRANSPARENT
+            };
+            assert_eq!(tall.pixel(x, y).unwrap(), want, "at {x},{y}");
+        }
+    }
+}
+
+#[test]
+fn a_long_rail_needs_more_than_a_pane() {
+    let mut ty = Type::new(Fonts::builtin());
+    let sz = Sizes::of((8, 17), &mut ty);
+    let (short, long) = (
+        height(&mut ty, sz, 300.0, &rail(3, 0)),
+        height(&mut ty, sz, 300.0, &rail(60, 0)),
+    );
+    assert!(short < 300.0 && long > 1000.0, "{short} {long}");
+}

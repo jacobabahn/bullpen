@@ -240,7 +240,10 @@ The tour (`cli/src/stepper/`, docs/tours.md) keeps its state and keys in `screen
 when the terminal draws images it shows the stepper with `look/` instead of as text.
 `look/mod.rs` lays the pane out (`Lay`: the rail's columns, the page's, a tile's rows and
 the window's) and draws a frame: the rail (`rail.rs`, every step's title, the step
-shown in blue), a window on the page, and the foot (the message and keys); what's typed
+shown in blue; an image only as many rows as its steps need, `rail::height`, or the
+pane's for a long tour, with its edge on a column's image under a short one, so the
+budget isn't spent on empty rail), a window on the page, and the foot (the message and
+keys); what's typed
 is text where the foot was. The type's sizes come from the cell (`ink.rs`'s `Sizes`):
 code at the em where its advance is a cell, drawn a character a cell on whole pixels
 (`Ink::cells`) and a line a row from a row's top; prose from the cell's height as the

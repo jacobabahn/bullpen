@@ -10,8 +10,10 @@
 //! drawn on an image the tile's height, the page shifted up by the tile's top, so a long
 //! step is never an image of its own. The window on the page is crops of the tiles it
 //! covers, so scrolling places crops (a few dozen bytes each) and sends a tile only the
-//! first time it's reached. The rail and the foot are cut into pieces when they're over
-//! the limit (shown.rs). An image the tour can't make (past `MOST`, or not cut under the
+//! first time it's reached. The rail is an image only as tall as its steps (the pane's,
+//! for a long tour), with its edge on an image a column wide under it, so a short tour's
+//! rail isn't a pane of background in the budget. The rail and the foot are cut into
+//! pieces when they're over the limit (shown.rs). An image the tour can't make (past `MOST`, or not cut under the
 //! limit) is an error, and the tour is text from then on (view.rs). While no key waits
 //! (`ahead`), the tile under the window and the one above it, the next step's rail, the
 //! tiles of its first window and its foot, a window's tiles under and over it, and the
@@ -43,6 +45,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
+use tiny_skia::Pixmap;
 
 /// The tour's images get IDs from here up (the graphics query's is FIRST - 1).
 pub const FIRST: u32 = 0x5450_0001;
@@ -120,7 +123,8 @@ pub struct Look {
     ty: Type,
     shown: Shown,
     patch: PatchFn,
-    /// the rows of every page measured, by its key: a page is never kept as pixels
+    /// the rows of every page (and rail) measured, by its key: a page is never kept as
+    /// pixels
     rows: HashMap<u64, i64>,
     /// the most pixels (bytes) an image drawn has had
     largest: usize,
@@ -308,8 +312,9 @@ impl Look {
         Ok(Some((self.shown.send(k, &pm, out)?, n)))
     }
 
-    /// The rail at step i, and what it shows as a key.
-    fn rail_of(&self, st: &Stepper, i: usize, lay: Lay) -> (rail::Rail, u64) {
+    /// The rail at step i, what it shows as a key, and the rows it has: as many as its
+    /// steps need (`rail::height`), or the pane's when they need more (it scrolls then).
+    fn rail_of(&mut self, st: &Stepper, i: usize, lay: Lay) -> (rail::Rail, u64, u16) {
         let comments = (0..st.steps.len()).map(|k| Self::on_step(st, k).len()).collect();
         let r = rail::Rail {
             tid: st.tid.clone(),
@@ -318,20 +323,64 @@ impl Look {
             at: i,
             comments,
         };
-        let k = key((&r, lay.rail, lay.rows, self.cell, self.th));
-        (r, k)
+        let measured = key(("rail", &r, lay.rail, self.cell, self.th));
+        let ch = self.cell.1;
+        let needs = match self.rows.get(&measured) {
+            Some(rows) => *rows,
+            None => {
+                let w = (lay.rail as u32 * self.cell.0) as f32;
+                let rows = (rail::height(&mut self.ty, self.sz, w, &r) / ch as f32).ceil() as i64;
+                self.rows.insert(measured, rows);
+                rows
+            }
+        };
+        let rows = needs.clamp(1, lay.rows as i64) as u16;
+        let k = key((&r, lay.rail, rows, self.cell, self.th));
+        (r, k, rows)
     }
 
-    /// The rail at step i sent: its ID.
-    fn rail(&mut self, st: &Stepper, i: usize, lay: Lay, out: &mut impl Write) -> std::io::Result<Option<u32>> {
-        let (r, k) = self.rail_of(st, i, lay);
+    /// The rail at step i drawn, on an image `rows` high.
+    fn rail_image(&mut self, r: &rail::Rail, rows: u16, lay: Lay) -> std::io::Result<Pixmap> {
+        let (w, h) = (lay.rail as u32 * self.cell.0, rows as u32 * self.cell.1);
+        let mut ink = self.ink(w, h, 0.0)?;
+        rail::draw(&mut ink, r);
+        Ok(ink.pm)
+    }
+
+    /// The rail at step i sent: its ID, and the rows it has.
+    fn rail(&mut self, st: &Stepper, i: usize, lay: Lay, out: &mut impl Write) -> std::io::Result<(u32, u16)> {
+        let (r, k, rows) = self.rail_of(st, i, lay);
+        if let Some(id) = self.shown.id(k) {
+            return Ok((id, rows));
+        }
+        let pm = self.rail_image(&r, rows, lay)?;
+        Ok((self.shown.send(k, &pm, out)?, rows))
+    }
+
+    /// What the rail's edge under a rail `from` rows high shows, as a key: None when the
+    /// rail is the pane's height.
+    fn edge_key(&self, from: u16, lay: Lay) -> Option<u64> {
+        (from < lay.rows).then(|| key(("edge", lay.rows - from, self.cell, self.th)))
+    }
+
+    /// The rail's edge under a rail `from` rows high, on its last column's image.
+    fn edge_image(&mut self, from: u16, lay: Lay) -> std::io::Result<Pixmap> {
+        let (w, h) = (self.cell.0, (lay.rows - from) as u32 * self.cell.1);
+        let mut ink = self.ink(w, h, 0.0)?;
+        rail::edge(&mut ink);
+        Ok(ink.pm)
+    }
+
+    /// The rail's edge under a rail `from` rows high sent: its ID (None when there's no
+    /// room under the rail).
+    fn edge(&mut self, from: u16, lay: Lay, out: &mut impl Write) -> std::io::Result<Option<u32>> {
+        let Some(k) = self.edge_key(from, lay) else {
+            return Ok(None);
+        };
         if let Some(id) = self.shown.id(k) {
             return Ok(Some(id));
         }
-        let (w, h) = (lay.rail as u32 * self.cell.0, lay.rows as u32 * self.cell.1);
-        let mut ink = self.ink(w, h, 0.0)?;
-        rail::draw(&mut ink, &r);
-        let pm = ink.pm;
+        let pm = self.edge_image(from, lay)?;
         Ok(Some(self.shown.send(k, &pm, out)?))
     }
 
@@ -415,8 +464,10 @@ impl Look {
         self.texted = typing;
         let mut wants = Vec::new();
         if lay.rail > 0 {
-            if let Some(id) = self.rail(st, st.at, lay, out)? {
-                wants.push(self.place(id, 1, (0, 0), 0, (lay.rail, lay.rows)));
+            let (id, rows) = self.rail(st, st.at, lay, out)?;
+            wants.push(self.place(id, 1, (0, 0), 0, (lay.rail, rows)));
+            if let Some(id) = self.edge(rows, lay, out)? {
+                wants.push(self.place(id, 1, (lay.rail - 1, rows), 0, (1, lay.rows - rows)));
             }
         }
         // the window on the page: one tile's crop, or the end of one and the start of the next
@@ -507,6 +558,10 @@ impl Look {
                 Ahead::Rail(i) => {
                     self.rail(st, i, lay, out)?;
                 }
+                Ahead::Edge(i) => {
+                    let rows = self.rail_of(st, i, lay).2;
+                    self.edge(rows, lay, out)?;
+                }
                 Ahead::Foot(i) => {
                     let f = self.foot_ahead(st, i, lay);
                     self.foot(&f, lay, out)?;
@@ -525,9 +580,10 @@ impl Look {
         let window = (lay.view as i64 + tile - 1) / tile;
         // step i's rail, its first `tiles` tiles and its foot (none past the end)
         let step = |i: usize, tiles: i64| -> Vec<Ahead> {
-            let rail = (i <= n && lay.rail > 0).then_some(Ahead::Rail(i));
+            let rail = (i <= n && lay.rail > 0).then_some([Ahead::Rail(i), Ahead::Edge(i)]);
             let tiles = (0..tiles).map(move |t| Ahead::Tile(i, t));
             rail.into_iter()
+                .flatten()
                 .chain(tiles)
                 .chain([Ahead::Foot(i)])
                 .filter(|_| i <= n)
@@ -552,8 +608,13 @@ impl Look {
                 Some((k, self.shown.bytes_of(lay.page_cols as u32 * cw, n as u32 * ch)))
             }
             Ahead::Rail(i) => {
-                let k = self.rail_of(st, i, lay).1;
-                Some((k, self.shown.bytes_of(lay.rail as u32 * cw, lay.rows as u32 * ch)))
+                let (_, k, rows) = self.rail_of(st, i, lay);
+                Some((k, self.shown.bytes_of(lay.rail as u32 * cw, rows as u32 * ch)))
+            }
+            Ahead::Edge(i) => {
+                let rows = self.rail_of(st, i, lay).2;
+                let k = self.edge_key(rows, lay)?;
+                Some((k, self.shown.bytes_of(cw, (lay.rows - rows) as u32 * ch)))
             }
             Ahead::Foot(i) => {
                 let f = self.foot_ahead(st, i, lay);
@@ -586,10 +647,12 @@ impl Look {
     }
 }
 
-/// An image drawn ahead: a tile of step i's page, its rail or its foot.
+/// An image drawn ahead: a tile of step i's page, its rail, the rail's edge under it
+/// (when it's shorter than the pane) or its foot.
 enum Ahead {
     Tile(usize, i64),
     Rail(usize),
+    Edge(usize),
     Foot(usize),
 }
 

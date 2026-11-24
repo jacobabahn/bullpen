@@ -2,10 +2,12 @@
 //! down a line, the steps behind you filled, the one you're on in blue, the ones ahead
 //! as rings, with a count of your comments beside each step that has some; the end is
 //! the last stop. You see the whole change's order and where you are in it. When the
-//! steps don't all fit, the rail scrolls to keep yours in view. Its foot (`foot`): the
-//! message, how much of the page is under, and the keys, in caps, under the page.
+//! steps don't all fit, the rail scrolls to keep yours in view; when they do, it's drawn
+//! only as tall as they are (`height`), its edge (`edge`) alone under it. Its foot
+//! (`foot`): the message, how much of the page is under, and the keys, in caps, under
+//! the page.
 
-use super::ink::{keys_width, Face, Ink};
+use super::ink::{keys_width, Face, Ink, Sizes, Type};
 use bullpen_draw::theme::{bright, faint, solid};
 
 /// What the rail shows.
@@ -26,6 +28,67 @@ const TEXT: f32 = 20.0;
 const ROW: f32 = 28.0;
 const GAP: f32 = 26.0;
 
+/// Where the rail's things go, on a rail `w` pixels wide: its stops (each title's lines
+/// and face), the top of the first, each one's top, and the bottom of the last (its gap
+/// under it too), before any scroll.
+struct Stops {
+    first: f32,
+    stops: Vec<(Vec<String>, Face)>,
+    tops: Vec<f32>,
+    end: f32,
+}
+
+/// The room under the last stop: the rail scrolls when its steps would go into it.
+const UNDER: f32 = 24.0;
+
+fn stops(ty: &mut Type, sz: Sizes, w: f32, rail: &Rail) -> Stops {
+    let px = sz.body;
+    let s = px / TEXT;
+    let x = 36.0 * s;
+    let room = w - x - 20.0 * s;
+    let row = (ROW * s).round();
+    let drow = (1.45 * sz.detail).round();
+    let mut y = 30.0 * s + drow + 2.0 * s;
+    y += ty
+        .wrap(&rail.title.replace('`', ""), Face::Ui, sz.detail, room, 2)
+        .len() as f32
+        * drow;
+    y += 30.0 * s;
+    let n = rail.steps.len();
+    let tx = x + 40.0 * s;
+    let count_w = 44.0 * s;
+    let tw = (w - tx - count_w - 12.0 * s).max(10.0);
+    let mut stops: Vec<(Vec<String>, Face)> = Vec::new();
+    for i in 0..=n {
+        let title = if i == n {
+            "End: send or accept".to_string()
+        } else {
+            rail.steps[i].replace('`', "")
+        };
+        let face = if i == rail.at { Face::UiBold } else { Face::Ui };
+        stops.push((ty.wrap(&title, face, px, tw, 2), face));
+    }
+    let mut tops = Vec::new();
+    let mut at = y;
+    for (lines, _) in &stops {
+        tops.push(at);
+        at += lines.len() as f32 * row + GAP * s;
+    }
+    Stops {
+        first: y,
+        stops,
+        tops,
+        end: at,
+    }
+}
+
+/// The pixels the rail needs, `w` wide, to show every step without scrolling: drawn at
+/// that height or more, it's the same down to it, and nothing is drawn under it but its
+/// edge.
+pub fn height(ty: &mut Type, sz: Sizes, w: f32, rail: &Rail) -> f32 {
+    stops(ty, sz, w, rail).end + UNDER * sz.body / TEXT
+}
+
 pub fn draw(ink: &mut Ink, rail: &Rail) {
     let (th, sz) = (ink.th, ink.sz);
     let h = ink.pm.height() as f32;
@@ -42,30 +105,18 @@ pub fn draw(ink: &mut Ink, rail: &Rail) {
         ink.boxed(&line, Face::Ui, dpx, x, y, drow, th.dim());
         y += drow;
     }
-    y += 30.0 * s;
+    let w = ink.w();
+    let Stops {
+        first: y,
+        stops,
+        tops,
+        end: at,
+    } = stops(ink.ty, sz, w, rail);
     let n = rail.steps.len();
-    let (cx, tx) = (x + 12.0 * s, x + 40.0 * s);
-    let count_w = 44.0 * s;
-    let tw = (ink.w() - tx - count_w - 12.0 * s).max(10.0);
-    // each stop's title lines, and where it is
-    let mut stops: Vec<(Vec<String>, Face)> = Vec::new();
-    for i in 0..=n {
-        let title = if i == n {
-            "End: send or accept".to_string()
-        } else {
-            rail.steps[i].replace('`', "")
-        };
-        let face = if i == rail.at { Face::UiBold } else { Face::Ui };
-        stops.push((ink.ty.wrap(&title, face, px, tw, 2), face));
-    }
-    let mut tops = Vec::new();
-    let mut at = y;
-    for (lines, _) in &stops {
-        tops.push(at);
-        at += lines.len() as f32 * row + GAP * s;
-    }
+    let cx = x + 12.0 * s;
+    let tx = x + 40.0 * s;
     // scrolled to keep the step shown in its middle third, when they don't all fit
-    let bottom = h - 24.0 * s;
+    let bottom = h - UNDER * s;
     let shift = if at > bottom {
         let want = tops[rail.at.min(n)] - (y + (bottom - y) / 3.0);
         want.clamp(0.0, at - bottom)
@@ -104,9 +155,16 @@ pub fn draw(ink: &mut Ink, rail: &Rail) {
             count(ink, k, ink.w() - 20.0 * s, top, s);
         }
     }
-    // the rail's edge
+    edge(ink);
+}
+
+/// The rail's edge, a faint line down the right of the image, its whole height: under a
+/// rail shorter than the pane it's drawn alone on a column's image (the rail's last), so
+/// it runs down the pane as before.
+pub fn edge(ink: &mut Ink) {
     let edge = (2.0 * ink.s).max(1.0);
-    ink.rect(ink.w() - edge, 0.0, edge, h, faint(th.fg, 0.09));
+    let (w, h) = (ink.w(), ink.pm.height() as f32);
+    ink.rect(w - edge, 0.0, edge, h, faint(ink.th.fg, 0.09));
 }
 
 /// How many comments a step has, in a small amber pill ending at `right` (`s`, the

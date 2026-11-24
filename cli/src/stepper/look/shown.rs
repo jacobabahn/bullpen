@@ -13,9 +13,9 @@
 //! wanted since `begin` (the frame's images, what's drawn ahead) is never deleted for
 //! room.
 //!
-//! An image over the terminal's limit (bullpen-draw's cut.rs: a rail on a tall pane) is
-//! sent as pieces, each an image of its own, and a placement of it is placed as theirs;
-//! the tour knows the image by its first piece's ID.
+//! An image over the terminal's limit (bullpen-draw's cut.rs: a long tour's rail on a
+//! tall pane) is sent as pieces, each an image of its own, and a placement of it is
+//! placed as theirs; the tour knows the image by its first piece's ID.
 
 use bullpen_draw::cut::{self, Piece};
 use bullpen_draw::kitty::{self, Place};

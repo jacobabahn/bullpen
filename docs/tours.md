@@ -99,6 +99,9 @@ terminal's colours, so it follows the Rex theme:
   steps behind you filled, the one you're on in blue, the ones ahead as rings, and a
   count of your comments beside each step that has some. The last stop is the end. A
   long tour's rail scrolls to keep your step in view; a pane under 80 columns has none.
+  It's drawn only as tall as its steps (under them, the pane and the rail's edge), so a
+  short tour's rail is a small image: at 211×65 cells of 19×37 pixels a three-step
+  tour's is about 2 MB of the 96 MB kept (below), not the pane-tall 8.8 MB.
 - **The page**, at the right: the step's title, the files and lines it covers, its note
   (code in it set in a monospace on a faint chip) and your comments on amber, then its
   code drawn: a strip per file with its +/− counts, each hunk under the lines it covers
@@ -155,7 +158,7 @@ about 160×46 (17×34 pixels) all of the above fits: `n`, `p` and a page down on
 images (a few hundred bytes); the first frame is about 250 KB, drawing ahead after it
 about 465 KB, a step not drawn ahead about 225 KB. On a larger one each window is
 bigger than the budget holds many of: at 211×65 cells of 19×37 pixels (a window about
-39 MB, the first frame about 425 KB) the first page down only places, later pages
+39 MB, the first frame about 410 KB) the first page down only places, later pages
 down send a strip or two (about 70 to 120 KB), `n` from the top of a long step sends
 the rest of its first window (about 210 KB), `p` back to it sends it again (about 410
 KB), and a page up past the strip over the window sends that page again (about 330 to
