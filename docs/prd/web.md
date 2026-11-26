@@ -111,7 +111,7 @@ bare 403. A task or coordinator is named by its repository's name and its ID
 | `GET /` | the page (and `/app.js`, `/app.css`) |
 | `GET /api/fleet` | the snapshot: `bullpen repos --json`'s shape, plus each task's group (`needs`, `active`, `done`) and the closed tasks of the last two days |
 | `GET /api/chat/{repo}/{id}?who=&before=` | `{agent, source, items, cursor, more}`: the last 200 items (`before`: the 200 before an item), the transcript's `source` (`recorded`, `title` or `none`), and `cursor`, the byte offset read to |
-| `GET /api/prompt/{repo}/{id}?who=` | `bullpen prompt --json`: `{who, question, options, id, screen, draft}` |
+| `GET /api/prompt/{repo}/{id}` | `bullpen prompt` (its JSON, with W2's `draft`): `{who, question, options, id, screen, draft}`; `who` is whichever agent is at the prompt |
 | `GET /api/screen/{repo}/{id}?who=` | `{lines, at}`: the end of the pane's screen as HTML spans |
 | `GET /api/diff/{repo}/{id}` | `bullpen diff ID` as `{files: [{path, added, removed, hunks}]}` |
 | `GET /api/tour/{repo}/{id}[?step=N]` | `bullpen tour ID --show --json`, or `--step N --json` |
@@ -177,8 +177,10 @@ What bullpen does today (checked in the code and in `~/.claude/projects/`):
   as L26).
 - The worker's Stop hook (`_worker_stop`, `cli/src/stop_hook/turn.rs`) is given
   `session_id` and `transcript_path`, keeps the session ID in `turns/BP-3.json` and
-  drops the path. The reviewer has no Stop hook. A coordinator's (`news --wake`, with
-  `config --news wake` only) reads the session ID for its waiter.
+  drops the path. The hook is in the worktree's `.claude/settings.local.json`, so the
+  reviewer, started in the same worktree, runs it too: a reviewer's turn that ends
+  writes its own session ID over the worker's record. A coordinator's hook
+  (`news --wake`, with `config --news wake` only) reads the session ID for its waiter.
 - Each transcript starts with a `custom-title` record holding the `-n` name, written
   when the agent starts, before its first turn ends.
 
@@ -189,9 +191,15 @@ The design:
    coordinator's `chat` in its entry. The page finds the file as
    `~/.claude/projects/*/<id>.jsonl`, with no need to rebuild the folder's name.
    Resuming passes `--resume <id>` instead of `--continue`, which fixes L26.
-10. **The Stop hook corrects it.** `_worker_stop` also keeps `transcript_path`; when it
-    differs from the recorded one (a `/clear` starts a new conversation), the page
-    follows the hook's. The coordinator's waiter keeps it too.
+10. **The Stop hook corrects it, for its own agent only.** `_worker_stop` also keeps
+    `transcript_path`, after telling whose turn ended, since the worker and the
+    reviewer share the hook: a session ID that is the task's `chat` is the worker's,
+    one that is its review's `chat` is the reviewer's, and an unknown one (a `/clear`
+    starts a new conversation) is told by the transcript's `custom-title` (`BP-3: …`
+    the worker, `BP-3 review` the reviewer), else ignored. The worker's turn goes in
+    `turns/BP-3.json` as now; the reviewer's moves its review's `chat` and never touches
+    the worker's record. The page follows a recorded `chat` when the hook moves it.
+    The coordinator's waiter keeps the path too.
 11. **Agents started before this ship** are matched by title: the newest `.jsonl` in
     the agent's folder whose `custom-title` is its `-n` name. The chat says it was
     matched by title (`source: "title"`), in small type under its first message.
@@ -394,11 +402,14 @@ Ten tasks. Wave 1 runs in parallel; each later wave needs the ones it names.
 - **W1. Know each agent's transcript.** `launch`, the reviewer's start and `up` pass
   `--session-id` to Claude Code and record it (`chat` on the task, its review and the
   coordinator's entry); `resume` and a hand-back use `--resume <id>` (fixes L26);
-  `_worker_stop` keeps `transcript_path`, as does the coordinator's waiter. Documented
-  in `docs/where-things-live.md`. *Tests:* Python, through the fake rex's recorded
-  commands: a started worker's command line has a UUID that its task records; a
-  reviewer's differs; a resume passes `--resume` with the worker's (never the
-  reviewer's) ID; a non-Claude worker gets neither; the turn record has the path.
+  `_worker_stop` keeps `transcript_path` for the agent whose turn ended (decision 10),
+  as does the coordinator's waiter. Documented in `docs/where-things-live.md`.
+  *Tests:* Python, through the fake rex's recorded commands: a started worker's command
+  line has a UUID that its task records; a reviewer's differs; a resume passes
+  `--resume` with the worker's (never the reviewer's) ID; a non-Claude worker gets
+  neither; the worker's turn record has the path; a reviewer's Stop (its session ID,
+  or an unknown one under the title `BP-3 review`) leaves the worker's `chat` and turn
+  record as they were and moves the review's `chat`.
 - **W2. Commands for a coordinator's pane, and drafts.** `prompt`, `answer` and `peek`
   take `--coordinator cN` (with `--repo`), and `prompt`'s JSON adds `draft` (`has_draft`).
   *Tests:* Python, with fake-rex screens: a coordinator at a prompt is read and
