@@ -48,7 +48,7 @@ impl Draw<'_> {
                     // in a small cap, as the key row's (lay left room for its sides),
                     // centred on the key's ink, which stays on the line's baseline
                     let (w, px) = (self.width(&run, weight), self.px());
-                    let (side, ch) = (KEY_SIDE * px, (1.25 * px).round());
+                    let (side, ch) = (KEY_SIDE * px, (1.3 * px).round());
                     let (up, down) = self.fonts().ink(&run, weight, px);
                     let top = (self.baseline(y) - (up - down) / 2.0 - ch / 2.0).round();
                     let (cap, edge) = (self.theme.cap(), self.theme.cap_edge());

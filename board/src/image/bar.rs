@@ -11,7 +11,7 @@ use super::render::{Canvas, Draw};
 use crate::ui::list::Tally;
 
 /// The bar's top and its height, of a cell's height.
-const TOP: f32 = 1.75;
+const TOP: f32 = 1.8;
 const HEIGHT: f32 = 0.24;
 /// The bar and its counts, from where text starts to where it ends, as the rule under
 /// a shorter header is; the counts' line midway between the bar and `bottom`, the

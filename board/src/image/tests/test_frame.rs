@@ -186,6 +186,9 @@ fn at_36_columns_the_keys_and_question_mark_dont_overlap_and_the_question_mark_s
             let used = keys_width(&fonts, &shown, c.m.label) + keys_width(&fonts, &help, c.m.label);
             let gap = if shown.is_empty() { 0.0 } else { KEY_GAP * c.m.label };
             assert!(used + gap <= room, "{size:?}, {n} keys: {used} of {room}");
+            // a bare ? only where its word doesn't fit beside the keys left
+            let worded = keys_width(&fonts, &shown, c.m.label) + 1.5 * gap + keys_width(&fonts, &[("?".into(), "keys".into())], c.m.label);
+            assert!(!help[0].1.is_empty() || worded > room, "{size:?}, {n} keys");
         }
     }
 }

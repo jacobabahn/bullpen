@@ -182,7 +182,7 @@ impl Theme {
             // (quieter than the colours: what doesn't wait on you doesn't outshine them)
             "working" => faint(self.fg, 0.6),
             "triage" => solid(self.between()),
-            _ => faint(self.fg, 0.36),
+            _ => faint(self.fg, 0.42),
         }
     }
 

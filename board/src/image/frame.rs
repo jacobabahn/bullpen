@@ -27,8 +27,8 @@ pub fn head(head: &Head, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pix
     let mut d = Draw::new(&mut pm, fonts, c, 0.0);
     let ch = c.grid.cell_h as f32;
     let (top, line) = if rows >= 2 { ((0.2 * ch).round(), (1.3 * ch).round()) } else { (0.0, ch) };
-    // the repository's name is the pane's largest type (but a cell's, clear of the bar)
-    let name_px = (NAME * c.m.title).min(0.95 * ch).round();
+    // the repository's name is the pane's largest type (but 0.9 of a cell's, clear of the bar)
+    let name_px = (NAME * c.m.title).min(0.9 * ch).round();
     d.set(name_px, line);
     let theme = d.theme();
     let (fg, dim) = (theme.text(), theme.dim());
@@ -170,16 +170,21 @@ fn key_row(d: &mut Draw, keys: &[(String, String)], left: f32, cy: f32, px: f32)
 }
 
 /// The keys that fit in `room` pixels, and `?`'s pair, as the text's: `?` is never
-/// dropped; with no room for "? keys" it goes bare, and then the last keys go first.
+/// dropped; with no room for "? keys" it goes bare, and then the last keys go first;
+/// but it keeps its word when dropping the keys for a bare `?` leaves room for it.
 fn fit_keys(fonts: &Fonts, keys: &[(String, String)], px: f32, room: f32) -> (Keys, Keys) {
     let width = |keys: &[(String, String)]| keys_width(fonts, keys, px);
     let gap = KEY_GAP * px;
     let mut keys = keys.to_vec();
     let mut help = vec![("?".to_string(), "keys".to_string())];
     if !keys.is_empty() && width(&keys) + 1.5 * gap + width(&help) > room {
+        let worded = width(&help);
         help = vec![("?".to_string(), String::new())];
         while !keys.is_empty() && width(&keys) + gap + width(&help) > room {
             keys.pop();
+        }
+        if width(&keys) + 1.5 * gap + worded <= room {
+            help = vec![("?".to_string(), "keys".to_string())];
         }
     }
     (keys, help)

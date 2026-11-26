@@ -210,7 +210,7 @@ pub fn fitting(laid: &Laid, top: usize, room: u32) -> usize {
 /// The space between a title's first line and its risk or age, of a title's size.
 const TITLE_GAP: f32 = 1.05;
 
-/// The space between a line's text and its risk's chip after it, of the line's type.
+/// The least space between a line's text and its risk's chip at its right, of the line's type.
 const RISK_GAP: f32 = 0.6;
 
 /// The space after a task's repository's name, before its title, of a title's size.
@@ -522,7 +522,7 @@ impl Geo {
         let m = &self.c.m;
         let h = match row {
             // (and a little under it, clear of a selected card's edge)
-            Row::Head { .. } => m.head_pad + m.detail_line + (0.6 * m.title).round(),
+            Row::Head { .. } => m.head_pad + m.detail_line + (0.8 * m.title).round(),
             Row::Task(_) | Row::Item(_) => m.pad + lines as f32 * m.line + m.title_gap,
             Row::Later { .. } => m.pad + m.line,
             Row::Detail(_) | Row::ItemDetail(..) => lines as f32 * m.body_line,
@@ -748,7 +748,7 @@ impl<'a> Draw<'a> {
                 let x = self.body_x();
                 // (found in the lines as drawn, which may have dropped a dot)
                 let keys = key_letters(&lines.join(" "), d.lead);
-                let (mut seen, mut end) = (0, x);
+                let mut seen = 0;
                 for (k, line) in lines.iter().enumerate() {
                     let y = y + k as f32 * m.body_line;
                     // a narrow board's age starts the first line
@@ -758,16 +758,20 @@ impl<'a> Draw<'a> {
                     let weight = if d.stale { Weight::Bold } else { Weight::Regular };
                     let after = self.text(&age, weight, x, y, self.right() - x, age_color);
                     seen += age.chars().filter(|c| !c.is_whitespace()).count();
-                    end = if d.stat { self.stat(&rest, after, y, color) } else { self.said(&rest, after, y, color, &keys, &mut seen) };
+                    if d.stat {
+                        self.stat(&rest, after, y, color);
+                    } else {
+                        self.said(&rest, after, y, color, &keys, &mut seen);
+                    }
                 }
-                // its task's risk, a chip after its last line (on its own, it starts one)
+                // its task's risk, a chip at the right of its last line, so risks make a
+                // column down the list; its word on the line's baseline
                 if let Some(level) = &d.risk {
-                    let cy = y + (lines.len().max(1) - 1) as f32 * m.body_line + m.body_line / 2.0;
-                    let at = if end > x { end + RISK_GAP * m.body } else { x };
+                    let base = self.baseline(y + (lines.len().max(1) - 1) as f32 * m.body_line);
                     let color = self.theme.risk(level);
                     let color = solid(lit(Rgb(color[0], color[1], color[2])));
-                    let h = (m.body_line - 2.0 * (0.06 * m.body_line).max(1.0).round()).min((1.5 * m.label).round());
-                    chip::risk(self, level, m.label, (at, cy, h), color);
+                    let at = self.right() - self.g.risk_width(level, self.fonts);
+                    chip::risk(self, level, m.label, (at, base), color);
                 }
             }
             Row::Gap => {}
