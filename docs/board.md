@@ -178,7 +178,7 @@ view. The selected task's keys are the key line's at the bottom (mission control
 card has `⏎` at its lower right). A task that needs you, or whose agent stopped,
 stands out: it sits on a faint wash of amber (or red), the card's size, with a bar of
 that colour down its left edge, following its corners; selected, its fill is that
-colour three times as strong and its edge is that colour too, two and a half pixels
+colour over twice as strong and its edge is that colour too, two and a half pixels
 wide, with the bar inside it, so edge and bar are one frame, heavier at the left. An age that has
 waited too long is a pill of its task's colour, whole: amber at its brightest with
 dark type, red a step darker with light type, so each reads at 4:1 or more.
@@ -207,8 +207,9 @@ no lines under its title has no gap for them. A Later item that asks for a yes, 
 line whether it's selected or not.
 A key a line names ("Its agent exited. `r` resumes it.") is in a small cap, as the
 keys at the bottom, centred on its letter. A ready task's risk is a quiet chip: a dot
-of its colour, then the word dim on the line's baseline, inside a faint line, at the
-right of its stat line at every width, so risks make a column down the list; when it
+of its colour, then the word dim on the line's baseline, on a keycap's faint fill
+inside a faint line (its block has room under it for the chip), at the right of its
+stat line at every width, so risks make a column down the list; when it
 doesn't fit there, the stat line breaks at its dot to make room ("Not toured yet …
 ● high"), and then so do the other stat lines in its group, so they take one shape;
 or it starts a line of its own. It never takes a title's room. A group's
