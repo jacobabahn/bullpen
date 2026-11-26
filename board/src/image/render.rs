@@ -23,7 +23,7 @@ use super::font::{tabular, Fonts, Weight};
 use super::shape::{diamond, left_slice, paint, rounded};
 use super::theme::{lit, solid, Flags, Rgb, Theme};
 use crate::model::TextSize;
-use crate::ui::rows::{DetailRow, Flag, ItemRow, Mark, Row, Rows, TaskRow};
+use crate::ui::rows::{Flag, ItemRow, Mark, Row, Rows, TaskRow};
 use std::ops::Range;
 use tiny_skia::{FillRule, LineCap, Path, Pixmap, Stroke, Transform};
 
@@ -201,12 +201,6 @@ const TITLE_GAP: f32 = 1.05;
 /// The space between a line's text and its risk's chip after it, of the line's type.
 const RISK_GAP: f32 = 0.6;
 
-/// How far inside where text ends a detail cut with "…" ends, of its type.
-const CUT_IN: f32 = 0.3;
-
-/// The space over a stat line under other lines, of a line's height.
-const STAT_GAP: f32 = 0.3;
-
 /// The space after a task's repository's name, before its title, of a title's size.
 const REPO_GAP: f32 = 0.5;
 
@@ -343,29 +337,6 @@ fn blocks<'r>(rows: &'r Rows, places: &[Place], pad: f32) -> Vec<Block<'r>> {
     out
 }
 
-/// Lines wrapped from parts said apart by " · " (a stat line's "5 files, +96 −31 · Not
-/// toured yet") break between parts where they can: a line's last part, cut by the
-/// break, goes down whole when the line under it has room (`fits`); and no line starts
-/// or ends with the dot. (So a line's text can lose a dot: what's drawn on it is read
-/// from the lines, not the text.)
-fn at_dots(lines: &mut [String], fits: impl Fn(&str) -> bool) {
-    for k in 1..lines.len() {
-        // (a line that starts at a dot has the part above it whole)
-        if lines[k].ends_with('…') || lines[k].starts_with("· ") {
-            continue;
-        }
-        if let Some((head, tail)) = lines[k - 1].rsplit_once(" · ") {
-            let down = format!("{tail} {}", lines[k].trim_start_matches("· "));
-            if head.contains(' ') && fits(&down) {
-                (lines[k - 1], lines[k]) = (head.to_string(), down);
-            }
-        }
-    }
-    for l in lines.iter_mut() {
-        *l = l.trim_start_matches("· ").trim_end_matches(" ·").to_string();
-    }
-}
-
 /// The ID column's width in pixels: the widest ID in the list, so titles line up as it scrolls.
 fn id_width(rows: &Rows, fonts: &Fonts, px: f32) -> f32 {
     rows.rows
@@ -463,28 +434,6 @@ impl Geo {
         self.c.grid.cols + 1 < 44
     }
 
-    /// A detail's text wrapped at its spaces to the room under the ID, `most` lines at
-    /// most (the first `less` narrower, and every one `key` narrower), the last cut with
-    /// "…" when there's more. One line at least, so a row is never empty.
-    fn detail_lines(&self, text: &str, most: usize, less: f32, key: f32, fonts: &Fonts) -> Vec<String> {
-        let room = self.detail_room() - key;
-        let mut lines = fonts.wrap(text, Weight::Regular, self.c.m.body, (room - less, room), most);
-        // (a line cut with "…" ends clearly inside where text ends: the dots' ink reaches
-        // further right than a letter's)
-        if lines.last().is_some_and(|l| l.ends_with('…')) {
-            let room = room - CUT_IN * self.c.m.body;
-            lines = fonts.wrap(text, Weight::Regular, self.c.m.body, (room - less, room), most);
-        }
-        fonts.fill_last(&mut lines, Weight::Regular, self.c.m.body, room);
-        at_dots(&mut lines, |l| fonts.width(l, Weight::Regular, self.c.m.body) <= room);
-        if lines.is_empty() { vec![String::new()] } else { lines }
-    }
-
-    /// The room the caps of the keys a detail's text names take on a line: their sides.
-    fn caps(&self, d: &DetailRow) -> f32 {
-        key_letters(&d.text, d.lead).len() as f32 * 2.0 * KEY_SIDE * self.c.m.body
-    }
-
     /// Does the selected task's key fit at the right of its block's last line (`row`,
     /// a detail, drawn on `lines`) as that line is, after its risk's chip? The line is
     /// never cut or moved for it: where it doesn't fit it's left out, and the key row
@@ -494,44 +443,6 @@ impl Geo {
         let line = lines.last().map_or(0.0, |l| fonts.width(l, Weight::Bold, self.c.m.body));
         let risk = d.risk.as_ref().map_or(0.0, |level| self.risk_room(level, fonts));
         line + self.caps(d) + risk + self.key_width(key, what, fonts) <= self.detail_room()
-    }
-
-    /// A detail's lines with room for its task's risk's chip after the last: as they
-    /// wrap when it fits there; else with the chip's room off every line, when that
-    /// cuts no more (a stat line breaks at its dot: "Not toured yet ● high"); else the
-    /// chip on a line of its own. A stat line takes a second line when it must. Its
-    /// figures are tabular.
-    fn with_risk(&self, d: &DetailRow, less: f32, fonts: &Fonts) -> Vec<String> {
-        // (every figure tabular: a stat line's line up, and a 1 keeps its space)
-        let (text, most) = (tabular(&d.text), if d.stat { d.lines.max(2) } else { d.lines });
-        let lines = self.detail_lines(&text, most, less, self.caps(d), fonts);
-        let Some(level) = &d.risk else { return lines };
-        let chip = self.risk_room(level, fonts);
-        let ends = |l: &[String]| l.last().map_or(0.0, |l| fonts.width(l, Weight::Regular, self.c.m.body)) + self.caps(d);
-        if ends(&lines) + chip <= self.detail_room() {
-            return lines;
-        }
-        let cut = |l: &[String]| l.last().is_some_and(|l| l.ends_with('…'));
-        let narrower = self.detail_lines(&text, most, less, self.caps(d) + chip, fonts);
-        if cut(&narrower) == cut(&lines) && ends(&narrower) + chip <= self.detail_room() {
-            return narrower;
-        }
-        let mut lines = lines;
-        lines.push(String::new());
-        lines
-    }
-
-    /// The room a risk's chip takes after a line's text: its gap and its chip.
-    fn risk_room(&self, level: &str, fonts: &Fonts) -> f32 {
-        RISK_GAP * self.c.m.body + self.risk_width(level, fonts)
-    }
-
-    /// The space over a stat line under other lines of its task's, setting its facts
-    /// apart from their words, in whole pixels.
-    fn stat_gap(&self, rows: &Rows, i: usize) -> f32 {
-        let stat = matches!(rows.rows.get(i), Some(Row::Detail(d)) if d.stat);
-        let after = i > 0 && rows.rows[i - 1].is_detail();
-        if stat && after { (STAT_GAP * self.c.m.body_line).round() } else { 0.0 }
     }
 
     /// The room the selected task's key takes at the right of its last line: its cap,
@@ -976,11 +887,19 @@ pub use metrics::Metrics;
 mod marks;
 #[path = "said.rs"]
 mod said;
+#[path = "lines.rs"]
+mod lines;
 #[path = "fleet.rs"]
 pub mod fleet;
 #[path = "page.rs"]
 pub mod page;
-use said::{key_letters, KEY_SIDE};
+use said::key_letters;
+#[cfg(test)]
+use crate::ui::rows::DetailRow;
+#[cfg(test)]
+use lines::{at_dots, STAT_GAP};
+#[cfg(test)]
+use said::KEY_SIDE;
 pub use marks::Marks;
 
 #[cfg(test)]
