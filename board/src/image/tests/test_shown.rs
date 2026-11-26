@@ -57,6 +57,21 @@ fn the_images_on_the_terminal_stay_under_the_budget_and_room_is_made_before_a_se
 }
 
 #[test]
+fn a_list_window_fits_beside_what_is_shown_and_kept_but_another_list() {
+    // a list's window shown (38 MB) and a key's block kept
+    let mut s = Screen::new(1);
+    let list = || Some(Pngs { cell: (10, 20), pieces: (0..4).map(|k| (Piece { x: 0, y: k * 900, w: 2_500, h: 950 }, b"png".to_vec())).collect() });
+    s.show(vec![Want { png: list(), places: vec![at(1, 0, 0, 10)], ..want(Slot::List, 1) }], &mut Vec::new()).unwrap();
+    s.preload(vec![Want { png: Some(png(2_500, 1_000)), ..want(Slot::Sel, 2) }], &mut Vec::new()).unwrap();
+    // another window as big fits; one that would push the block out doesn't
+    assert!(s.fits(2_500 * 3_800));
+    assert!(!s.fits(2_500 * 5_400));
+    // a kept list's window doesn't count: the next replaces it
+    s.preload(vec![Want { png: list(), ..want(Slot::List, 3) }], &mut Vec::new()).unwrap();
+    assert!(s.fits(2_500 * 3_800));
+}
+
+#[test]
 fn what_a_key_needs_isnt_dropped_to_keep_the_rest_of_it() {
     let mut s = Screen::new(1);
     for k in 1..=KEEP as u64 {

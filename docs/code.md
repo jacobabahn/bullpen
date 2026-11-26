@@ -118,7 +118,8 @@ are. While no key is waiting, `ahead.rs` presses j and k on the board,
 draws that frame off screen, puts back what the key changed, and sends the images it
 would want unplaced, so a j or k only places images; the list's base image it leaves
 to a thread of its own (`worker.rs`, its own fonts, answering with `Msg::Ready`),
-which also starts on the list's next window as the page nears its edge. The main
+which also starts on the list's next window as the page nears its edge, when that
+window fits in the budget beside what's shown (`Screen::fits`). The main
 loop also draws a key's
 frame before it reads the tasks again. While the board is an image, a task's detail is
 one row holding its whole text and the most lines it gets (`rows::detail_lines`), and

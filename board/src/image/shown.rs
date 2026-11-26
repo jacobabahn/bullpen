@@ -127,6 +127,13 @@ impl Screen {
         self.shown.values().chain(self.kept.iter().map(|(_, s)| s)).map(|s| s.px * 4).sum()
     }
 
+    /// Would an image of `px` pixels fit under the budget beside the images shown and
+    /// those kept but the list's (which a list's image kept replaces)?
+    pub fn fits(&self, px: u64) -> bool {
+        let kept = self.kept.iter().filter(|(k, _)| *k != Slot::List).map(|(_, s)| s);
+        self.shown.values().chain(kept).map(|s| s.px * 4).sum::<u64>() + px * 4 <= BUDGET as u64
+    }
+
     /// Delete the oldest images kept until `more` bytes fit under the budget (or none is
     /// left to delete).
     fn room(&mut self, more: u64, out: &mut impl Write) -> std::io::Result<()> {

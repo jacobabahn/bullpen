@@ -55,7 +55,9 @@ impl Picture {
     /// Start drawing the list's next window on the worker's thread when the page comes
     /// within a quarter of a page of its window's edge, so a key a few on that scrolls
     /// out of it only places it. Not for a window that's the page alone (the list just
-    /// changed there): a j or k's own drawing ahead does that.
+    /// changed there): a j or k's own drawing ahead does that; nor for one that couldn't
+    /// be kept beside what's on the terminal (shown.rs's budget): it would push out the
+    /// images drawn ahead for j and k, and itself, and be drawn again at every key.
     fn far(&mut self, app: &impl Host) -> Result<(), String> {
         let (Some(view), Some(drawn)) = (self.ahead_of.clone(), self.list.clone()) else { return Ok(()) };
         if self.worker.is_none() {
@@ -79,7 +81,11 @@ impl Picture {
             if wy <= y && y + room <= wy + wh {
                 continue;
             }
-            let (key, mut job) = super::list_job(&view, &plan.with_window(super::pieces::grid(y, room)), &paint);
+            let (gy, gh) = super::pieces::grid(y, room);
+            if !self.screen.fits(canvas.grid.width() as u64 * gh.min(total.saturating_sub(gy)) as u64) {
+                continue;
+            }
+            let (key, mut job) = super::list_job(&view, &plan.with_window((gy, gh)), &paint);
             if !self.screen.has(&super::Slot::List, key) {
                 job.font = font.clone();
                 self.worker.as_mut().expect("a worker").draw(job);

@@ -308,7 +308,8 @@ comes on), or when the list scrolls out of the window. While the board waits for
 it draws what `j` and `k` would show next (the block a task down and up, and the key
 row for it) and sends it without showing it; the list's next window, when the page
 comes near the window's edge, is drawn on a thread of its own, so a key doesn't wait
-for it. An image a key replaces is kept on the terminal, hidden, a while (the last 16,
+for it (but not when it couldn't be kept beside what's shown: it would push out what
+was drawn for `j` and `k`). An image a key replaces is kept on the terminal, hidden, a while (the last 16,
 and one of the list's, all the board's images under 96 MB: Rex keeps 128 MiB of images
 a pane and silently deletes the oldest past that, so the board deletes its own oldest
 first and never places one Rex may have deleted). So `j` and `k` send only a few placements, a few hundred
