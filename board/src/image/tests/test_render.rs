@@ -712,6 +712,42 @@ fn the_selected_tasks_key_is_in_a_cap_at_its_cards_lower_right() {
 }
 
 #[test]
+fn the_selected_tasks_key_is_left_of_its_risks_chip_on_its_last_line() {
+    // mission control's selected ready task: its key and its risk on its stat line
+    let c = Canvas::new(Grid { cols: 60, cell_w: 16, cell_h: 34 }, TextSize::Medium, Theme::default());
+    let block = |key: Option<(String, String)>, risk: Option<String>| {
+        let t = TaskRow { selected: true, key, ..task("BP-1", "ready") };
+        let stat = DetailRow { risk, stat: true, selected: true, ..detail_row("3 files, +12 −10") };
+        rows(vec![Row::Task(t), Row::Detail(detail_row("Approved.")), Row::Detail(stat)])
+    };
+    let draw = |r: &Rows| {
+        let mut fonts = Fonts::builtin();
+        let laid = lay(r, &c, &fonts);
+        let s = render(r, &laid, Cut::rows(0..3, laid.heights.iter().sum()), &c, &mut fonts).unwrap();
+        (laid, s)
+    };
+    let low = || Some("low".to_string());
+    let (laid, s) = draw(&block(Some(("⏎".into(), "open".into())), low()));
+    let ((_, bare), (_, plain)) = (draw(&block(None, low())), draw(&block(None, None)));
+    // on the stat line (without a risk the block is shorter: it has no room under it
+    // for the chip, so the card's foot moves)
+    let line = laid.heights[0] + laid.heights[1]..laid.heights[0] + laid.heights[1] + laid.heights[2] - c.m.below as u32;
+    let differ = |a: &Sheet, b: &Sheet| -> Vec<(u32, u32)> {
+        let w = a.pixmap.width();
+        line.clone().flat_map(|y| (0..w).map(move |x| (x, y))).filter(|&(x, y)| px_at(a, x, y) != px_at(b, x, y)).collect()
+    };
+    // the chip: what differs with the risk; the key: what differs with it, all of it
+    // left of the chip, on the same line
+    let chip_left = differ(&bare, &plain).iter().map(|p| p.0).min().unwrap();
+    let key = differ(&s, &bare);
+    assert!(!key.is_empty());
+    assert!(key.iter().all(|p| p.0 < chip_left), "{} {chip_left}", key.iter().map(|p| p.0).max().unwrap());
+    // and only there
+    let everywhere = (0..s.pixmap.height()).flat_map(|y| (0..s.pixmap.width()).map(move |x| (x, y)));
+    assert_eq!(everywhere.filter(|&(x, y)| px_at(&s, x, y) != px_at(&bare, x, y)).count(), key.len());
+}
+
+#[test]
 fn a_short_last_line_keeps_its_room_beside_the_key_and_a_task_with_no_key_has_none() {
     let with = |key: Option<(String, String)>| {
         let t = TaskRow { selected: true, key, ..task("BP-1", "needs") };

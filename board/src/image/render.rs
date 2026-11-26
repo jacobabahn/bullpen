@@ -306,7 +306,7 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
     // last line leaves room
     for b in blocks.iter().filter(|b| b.ends) {
         if let Some((key, what)) = b.key.filter(|(k, what)| d.g.key_fits(&rows.rows[b.last], &laid.lines[b.last], k, what, d.fonts)) {
-            d.action(key, what, b.bottom - c.m.below);
+            d.action(key, what, &rows.rows[b.last], b.bottom - c.m.below);
         }
     }
     let mut pm = pm.clone_rect(tiny_skia::IntRect::from_xywh(0, EDGE as i32, width, height).ok_or_else(made)?).ok_or_else(made)?;
@@ -672,12 +672,20 @@ impl<'a> Draw<'a> {
         }
     }
 
-    /// A task's key in a cap and what it does, at the right of its block's last line,
-    /// whose bottom is `bottom`.
-    fn action(&mut self, key: &str, what: &str, bottom: f32) {
+    /// A task's key in a cap and what it does, at the right of its block's last line
+    /// (`row`, whose foot, but the room under it, is `bottom`): left of its risk's chip,
+    /// which is there too, with the chip's gap between them.
+    fn action(&mut self, key: &str, what: &str, row: &Row, bottom: f32) {
         let px = self.g.key_px();
-        let x = self.right() - chip::keycap_width(self.fonts, key, what, px);
-        chip::keycap(self, key, what, px, x, bottom - self.m().body_line / 2.0);
+        let (chip, under) = match row {
+            Row::Detail(d) if d.risk.is_some() => {
+                let level = d.risk.as_deref().unwrap_or_default();
+                (self.g.risk_room(level, self.fonts), self.g.risk_under(d, self.fonts) as f32)
+            }
+            _ => (0.0, 0.0),
+        };
+        let x = self.right() - chip - chip::keycap_width(self.fonts, key, what, px);
+        chip::keycap(self, key, what, px, x, bottom - under - self.m().body_line / 2.0);
     }
 
     /// A rectangle with rounded corners, filled.
