@@ -382,3 +382,7 @@ fn blend(pm: &mut Pixmap, mask: &Mask, x: i32, y: i32, color: [u8; 4]) {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/test_font.rs"]
+mod tests;
