@@ -21,9 +21,10 @@ pub trait Flags {
 
 impl Flags for Theme {
     /// The selected card's fill when its task needs you or stopped: its flag's colour,
-    /// well over twice as strong as its wash.
+    /// twice as strong as its wash (more on a light pane, where amber is pale), under
+    /// an edge of that colour (render.rs's `card`).
     fn flag_tint(&self, flag: Flag) -> [u8; 4] {
-        faint(fill(self, flag), 0.26)
+        faint(fill(self, flag), if luminance(self.bg) > luminance(self.fg) { 0.26 } else { 0.2 })
     }
 
     /// A flag's colour: amber for a task that needs you, red for one whose agent stopped.

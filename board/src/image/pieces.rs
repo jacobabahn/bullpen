@@ -77,7 +77,7 @@ fn block(rows: &Rows, base: &Rows) -> Option<(usize, usize)> {
     let same = |(a, b): (&Row, &Row)| match (a, b) {
         (Row::Task(a), Row::Task(b)) => (&a.title, a.yours, &a.age, &a.risk) == (&b.title, b.yours, &b.age, &b.risk),
         (Row::Item(a), Row::Item(b)) => a.title == b.title,
-        (Row::Detail(a), Row::Detail(b)) => (&a.text, a.lines, a.lead, a.stale) == (&b.text, b.lines, b.lead, b.stale),
+        (Row::Detail(a), Row::Detail(b)) => (&a.text, a.lines, a.lead, a.stale, &a.risk, a.stat) == (&b.text, b.lines, b.lead, b.stale, &b.risk, b.stat),
         (Row::ItemDetail(a, n, _), Row::ItemDetail(b, m, _)) => (a, n) == (b, m),
         _ => false,
     };

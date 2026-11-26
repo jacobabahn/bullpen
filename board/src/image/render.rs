@@ -18,7 +18,7 @@
 //! a window of pixels of them (pieces.rs), drawn as that part of the whole would be.
 
 use super::chip;
-use super::font::{Fonts, Weight};
+use super::font::{tabular, Fonts, Weight};
 use super::shape::{diamond, left_slice, paint, rounded};
 use super::theme::{lit, solid, Flags, Rgb, Theme};
 use crate::model::TextSize;
@@ -136,20 +136,15 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
             Row::Task(t) => {
                 let most = TITLE_LINES;
                 // (its repository's name before it, on mission control, takes its first line's room)
-                (&t.title, most, title_weight(), g.task_right(t, fonts) - g.repo_width(t), g.title_right(t, fonts))
+                (&t.title, most, title_weight(), g.task_right(t, fonts) - g.repo_width(t), c.right())
             }
             Row::Item(i) => (&i.title, 1, title_weight(), c.right(), c.right()),
             Row::Detail(d) => {
                 // a stale age is semibold: the first line has that much less room
                 let (age, _) = crate::model::split_at_width(&d.text, d.lead);
                 let bolder = if d.stale { fonts.width(&age, Weight::Bold, c.m.body) - fonts.width(&age, Weight::Regular, c.m.body) } else { 0.0 };
-                // (a narrow board's risk chip at its last line's right: one line more for it)
-                let (most, chip) = match g.risk_below(d) {
-                    Some(level) => (d.lines.max(2), g.risk_width(level, fonts) + RISK_GAP * c.m.detail),
-                    None => (d.lines, 0.0),
-                };
-                let lines = g.detail_lines(&d.text, most, bolder, g.caps(d) + chip, fonts);
-                heights.push(g.height(row, lines.len()) + under(i));
+                let lines = g.with_risk(d, bolder, fonts);
+                heights.push(g.height(row, lines.len()) + g.stat_gap(rows, i) as u32 + under(i));
                 all.push(lines);
                 continue;
             }
@@ -171,12 +166,12 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
             }
         };
         let px = c.m.title;
-        let x = g.title_x();
-        let first = right - x;
+        let first = right - g.title_x();
         let lines = if most > 1 {
             // (its first line full beside its age, but a last line of one word takes another)
-            let mut lines = fonts.wrap(title, weight, px, (first, rest - x), most);
-            fonts.no_widow(&mut lines, weight, px, rest - x);
+            let rest = rest - g.body_x();
+            let mut lines = fonts.wrap(title, weight, px, (first, rest), most);
+            fonts.no_widow(&mut lines, weight, px, rest);
             lines
         } else {
             vec![fonts.fit(title, weight, px, first)]
@@ -202,8 +197,14 @@ pub fn fitting(laid: &Laid, top: usize, room: u32) -> usize {
 /// The space between a title's first line and its risk or age, of a title's size.
 const TITLE_GAP: f32 = 0.85;
 
-/// The space between a risk's chip and the age's column, of a detail's size.
-const RISK_GAP: f32 = 0.75;
+/// The space between a line's text and its risk's chip after it, of the line's type.
+const RISK_GAP: f32 = 0.6;
+
+/// How far inside where text ends a detail cut with "…" ends, of its type.
+const CUT_IN: f32 = 0.3;
+
+/// The space over a stat line under other lines, of a line's height.
+const STAT_GAP: f32 = 0.3;
 
 /// The space after a task's repository's name, before its title, of a title's size.
 const REPO_GAP: f32 = 0.5;
@@ -274,7 +275,7 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
             _ => {}
         }
         if let Some(f) = b.flag {
-            d.bar(b.top, b.bottom, f, if b.selected { RING } else { 0.0 });
+            d.bar(b.top, b.bottom, f);
         }
     }
     let at = |p: &Place| p.y as f32;
@@ -283,14 +284,15 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
         // a row outside the window draws nothing (its card, wash and bar may reach in, above)
         let top = (cut.at + cut.y) as f32;
         if y + h + c.m.pad + EDGE as f32 >= top && y <= top + (height + EDGE) as f32 {
-            d.row(&rows.rows[p.row], &laid.lines[p.row], (y, h), (cut.bare)(p.row));
+            let gap = d.g.stat_gap(rows, p.row);
+            d.row(&rows.rows[p.row], &laid.lines[p.row], (y + gap, h - gap), (cut.bare)(p.row));
         }
     }
     // the selected task's key (mission control's), at its card's lower right, when its
     // last line leaves room
     for b in blocks.iter().filter(|b| b.ends) {
         if let Some((key, what)) = b.key.filter(|(k, what)| d.g.key_fits(&rows.rows[b.last], &laid.lines[b.last], k, what, d.fonts)) {
-            d.action(key, what, &rows.rows[b.last], b.bottom - c.m.below);
+            d.action(key, what, b.bottom - c.m.below);
         }
     }
     let mut pm = pm.clone_rect(tiny_skia::IntRect::from_xywh(0, EDGE as i32, width, height).ok_or_else(made)?).ok_or_else(made)?;
@@ -368,8 +370,8 @@ fn id_width(rows: &Rows, fonts: &Fonts, px: f32) -> f32 {
     rows.rows
         .iter()
         .filter_map(|r| match r {
-            Row::Task(t) => Some(fonts.width(&t.id, Weight::Bold, px)),
-            Row::Item(i) => Some(fonts.width(&i.id, Weight::Bold, px)),
+            Row::Task(t) => Some(fonts.width(&tabular(&t.id), Weight::Bold, px)),
+            Row::Item(i) => Some(fonts.width(&tabular(&i.id), Weight::Bold, px)),
             _ => None,
         })
         .fold(0.0, f32::max)
@@ -436,11 +438,18 @@ impl Geo {
         (self.c.left() + 2.0 * c).max(self.mark_x() + self.mark_r() + 0.4 * self.c.m.title)
     }
 
-    /// Where a title starts, and every line of it and of the task's details under it
-    /// (the ID and the mark hang in a gutter at their left): past the ID column and a
-    /// gap, narrower on a board under 44 columns, where every pixel counts.
+    /// Where a title starts: past the ID column and a gap (on a board under 44
+    /// columns, where the ID is a word before the title, a little more than a space).
     fn title_x(&self) -> f32 {
-        self.text_x() + self.idw + if self.narrow() { 0.6 } else { 0.8 } * self.c.m.title
+        self.text_x() + self.idw + if self.narrow() { 0.5 } else { 0.8 } * self.c.m.title
+    }
+
+    /// Where a title's other lines start, and the task's details under it: under its
+    /// first line (the ID and the mark hang in a gutter at their left); on a board under
+    /// 44 columns, where every pixel counts, under the ID (the mark alone hangs), so the
+    /// title and its details get the pane's width.
+    fn body_x(&self) -> f32 {
+        if self.narrow() { self.text_x() } else { self.title_x() }
     }
 
     /// An ID's type: a detail's, at any width.
@@ -459,6 +468,12 @@ impl Geo {
     fn detail_lines(&self, text: &str, most: usize, less: f32, key: f32, fonts: &Fonts) -> Vec<String> {
         let room = self.detail_room() - key;
         let mut lines = fonts.wrap(text, Weight::Regular, self.c.m.body, (room - less, room), most);
+        // (a line cut with "…" ends clearly inside where text ends: the dots' ink reaches
+        // further right than a letter's)
+        if lines.last().is_some_and(|l| l.ends_with('…')) {
+            let room = room - CUT_IN * self.c.m.body;
+            lines = fonts.wrap(text, Weight::Regular, self.c.m.body, (room - less, room), most);
+        }
         fonts.fill_last(&mut lines, Weight::Regular, self.c.m.body, room);
         at_dots(&mut lines, |l| fonts.width(l, Weight::Regular, self.c.m.body) <= room);
         if lines.is_empty() { vec![String::new()] } else { lines }
@@ -470,14 +485,51 @@ impl Geo {
     }
 
     /// Does the selected task's key fit at the right of its block's last line (`row`,
-    /// a detail, drawn on `lines`) as that line is, beside a narrow board's risk chip?
-    /// The line is never cut or moved for it: where it doesn't fit it's left out, and
-    /// the key row has it.
+    /// a detail, drawn on `lines`) as that line is, after its risk's chip? The line is
+    /// never cut or moved for it: where it doesn't fit it's left out, and the key row
+    /// has it.
     fn key_fits(&self, row: &Row, lines: &[String], key: &str, what: &str, fonts: &Fonts) -> bool {
         let Row::Detail(d) = row else { return false };
         let line = lines.last().map_or(0.0, |l| fonts.width(l, Weight::Bold, self.c.m.body));
-        let risk = self.risk_below(d).map_or(0.0, |level| self.risk_width(level, fonts) + RISK_GAP * self.c.m.detail);
+        let risk = d.risk.as_ref().map_or(0.0, |level| self.risk_room(level, fonts));
         line + self.caps(d) + risk + self.key_width(key, what, fonts) <= self.detail_room()
+    }
+
+    /// A detail's lines with room for its task's risk's chip after the last: as they
+    /// wrap when it fits there; else with the chip's room off every line, when that
+    /// cuts no more (a stat line breaks at its dot: "Not toured yet ● high"); else the
+    /// chip on a line of its own. A stat line takes a second line when it must, and
+    /// its figures are tabular.
+    fn with_risk(&self, d: &DetailRow, less: f32, fonts: &Fonts) -> Vec<String> {
+        let (text, most) = if d.stat { (tabular(&d.text), d.lines.max(2)) } else { (d.text.clone(), d.lines) };
+        let lines = self.detail_lines(&text, most, less, self.caps(d), fonts);
+        let Some(level) = &d.risk else { return lines };
+        let chip = self.risk_room(level, fonts);
+        let ends = |l: &[String]| l.last().map_or(0.0, |l| fonts.width(l, Weight::Regular, self.c.m.body)) + self.caps(d);
+        if ends(&lines) + chip <= self.detail_room() {
+            return lines;
+        }
+        let cut = |l: &[String]| l.last().is_some_and(|l| l.ends_with('…'));
+        let narrower = self.detail_lines(&text, most, less, self.caps(d) + chip, fonts);
+        if cut(&narrower) == cut(&lines) && ends(&narrower) + chip <= self.detail_room() {
+            return narrower;
+        }
+        let mut lines = lines;
+        lines.push(String::new());
+        lines
+    }
+
+    /// The room a risk's chip takes after a line's text: its gap and its chip.
+    fn risk_room(&self, level: &str, fonts: &Fonts) -> f32 {
+        RISK_GAP * self.c.m.body + self.risk_width(level, fonts)
+    }
+
+    /// The space over a stat line under other lines of its task's, setting its facts
+    /// apart from their words, in whole pixels.
+    fn stat_gap(&self, rows: &Rows, i: usize) -> f32 {
+        let stat = matches!(rows.rows.get(i), Some(Row::Detail(d)) if d.stat);
+        let after = i > 0 && rows.rows[i - 1].is_detail();
+        if stat && after { (STAT_GAP * self.c.m.body_line).round() } else { 0.0 }
     }
 
     /// The room the selected task's key takes at the right of its last line: its cap,
@@ -492,14 +544,14 @@ impl Geo {
         self.c.m.label
     }
 
-    /// A detail line's room: from the title's left edge to where text ends.
+    /// A detail line's room: from its left edge to where text ends.
     fn detail_room(&self) -> f32 {
-        self.c.right() - self.title_x()
+        self.c.right() - self.body_x()
     }
 
-    /// The age column's width: an age of two figures', so the risks' chips before it
-    /// line up down the list whatever the ages are (a wider one, or an overdue one's
-    /// chip, takes its own).
+    /// The age column's width: an age of two figures', so titles end at one column
+    /// down the list whatever the ages are (a wider one, or an overdue one's chip,
+    /// takes its own).
     fn age_width(&self, t: &TaskRow, fonts: &Fonts) -> f32 {
         if t.age.is_empty() {
             return 0.0;
@@ -514,38 +566,9 @@ impl Geo {
         t.stale && t.asked.is_none()
     }
 
-    /// The width a task's age (and risk) take at the right, as `task` draws them.
-    fn right_side(&self, t: &TaskRow, fonts: &Fonts) -> f32 {
-        let mut w = self.age_width(t, fonts);
-        if let Some(level) = self.risk_beside(t) {
-            let gap = if t.age.is_empty() { 0.0 } else { RISK_GAP * self.c.m.detail };
-            w += gap + self.risk_width(level, fonts);
-        }
-        w
-    }
-
-    /// A task's risk, when its chip is beside its title: but on a board under 44
-    /// columns, where it would take the title's room (it's at its last line's right).
-    fn risk_beside<'t>(&self, t: &'t TaskRow) -> Option<&'t String> {
-        t.risk.as_ref().filter(|_| !self.narrow())
-    }
-
-    /// A line's risk, when its task's chip is at its right: its task's last line, on a
-    /// board under 44 columns.
-    fn risk_below<'d>(&self, d: &'d DetailRow) -> Option<&'d String> {
-        d.risk.as_ref().filter(|_| self.narrow())
-    }
-
     /// How wide a task's risk is: its chip.
     fn risk_width(&self, level: &str, fonts: &Fonts) -> f32 {
         chip::risk_width(fonts, level, self.c.m.label)
-    }
-
-    /// Where a task's title's other lines end: short of the age's column, so the ages
-    /// have a column of their own down the list, whatever wraps beside them.
-    fn title_right(&self, t: &TaskRow, fonts: &Fonts) -> f32 {
-        let age = self.age_width(t, fonts);
-        self.c.right() - if age > 0.0 { age + TITLE_GAP * self.c.m.title } else { 0.0 }
     }
 
     /// The room a task's repository's name takes before its title's first line (mission
@@ -559,7 +582,7 @@ impl Geo {
 
     /// Where a task's title's first line must end: short of its risk and age, by a gap.
     fn task_right(&self, t: &TaskRow, fonts: &Fonts) -> f32 {
-        self.c.right() - self.right_side(t, fonts) - TITLE_GAP * self.c.m.title
+        self.c.right() - self.age_width(t, fonts) - TITLE_GAP * self.c.m.title
     }
 
     /// A row's height in whole pixels, with its title (or a detail's text) on `lines` lines.
@@ -567,7 +590,7 @@ impl Geo {
         let m = &self.c.m;
         let h = match row {
             // (and a little under it, clear of a selected card's edge)
-            Row::Head { .. } => m.head_pad + m.detail_line + (0.35 * m.title).round(),
+            Row::Head { .. } => m.head_pad + m.detail_line + (0.5 * m.title).round(),
             Row::Task(_) | Row::Item(_) => m.pad + lines as f32 * m.line + m.title_gap,
             Row::Later { .. } => m.pad + m.line,
             Row::Detail(_) | Row::ItemDetail(..) => lines as f32 * m.body_line,
@@ -630,6 +653,9 @@ impl<'a> Draw<'a> {
     fn title_x(&self) -> f32 {
         self.g.title_x()
     }
+    fn body_x(&self) -> f32 {
+        self.g.body_x()
+    }
     /// The baseline of a line whose top is y: a whole pixel from its top (as the glyphs
     /// are drawn), so a row drawn at any height in any image looks the same.
     fn baseline(&self, y: f32) -> f32 {
@@ -685,7 +711,8 @@ impl<'a> Draw<'a> {
         let (x, y, w, h) = self.panel(top, bottom);
         let r = self.radius();
         let fill = flag.map_or(self.theme.tint(), |f| self.theme.flag_tint(f));
-        let edge = self.theme.edge();
+        // (a task that needs you or stopped is edged in its flag's colour, its bar's)
+        let edge = flag.map_or(self.theme.edge(), |f| solid(lit(self.theme.flag(f))));
         self.rounded_fill(x, y, w, h, r, fill);
         self.rounded_edge(x, y, w, h, r, RING, edge);
     }
@@ -704,26 +731,22 @@ impl<'a> Draw<'a> {
     }
 
     /// The bar at the left of a task that needs you or stopped, in its colour: its
-    /// wash's left edge, following its corners, `inside` a selected card's edge.
-    fn bar(&mut self, top: f32, bottom: f32, flag: Flag, inside: f32) {
+    /// wash's left edge, following its corners (selected, its card's edge is that
+    /// colour too, so the two are one frame, heavier at the left).
+    fn bar(&mut self, top: f32, bottom: f32, flag: Flag) {
         let (x, y, _, h) = self.panel(top, bottom);
         let w = (0.25 * self.c()).max(3.0);
         let color = solid(lit(self.theme.flag(flag)));
-        if let Some(p) = left_slice(x + inside, y + inside, w, h - 2.0 * inside, self.radius() - inside) {
+        if let Some(p) = left_slice(x, y, w, h, self.radius()) {
             self.fill(&p, color);
         }
     }
 
-    /// A task's key in a cap and what it does, at the right of its block's last line
-    /// (`row`), whose bottom is `bottom`: left of a narrow board's risk chip, which is
-    /// there too.
-    fn action(&mut self, key: &str, what: &str, row: &Row, bottom: f32) {
+    /// A task's key in a cap and what it does, at the right of its block's last line,
+    /// whose bottom is `bottom`.
+    fn action(&mut self, key: &str, what: &str, bottom: f32) {
         let px = self.g.key_px();
-        let chip = match row {
-            Row::Detail(d) => self.g.risk_below(d).map_or(0.0, |level| self.g.risk_width(level, self.fonts) + RISK_GAP * self.m().detail),
-            _ => 0.0,
-        };
-        let x = self.right() - chip - chip::keycap_width(self.fonts, key, what, px);
+        let x = self.right() - chip::keycap_width(self.fonts, key, what, px);
         chip::keycap(self, key, what, px, x, bottom - self.m().body_line / 2.0);
     }
 
@@ -788,12 +811,12 @@ impl<'a> Draw<'a> {
             Row::Task(t) => self.task(t, lines, y, bare),
             Row::Detail(d) => {
                 // dim, but the selected task's and what you must act on, which are a
-                // step under the title's foreground
-                let color = if d.selected || (d.loud && d.flag.is_some()) { self.theme.soft() } else { dim };
-                let x = self.title_x();
+                // step under the title's foreground (a stat line is dim)
+                let color = if !d.stat && (d.selected || (d.loud && d.flag.is_some())) { self.theme.soft() } else { dim };
+                let x = self.body_x();
                 // (found in the lines as drawn, which may have dropped a dot)
                 let keys = key_letters(&lines.join(" "), d.lead);
-                let mut seen = 0;
+                let (mut seen, mut end) = (0, x);
                 for (k, line) in lines.iter().enumerate() {
                     let y = y + k as f32 * m.body_line;
                     // a narrow board's age starts the first line
@@ -801,16 +824,18 @@ impl<'a> Draw<'a> {
                     // (an age that has waited too long is semibold, in the foreground)
                     let age_color = if d.stale { fg } else { dim };
                     let weight = if d.stale { Weight::Bold } else { Weight::Regular };
-                    let end = self.text(&age, weight, x, y, self.right() - x, age_color);
+                    let after = self.text(&age, weight, x, y, self.right() - x, age_color);
                     seen += age.chars().filter(|c| !c.is_whitespace()).count();
-                    self.said(&rest, end, y, color, &keys, &mut seen);
+                    end = if d.stat { self.stat(&rest, after, y, color) } else { self.said(&rest, after, y, color, &keys, &mut seen) };
                 }
-                // a narrow board's risk chip, at the right of the task's last line
-                if let Some(level) = self.g.risk_below(d) {
+                // its task's risk, a chip after its last line (on its own, it starts one)
+                if let Some(level) = &d.risk {
                     let cy = y + (lines.len().max(1) - 1) as f32 * m.body_line + m.body_line / 2.0;
+                    let at = if end > x { end + RISK_GAP * m.body } else { x };
                     let color = self.theme.risk(level);
                     let color = solid(lit(Rgb(color[0], color[1], color[2])));
-                    chip::risk(self, level, m.label, self.right(), cy, color);
+                    let h = (m.body_line - 2.0 * (0.06 * m.body_line).max(1.0).round()).min((1.5 * m.label).round());
+                    chip::risk(self, level, m.label, (at, cy, h), color);
                 }
             }
             Row::Gap => {}
@@ -831,7 +856,7 @@ impl<'a> Draw<'a> {
             Row::Item(i) => self.item(i, lines, y + m.pad, bare),
             Row::Repo(r) => self.repo(r, y + m.head_pad, y + h),
             Row::ItemDetail(_, _, selected) => {
-                let x = self.title_x();
+                let x = self.body_x();
                 for (k, line) in lines.iter().enumerate() {
                     let color = if *selected { self.theme.soft() } else { dim };
                     self.text(line, Weight::Regular, x, y + k as f32 * m.body_line, self.right() - x, color);
@@ -854,9 +879,9 @@ impl<'a> Draw<'a> {
             let r = 0.2 * self.px();
             self.backlog_mark(id_end + 0.25 * self.px() + r, cy, r);
         }
-        // the right side: the risk as a chip, then the age at a detail's size
+        // the right side: the age at a detail's size (its risk is after its last line)
         let small = self.m().detail;
-        let mut right = self.right();
+        let right = self.right();
         let age_w = self.g.age_width(t, self.fonts);
         if self.g.overdue(t) {
             // an age that has waited too long: a chip of its task's flag's colour, whole
@@ -868,20 +893,14 @@ impl<'a> Draw<'a> {
             let x = right - self.fonts.width(&t.age, weight, small);
             self.text_in(small, &t.age, weight, x, y, age_w + 1.0, color);
         }
-        right -= age_w;
-        if let Some(level) = self.g.risk_beside(t) {
-            let gap = if t.age.is_empty() { 0.0 } else { RISK_GAP * small };
-            let color = self.theme.risk(level);
-            let color = solid(lit(Rgb(color[0], color[1], color[2])));
-            chip::risk(self, level, self.m().label, right - gap, cy, color);
-        }
         let color = match tone {
             Some(c) => c,
             None if t.selected || t.yours => self.theme.text(),
             None if t.quiet => self.theme.quiet(),
             None => self.theme.soft(),
         };
-        let (first, rest) = (self.g.task_right(t, self.fonts), self.g.title_right(t, self.fonts));
+        // (its other lines run to where text ends, as its details do: the age is beside the first)
+        let (first, rest) = (self.g.task_right(t, self.fonts), self.right());
         // mission control's inbox: its repository's name first, regular and dim
         let lead = self.g.repo_width(t);
         if lead > 0.0 {
@@ -891,22 +910,23 @@ impl<'a> Draw<'a> {
         self.title(lines, title_weight(), (first, rest), lead, y, color);
     }
 
-    /// A title's lines from the title column (the first `lead` further in), the first
-    /// ending at `first`, the rest at `rest`.
+    /// A title's lines: the first from the title column (`lead` further in), ending at
+    /// `first`, the rest from under it (`body_x`) to `rest`.
     fn title(&mut self, lines: &[String], weight: Weight, (first, rest): (f32, f32), lead: f32, y: f32, color: [u8; 4]) {
-        let x = self.title_x();
+        let (x, under) = (self.title_x(), self.body_x());
         for (k, line) in lines.iter().enumerate() {
-            let (x, end) = if k == 0 { (x + lead, first) } else { (x, rest) };
+            let (x, end) = if k == 0 { (x + lead, first) } else { (under, rest) };
             self.text(line, weight, x, y + k as f32 * self.h(), end - x + 1.0, color);
         }
     }
 
-    /// An ID, at a detail's size on the title's baseline: dim (a step up on a wash,
-    /// `washed`, where dim is fainter), or in the foreground when selected (its weight
-    /// the same, so it keeps its width), or semibold in `tone` when it's asked about.
-    /// Returns where it ends.
+    /// An ID, at a detail's size on the title's baseline, its figures tabular (so IDs
+    /// are a column): dim (a step up on a wash, `washed`, where dim is fainter), or in
+    /// the foreground when selected (its weight the same, so it keeps its width), or
+    /// semibold in `tone` when it's asked about. Returns where it ends.
     fn id(&mut self, id: &str, selected: bool, washed: bool, tone: Option<[u8; 4]>, y: f32) -> f32 {
-        let (x, px) = (self.text_x(), self.g.id_px());
+        let (x, px, id) = (self.text_x(), self.g.id_px(), tabular(id));
+        let id = id.as_str();
         let (weight, color) = match tone {
             Some(c) => (Weight::Bold, c),
             None if selected => (Weight::Regular, self.theme.text()),

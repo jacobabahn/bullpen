@@ -38,6 +38,8 @@ pub struct Fonts {
     fake_bold: bool,
     /// Inter, for a character the font file lacks
     fallback: Option<(Face<'static>, Face<'static>)>,
+    /// each face's tabular figures, regular's then bold's ("zero.tf"…), where it has them
+    figures: [[Option<GlyphId>; 10]; 2],
     cache: HashMap<(Weight, bool, u16, u32, u8), Glyph>,
 }
 
@@ -48,14 +50,19 @@ impl Fonts {
     /// Inter, built in.
     pub fn builtin() -> Fonts {
         let face = |data: &'static [u8]| Face::parse(data, 0).expect("the built-in font parses");
-        Fonts { regular: face(REGULAR), bold: face(SEMIBOLD), fake_bold: false, fallback: None, cache: HashMap::new() }
+        Fonts::of(face(REGULAR), face(SEMIBOLD), false, None)
     }
 
     /// JetBrains Mono, built in, with Inter for what it lacks: code.
     pub fn mono() -> Fonts {
         let face = Face::parse(MONO, 0).expect("the built-in font parses");
         let inter = Fonts::builtin();
-        Fonts { regular: face.clone(), bold: face, fake_bold: true, fallback: Some((inter.regular, inter.bold)), cache: HashMap::new() }
+        Fonts::of(face.clone(), face, true, Some((inter.regular, inter.bold)))
+    }
+
+    fn of(regular: Face<'static>, bold: Face<'static>, fake_bold: bool, fallback: Option<(Face<'static>, Face<'static>)>) -> Fonts {
+        let figures = [figures(&regular), figures(&bold)];
+        Fonts { regular, bold, fake_bold, fallback, figures, cache: HashMap::new() }
     }
 
     /// The font file at path, with Inter for what it lacks; why not, when it can't be read.
@@ -65,7 +72,7 @@ impl Fonts {
         let data: &'static [u8] = Box::leak(data.into_boxed_slice());
         let face = Face::parse(data, 0).map_err(|e| format!("{} isn't a font the board can draw with: {e}", path.display()))?;
         let inter = Fonts::builtin();
-        Ok(Fonts { regular: face.clone(), bold: face, fake_bold: true, fallback: Some((inter.regular, inter.bold)), cache: HashMap::new() })
+        Ok(Fonts::of(face.clone(), face, true, Some((inter.regular, inter.bold))))
     }
 
     /// The font `board_font` names, else Inter.
@@ -81,6 +88,14 @@ impl Fonts {
         let own = match weight {
             Weight::Regular => &self.regular,
             Weight::Bold => &self.bold,
+        };
+        // a tabular figure (`tabular`): the face's own, else its figure
+        let c = match figure(c) {
+            Some(n) => match self.figures[usize::from(weight == Weight::Bold)][n] {
+                Some(g) => return (false, own, g),
+                None => char::from(b'0' + n as u8),
+            },
+            None => c,
         };
         if let Some(g) = own.glyph_index(c) {
             return (false, own, g);
@@ -296,6 +311,35 @@ impl Fonts {
         mask.fill_path(&path, FillRule::Winding, true, t);
         Glyph { mask: Some(mask), left: left as i32, top: top as i32 }
     }
+}
+
+/// Text with its figures tabular, each as wide as the others (an ID's, a count's), so
+/// figures in a column line up: each is a character of the Private Use Area, which
+/// `Fonts` draws as the face's tabular figure ("one.tf", with a foot: not a narrow one
+/// spaced out), or its own figure when the face has none.
+pub fn tabular(text: &str) -> String {
+    text.chars().map(|c| if c.is_ascii_digit() { char::from_u32(TABULAR + (c as u32 - '0' as u32)).unwrap_or(c) } else { c }).collect()
+}
+
+/// Where `tabular`'s figures start: U+E000 is zero.
+const TABULAR: u32 = 0xE000;
+
+/// Which tabular figure a character is.
+fn figure(c: char) -> Option<usize> {
+    (TABULAR..TABULAR + 10).contains(&(c as u32)).then(|| (c as u32 - TABULAR) as usize)
+}
+
+/// A face's tabular figures, by their glyphs' names ("zero.tf" to "nine.tf").
+fn figures(face: &Face) -> [Option<GlyphId>; 10] {
+    const NAMES: [&str; 10] = ["zero.tf", "one.tf", "two.tf", "three.tf", "four.tf", "five.tf", "six.tf", "seven.tf", "eight.tf", "nine.tf"];
+    let mut out = [None; 10];
+    for i in 0..face.number_of_glyphs() {
+        let g = GlyphId(i);
+        if let Some(n) = face.glyph_name(g).and_then(|name| NAMES.iter().position(|&x| x == name)) {
+            out[n] = Some(g);
+        }
+    }
+    out
 }
 
 /// Do these words start with a key the board names, in its phrases' form: a lowercase

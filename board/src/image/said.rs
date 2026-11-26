@@ -4,6 +4,7 @@
 
 use super::Draw;
 use crate::image::font::Weight;
+use crate::image::theme::faint;
 
 /// The room each side of a key a detail's text names, inside its cap, of the type's size.
 pub(super) const KEY_SIDE: f32 = 0.28;
@@ -35,8 +36,8 @@ pub(super) fn key_letters(text: &str, lead: usize) -> Vec<usize> {
 impl Draw<'_> {
     /// A detail's line from x, on the line whose top is y: its text in `color`, the
     /// keys it names (`keys`: which of the text's letters, `seen` of them drawn on the
-    /// lines before) semibold in the foreground, each in a small cap.
-    pub(super) fn said(&mut self, line: &str, x: f32, y: f32, color: [u8; 4], keys: &[usize], seen: &mut usize) {
+    /// lines before) semibold in the foreground, each in a small cap. Returns where it ends.
+    pub(super) fn said(&mut self, line: &str, x: f32, y: f32, color: [u8; 4], keys: &[usize], seen: &mut usize) -> f32 {
         let fg = self.theme.text();
         let (mut x, mut run, mut key) = (x, String::new(), false);
         for c in line.chars().chain(std::iter::once('\0')) {
@@ -47,7 +48,7 @@ impl Draw<'_> {
                     // in a small cap, as the key row's (lay left room for its sides),
                     // centred on the key's ink, which stays on the line's baseline
                     let (w, px) = (self.width(&run, weight), self.px());
-                    let (side, ch) = (KEY_SIDE * px, (1.15 * px).round());
+                    let (side, ch) = (KEY_SIDE * px, (1.25 * px).round());
                     let (up, down) = self.fonts().ink(&run, weight, px);
                     let top = (self.baseline(y) - (up - down) / 2.0 - ch / 2.0).round();
                     let (cap, edge) = (self.theme.cap(), self.theme.cap_edge());
@@ -65,5 +66,29 @@ impl Draw<'_> {
                 *seen += usize::from(!c.is_whitespace());
             }
         }
+        x
     }
+
+    /// A stat line's line from x ("14 files, +612 −148 · Not toured yet"), on the line
+    /// whose top is y: in `color`, but the lines added in green and those taken out in
+    /// red, a little dimmed, so its figures read as facts. Returns where it ends.
+    pub(super) fn stat(&mut self, line: &str, x: f32, y: f32, color: [u8; 4]) -> f32 {
+        let (green, red) = (faint(self.theme.green, FIGURES), faint(self.theme.red, FIGURES));
+        let mut x = x;
+        for (i, word) in line.split(' ').enumerate() {
+            let figures = |sign: char| word.strip_prefix(sign).is_some_and(|n| !n.is_empty() && n.trim_end_matches(',').chars().all(is_figure));
+            let tone = if figures('+') { green } else if figures('−') || figures('-') { red } else { color };
+            let word = if i == 0 { word.to_string() } else { format!(" {word}") };
+            x = self.text(&word, Weight::Regular, x, y, f32::MAX, tone);
+        }
+        x
+    }
+}
+
+/// How strong a stat line's coloured figures are.
+const FIGURES: f32 = 0.85;
+
+/// A figure, plain or tabular (font.rs's `tabular`).
+fn is_figure(c: char) -> bool {
+    c.is_ascii_digit() || ('\u{E000}'..='\u{E009}').contains(&c)
 }

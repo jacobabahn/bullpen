@@ -40,19 +40,18 @@ pub fn risk_width(fonts: &Fonts, text: &str, px: f32) -> f32 {
     width(fonts, text, px) + DOT * px
 }
 
-/// A risk's chip, whose right edge is at `right`, centred on `cy`: a dot in the
-/// level's colour, then the word dim, inside a line of the foreground. The dot alone
-/// has the colour, so a risk doesn't read as a status. Returns its left edge.
-pub fn risk(d: &mut Draw, text: &str, px: f32, right: f32, cy: f32, color: [u8; 4]) -> f32 {
+/// A risk's chip from x, centred on `cy`, `h` high (it sits in a line of text): a dot
+/// in the level's colour, then the word dim, inside a line of the foreground. The dot
+/// alone has the colour, so a risk doesn't read as a status. Returns its right edge.
+pub fn risk(d: &mut Draw, text: &str, px: f32, (x, cy, h): (f32, f32, f32), color: [u8; 4]) -> f32 {
     let theme = d.theme();
     let w = risk_width(d.fonts(), text, px);
     let dot = dot_width(px);
-    let h = (1.5 * px).round();
-    let (x, top) = (right - w, (cy - h / 2.0).round());
+    let (x, top) = (x.round(), (cy - h / 2.0).round());
     d.rounded_edge(x, top, w, h, h / 2.0, 1.25, theme.chip_edge());
     d.rounded_fill((x + SIDE * px).round(), top + ((h - dot) / 2.0).round(), dot, dot, dot / 2.0, color);
     d.boxed(px, text, Weight::Bold, x + (SIDE + DOT) * px, top, h, theme.dim());
-    x
+    x + w
 }
 
 /// A risk's dot's width, in type `px`.
@@ -88,21 +87,24 @@ fn cap_width(fonts: &Fonts, key: &str, px: f32) -> f32 {
 
 /// A key in a cap from x, centred on cy: the key semibold in the foreground on the
 /// foreground at 7% with a 1-pixel edge at 28%, its corners round by a third of the
-/// type, the key in its middle (a letter's x-height); then what it does, dim, 0.4 of the type after
-/// it. Returns where it ends.
+/// type, the key in its middle (a lowercase letter's x-height and half a descender,
+/// so a "g" or a "p" clears the cap's foot); then what it does, dim, 0.4 of the type
+/// after it. Returns where it ends.
 pub fn keycap(d: &mut Draw, key: &str, what: &str, px: f32, x: f32, cy: f32) -> f32 {
     let theme = d.theme();
-    let (w, h) = (cap_width(d.fonts(), key, px), (1.45 * px).round());
+    let (w, h) = (cap_width(d.fonts(), key, px), (1.5 * px).round());
     let top = (cy - h / 2.0).round();
     let r = 0.3 * px;
     d.rounded_fill(x, top, w, h, r, theme.cap());
     d.rounded_edge(x, top, w, h, r, 1.0, theme.cap_edge());
     let kw = d.fonts().width(key, Weight::Bold, px);
-    // a lowercase letter's x-height centred in its cap, so the letters share a
-    // baseline (a "g" hangs below it); anything else its own ink centred
+    // a lowercase letter's x-height and half a descender centred in its cap, so the
+    // letters share a baseline and a "g" clears the cap's foot; anything else its
+    // own ink centred
     let lower = key.chars().all(|c| c.is_ascii_lowercase());
     let (up, down) = d.fonts().ink(if lower { "x" } else { key }, Weight::Bold, px);
-    let base = if up + down > 0.0 { (top + (h + up - down) / 2.0).round() } else { top + ((h + d.fonts().cap_height(px)) / 2.0).round() };
+    let hang = if lower { d.fonts().ink("p", Weight::Bold, px).1 / 2.0 } else { 0.0 };
+    let base = if up + down > 0.0 { (top + (h + up - down - hang) / 2.0).round() } else { top + ((h + d.fonts().cap_height(px)) / 2.0).round() };
     d.on_baseline(px, key, Weight::Bold, x + (w - kw) / 2.0, base, theme.text());
     if what.is_empty() {
         return x + w;

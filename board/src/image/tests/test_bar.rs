@@ -79,20 +79,23 @@ fn the_counts_under_the_bar_are_the_groups_that_fit_then_how_many_tasks_the_rest
     let end = |pm: &Pixmap| (line - 8..line + 8).flat_map(|y| inked(pm, y, 0)).max().unwrap();
     assert!(end(&narrow) <= c.right() as u32);
     assert!(end(&wide) > end(&narrow) + 200);
-    // what needs you isn't among them (the chip on the top line says it): no amber dot
+    // in the bar's order, from what needs you: the amber dot keys its first segments
     let t = c.theme;
     let has = |pm: &Pixmap, c: crate::image::theme::Rgb| inked(pm, line, 0).into_iter().any(|x| {
         let p = pm.pixels()[(line * pm.width() + x) as usize].demultiply();
         (p.red(), p.green(), p.blue()) == (c.0, c.1, c.2)
     });
-    assert!(!has(&wide, t.yellow) && has(&wide, t.green) && has(&wide, t.blue));
+    assert!(has(&wide, t.yellow) && has(&wide, t.green) && has(&wide, t.blue));
+    let first = inked(&narrow, line, 0).into_iter().next().unwrap();
+    let p = narrow.pixels()[(line * narrow.width() + first + 2) as usize].demultiply();
+    assert_eq!((p.red(), p.green(), p.blue()), (t.yellow.0, t.yellow.1, t.yellow.2), "the first count is what needs you");
     // the groups that fit, then "+N" for the rest's tasks
     let (pm, c) = drawn(&fixture(), 35);
     let mut fonts = Fonts::load(None).unwrap();
     let mut scratch = Pixmap::new(1, 1).unwrap();
     let d = Draw::new(&mut scratch, &mut fonts, &c, 0.0);
     let all = fixture();
-    let groups: Vec<&Tally> = all.iter().filter(|t| t.status != "needs").collect();
+    let groups: Vec<&Tally> = all.iter().collect();
     let (shown, more) = fitting(&d, &groups, c.right() - c.left(), c.m.label);
     assert!(shown >= 1 && shown < groups.len(), "{shown}");
     assert_eq!(more, format!("+{} more", groups[shown..].iter().map(|t| t.n).sum::<usize>()));

@@ -237,7 +237,7 @@ impl Draw<'_> {
         let m = self.m();
         if r.question.is_some() {
             self.wash(y, bottom - m.below, Flag::Needs);
-            self.bar(y, bottom - m.below, Flag::Needs, 0.0);
+            self.bar(y, bottom - m.below, Flag::Needs);
         }
         self.set(m.title, m.line);
         let theme = self.theme;

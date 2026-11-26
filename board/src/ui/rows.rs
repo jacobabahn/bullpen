@@ -130,9 +130,12 @@ pub(crate) struct DetailRow {
     /// its task's age is red
     pub stale: bool,
     pub flag: Option<Flag>,
-    /// on a task's last line, its risk: a narrow image board puts its chip there, off
-    /// the title's first line (the text list doesn't draw it)
+    /// on a task's last line, its risk: the image board puts its chip at its end (the
+    /// text list has it on the task's row)
     pub risk: Option<String>,
+    /// it's the task's stat line ("14 files, +612 −148 · Not toured yet"): facts, which
+    /// the image board sets apart from the words over it
+    pub stat: bool,
 }
 
 /// An item of the Later group.
@@ -278,19 +281,19 @@ pub(crate) fn details(rows: &mut Vec<Row>, app: &App, t: &Task, cur: bool, age_o
         (false, true) => age.clone(),
         (false, false) => format!("{age} · {text}"),
     };
-    let detail = |text: String, lines: usize, loud: bool, lead: usize| {
-        Row::Detail(DetailRow { text, lines, loud, lead, selected: cur, stale: stale(t, now), flag: flag(t), risk: None })
+    let detail = |text: String, lines: usize, loud: bool, lead: usize, stat: bool| {
+        Row::Detail(DetailRow { text, lines, loud, lead, selected: cur, stale: stale(t, now), flag: flag(t), risk: None, stat })
     };
     let first = rows.len();
     for (i, (d, most)) in detail_lines(app, &text, detail_w, lines).into_iter().enumerate() {
         if !d.is_empty() {
             let lead = if i == 0 { width(&age) } else { 0 };
-            rows.push(detail(d, most, loud_detail(app, t), lead));
+            rows.push(detail(d, most, loud_detail(app, t), lead, false));
         }
     }
     let stat = model::stat_line(t);
     if !stat.is_empty() {
-        rows.push(detail(stat, 1, false, 0));
+        rows.push(detail(stat, 1, false, 0, true));
     }
     let asked = app.pending.as_ref().is_some_and(|(_, tid)| *tid == t.id);
     if let Some(Row::Detail(d)) = rows[first..].last_mut().filter(|_| !asked) {
