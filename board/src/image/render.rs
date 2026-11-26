@@ -343,10 +343,12 @@ fn blocks<'r>(rows: &'r Rows, places: &[Place], pad: f32) -> Vec<Block<'r>> {
 /// Lines wrapped from parts said apart by " · " (a stat line's "5 files, +96 −31 · Not
 /// toured yet") break between parts where they can: a line's last part, cut by the
 /// break, goes down whole when the line under it has room (`fits`); and no line starts
-/// or ends with the dot.
+/// or ends with the dot. (So a line's text can lose a dot: what's drawn on it is read
+/// from the lines, not the text.)
 fn at_dots(lines: &mut [String], fits: impl Fn(&str) -> bool) {
     for k in 1..lines.len() {
-        if lines[k].ends_with('…') {
+        // (a line that starts at a dot has the part above it whole)
+        if lines[k].ends_with('…') || lines[k].starts_with("· ") {
             continue;
         }
         if let Some((head, tail)) = lines[k - 1].rsplit_once(" · ") {
@@ -789,7 +791,8 @@ impl<'a> Draw<'a> {
                 // step under the title's foreground
                 let color = if d.selected || (d.loud && d.flag.is_some()) { self.theme.soft() } else { dim };
                 let x = self.title_x();
-                let keys = key_letters(&d.text, d.lead);
+                // (found in the lines as drawn, which may have dropped a dot)
+                let keys = key_letters(&lines.join(" "), d.lead);
                 let mut seen = 0;
                 for (k, line) in lines.iter().enumerate() {
                     let y = y + k as f32 * m.body_line;

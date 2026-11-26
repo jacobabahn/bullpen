@@ -772,3 +772,45 @@ fn on_a_narrow_board_a_ready_tasks_risk_is_at_its_last_lines_right_not_beside_it
     let room = gn.detail_room() - gn.risk_width("high", &fonts) - RISK_GAP * narrow.m.detail;
     assert!(laid.lines[1].iter().all(|l| fonts.width(l, Weight::Regular, narrow.m.body) <= room), "{:?}", laid.lines[1]);
 }
+
+#[test]
+fn a_line_that_starts_at_a_dot_keeps_the_part_above_it_and_loses_only_the_dot() {
+    let mut three = vec!["alpha beta · gamma delta".to_string(), "· epsilon zeta".to_string()];
+    at_dots(&mut three, |_| true);
+    assert_eq!(three, vec!["alpha beta · gamma delta", "epsilon zeta"]);
+}
+
+#[test]
+fn a_key_after_a_dot_a_wrap_dropped_still_gets_its_cap() {
+    // drawn on a narrow board, the dot falls at the break and goes
+    let c = Canvas::new(Grid { cols: 35, cell_w: 16, cell_h: 34 }, TextSize::Medium, Theme::default());
+    let (g, f) = (Geo { c, idw: 0.0, repow: 0.0 }, Fonts::builtin());
+    let mut head = String::from("Waiting");
+    while f.width(&format!("{head} here · Its"), Weight::Regular, c.m.body) <= g.detail_room() {
+        head.push_str(" on");
+    }
+    let text = format!("{head} here · Its agent exited. r resumes it.");
+    let lines = g.detail_lines(&text, 4, 0.0, g.caps(&detail_row(&text)), &f);
+    assert!(lines.iter().all(|l| !l.starts_with('·') && !l.ends_with('·')), "{lines:?}");
+    // (the dot went, so the text's count of letters is one ahead of the lines')
+    let count = |s: &str| s.chars().filter(|c| !c.is_whitespace()).count();
+    assert_eq!(count(&text), count(&lines.join(" ")) + 1, "{lines:?}");
+    assert_eq!(key_letters(&text, 0)[0], key_letters(&lines.join(" "), 0)[0] + 1);
+    // the key, as the lines are drawn, is the r alone
+    let joined = lines.join(" ");
+    let letters: Vec<char> = joined.chars().filter(|c| !c.is_whitespace()).collect();
+    let keys = key_letters(&joined, 0);
+    assert_eq!(keys.len(), 1);
+    assert_eq!((letters[keys[0]], letters[keys[0] + 1]), ('r', 'r'), "{joined}");
+    assert!(joined.contains(" r resumes it."));
+}
+
+#[test]
+fn only_a_key_in_its_phrases_form_goes_down_with_its_phrase() {
+    let f = Fonts::builtin();
+    let room = f.width("review. Low risk: comments and a docs reflow", Weight::Regular, 12.0) + 0.5;
+    // "a docs reflow" is no key: only the lone last word gets company
+    let mut lines = vec!["review. Low risk: comments and a docs reflow".to_string(), "only.".to_string()];
+    f.fill_last(&mut lines, Weight::Regular, 12.0, room);
+    assert_eq!(lines, vec!["review. Low risk: comments and a docs", "reflow only."]);
+}

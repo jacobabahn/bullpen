@@ -106,7 +106,7 @@ fn task_rows(m: &Mission, i: items::Item, inbox: bool, selected: bool, now: Now)
         row.repo = r.repo.name();
     }
     row.dir = r.repo.dir.display().to_string();
-    if selected && row.asked.is_none() {
+    if selected && row.asked.is_none() && !model::task_keys(Some(t)).is_empty() {
         row.key = Some(("⏎".into(), model::enter_name(t).into()));
     }
     let mut out = vec![Row::Task(row)];

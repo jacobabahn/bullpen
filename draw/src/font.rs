@@ -189,9 +189,9 @@ impl Fonts {
     }
 
     /// A detail's last line of one word takes the last word of the line above it (or,
-    /// when a letter alone is among that line's last three words, a key with its
-    /// phrase: "p shows its screen", from the letter on); a letter alone at the end of
-    /// the line above goes down with what it starts. The lines are otherwise full to
+    /// when a key is among that line's last three words, the key with its phrase: "p
+    /// shows its screen", from the letter on); a key at the end of the line above goes
+    /// down with what it starts. A key is the board's phrase's form (`is_key`). The lines are otherwise full to
     /// the measure.
     pub fn fill_last(&self, lines: &mut [String], weight: Weight, px: f32, max: f32) {
         let [.., above, last] = lines else { return };
@@ -199,7 +199,8 @@ impl Fonts {
             return;
         }
         let words: Vec<&str> = above.split(' ').collect();
-        let letter = words.iter().rposition(|w| w.chars().count() == 1).filter(|&j| j + 3 >= words.len() && j >= 2);
+        let next: Vec<&str> = words.iter().copied().chain(last.split(' ')).collect();
+        let letter = (0..words.len()).rev().find(|&j| is_key(&next[j..])).filter(|&j| j + 3 >= words.len() && j >= 2);
         let take = match letter {
             Some(j) if j + 1 == words.len() || !last.contains(' ') => words.len() - j,
             _ if !last.contains(' ') && words.len() >= 3 => 1,
@@ -295,6 +296,16 @@ impl Fonts {
         mask.fill_path(&path, FillRule::Winding, true, t);
         Glyph { mask: Some(mask), left: left as i32, top: top as i32 }
     }
+}
+
+/// Do these words start with a key the board names, in its phrases' form: a lowercase
+/// letter alone, a verb of four letters or more ending in s, then "it" or "its" ("p
+/// shows its screen", "r resumes it")?
+fn is_key(words: &[&str]) -> bool {
+    let letter = words.first().is_some_and(|w| w.len() == 1 && w.chars().all(|c| c.is_ascii_lowercase()));
+    let verb = words.get(1).is_some_and(|v| v.len() >= 4 && v.ends_with('s') && v.chars().all(|c| c.is_ascii_lowercase()));
+    let it = words.get(2).is_some_and(|o| matches!(o.trim_end_matches(['.', ',', ';', ':']), "it" | "its"));
+    letter && verb && it
 }
 
 /// Lay a mask's coverage over the pixmap at (x, y), in colour (straight RGBA).
