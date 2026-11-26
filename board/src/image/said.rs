@@ -44,10 +44,12 @@ impl Draw<'_> {
             if (is_key != key || c == '\0') && !run.is_empty() {
                 let (weight, color) = if key { (Weight::Bold, fg) } else { (Weight::Regular, color) };
                 if key {
-                    // in a small cap, as the key row's (lay left room for its sides)
+                    // in a small cap, as the key row's (lay left room for its sides),
+                    // centred on the key's ink, which stays on the line's baseline
                     let (w, px) = (self.width(&run, weight), self.px());
-                    let (side, ch) = (KEY_SIDE * px, (1.25 * px).round());
-                    let top = (y + (self.h() - ch) / 2.0).round();
+                    let (side, ch) = (KEY_SIDE * px, (1.15 * px).round());
+                    let (up, down) = self.fonts().ink(&run, weight, px);
+                    let top = (self.baseline(y) - (up - down) / 2.0 - ch / 2.0).round();
                     let (cap, edge) = (self.theme.cap(), self.theme.cap_edge());
                     self.rounded_fill(x, top, w + 2.0 * side, ch, 0.25 * px, cap);
                     self.rounded_edge(x, top, w + 2.0 * side, ch, 0.25 * px, 1.0, edge);

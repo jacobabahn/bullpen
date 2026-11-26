@@ -95,3 +95,32 @@ fn dim_text_reads_on_the_wash_behind_a_task_that_needs_you() {
         }
     }
 }
+
+#[test]
+fn a_pills_word_reads_on_it_amber_dark_on_its_brightest_red_light_on_it_darkened() {
+    for t in [Theme::light(), Theme::default()] {
+        let (light, dark) = if luminance(t.fg) > luminance(t.bg) { (t.fg, t.bg) } else { (t.bg, t.fg) };
+        let (fill, ink) = t.pill(t.yellow);
+        assert_eq!((fill, ink), (solid(bright(t.yellow)), solid(dark)), "{t:?}");
+        let (fill, ink) = t.pill(t.red);
+        assert_eq!(ink, solid(light), "{t:?}");
+        let c = contrast(ink, Rgb(fill[0], fill[1], fill[2]));
+        assert!(c >= 4.0, "{t:?}: {c}");
+    }
+}
+
+#[test]
+fn a_chips_word_is_darker_on_a_light_theme_and_its_colour_on_a_dark_one() {
+    let (light, dark) = (Theme::light(), Theme::default());
+    assert_eq!(dark.word(solid(dark.yellow)), solid(dark.yellow));
+    let w = light.word(solid(light.yellow));
+    assert!(luminance(Rgb(w[0], w[1], w[2])) < luminance(light.yellow));
+}
+
+#[test]
+fn a_finished_task_is_teal_apart_from_a_ready_ones_green() {
+    for t in [Theme::light(), Theme::default()] {
+        assert_ne!(t.status("finished"), t.status("ready"));
+        assert_eq!(t.status("finished"), Some(solid(t.teal())));
+    }
+}

@@ -27,8 +27,8 @@ pub fn head(head: &Head, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pix
     let mut d = Draw::new(&mut pm, fonts, c, 0.0);
     let ch = c.grid.cell_h as f32;
     let (top, line) = if rows >= 2 { ((0.2 * ch).round(), (1.3 * ch).round()) } else { (0.0, ch) };
-    // the repository's name is the pane's largest type
-    let name_px = (NAME * c.m.title).round();
+    // the repository's name is the pane's largest type (but a cell's, clear of the bar)
+    let name_px = (NAME * c.m.title).min(0.95 * ch).round();
     d.set(name_px, line);
     let theme = d.theme();
     let (fg, dim) = (theme.text(), theme.dim());
@@ -52,7 +52,7 @@ pub fn head(head: &Head, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pix
         d.text_in(px, &head.others, Weight::Regular, end, top, left_end - end, tone);
     }
     if bar {
-        super::bar::draw(&mut d, c, &head.tallies);
+        super::bar::draw(&mut d, c, &head.tallies, rows as f32 * ch);
     } else if rows >= 2 {
         rule(&mut d, c, (1.65 * ch).round());
     }
@@ -87,7 +87,7 @@ fn rule(d: &mut Draw, c: &Canvas, y: f32) {
 /// line on its row, as the text has it, the message in the detail lines' type and the
 /// keys in caps; a faint rule above the first line, or above the message's row when
 /// there's no message, as under the top line (at the image's top when the first line
-/// is on its first row).
+/// is on its first row), and then the keys midway between the rule and the foot.
 pub fn foot(foot: &Foot, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pixmap, String> {
     let mut pm = pixmap(c, rows)?;
     let mut d = Draw::new(&mut pm, fonts, c, 0.0);
@@ -96,10 +96,19 @@ pub fn foot(foot: &Foot, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pix
     // of the pane's bottom edge
     let up = if rows >= 3 { (LIFT * ch).round() } else { 0.0 };
     // above the message's row, there or not, so the rule stays put when a message comes
+    let mut ruled = None;
     if let Some(first) = foot.lines.iter().map(|(row, _)| *row).min() {
         let first = first.min(rows.saturating_sub(2));
-        rule(&mut d, c, (first as f32 * ch - RULE * ch).round().max(0.0));
+        let y = (first as f32 * ch - RULE * ch).round().max(0.0);
+        rule(&mut d, c, y);
+        ruled = Some(y);
     }
+    // with no message, the keys are midway between the rule and the image's foot
+    let alone = foot.lines.iter().all(|(_, l)| matches!(l, FootLine::Keys(_)));
+    let keys_cy = |row: u16| match ruled {
+        Some(y) if alone && rows >= 2 => ((y + rows as f32 * ch) / 2.0).round(),
+        _ => row as f32 * ch - up + ch / 2.0,
+    };
     d.set(c.m.detail, ch);
     let theme = d.theme();
     let left = c.left();
@@ -116,7 +125,7 @@ pub fn foot(foot: &Foot, rows: u16, c: &Canvas, fonts: &mut Fonts) -> Result<Pix
                 let right = d.right();
                 d.text(text, weight, left, y, right - left, color);
             }
-            FootLine::Keys(keys) => key_row(&mut d, keys, left, y + ch / 2.0, c.m.label),
+            FootLine::Keys(keys) => key_row(&mut d, keys, left, keys_cy(*row), c.m.label),
             FootLine::Mission(task, own) => {
                 let room = d.right() - left;
                 let mut keys: Keys = task.iter().chain(own).cloned().collect();
@@ -145,7 +154,7 @@ const RULE: f32 = 0.4;
 const LIFT: f32 = 0.2;
 
 /// The space between a key's pair and the next, of their type.
-const KEY_GAP: f32 = 0.9;
+const KEY_GAP: f32 = 1.0;
 
 type Keys = Vec<(String, String)>;
 

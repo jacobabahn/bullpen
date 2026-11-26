@@ -49,7 +49,7 @@ fn drawn(tallies: &[Tally], cols: usize) -> (Pixmap, Canvas) {
     let c = Canvas::new(Grid { cols, cell_w: 16, cell_h: 34 }, TextSize::Medium, Theme::default());
     let mut fonts = Fonts::load(None).unwrap();
     let mut pm = Pixmap::new(c.grid.width(), 3 * 34).unwrap();
-    draw(&mut Draw::new(&mut pm, &mut fonts, &c, 0.0), &c, tallies);
+    draw(&mut Draw::new(&mut pm, &mut fonts, &c, 0.0), &c, tallies, 3.0 * 34.0);
     (pm, c)
 }
 
@@ -72,7 +72,8 @@ fn the_bar_sits_under_the_top_line_in_its_groups_colours() {
 
 #[test]
 fn the_counts_under_the_bar_are_the_groups_that_fit_then_how_many_tasks_the_rest_have() {
-    let line = (TOP * 34.0 + HEIGHT * 34.0 + UNDER * 34.0 + 17.0) as u32;
+    // the counts' line is midway between the bar and the image's foot
+    let line = (((TOP * 34.0).round() + (HEIGHT * 34.0).round() + 3.0 * 34.0) / 2.0) as u32;
     let (wide, _) = drawn(&fixture(), 120);
     let (narrow, c) = drawn(&fixture(), 35);
     let end = |pm: &Pixmap| (line - 8..line + 8).flat_map(|y| inked(pm, y, 0)).max().unwrap();

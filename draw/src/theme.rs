@@ -95,7 +95,7 @@ impl Theme {
 
     /// A group's name: the foreground, a little dim, so the titles under it lead.
     pub fn heading(&self) -> [u8; 4] {
-        faint(self.fg, 0.82)
+        faint(self.fg, 0.78)
     }
 
     /// The title of a task that isn't waiting on you (working, in review, queued): the
@@ -107,17 +107,19 @@ impl Theme {
     /// A quiet title (the coordinator's task, a closed one): dimmer than the rest, a
     /// step above its own lines.
     pub fn quiet(&self) -> [u8; 4] {
-        faint(self.fg, 0.76)
+        faint(self.fg, 0.8)
     }
 
-    /// The selected card's fill: the foreground, faintly.
+    /// The selected card's fill: the foreground, faintly (a little more on a dark
+    /// pane, where a faint grey lifts less).
     pub fn tint(&self) -> [u8; 4] {
-        faint(self.fg, 0.085)
+        faint(self.fg, if luminance(self.fg) > luminance(self.bg) { 0.13 } else { 0.085 })
     }
 
-    /// A working mark's ring: the foreground, a little stronger than the tint.
+    /// A working mark's ring: the foreground, a little stronger than the tint (more
+    /// on a light pane, where a faint grey ring all but goes).
     pub fn tint_strong(&self) -> [u8; 4] {
-        faint(self.fg, 0.25)
+        faint(self.fg, if luminance(self.fg) > luminance(self.bg) { 0.25 } else { 0.34 })
     }
 
     /// The selected card's edge: the terminal's blue, part clear, so it's mixed into
@@ -142,6 +144,12 @@ impl Theme {
         faint(self.fg, 0.28)
     }
 
+    /// A risk's chip's line: the foreground, a little stronger than a keycap's edge, as
+    /// the chip has no fill.
+    pub fn chip_edge(&self) -> [u8; 4] {
+        faint(self.fg, 0.38)
+    }
+
     /// A status's colour for a shape (a mark, a segment of the status bar, a dot): its
     /// colour, lifted (`lit`); None for the dim ones.
     pub fn shape(&self, status: &str) -> Option<[u8; 4]> {
@@ -153,14 +161,16 @@ impl Theme {
         match status {
             "needs" => Some(solid(self.yellow)),
             "stopped" => Some(solid(self.red)),
-            "ready" | "finished" => Some(solid(self.green)),
+            "ready" => Some(solid(self.green)),
+            // (its own teal: the bar and its count tell it from what's ready)
+            "finished" => Some(solid(self.teal())),
             "review" => Some(solid(self.blue)),
             _ => None,
         }
     }
 
     /// A group's colour in the header's status bar, by its first status: what waits on
-    /// you in its status's colour (finished the ready's green, drawn hollow), in review blue, the
+    /// you in its status's colour (finished its teal), in review blue, the
     /// coordinator's a violet of its own, and what's working or queued in the
     /// foreground, the queued fainter.
     pub fn group(&self, status: &str) -> [u8; 4] {
@@ -180,11 +190,50 @@ impl Theme {
         bright(Rgb(warm(self.yellow.0, self.red.0), warm(self.yellow.1, self.red.1), warm(self.yellow.2, self.red.2)))
     }
 
+    /// A teal, the terminal's green a third of the way to its blue: a finished task's,
+    /// in its mark, its status bar segment and its count, apart from a ready one's green.
+    pub fn teal(&self) -> Rgb {
+        let mix = |g: u8, b: u8| ((g as u16 * 2 + b as u16) / 3) as u8;
+        Rgb(mix(self.green.0, self.blue.0), mix(self.green.1, self.blue.1), mix(self.green.2, self.blue.2))
+    }
+
     /// A violet between the terminal's red and blue, toward the foreground: the
     /// coordinator's tasks in the status bar, which are neither yours nor a worker's.
     pub fn between(&self) -> Rgb {
         let mix = |a: u8, b: u8, c: u8| ((a as u16 * 3 + b as u16 * 4 + c as u16) / 8) as u8;
         Rgb(mix(self.red.0, self.blue.0, self.fg.0), mix(self.red.1, self.blue.1, self.fg.1), mix(self.red.2, self.blue.2, self.fg.2))
+    }
+
+    /// A solid pill of a colour (an overdue age's chip) and what's written on it: a
+    /// light colour (amber) at its brightest, with the darker of the pane's foreground
+    /// and background on it; a dark one (red) with the lighter on it, the colour taken
+    /// toward black until that reads at 4:1 (its word is semibold and short).
+    pub fn pill(&self, c: Rgb) -> ([u8; 4], [u8; 4]) {
+        let (light, dark) = if luminance(self.fg) > luminance(self.bg) { (self.fg, self.bg) } else { (self.bg, self.fg) };
+        let lit = bright(c);
+        if luminance(lit) > 0.4 {
+            return (solid(lit), solid(dark));
+        }
+        let apart = |a: Rgb, b: Rgb| (luminance(a).max(luminance(b)) + 0.05) / (luminance(a).min(luminance(b)) + 0.05);
+        let mut fill = c;
+        for _ in 0..20 {
+            if apart(fill, light) >= 4.0 {
+                break;
+            }
+            let down = |v: u8| (v as u16 * 19 / 20) as u8;
+            fill = Rgb(down(fill.0), down(fill.1), down(fill.2));
+        }
+        (solid(fill), solid(light))
+    }
+
+    /// A chip's word in a colour, on that colour faintly: on a light theme the colour
+    /// half way to the foreground, so it reads on its pale fill as text does.
+    pub fn word(&self, c: [u8; 4]) -> [u8; 4] {
+        if luminance(self.bg) <= luminance(self.fg) {
+            return c;
+        }
+        let mix = |a: u8, b: u8| ((a as u16 + b as u16) / 2) as u8;
+        [mix(c[0], self.fg.0), mix(c[1], self.fg.1), mix(c[2], self.fg.2), c[3]]
     }
 
     /// A risk level's colour, as ui::risk_style gives it.
@@ -215,6 +264,15 @@ pub fn bright(c: Rgb) -> Rgb {
     let most = c.0.max(c.1).max(c.2).max(1) as u32;
     let up = |v: u8| (v as u32 * 255 / most) as u8;
     Rgb(up(c.0), up(c.1), up(c.2))
+}
+
+/// A colour's relative luminance, as WCAG works it out (0 black, 1 white).
+pub fn luminance(c: Rgb) -> f32 {
+    let lin = |v: u8| {
+        let v = v as f32 / 255.0;
+        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * lin(c.0) + 0.7152 * lin(c.1) + 0.0722 * lin(c.2)
 }
 
 /// How much of the selected card's edge is the terminal's blue.

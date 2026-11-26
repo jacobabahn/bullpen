@@ -144,7 +144,8 @@ fn a_three_cell_header_has_the_status_bar_in_the_rules_place_and_only_the_chip_o
     // the bar, solid in its groups' colours, and no rule (a row of it across the line)
     let ruled = |pm: &Pixmap| (0..pm.height()).any(|y| block(pm, (c.left() as u32, c.right() as u32), (y, y + 1)).iter().all(|p| p[3] == t.rule()[3]));
     assert!(!ruled(&pm));
-    let bar = block(&pm, (0, 400), (30, 35));
+    // (1.75 cells of 20 down)
+    let bar = block(&pm, (0, 400), (35, 40));
     assert!(has(&bar, t.yellow) && has(&bar, t.green) && has(&bar, t.blue));
     // with no task open, the rule as before
     h.tallies.clear();
@@ -199,4 +200,15 @@ fn the_rule_over_the_bottom_rows_stays_put_when_a_message_comes() {
     // above the message's row, there or not
     assert!(!a.is_empty() && a == b, "{a:?} {b:?}");
     assert!(a[0] < c.grid.cell_h);
+}
+
+#[test]
+fn with_no_message_the_keys_sit_midway_between_the_rule_and_the_foot() {
+    let (c, t) = (canvas(TextSize::Medium), Theme::default());
+    let pm = foot(&Foot { lines: vec![(2, FootLine::Keys(vec![("a".into(), "accept".into())]))] }, 3, &c, &mut Fonts::builtin()).unwrap();
+    let rule = rows_with(&pm, t.rule())[0] as f32;
+    let inked_rows: Vec<u32> = (rule as u32 + 3..pm.height()).filter(|&y| inked(&block(&pm, (0, 120), (y, y + 1)))).collect();
+    let (top, bottom) = (inked_rows[0] as f32, *inked_rows.last().unwrap() as f32 + 1.0);
+    // the keys' caps as far from the rule as from the image's foot, to a pixel or two
+    assert!(((top - rule) - (pm.height() as f32 - bottom)).abs() <= 3.0, "{rule} {top} {bottom}");
 }

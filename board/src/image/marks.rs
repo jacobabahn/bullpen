@@ -94,7 +94,9 @@ impl Draw<'_> {
         let r = self.mark_r();
         let lw = self.line();
         let dim = self.theme.dim();
-        let color = over.or(self.theme.shape(st)).unwrap_or(dim);
+        // (the coordinator's, the status bar's violet)
+        let own = if st == "triage" { Some(solid(self.theme.between())) } else { self.theme.shape(st) };
+        let color = over.or(own).unwrap_or(dim);
         let ink = solid(self.theme.bg);
         match st {
             // (a disc and a diamond look larger than a ring their size: a little under it)
@@ -158,6 +160,14 @@ impl Draw<'_> {
         pb.close();
         if let Some(p) = pb.finish() {
             self.fill(&p, dim);
+        }
+    }
+
+    /// A filled diamond `r` from its centre to its points: a finished group's dot in
+    /// the header's counts, as its tasks' mark.
+    pub(in crate::image) fn diamond_dot(&mut self, cx: f32, cy: f32, r: f32, color: [u8; 4]) {
+        if let Some(p) = diamond(cx, cy, r) {
+            self.fill(&p, color);
         }
     }
 

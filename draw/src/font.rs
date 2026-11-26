@@ -111,6 +111,16 @@ impl Fonts {
         f.capital_height().unwrap_or(f.ascender()) as f32 * px / f.units_per_em() as f32
     }
 
+    /// How far text's ink reaches above its baseline and below it, at `px`: what a
+    /// key's cap centres (a "p" hangs below its baseline, an "r" doesn't).
+    pub fn ink(&self, text: &str, weight: Weight, px: f32) -> (f32, f32) {
+        text.chars().fold((0.0, 0.0), |(up, down), c| {
+            let (_, face, g) = self.glyph_of(weight, c);
+            let k = px / face.units_per_em() as f32;
+            face.glyph_bounding_box(g).map_or((up, down), |b| (f32::max(up, b.y_max as f32 * k), f32::max(down, -b.y_min as f32 * k)))
+        })
+    }
+
     /// Text cut to `max` pixels wide, with "…" when it was cut: after its last whole
     /// word that fits (and not after a full stop, a comma or a colon); in a word only
     /// when that would leave under FILL of the room used (one long word, a path).
@@ -139,6 +149,12 @@ impl Fonts {
         if let (true, Some(space)) = (in_word, out.rfind(char::is_whitespace)) {
             if self.width(&out[..space], weight, px) >= FILL * room {
                 out.truncate(space);
+            }
+        }
+        // (nor on a bracket just opened: "proposals (a…")
+        if let Some((before, last)) = out.trim_end().rsplit_once(' ') {
+            if last.starts_with('(') && !last.contains(')') {
+                out = before.to_string();
             }
         }
         out.trim_end().trim_end_matches(['.', ',', ':', ';', '·', '-', '(']).trim_end().to_string() + "…"
@@ -172,20 +188,27 @@ impl Fonts {
         lines
     }
 
-    /// A detail's last line of a word or two takes words from the line above it until
-    /// it has four, or two fifths of the room: it reads as a line, not as a leftover.
+    /// A detail's last line of one word takes the last word of the line above it (or,
+    /// when a letter alone is among that line's last three words, a key with its
+    /// phrase: "p shows its screen", from the letter on); a letter alone at the end of
+    /// the line above goes down with what it starts. The lines are otherwise full to
+    /// the measure.
     pub fn fill_last(&self, lines: &mut [String], weight: Weight, px: f32, max: f32) {
         let [.., above, last] = lines else { return };
         if last.ends_with('…') {
             return;
         }
-        while last.split(' ').count() < 4 && self.width(last, weight, px) < 0.4 * max && above.split(' ').count() > 3 {
-            let Some((rest, word)) = above.rsplit_once(' ') else { return };
-            let moved = format!("{word} {last}");
-            if self.width(&moved, weight, px) > max {
-                return;
-            }
-            (*above, *last) = (rest.to_string(), moved);
+        let words: Vec<&str> = above.split(' ').collect();
+        let letter = words.iter().rposition(|w| w.chars().count() == 1).filter(|&j| j + 3 >= words.len() && j >= 2);
+        let take = match letter {
+            Some(j) if j + 1 == words.len() || !last.contains(' ') => words.len() - j,
+            _ if !last.contains(' ') && words.len() >= 3 => 1,
+            _ => return,
+        };
+        let keep = words.len() - take;
+        let moved = format!("{} {last}", words[keep..].join(" "));
+        if self.width(&moved, weight, px) <= max {
+            (*above, *last) = (words[..keep].join(" "), moved);
         }
     }
 

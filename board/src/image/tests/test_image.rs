@@ -266,8 +266,8 @@ fn the_text_size_setting_sets_the_rows_heights() {
         let c = Canvas::new(Grid { cols: 39, cell_w: 10, cell_h: 20 }, app.cfg.text_size, p.theme);
         render::lay(&app.view.unwrap().rows, &c, &Fonts::builtin()).heights
     };
-    assert!(heights("small").iter().all(|h| *h == 20));
-    assert!(heights("large").iter().sum::<u32>() > heights("medium").iter().sum::<u32>());
+    let sum = |size: &str| heights(size).iter().sum::<u32>();
+    assert!(sum("small") < sum("medium") && sum("medium") < sum("large"));
 }
 
 #[test]

@@ -94,8 +94,9 @@ pub(crate) struct TaskRow {
     /// it waits on you (it needs you, stopped, or is ready) and isn't another
     /// coordinator's: the image board gives its title two lines
     pub yours: bool,
-    /// selected (and not asked about): its first key and what it does, which the image
-    /// look puts in a cap at its card's lower right
+    /// mission control's selected task (not asked about): what ⏎ does, which the
+    /// image look puts in a cap at its card's lower right (the board's key row says
+    /// its tasks' keys)
     pub key: Option<(String, String)>,
     /// the repository it's in, before its title, dim: mission control's inbox, which
     /// lists every repository's; empty on a board
@@ -129,6 +130,9 @@ pub(crate) struct DetailRow {
     /// its task's age is red
     pub stale: bool,
     pub flag: Option<Flag>,
+    /// on a task's last line, its risk: a narrow image board puts its chip there, off
+    /// the title's first line (the text list doesn't draw it)
+    pub risk: Option<String>,
 }
 
 /// An item of the Later group.
@@ -275,8 +279,9 @@ pub(crate) fn details(rows: &mut Vec<Row>, app: &App, t: &Task, cur: bool, age_o
         (false, false) => format!("{age} · {text}"),
     };
     let detail = |text: String, lines: usize, loud: bool, lead: usize| {
-        Row::Detail(DetailRow { text, lines, loud, lead, selected: cur, stale: stale(t, now), flag: flag(t) })
+        Row::Detail(DetailRow { text, lines, loud, lead, selected: cur, stale: stale(t, now), flag: flag(t), risk: None })
     };
+    let first = rows.len();
     for (i, (d, most)) in detail_lines(app, &text, detail_w, lines).into_iter().enumerate() {
         if !d.is_empty() {
             let lead = if i == 0 { width(&age) } else { 0 };
@@ -286,6 +291,10 @@ pub(crate) fn details(rows: &mut Vec<Row>, app: &App, t: &Task, cur: bool, age_o
     let stat = model::stat_line(t);
     if !stat.is_empty() {
         rows.push(detail(stat, 1, false, 0));
+    }
+    let asked = app.pending.as_ref().is_some_and(|(_, tid)| *tid == t.id);
+    if let Some(Row::Detail(d)) = rows[first..].last_mut().filter(|_| !asked) {
+        d.risk = bullpen_core::risk::shown(t.obj()).map(|(level, _)| level.to_string());
     }
 }
 
@@ -323,7 +332,7 @@ pub(crate) fn task_row(app: &App, t: &Task, selected: bool, with_age: bool, now:
         asked,
         quiet: t.closed() || t.triage() || app.cfg.theirs(t, app.me.as_deref()),
         yours: (t.flagged() || t.status == "ready") && !app.cfg.theirs(t, app.me.as_deref()),
-        key: model::task_keys(Some(t)).first().filter(|_| selected && asked.is_none()).map(|(k, what)| (k.to_string(), what.to_string())),
+        key: None,
         repo: String::new(),
         dir: String::new(),
     }

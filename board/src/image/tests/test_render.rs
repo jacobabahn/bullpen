@@ -26,7 +26,7 @@ fn task(id: &str, status: &str) -> TaskRow {
 }
 
 fn detail(text: &str, selected: bool) -> Row {
-    Row::Detail(DetailRow { text: text.into(), lines: 1, loud: false, lead: 0, selected, stale: false, flag: None })
+    Row::Detail(DetailRow { text: text.into(), lines: 1, loud: false, lead: 0, selected, stale: false, flag: None, risk: None })
 }
 
 /// A selected ready task, with its first key.
@@ -51,15 +51,16 @@ fn draw_in(r: &Rows, size: TextSize) -> (Laid, Sheet) {
     (laid, sheet)
 }
 
-/// Small type: a row a cell, as the text list's.
+/// Small type.
 fn draw(r: &Rows) -> Sheet {
     draw_in(r, TextSize::Small).1
 }
 
-/// The pixels of row i (straight RGBA).
+/// The pixels of row i (straight RGBA), where the sheet placed it.
 fn row_px(s: &Sheet, i: usize) -> Vec<[u8; 4]> {
-    let (w, h) = (s.pixmap.width() as usize, GRID.cell_h as usize);
-    s.pixmap.pixels()[i * h * w..(i + 1) * h * w]
+    let w = s.pixmap.width() as usize;
+    let (y, h) = (s.places[i].y as usize, s.places[i].h as usize);
+    s.pixmap.pixels()[y * w..(y + h) * w]
         .iter()
         .map(|p| {
             let c = p.demultiply();
@@ -73,18 +74,20 @@ fn has(px: &[[u8; 4]], c: theme::Rgb) -> bool {
 }
 
 #[test]
-fn the_image_is_the_lists_columns_wide_and_a_cell_high_a_row() {
+fn the_image_is_the_lists_columns_wide_and_as_tall_as_its_rows() {
     let r = rows(vec![Row::Head { name: "Ready".into(), count: 1 }, Row::Task(task("BP-1", "ready")), Row::Gap]);
-    let s = draw(&r);
-    assert_eq!((s.pixmap.width(), s.pixmap.height()), (400, 60));
+    let (laid, s) = draw_in(&r, TextSize::Small);
+    assert_eq!((s.pixmap.width(), s.pixmap.height()), (400, laid.heights.iter().sum::<u32>()));
 }
 
 #[test]
-fn each_row_sits_a_cell_under_the_last_and_a_task_row_says_its_id() {
+fn each_row_sits_under_the_last_and_a_task_row_says_its_id() {
     let r = rows(vec![Row::Head { name: "Ready".into(), count: 2 }, Row::Task(task("BP-1", "ready")), detail("x", false), Row::Task(task("BP-2", "ready"))]);
-    let s = draw(&r);
+    let (laid, s) = draw_in(&r, TextSize::Small);
     let at: Vec<(usize, u32, u32, Option<&str>)> = s.places.iter().map(|p| (p.row, p.y, p.h, p.id.as_deref())).collect();
-    assert_eq!(at, vec![(0, 0, 20, None), (1, 20, 20, Some("BP-1")), (2, 40, 20, None), (3, 60, 20, Some("BP-2"))]);
+    let h = &laid.heights;
+    let want = vec![(0, 0, h[0], None), (1, h[0], h[1], Some("BP-1")), (2, h[0] + h[1], h[2], None), (3, h[0] + h[1] + h[2], h[3], Some("BP-2"))];
+    assert_eq!(at, want);
 }
 
 #[test]
@@ -101,10 +104,15 @@ fn a_selected_row_differs_from_the_same_row_unselected() {
 #[test]
 fn a_risk_is_drawn_in_its_colour_and_a_status_in_its_own() {
     let theme = Theme::default();
-    let high = draw(&rows(vec![Row::Task(TaskRow { risk: Some("high".into()), ..task("BP-1", "todo") })]));
-    assert!(has(&row_px(&high, 0), theme.red));
-    let low = draw(&rows(vec![Row::Task(TaskRow { risk: Some("low".into()), ..task("BP-1", "todo") })]));
-    assert!(has(&row_px(&low, 0), theme.green) && !has(&row_px(&low, 0), theme.red));
+    // (the test's board is under 44 columns: the chip is at the right of the task's last line)
+    let risky = |level: &str| {
+        let t = TaskRow { risk: Some(level.into()), ..task("BP-1", "todo") };
+        draw(&rows(vec![Row::Task(t), Row::Detail(DetailRow { risk: Some(level.into()), ..detail_row("2 files") })]))
+    };
+    let high = risky("high");
+    assert!(has(&row_px(&high, 1), theme.red) && !has(&row_px(&high, 0), theme.red));
+    let low = risky("low");
+    assert!(has(&row_px(&low, 1), theme.green) && !has(&row_px(&low, 1), theme.red));
     // a task that needs you: an amber mark and an amber bar
     let needs = draw(&rows(vec![Row::Task(TaskRow { flag: Some(Flag::Needs), ..task("BP-1", "needs") })]));
     assert!(has(&row_px(&needs, 0), theme.yellow));
@@ -117,9 +125,9 @@ fn the_colours_are_the_terminals() {
     let mut theme = Theme::default();
     theme.red = theme::Rgb(200, 10, 20);
     let r = rows(vec![Row::Task(TaskRow { risk: Some("high".into()), ..task("BP-1", "todo") })]);
-    let c = Canvas::new(GRID, TextSize::Small, theme);
+    let c = Canvas::new(Grid { cols: 60, ..GRID }, TextSize::Small, theme);
     let laid = lay(&r, &c, &Fonts::builtin());
-    let s = render(&r, &laid, Cut::rows(0..1, 20), &c, &mut Fonts::builtin()).unwrap();
+    let s = render(&r, &laid, Cut::rows(0..1, laid.heights[0]), &c, &mut Fonts::builtin()).unwrap();
     assert!(has(&row_px(&s, 0), theme.red));
 }
 
@@ -141,8 +149,8 @@ fn larger_type_makes_taller_rows_with_space_between_tasks_and_a_smaller_detail()
     let small = Metrics::of(TextSize::Small, 20);
     let (medium, large) = (Metrics::of(TextSize::Medium, 20), Metrics::of(TextSize::Large, 20));
     assert!(small.title < medium.title && medium.title < large.title);
-    for m in [medium, large] {
-        assert!(m.detail < m.title && m.line > 20.0 && m.pad > 0.0);
+    for m in [small, medium, large] {
+        assert!(m.detail < m.title && m.line >= 1.35 * m.title && m.pad > 0.0);
     }
     let (laid, sheet) = draw_in(&r, TextSize::Medium);
     let task_h = laid.heights[1];
@@ -152,8 +160,9 @@ fn larger_type_makes_taller_rows_with_space_between_tasks_and_a_smaller_detail()
     // a task's lines are smaller than a detail's size (its ID's and age's), after a gap
     assert!(medium.body < medium.detail && medium.title_gap >= 3.0 && laid.heights[2] == (medium.body_line + medium.below) as u32);
     assert_eq!(sheet.places[2].y, laid.heights[0] + task_h);
-    // small is the text list's: a cell a row
-    assert_eq!(draw_in(&r, TextSize::Small).0.heights, vec![20, 20, 20]);
+    // small is medium's look in smaller type: shorter rows, with room as medium's
+    let small_h = draw_in(&r, TextSize::Small).0.heights;
+    assert!(small_h.iter().zip(&laid.heights).all(|(s, m)| s <= m) && small_h[1] < laid.heights[1]);
 }
 
 #[test]
@@ -166,10 +175,10 @@ fn a_title_is_laid_out_the_same_selected_or_not() {
     };
     let laid = pair(false);
     assert_eq!(laid, pair(true));
-    // another's is cut to its row; one that's yours gets two lines
-    assert_eq!(laid.lines[0].len(), 1);
-    assert!(laid.lines[0][0].ends_with('…'));
-    assert_eq!(laid.lines[1].len(), YOURS_LINES);
+    // every title gets two lines, then it's cut
+    assert_eq!(laid.lines[0].len(), TITLE_LINES);
+    assert!(laid.lines[0][1].ends_with('…'));
+    assert_eq!(laid.lines[1].len(), TITLE_LINES);
     let m = Metrics::of(TextSize::Medium, 20);
     assert_eq!(laid.heights[1], (m.pad + 2.0 * m.line + m.title_gap + m.below) as u32);
     let joined = laid.lines[1].join(" ");
@@ -235,11 +244,11 @@ fn a_word_longer_than_a_line_is_broken_where_the_line_ends() {
 }
 
 fn detail_row(text: &str) -> DetailRow {
-    DetailRow { text: text.into(), lines: 1, loud: false, lead: 0, selected: false, stale: false, flag: None }
+    DetailRow { text: text.into(), lines: 1, loud: false, lead: 0, selected: false, stale: false, flag: None, risk: None }
 }
 
 #[test]
-fn a_title_thats_yours_takes_two_lines_at_any_width() {
+fn a_title_takes_two_lines_at_any_width() {
     let fonts = Fonts::builtin();
     let long = "Mission control: show each repo's coordinator question in the inbox";
     let r = rows(vec![
@@ -250,15 +259,15 @@ fn a_title_thats_yours_takes_two_lines_at_any_width() {
         let c = Canvas::new(Grid { cols, cell_w: 16, cell_h: 34 }, TextSize::Medium, Theme::default());
         let laid = lay(&r, &c, &fonts);
         assert_eq!(laid.lines[0].len(), 2, "{cols}");
-        assert_eq!(laid.lines[1].len(), 1, "{cols}: another's is cut to one");
-        assert!(laid.heights[0] > laid.heights[1]);
+        assert_eq!(laid.lines[1].len(), 2, "{cols}: another's too");
+        assert_eq!(laid.heights[0], laid.heights[1]);
     }
     // with room for it on one line, one
     let c = Canvas::new(Grid { cols: 79, cell_w: 16, cell_h: 34 }, TextSize::Medium, Theme::default());
     assert_eq!(lay(&r, &c, &fonts).lines[0], vec![long.to_string()]);
-    // small type keeps a cell a row, as the text list
+    // small type too
     let c = Canvas::new(Grid { cols: 35, cell_w: 16, cell_h: 34 }, TextSize::Small, Theme::default());
-    assert_eq!(lay(&r, &c, &fonts).lines[0].len(), 1);
+    assert_eq!(lay(&r, &c, &fonts).lines[0].len(), 2);
 }
 
 #[test]
@@ -321,8 +330,12 @@ fn a_wrapped_texts_last_word_isnt_left_alone() {
         long.push_str(" more");
     }
     let lines = g.detail_lines(&format!("{long} last."), 2, 0.0, 0.0, &f);
-    // a detail's last line takes words until it's a line of its own: four, or two fifths of the room
-    assert_eq!(lines[1], "more more more last.");
+    // a detail's last word gets company, as a title's: the word before it
+    assert_eq!(lines[1], "more last.");
+    // and a key goes down with its phrase, not split from it
+    let mut keyed = vec!["probably with a question. p shows its".to_string(), "screen.".to_string()];
+    f.fill_last(&mut keyed, Weight::Regular, 12.0, room);
+    assert_eq!(keyed, vec!["probably with a question.", "p shows its screen."]);
 }
 
 #[test]
@@ -399,9 +412,9 @@ fn medium_type_has_room_above_each_task_and_between_its_title_and_lines() {
     let m = Metrics::of(TextSize::Medium, 34);
     assert!(m.pad >= 0.6 * m.title && m.title_gap > 0.0);
     assert!(m.line >= 1.35 * m.title && m.detail_line >= 1.4 * m.detail);
-    // small stays a cell a row, its card a pixel inside its rows
+    // small too: room over each task and in its card, a gap under its title
     let s = Metrics::of(TextSize::Small, 34);
-    assert_eq!((s.pad, s.title_gap, s.line, s.inset, s.cells), (0.0, 0.0, 34.0, -1.0, true));
+    assert!(s.pad >= 0.6 * s.title && s.title_gap > 0.0 && s.inset > 0.0 && s.line >= 1.35 * s.title);
 }
 
 #[test]
@@ -409,8 +422,8 @@ fn the_title_leads_its_row_the_id_and_age_are_a_details_size() {
     let r = rows(vec![Row::Task(task("BP-123", "todo"))]);
     let (c, fonts) = (canvas(TextSize::Medium), Fonts::builtin());
     let laid = lay(&r, &c, &fonts);
-    // (the test's board is under 44 columns: its IDs are a label's size, a wider one's a detail's)
-    assert_eq!(laid.idw, fonts.width("BP-123", Weight::Bold, c.m.label));
+    // at any width
+    assert_eq!(laid.idw, fonts.width("BP-123", Weight::Bold, c.m.detail));
     let wide = Canvas::new(Grid { cols: 60, ..GRID }, TextSize::Medium, Theme::default());
     assert_eq!(lay(&r, &wide, &fonts).idw, fonts.width("BP-123", Weight::Bold, wide.m.detail));
     let g = Geo { c, idw: laid.idw, repow: 0.0 };
@@ -481,11 +494,16 @@ fn an_age_that_has_waited_too_long_is_a_chip_of_its_tasks_flags_colour() {
         let s = draw_in(&rows(vec![Row::Task(t)]), TextSize::Medium).1;
         (0..s.pixmap.height()).flat_map(|y| (0..s.pixmap.width()).map(move |x| (x, y))).map(|(x, y)| px_at(&s, x, y)).collect()
     };
-    // the colour whole, its word in the pane's background: amber on a task that needs you, red with no flag
+    // the colour whole, as Theme::pill makes it: amber at its brightest with the pane's
+    // background on it on a task that needs you, red (a step darker) with the foreground
+    // with no flag
+    let (amber_fill, amber_ink) = theme.pill(theme.yellow);
     let amber = all(aged(true, Some(Flag::Needs)));
-    assert!(has(&amber, theme.yellow) && !has(&amber, theme.red));
-    assert!(has(&all(aged(true, None)), theme.red) && has(&all(aged(true, None)), theme.bg));
-    assert!(!has(&all(aged(false, None)), theme.red) && !has(&all(aged(false, None)), theme.bg));
+    assert!(amber.contains(&amber_fill) && amber.contains(&amber_ink) && amber_ink == solid(theme.bg));
+    let (red_fill, red_ink) = theme.pill(theme.red);
+    let red = all(aged(true, None));
+    assert!(red.contains(&red_fill) && red.contains(&red_ink) && red_ink == solid(theme.fg));
+    assert!(!all(aged(false, None)).contains(&red_fill));
     // and the title makes room for the chip
     let g = Geo { c, idw: 0.0, repow: 0.0 };
     assert_eq!(g.right_side(&aged(true, None), &fonts), chip::width(&fonts, "12m", c.m.label));
@@ -519,7 +537,7 @@ fn faintly(px: [u8; 4], c: [u8; 4]) -> bool {
 }
 
 fn flagged(flag: Flag, selected: bool) -> Rows {
-    let d = DetailRow { text: "what it asks".into(), lines: 1, loud: true, lead: 0, selected, stale: false, flag: Some(flag) };
+    let d = DetailRow { text: "what it asks".into(), lines: 1, loud: true, lead: 0, selected, stale: false, flag: Some(flag), risk: None };
     rows(vec![Row::Task(TaskRow { flag: Some(flag), selected, ..task("BP-1", "needs") }), Row::Detail(d)])
 }
 
@@ -590,7 +608,7 @@ fn a_risk_is_a_chip_a_dot_of_its_colour_and_its_word_dim_inside_a_faint_line_bef
     let across = red.iter().map(|p| p.0).max().unwrap() - red.iter().map(|p| p.0).min().unwrap() + 1;
     assert!(across >= 3 && (across as f32) <= 0.5 * c.m.label + 1.0, "{across}");
     // its line: the foreground, faint, a word and a half from its top to its bottom
-    let lined = all(&|p| faintly(p, theme.cap_edge()));
+    let lined = all(&|p| faintly(p, theme.chip_edge()));
     let ys = lined.iter().map(|p| p.1);
     let tall = ys.clone().max().unwrap() - ys.min().unwrap() + 1;
     assert!(tall as f32 >= 1.5 * c.m.label - 2.0 && tall as f32 <= 1.5 * c.m.label, "{tall}");
@@ -599,11 +617,10 @@ fn a_risk_is_a_chip_a_dot_of_its_colour_and_its_word_dim_inside_a_faint_line_bef
     let fonts = Fonts::builtin();
     let t = TaskRow { risk: Some("high".into()), ..task("BP-1", "ready") };
     // the age's column is two figures wide, so chips line up whatever the ages
-    let want = fonts.width("00m", Weight::Bold, c.m.detail) + 0.5 * c.m.detail + chip::risk_width(&fonts, "high", c.m.label);
-    // on a board under 44 columns, the chip has the level's first letter
+    let want = fonts.width("00m", Weight::Bold, c.m.detail) + RISK_GAP * c.m.detail + chip::risk_width(&fonts, "high", c.m.label);
+    // on a board under 44 columns the chip isn't beside the title (it's at its last line's right)
     let narrow = Geo { c: Canvas::new(Grid { cols: 35, ..GRID }, TextSize::Medium, Theme::default()), idw: 0.0, repow: 0.0 };
-    assert_eq!(narrow.risk_word("high"), "H");
-    assert_eq!(narrow.right_side(&t, &fonts), fonts.width("00m", Weight::Bold, c.m.detail) + 0.5 * c.m.detail + chip::risk_width(&fonts, "H", c.m.label));
+    assert_eq!(narrow.right_side(&t, &fonts), fonts.width("00m", Weight::Bold, c.m.detail));
     let wide = TaskRow { age: "100m".into(), ..t.clone() };
     assert!(g.right_side(&wide, &fonts) > want);
     assert_eq!(g.right_side(&t, &fonts), want);
@@ -706,7 +723,52 @@ fn a_tasks_lines_start_at_its_titles_left_edge_with_its_id_in_a_gutter() {
         assert!((first as f32 - g.title_x()).abs() <= 3.0, "{cols} {size:?}: {first} {}", g.title_x());
         assert!(g.title_x() > g.text_x() + laid.idw && g.detail_room() == c.right() - g.title_x());
     }
-    // a board under 44 columns has a narrower gutter: its IDs are a label's size
-    let narrow = Geo { c: Canvas::new(Grid { cols: 35, cell_w: 16, cell_h: 34 }, TextSize::Medium, Theme::default()), idw: 0.0, repow: 0.0 };
-    assert_eq!(narrow.id_px(), narrow.c.m.label);
+    // a board under 44 columns has a narrower gap after the ID, its ID the same size
+    let geo = |cols| Geo { c: Canvas::new(Grid { cols, cell_w: 16, cell_h: 34 }, TextSize::Medium, Theme::default()), idw: 0.0, repow: 0.0 };
+    let (narrow, wide) = (geo(35), geo(47));
+    assert_eq!(narrow.id_px(), wide.id_px());
+    assert!(narrow.title_x() - narrow.text_x() < wide.title_x() - wide.text_x());
+}
+
+#[test]
+fn a_line_of_parts_breaks_at_their_dot_and_no_line_starts_or_ends_with_it() {
+    let fits = |l: &str| l.chars().count() <= 20;
+    let mut lines = vec!["5 files, +96 −31 · Not".to_string(), "toured yet".to_string()];
+    at_dots(&mut lines, fits);
+    assert_eq!(lines, vec!["5 files, +96 −31", "Not toured yet"]);
+    let mut dangling = vec!["5 files, +96 −31 ·".to_string(), "· Not toured yet".to_string()];
+    at_dots(&mut dangling, |_| false);
+    assert_eq!(dangling, vec!["5 files, +96 −31", "Not toured yet"]);
+    // the age before a narrow board's line stays with it
+    let mut aged = vec!["6m · Its tests fail".to_string(), "on main".to_string()];
+    at_dots(&mut aged, fits);
+    assert_eq!(aged[0], "6m · Its tests fail");
+}
+
+#[test]
+fn a_cut_doesnt_end_on_a_bracket_just_opened() {
+    let f = Fonts::builtin();
+    let w = |s: &str| f.width(s, Weight::Regular, 12.0);
+    assert_eq!(f.fit("board, with proposals (a report)", Weight::Regular, 12.0, w("board, with proposals (a…") + 0.5), "board, with proposals…");
+}
+
+#[test]
+fn on_a_narrow_board_a_ready_tasks_risk_is_at_its_last_lines_right_not_beside_its_title() {
+    let fonts = Fonts::builtin();
+    let t = TaskRow { risk: Some("high".into()), title: "Accept: merge a stack of ready tasks".into(), ..task("BP-1", "ready") };
+    let last = Row::Detail(DetailRow { risk: Some("high".into()), ..detail_row("14 files, +612 −148 · Not toured yet") });
+    let r = rows(vec![Row::Task(t.clone()), last]);
+    let (narrow, wide) = (Canvas::new(Grid { cols: 35, cell_w: 16, cell_h: 34 }, TextSize::Medium, Theme::default()), Canvas::new(Grid { cols: 60, cell_w: 16, cell_h: 34 }, TextSize::Medium, Theme::default()));
+    // the title's first line has the room the chip had
+    let (gn, gw) = (Geo { c: narrow, idw: 0.0, repow: 0.0 }, Geo { c: wide, idw: 0.0, repow: 0.0 });
+    assert!(gn.risk_beside(&t).is_none() && gw.risk_beside(&t).is_some());
+    // the last line makes room for it (a line more, if it needs one) and the chip is drawn there
+    let laid = lay(&r, &narrow, &fonts);
+    let mut f = Fonts::builtin();
+    let s = render(&r, &laid, Cut::rows(0..2, laid.heights.iter().sum()), &narrow, &mut f).unwrap();
+    let red = solid(Theme::default().red);
+    let at = |y0: u32, y1: u32| (y0..y1).any(|y| (0..s.pixmap.width()).any(|x| px_at(&s, x, y) == red));
+    assert!(!at(0, laid.heights[0]) && at(laid.heights[0], laid.heights[0] + laid.heights[1]));
+    let room = gn.detail_room() - gn.risk_width("high", &fonts) - RISK_GAP * narrow.m.detail;
+    assert!(laid.lines[1].iter().all(|l| fonts.width(l, Weight::Regular, narrow.m.body) <= room), "{:?}", laid.lines[1]);
 }

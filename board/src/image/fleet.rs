@@ -236,9 +236,8 @@ impl Draw<'_> {
     pub(super) fn repo(&mut self, r: &RepoRow, y: f32, bottom: f32) {
         let m = self.m();
         if r.question.is_some() {
-            let under = if m.cells { 0.0 } else { m.below };
-            self.wash(y, bottom - under, Flag::Needs);
-            self.bar(y, bottom - under, Flag::Needs);
+            self.wash(y, bottom - m.below, Flag::Needs);
+            self.bar(y, bottom - m.below, Flag::Needs, 0.0);
         }
         self.set(m.title, m.line);
         let theme = self.theme;
