@@ -41,27 +41,36 @@ pub fn risk_width(fonts: &Fonts, text: &str, px: f32) -> f32 {
 }
 
 /// A risk's chip from x, its word on `base`, the baseline of the line of text it sits
-/// in: a dot in the level's colour, then the word dim, inside a line of the
-/// foreground, as far above the word's x-height as below its descenders. The dot
+/// in: a dot in the level's colour, then the word dim, on the foreground faintly (a
+/// keycap's fill) inside a line of it, as far above the word's x-height as below its
+/// descenders (`risk_reach`). The dot
 /// alone has the colour, so a risk doesn't read as a status. Returns its right edge.
 pub fn risk(d: &mut Draw, text: &str, px: f32, (x, base): (f32, f32), color: [u8; 4]) -> f32 {
     let theme = d.theme();
     let w = risk_width(d.fonts(), text, px);
     let dot = dot_width(px);
-    let fonts = d.fonts();
-    let ((up, _), (_, down)) = (fonts.ink("x", Weight::Bold, px), fonts.ink("p", Weight::Bold, px));
-    let pad = (RISK_PAD * px).round();
-    let (x, top) = (x.round(), (base - up - pad).round());
-    let h = (base + down + pad).round() - top;
+    let (up, down) = risk_reach(d.fonts(), px);
+    let (x, top) = (x.round(), (base - up).round());
+    let h = (base + down).round() - top;
+    d.rounded_fill(x, top, w, h, h / 2.0, theme.cap());
     d.rounded_edge(x, top, w, h, h / 2.0, 1.25, theme.chip_edge());
     // (the dot centred on the word's x-height)
-    d.rounded_fill((x + SIDE * px).round(), (base - (up + dot) / 2.0).round(), dot, dot, dot / 2.0, color);
+    let x_up = d.fonts().ink("x", Weight::Bold, px).0;
+    d.rounded_fill((x + SIDE * px).round(), (base - (x_up + dot) / 2.0).round(), dot, dot, dot / 2.0, color);
     d.on_baseline(px, text, Weight::Bold, x + (SIDE + DOT) * px, base, theme.dim());
     x + w
 }
 
+/// How far a risk's chip reaches above its word's baseline and below it, in type `px`:
+/// its x-height and its descenders, and room round them.
+pub fn risk_reach(fonts: &Fonts, px: f32) -> (f32, f32) {
+    let ((up, _), (_, down)) = (fonts.ink("x", Weight::Bold, px), fonts.ink("p", Weight::Bold, px));
+    let pad = (RISK_PAD * px).round();
+    (up + pad, down + pad)
+}
+
 /// A risk chip's room over its word's x-height and under its descenders, of its type.
-const RISK_PAD: f32 = 0.25;
+const RISK_PAD: f32 = 0.32;
 
 /// The baseline of lowercase words in a box `h` high whose top is y, in type `px`:
 /// their x-height and most of a descender centred, so a "g" clears the box's foot as
@@ -88,7 +97,7 @@ const DOT: f32 = 0.85;
 pub fn solid(d: &mut Draw, text: &str, px: f32, right: f32, cy: f32, color: Rgb) -> f32 {
     let (color, ink) = d.theme().pill(color);
     let w = width(d.fonts(), text, px);
-    let h = (1.5 * px).round();
+    let h = (1.4 * px).round();
     let (x, top) = (right - w, (cy - h / 2.0).round());
     d.rounded_fill(x, top, w, h, h / 2.0, color);
     d.boxed(px, text, Weight::Bold, x + SIDE * px, top, h, ink);

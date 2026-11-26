@@ -146,7 +146,8 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
                 let (age, _) = crate::model::split_at_width(&d.text, d.lead);
                 let bolder = if d.stale { fonts.width(&age, Weight::Bold, c.m.body) - fonts.width(&age, Weight::Regular, c.m.body) } else { 0.0 };
                 let lines = g.with_risk(d, bolder, stacked[i], fonts);
-                heights.push(g.height(row, lines.len()) + g.stat_gap(rows, i) as u32 + under(i));
+                let chip = if under(i) > 0 { g.risk_under(d, fonts) } else { 0 };
+                heights.push(g.height(row, lines.len()) + g.stat_gap(rows, i) as u32 + under(i) + chip);
                 all.push(lines);
                 continue;
             }
@@ -518,7 +519,7 @@ impl Geo {
         let m = &self.c.m;
         let h = match row {
             // (and a little under it, clear of a selected card's edge)
-            Row::Head { .. } => m.head_pad + m.detail_line + (0.8 * m.title).round(),
+            Row::Head { .. } => m.head_pad + m.detail_line + (0.7 * m.title).round(),
             Row::Task(_) | Row::Item(_) => m.pad + lines as f32 * m.line + m.title_gap,
             Row::Later { .. } => m.pad + m.line,
             Row::Detail(_) | Row::ItemDetail(..) => lines as f32 * m.body_line,

@@ -4,7 +4,7 @@
 //! over it, and the room for a ready task's risk's chip after its last line.
 
 use super::said::{key_letters, KEY_SIDE};
-use super::{Geo, Row, Rows, RISK_GAP};
+use super::{chip, Geo, Row, Rows, RISK_GAP};
 use crate::image::font::{tabular, Fonts, Weight};
 use crate::ui::rows::DetailRow;
 
@@ -82,6 +82,18 @@ impl Geo {
             start = i;
         }
         out
+    }
+
+    /// How far a detail's risk's chip reaches under its line, in whole pixels: its
+    /// block has that much more room under it, so the chip is as clear of a card's
+    /// foot as type is.
+    pub(super) fn risk_under(&self, d: &DetailRow, fonts: &Fonts) -> u32 {
+        if d.risk.is_none() {
+            return 0;
+        }
+        let m = self.c.m;
+        let base = ((m.body_line + fonts.cap_height(m.body)) / 2.0).round();
+        (base + chip::risk_reach(fonts, m.label).1 - m.body_line).max(0.0).round() as u32
     }
 
     /// The room a risk's chip takes after a line's text: its gap and its chip.

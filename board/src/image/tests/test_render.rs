@@ -662,7 +662,10 @@ fn a_stat_line_that_hasnt_room_for_its_risk_breaks_at_its_dot_and_sets_its_figur
     assert!(fonts.width(&lines[1], Weight::Regular, c.m.body) + g.risk_room("medium", &fonts) <= g.detail_room());
     // set apart from the words over it by a gap, but not when it's a task's first line
     let laid = lay(&r, &c, &fonts);
-    assert_eq!(laid.heights[2] as f32, 2.0 * c.m.body_line + (STAT_GAP * c.m.body_line).round() + c.m.below);
+    // (and room under it for the chip, which reaches under its line)
+    let chip = g.risk_under(&stat, &fonts);
+    assert!(chip > 0);
+    assert_eq!(laid.heights[2] as f32, 2.0 * c.m.body_line + (STAT_GAP * c.m.body_line).round() + c.m.below + chip as f32);
     let alone = rows(vec![Row::Task(task("BP-1", "ready")), Row::Detail(stat.clone())]);
     assert_eq!(g.stat_gap(&alone, 1), 0.0);
     // a short one in the same group breaks at its dot too, so the group's facts take one shape
