@@ -23,7 +23,7 @@ use super::font::{tabular, Fonts, Weight};
 use super::shape::{diamond, left_slice, paint, rounded};
 use super::theme::{lit, solid, Flags, Rgb, Theme};
 use crate::model::TextSize;
-use crate::ui::rows::{Flag, ItemRow, Mark, Row, Rows, TaskRow};
+use crate::ui::rows::{DetailRow, Flag, ItemRow, Mark, Row, Rows, TaskRow};
 use std::ops::Range;
 use tiny_skia::{FillRule, LineCap, Path, Pixmap, Stroke, Transform};
 
@@ -159,6 +159,9 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
                 // the list's first group's name is clear of the header over it
                 let under = match row {
                     Row::Head { .. } if i == 0 => (c.m.gap / 2.0).round() as u32,
+                    // (a wash reaches under its block's last line: the space after a group
+                    // that ends in one is that much more, so it looks as far from the next)
+                    Row::Gap if i > 0 && washed(&rows.rows[i - 1]) => (WASHED_GAP * c.m.below).round() as u32,
                     _ => 0,
                 };
                 all.push(vec![]);
@@ -182,6 +185,15 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
     }
     Laid { heights, lines: all, idw, repow }
 }
+
+/// A row of a task that sits on a wash (it needs you, or stopped).
+fn washed(row: &Row) -> bool {
+    matches!(row, Row::Task(TaskRow { flag: Some(_), .. }) | Row::Detail(DetailRow { flag: Some(_), .. }))
+}
+
+/// How much more space follows a group that ends in a wash, of the room a card has
+/// under its type.
+const WASHED_GAP: f32 = 0.7;
 
 /// The rows from `top` that fit in `room` pixels whole: [top, end). One at least, cut if
 /// it must be.
@@ -894,8 +906,6 @@ pub mod fleet;
 #[path = "page.rs"]
 pub mod page;
 use said::key_letters;
-#[cfg(test)]
-use crate::ui::rows::DetailRow;
 #[cfg(test)]
 use lines::{at_dots, STAT_GAP};
 #[cfg(test)]

@@ -50,9 +50,22 @@ pub fn risk(d: &mut Draw, text: &str, px: f32, (x, cy, h): (f32, f32, f32), colo
     let (x, top) = (x.round(), (cy - h / 2.0).round());
     d.rounded_edge(x, top, w, h, h / 2.0, 1.25, theme.chip_edge());
     d.rounded_fill((x + SIDE * px).round(), top + ((h - dot) / 2.0).round(), dot, dot, dot / 2.0, color);
-    d.boxed(px, text, Weight::Bold, x + (SIDE + DOT) * px, top, h, theme.dim());
+    let base = lower_base(d, px, top, h);
+    d.on_baseline(px, text, Weight::Bold, x + (SIDE + DOT) * px, base, theme.dim());
     x + w
 }
+
+/// The baseline of lowercase words in a box `h` high whose top is y, in type `px`:
+/// their x-height and most of a descender centred, so a "g" clears the box's foot as
+/// an "x" clears its top, and every word in such boxes shares it.
+fn lower_base(d: &Draw, px: f32, top: f32, h: f32) -> f32 {
+    let fonts = d.fonts();
+    let ((x_up, _), (_, down)) = (fonts.ink("x", Weight::Bold, px), fonts.ink("p", Weight::Bold, px));
+    (top + (h + x_up - HANG * down) / 2.0).round()
+}
+
+/// How much of a descender a lowercase word's centring counts.
+const HANG: f32 = 0.75;
 
 /// A risk's dot's width, in type `px`.
 fn dot_width(px: f32) -> f32 {
@@ -87,9 +100,9 @@ fn cap_width(fonts: &Fonts, key: &str, px: f32) -> f32 {
 
 /// A key in a cap from x, centred on cy: the key semibold in the foreground on the
 /// foreground at 7% with a 1-pixel edge at 28%, its corners round by a third of the
-/// type, the key in its middle (a lowercase letter's x-height and half a descender,
-/// so a "g" or a "p" clears the cap's foot); then what it does, dim, 0.4 of the type
-/// after it. Returns where it ends.
+/// type, the key in its middle (a lowercase letter on `lower_base`, so a "g" or a "p"
+/// clears the cap's foot); then what it does, dim, 0.4 of the type after it, on the
+/// letter's baseline. Returns where it ends.
 pub fn keycap(d: &mut Draw, key: &str, what: &str, px: f32, x: f32, cy: f32) -> f32 {
     let theme = d.theme();
     let (w, h) = (cap_width(d.fonts(), key, px), (1.55 * px).round());
@@ -102,10 +115,8 @@ pub fn keycap(d: &mut Draw, key: &str, what: &str, px: f32, x: f32, cy: f32) -> 
     // letters share a baseline and a "g" clears the cap's foot; anything else its
     // own ink centred
     let lower = key.chars().all(|c| c.is_ascii_lowercase());
-    let fonts = d.fonts();
-    let ((x_up, _), hang) = (fonts.ink("x", Weight::Bold, px), fonts.ink("p", Weight::Bold, px).1 / 2.0);
-    let line = (top + (h + x_up - hang) / 2.0).round();
-    let (up, down) = fonts.ink(key, Weight::Bold, px);
+    let line = lower_base(d, px, top, h);
+    let (up, down) = d.fonts().ink(key, Weight::Bold, px);
     let base = if lower || up + down <= 0.0 { line } else { (top + (h + up - down) / 2.0).round() };
     d.on_baseline(px, key, Weight::Bold, x + (w - kw) / 2.0, base, theme.text());
     if what.is_empty() {

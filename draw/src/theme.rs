@@ -111,10 +111,13 @@ impl Theme {
         faint(self.fg, 0.8)
     }
 
-    /// The selected card's fill: the foreground, faintly (a little more on a dark
-    /// pane, where a faint grey lifts less).
+    /// The selected card's fill: the terminal's blue toward the foreground, faintly (a
+    /// little more on a dark pane, where a faint fill lifts less), so the card reads as
+    /// chosen, as its edge's colour, not as a grey, disabled one.
     pub fn tint(&self) -> [u8; 4] {
-        faint(self.fg, if luminance(self.fg) > luminance(self.bg) { 0.13 } else { 0.085 })
+        let mix = |b: u8, f: u8| ((b as u16 * 2 + f as u16) / 3) as u8;
+        let c = Rgb(mix(self.blue.0, self.fg.0), mix(self.blue.1, self.fg.1), mix(self.blue.2, self.fg.2));
+        faint(c, if luminance(self.fg) > luminance(self.bg) { 0.2 } else { 0.12 })
     }
 
     /// A working mark's ring: the foreground, a little stronger than the tint (more
@@ -123,10 +126,9 @@ impl Theme {
         faint(self.fg, if luminance(self.fg) > luminance(self.bg) { 0.25 } else { 0.34 })
     }
 
-    /// The selected card's edge: the terminal's blue, part clear, so it's mixed into
-    /// the card's own fill and reads as a quiet line, not a frame. Nothing else on the
-    /// board is boxed, so the ring is the selection wherever it is, among amber and red
-    /// washes too.
+    /// The selected card's edge: the terminal's blue, a little clear, so it's mixed into
+    /// the card's own fill. Nothing else on the board is boxed but a selected task that
+    /// needs you (edged in its own colour), so the ring is the selection wherever it is.
     pub fn edge(&self) -> [u8; 4] {
         faint(self.blue, EDGE)
     }
@@ -178,9 +180,9 @@ impl Theme {
         match status {
             "needs" | "stopped" | "ready" | "finished" | "review" => self.shape(status).unwrap_or(self.text()),
             // (quieter than the colours: what doesn't wait on you doesn't outshine them)
-            "working" => faint(self.fg, 0.55),
+            "working" => faint(self.fg, 0.6),
             "triage" => solid(self.between()),
-            _ => faint(self.fg, 0.32),
+            _ => faint(self.fg, 0.36),
         }
     }
 
@@ -278,7 +280,7 @@ pub fn luminance(c: Rgb) -> f32 {
 }
 
 /// How much of the selected card's edge is the terminal's blue.
-const EDGE: f32 = 0.6;
+const EDGE: f32 = 0.85;
 
 pub fn solid(c: Rgb) -> [u8; 4] {
     [c.0, c.1, c.2, 255]
