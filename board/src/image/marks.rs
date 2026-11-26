@@ -163,14 +163,6 @@ impl Draw<'_> {
         }
     }
 
-    /// A filled diamond `r` from its centre to its points: a finished group's dot in
-    /// the header's counts, as its tasks' mark.
-    pub(in crate::image) fn diamond_dot(&mut self, cx: f32, cy: f32, r: f32, color: [u8; 4]) {
-        if let Some(p) = diamond(cx, cy, r) {
-            self.fill(&p, color);
-        }
-    }
-
     fn disc(&mut self, cx: f32, cy: f32, r: f32, color: [u8; 4]) {
         if let Some(p) = PathBuilder::from_circle(cx, cy, r) {
             self.fill(&p, color);

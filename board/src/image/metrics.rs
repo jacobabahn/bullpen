@@ -71,7 +71,7 @@ impl Metrics {
             gap: (0.5 * ch).round(),
             title_gap: (0.22 * title).round(),
             inset: (ROOM * title).round(),
-            below: (ROOM * title).round() + (0.15 * title).round(),
+            below: (ROOM * title).round() + (0.25 * title).round(),
         }
     }
 }
@@ -79,7 +79,7 @@ impl Metrics {
 /// A card's room over its type, of a title's size (its line has as much again over its
 /// capitals), and the space between two cards.
 const ROOM: f32 = 0.38;
-const BETWEEN: f32 = 0.34;
+const BETWEEN: f32 = 0.42;
 
 /// The type of the lines under a task, of a detail's size (medium's is 0.62 of a cell).
 const BODY: f32 = 0.886;

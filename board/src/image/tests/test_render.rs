@@ -167,7 +167,7 @@ fn larger_type_makes_taller_rows_with_space_between_tasks_and_a_smaller_detail()
 
 #[test]
 fn a_title_is_laid_out_the_same_selected_or_not() {
-    let long = "a title much too long for one row of a board this narrow, which goes on and on, past two of its lines";
+    let long = "a title much too long for one row of a board this narrow, which goes on and on, past two of its lines and then a third, and more";
     let pair = |selected: bool| {
         let other = TaskRow { title: long.into(), selected, ..task("BP-1", "todo") };
         let yours = TaskRow { title: long.into(), yours: true, selected: !selected, ..task("BP-2", "ready") };
@@ -175,12 +175,12 @@ fn a_title_is_laid_out_the_same_selected_or_not() {
     };
     let laid = pair(false);
     assert_eq!(laid, pair(true));
-    // every title gets two lines, then it's cut
+    // every title gets three lines, then it's cut
     assert_eq!(laid.lines[0].len(), TITLE_LINES);
-    assert!(laid.lines[0][1].ends_with('…'));
+    assert!(laid.lines[0][TITLE_LINES - 1].ends_with('…'));
     assert_eq!(laid.lines[1].len(), TITLE_LINES);
     let m = Metrics::of(TextSize::Medium, 20);
-    assert_eq!(laid.heights[1], (m.pad + 2.0 * m.line + m.title_gap + m.below) as u32);
+    assert_eq!(laid.heights[1], (m.pad + TITLE_LINES as f32 * m.line + m.title_gap + m.below) as u32);
     let joined = laid.lines[1].join(" ");
     assert!(long.starts_with(joined.trim_end_matches('…')));
 }
@@ -248,7 +248,7 @@ fn detail_row(text: &str) -> DetailRow {
 }
 
 #[test]
-fn a_title_takes_two_lines_at_any_width() {
+fn a_title_takes_the_lines_it_needs_up_to_three_at_any_width_whoever_its_task_is() {
     let fonts = Fonts::builtin();
     let long = "Mission control: show each repo's coordinator question in the inbox";
     let r = rows(vec![
@@ -258,8 +258,8 @@ fn a_title_takes_two_lines_at_any_width() {
     for cols in [35, 42, 43, 47] {
         let c = Canvas::new(Grid { cols, cell_w: 16, cell_h: 34 }, TextSize::Medium, Theme::default());
         let laid = lay(&r, &c, &fonts);
-        assert_eq!(laid.lines[0].len(), 2, "{cols}");
-        assert_eq!(laid.lines[1].len(), 2, "{cols}: another's too");
+        assert!((2..=TITLE_LINES).contains(&laid.lines[0].len()) && !laid.lines[0].concat().ends_with('…'), "{cols}");
+        assert_eq!(laid.lines[1], laid.lines[0], "{cols}: another's too");
         assert_eq!(laid.heights[0], laid.heights[1]);
     }
     // with room for it on one line, one
@@ -267,7 +267,7 @@ fn a_title_takes_two_lines_at_any_width() {
     assert_eq!(lay(&r, &c, &fonts).lines[0], vec![long.to_string()]);
     // small type too
     let c = Canvas::new(Grid { cols: 35, cell_w: 16, cell_h: 34 }, TextSize::Small, Theme::default());
-    assert_eq!(lay(&r, &c, &fonts).lines[0].len(), 2);
+    assert!(lay(&r, &c, &fonts).lines[0].len() >= 2);
 }
 
 #[test]
@@ -302,7 +302,7 @@ fn a_titles_first_line_stops_short_of_its_age_and_the_next_runs_to_where_text_en
     let width = |l: &str| fonts.width(l, Weight::Bold, c.m.title);
     let first = g.task_right(&t, &fonts) - g.title_x();
     assert!(first < c.right() - g.title_x() - fonts.width("00m", Weight::Bold, c.m.detail));
-    assert_eq!(laid.lines[0].len(), 2);
+    assert_eq!(laid.lines[0].len(), TITLE_LINES);
     assert!(width(&laid.lines[0][0]) <= first && width(&laid.lines[0][1]) > first, "{:?}", laid.lines[0]);
     assert!(width(&laid.lines[0][1]) <= c.right() - g.body_x());
 }
@@ -350,6 +350,10 @@ fn a_wrapped_texts_last_word_isnt_left_alone() {
     let mut keyed = vec!["probably with a question. p shows its".to_string(), "screen.".to_string()];
     f.fill_last(&mut keyed, Weight::Regular, 12.0, room);
     assert_eq!(keyed, vec!["probably with a question.", "p shows its screen."]);
+    // a phrase the break splits goes down whole, though the last line has two words
+    let mut split = vec!["Stopped mid-task, probably with a question. p shows".to_string(), "its screen.".to_string()];
+    f.fill_last(&mut split, Weight::Regular, 12.0, 400.0);
+    assert_eq!(split, vec!["Stopped mid-task, probably with a question.", "p shows its screen."]);
 }
 
 #[test]
@@ -700,7 +704,7 @@ fn a_short_last_line_keeps_its_room_beside_the_key_and_a_task_with_no_key_has_no
     };
     let (laid, s) = draw_in(&with(Some(("i".into(), "answer".into()))), TextSize::Medium);
     let (_, bare) = draw_in(&with(None), TextSize::Medium);
-    assert_eq!(laid.lines[2], vec!["3 files, +4 −1".to_string()]);
+    assert_eq!(laid.lines[2], vec![tabular("3 files, +4 −1")]);
     let bottom = laid.heights.iter().sum::<u32>() - Metrics::of(TextSize::Medium, 20).below as u32;
     assert!(differ(&s, &bare, (250, 400), (bottom - 25, bottom)));
     // only the last line has it

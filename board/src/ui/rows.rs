@@ -267,7 +267,8 @@ pub(crate) fn details(rows: &mut Vec<Row>, app: &App, t: &Task, cur: bool, age_o
     } else if app.image && doing.is_empty() && loud_detail(app, t) {
         YOURS_LINES
     } else if !doing.is_empty() {
-        1
+        // (the image board's has two, so a path doesn't take the line from what's said)
+        if app.image { 2 } else { 1 }
     } else if t.flagged() || t.is_limited() || t.triage() || t.status == "finished" || !model::pr_phrase(t).is_empty() {
         2
     } else {

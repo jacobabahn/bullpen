@@ -4,7 +4,7 @@
 
 use super::Draw;
 use crate::image::font::Weight;
-use crate::image::theme::faint;
+use crate::image::theme::{bright, faint, luminance, Rgb};
 
 /// The room each side of a key a detail's text names, inside its cap, of the type's size.
 pub(super) const KEY_SIDE: f32 = 0.28;
@@ -73,7 +73,10 @@ impl Draw<'_> {
     /// whose top is y: in `color`, but the lines added in green and those taken out in
     /// red, a little dimmed, so its figures read as facts. Returns where it ends.
     pub(super) fn stat(&mut self, line: &str, x: f32, y: f32, color: [u8; 4]) -> f32 {
-        let (green, red) = (faint(self.theme.green, FIGURES), faint(self.theme.red, FIGURES));
+        // (at their brightest on a dark pane, where a terminal's red is dark)
+        let dark = luminance(self.theme.bg) < luminance(self.theme.fg);
+        let tone = |c: Rgb| faint(if dark { bright(c) } else { c }, FIGURES);
+        let (green, red) = (tone(self.theme.green), tone(self.theme.red));
         let mut x = x;
         for (i, word) in line.split(' ').enumerate() {
             let figures = |sign: char| word.strip_prefix(sign).is_some_and(|n| !n.is_empty() && n.trim_end_matches(',').chars().all(is_figure));

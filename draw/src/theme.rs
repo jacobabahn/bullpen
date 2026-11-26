@@ -87,10 +87,11 @@ impl Theme {
         solid(self.fg)
     }
 
-    /// Dim text: the foreground at 70%, which reads at over 4.5:1 on a light theme's
-    /// white, even on the selected card (and at over 6:1 on a dark one).
+    /// Dim text: the foreground at 70% (76% on a light theme, where thin grey type on
+    /// white goes faint), which reads at over 4.5:1 on a light theme's white, even on
+    /// the selected card (and at over 6:1 on a dark one).
     pub fn dim(&self) -> [u8; 4] {
-        faint(self.fg, 0.7)
+        faint(self.fg, if luminance(self.bg) > luminance(self.fg) { 0.76 } else { 0.7 })
     }
 
     /// A group's name: the foreground, a little dim, so the titles under it lead.
@@ -176,9 +177,10 @@ impl Theme {
     pub fn group(&self, status: &str) -> [u8; 4] {
         match status {
             "needs" | "stopped" | "ready" | "finished" | "review" => self.shape(status).unwrap_or(self.text()),
-            "working" => faint(self.fg, 0.7),
+            // (quieter than the colours: what doesn't wait on you doesn't outshine them)
+            "working" => faint(self.fg, 0.55),
             "triage" => solid(self.between()),
-            _ => faint(self.fg, 0.45),
+            _ => faint(self.fg, 0.32),
         }
     }
 
@@ -190,10 +192,10 @@ impl Theme {
         bright(Rgb(warm(self.yellow.0, self.red.0), warm(self.yellow.1, self.red.1), warm(self.yellow.2, self.red.2)))
     }
 
-    /// A teal, the terminal's green a third of the way to its blue: a finished task's,
-    /// in its mark, its status bar segment and its count, apart from a ready one's green.
+    /// A teal, the terminal's green half way to its blue: a finished task's, in its
+    /// mark, its status bar segment and its count, apart from a ready one's green.
     pub fn teal(&self) -> Rgb {
-        let mix = |g: u8, b: u8| ((g as u16 * 2 + b as u16) / 3) as u8;
+        let mix = |g: u8, b: u8| ((g as u16 + b as u16) / 2) as u8;
         Rgb(mix(self.green.0, self.blue.0), mix(self.green.1, self.blue.1), mix(self.green.2, self.blue.2))
     }
 

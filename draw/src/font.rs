@@ -205,8 +205,8 @@ impl Fonts {
 
     /// A detail's last line of one word takes the last word of the line above it (or,
     /// when a key is among that line's last three words, the key with its phrase: "p
-    /// shows its screen", from the letter on); a key at the end of the line above goes
-    /// down with what it starts. A key is the board's phrase's form (`is_key`). The lines are otherwise full to
+    /// shows its screen", from the letter on); a key whose phrase the break splits ("p
+    /// shows / its screen") goes down with it. A key is the board's phrase's form (`is_key`). The lines are otherwise full to
     /// the measure.
     pub fn fill_last(&self, lines: &mut [String], weight: Weight, px: f32, max: f32) {
         let [.., above, last] = lines else { return };
@@ -217,7 +217,7 @@ impl Fonts {
         let next: Vec<&str> = words.iter().copied().chain(last.split(' ')).collect();
         let letter = (0..words.len()).rev().find(|&j| is_key(&next[j..])).filter(|&j| j + 3 >= words.len() && j >= 2);
         let take = match letter {
-            Some(j) if j + 1 == words.len() || !last.contains(' ') => words.len() - j,
+            Some(j) if j + 3 > words.len() || !last.contains(' ') => words.len() - j,
             _ if !last.contains(' ') && words.len() >= 3 => 1,
             _ => return,
         };

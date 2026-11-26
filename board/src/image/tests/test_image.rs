@@ -188,14 +188,15 @@ fn the_header_with_its_status_bar_is_sent_again_only_when_a_count_changes() {
 fn moving_the_selection_sends_a_small_image_not_the_list() {
     let (mut app, mut p) = (mixed(), picture());
     asked(&mut app, &mut p);
+    // (tall enough that the list doesn't scroll: scrolling sends its window, rightly)
     p.cell = Some((16, 34)); // a Mac's cell
-    let first = frame_in(&mut app, &mut p, 60, 45);
+    let first = frame_in(&mut app, &mut p, 60, 50);
     let list = |out: &str| out.matches(&format!("a=t,f=100,t=d,i={LIST},")).count();
     assert_eq!(list(&first), 1);
     let mut most = 0;
     for sel in ["BP-2", "BP-4", "BP-5", "BP-3", "BP-6"] {
         app.sel = Some(sel.into());
-        let out = frame_in(&mut app, &mut p, 60, 45);
+        let out = frame_in(&mut app, &mut p, 60, 50);
         assert!(!out.contains(&format!("a=t,f=100,t=d,i={LIST},")), "{sel}");
         let sizes: Vec<_> = out.split("\x1b_Ga=t,f=100,t=d,i=").skip(1).map(|c| c.split("a=p").next().unwrap().len()).collect();
         eprintln!("{sel}: {} bytes, images {sizes:?}", out.len());

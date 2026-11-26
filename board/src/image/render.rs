@@ -117,7 +117,7 @@ impl Laid {
 
 /// The most lines a task's title wraps to, at any width, so a wider board never shows
 /// less of it than a narrower one (an item's is cut to one).
-const TITLE_LINES: usize = 2;
+const TITLE_LINES: usize = 3;
 
 /// Lay the rows out: a title cut to its row, or wrapped (one that's yours), a detail's
 /// text wrapped by pixels to the room its type has, and how tall each row is: a
@@ -136,7 +136,7 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
             Row::Task(t) => {
                 let most = TITLE_LINES;
                 // (its repository's name before it, on mission control, takes its first line's room)
-                (&t.title, most, title_weight(), g.task_right(t, fonts) - g.repo_width(t), c.right())
+                (&t.title, most, title_weight(), g.task_right(t, fonts) - g.repo_width(t), g.title_rest(t, fonts))
             }
             Row::Item(i) => (&i.title, 1, title_weight(), c.right(), c.right()),
             Row::Detail(d) => {
@@ -195,7 +195,7 @@ pub fn fitting(laid: &Laid, top: usize, room: u32) -> usize {
 }
 
 /// The space between a title's first line and its risk or age, of a title's size.
-const TITLE_GAP: f32 = 0.85;
+const TITLE_GAP: f32 = 1.05;
 
 /// The space between a line's text and its risk's chip after it, of the line's type.
 const RISK_GAP: f32 = 0.6;
@@ -498,10 +498,11 @@ impl Geo {
     /// A detail's lines with room for its task's risk's chip after the last: as they
     /// wrap when it fits there; else with the chip's room off every line, when that
     /// cuts no more (a stat line breaks at its dot: "Not toured yet ● high"); else the
-    /// chip on a line of its own. A stat line takes a second line when it must, and
-    /// its figures are tabular.
+    /// chip on a line of its own. A stat line takes a second line when it must. Its
+    /// figures are tabular.
     fn with_risk(&self, d: &DetailRow, less: f32, fonts: &Fonts) -> Vec<String> {
-        let (text, most) = if d.stat { (tabular(&d.text), d.lines.max(2)) } else { (d.text.clone(), d.lines) };
+        // (every figure tabular: a stat line's line up, and a 1 keeps its space)
+        let (text, most) = (tabular(&d.text), if d.stat { d.lines.max(2) } else { d.lines });
         let lines = self.detail_lines(&text, most, less, self.caps(d), fonts);
         let Some(level) = &d.risk else { return lines };
         let chip = self.risk_room(level, fonts);
@@ -571,6 +572,13 @@ impl Geo {
         chip::risk_width(fonts, level, self.c.m.label)
     }
 
+    /// Where a task's title's other lines end: where text ends, as its details' lines
+    /// do (the age is beside the first only); but short of an overdue age's pill,
+    /// which reaches down toward the second.
+    fn title_rest(&self, t: &TaskRow, fonts: &Fonts) -> f32 {
+        if self.overdue(t) { self.task_right(t, fonts) } else { self.c.right() }
+    }
+
     /// The room a task's repository's name takes before its title's first line (mission
     /// control's inbox): the name at a title's size and a gap; none on a board.
     fn repo_width(&self, t: &TaskRow) -> f32 {
@@ -590,7 +598,7 @@ impl Geo {
         let m = &self.c.m;
         let h = match row {
             // (and a little under it, clear of a selected card's edge)
-            Row::Head { .. } => m.head_pad + m.detail_line + (0.5 * m.title).round(),
+            Row::Head { .. } => m.head_pad + m.detail_line + (0.6 * m.title).round(),
             Row::Task(_) | Row::Item(_) => m.pad + lines as f32 * m.line + m.title_gap,
             Row::Later { .. } => m.pad + m.line,
             Row::Detail(_) | Row::ItemDetail(..) => lines as f32 * m.body_line,
@@ -899,8 +907,7 @@ impl<'a> Draw<'a> {
             None if t.quiet => self.theme.quiet(),
             None => self.theme.soft(),
         };
-        // (its other lines run to where text ends, as its details do: the age is beside the first)
-        let (first, rest) = (self.g.task_right(t, self.fonts), self.right());
+        let (first, rest) = (self.g.task_right(t, self.fonts), self.g.title_rest(t, self.fonts));
         // mission control's inbox: its repository's name first, regular and dim
         let lead = self.g.repo_width(t);
         if lead > 0.0 {

@@ -18,7 +18,7 @@ pub fn width(fonts: &Fonts, text: &str, px: f32) -> f32 {
 }
 
 /// A chip whose right edge is at `right`, centred on `cy`: the word semibold in its
-/// colour (`Theme::word`) on that colour at 18% (36% on a light theme), a word and a half high. Returns its
+/// colour (`Theme::word`) on that colour at 18% (46% on a light theme), a word and a half high. Returns its
 /// left edge.
 pub fn chip(d: &mut Draw, text: &str, px: f32, right: f32, cy: f32, color: [u8; 4]) -> f32 {
     let w = width(d.fonts(), text, px);
@@ -27,7 +27,7 @@ pub fn chip(d: &mut Draw, text: &str, px: f32, right: f32, cy: f32, color: [u8; 
     // (the fill from the colour at its brightest: a light theme's amber is dark)
     let lit = bright(Rgb(color[0], color[1], color[2]));
     // (stronger on a light theme, where 18% of amber on white is cream)
-    let alpha = if luminance(d.theme().bg) > luminance(d.theme().fg) { 0.36 } else { 0.18 };
+    let alpha = if luminance(d.theme().bg) > luminance(d.theme().fg) { 0.46 } else { 0.18 };
     let fill = [lit.0, lit.1, lit.2, (alpha * 255.0f32).round() as u8];
     d.rounded_fill(x, top, w, h, h / 2.0, fill);
     let ink = d.theme().word(color);
@@ -92,7 +92,7 @@ fn cap_width(fonts: &Fonts, key: &str, px: f32) -> f32 {
 /// after it. Returns where it ends.
 pub fn keycap(d: &mut Draw, key: &str, what: &str, px: f32, x: f32, cy: f32) -> f32 {
     let theme = d.theme();
-    let (w, h) = (cap_width(d.fonts(), key, px), (1.5 * px).round());
+    let (w, h) = (cap_width(d.fonts(), key, px), (1.55 * px).round());
     let top = (cy - h / 2.0).round();
     let r = 0.3 * px;
     d.rounded_fill(x, top, w, h, r, theme.cap());
@@ -102,12 +102,15 @@ pub fn keycap(d: &mut Draw, key: &str, what: &str, px: f32, x: f32, cy: f32) -> 
     // letters share a baseline and a "g" clears the cap's foot; anything else its
     // own ink centred
     let lower = key.chars().all(|c| c.is_ascii_lowercase());
-    let (up, down) = d.fonts().ink(if lower { "x" } else { key }, Weight::Bold, px);
-    let hang = if lower { d.fonts().ink("p", Weight::Bold, px).1 / 2.0 } else { 0.0 };
-    let base = if up + down > 0.0 { (top + (h + up - down - hang) / 2.0).round() } else { top + ((h + d.fonts().cap_height(px)) / 2.0).round() };
+    let fonts = d.fonts();
+    let ((x_up, _), hang) = (fonts.ink("x", Weight::Bold, px), fonts.ink("p", Weight::Bold, px).1 / 2.0);
+    let line = (top + (h + x_up - hang) / 2.0).round();
+    let (up, down) = fonts.ink(key, Weight::Bold, px);
+    let base = if lower || up + down <= 0.0 { line } else { (top + (h + up - down) / 2.0).round() };
     d.on_baseline(px, key, Weight::Bold, x + (w - kw) / 2.0, base, theme.text());
     if what.is_empty() {
         return x + w;
     }
-    d.boxed(px, what, Weight::Regular, x + w + 0.4 * px, top, h, theme.dim())
+    // (what it does on the letters' baseline, so the row reads as one line)
+    d.on_baseline(px, what, Weight::Regular, x + w + 0.4 * px, line, theme.dim())
 }
