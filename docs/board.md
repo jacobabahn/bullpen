@@ -154,10 +154,9 @@ images](tours.md#drawn-as-images)).
 One grid holds it: text starts a column and a half in from the pane's left edge
 and ends that far from its right, the rules and the status bar run between the two,
 and a card or a wash reaches a column past each, so type has clear room inside its
-edges and they're as far from one side of the pane as the other. The ages
-have a column of their own at the right, two figures wide, beside a title's first
-line; its other lines run to where text ends, as the lines under it do (short of an
-overdue age's pill, which reaches down toward them). A task is one block with a
+edges and they're as far from one side of the pane as the other. A task's age is at
+the right of its title's first line, which stops short of it by a gap; the title's
+other lines run to where text ends, as the lines under it do. A task is one block with a
 hanging indent: its mark and its ID are in a gutter at the left, and its title,
 every line the title wraps to and every line under it start at the title's left
 edge. On a board under 44 columns the ID is on the title's first line instead, a
@@ -168,8 +167,8 @@ regular, two sizes smaller, after a gap. The ID is a detail's size at every widt
 in tabular figures (each as wide as the others, a 1 with its foot), so IDs make a
 column; every figure in a task's lines is tabular too.
 
-The selected task sits on a card, and nothing else is boxed: a faint fill and a
-quiet edge two pixels wide, the terminal's blue mixed into the card's fill, its mark
+The selected task sits on a card, and nothing else is boxed: a faint fill of the
+terminal's blue (toward the foreground) and an edge two pixels wide of that blue, its mark
 inside it and its ID in the foreground (its weight unchanged, so it keeps its width). A card has room inside it on every side: a
 column beside the type, and a little over a third of a title's size over the first
 line and under the last. A task is laid out the same whether it's selected or not
@@ -179,8 +178,8 @@ view. The selected task's keys are the key line's at the bottom (mission control
 card has `⏎` at its lower right). A task that needs you, or whose agent stopped,
 stands out: it sits on a faint wash of amber (or red), the card's size, with a bar of
 that colour down its left edge, following its corners; selected, its fill is that
-colour stronger and its edge is that colour too, whole, so edge and bar are one
-frame, heavier at the left. An age that has
+colour three times as strong and its edge is that colour too, two and a half pixels
+wide, with the bar inside it, so edge and bar are one frame, heavier at the left. An age that has
 waited too long is a pill of its task's colour, whole: amber at its brightest with
 dark type, red a step darker with light type, so each reads at 4:1 or more.
 
@@ -203,14 +202,16 @@ it's drawn on, a light theme's washes and cards too). What a task needs from you
 gets up to four lines, so a question isn't cut, and what a ready or finished task of
 yours says (its review, its risk's reason) up to three; what a working task's agent is
 doing two; any other task one. Its stat line comes last, set apart as facts: a little
-space over it, dim, the lines added in green and those taken out in red. A Later item that asks for a yes, or that the coordinator skipped, has its
+space over it, dim, the lines added in green and those taken out in red. A task with
+no lines under its title has no gap for them. A Later item that asks for a yes, or that the coordinator skipped, has its
 line whether it's selected or not.
 A key a line names ("Its agent exited. `r` resumes it.") is in a small cap, as the
-keys at the bottom, centred on its letter. A ready task's risk is a quiet chip, a
-line high: a dot of its colour, then the word dim, inside a faint line, after its
-stat line at every width ("14 files, +612 −148 · Not toured yet ● high"); when it
-doesn't fit there, the stat line breaks at its dot to make room ("Not toured yet ●
-high"), or it starts a line of its own. It never takes a title's room. A group's
+keys at the bottom, centred on its letter. A ready task's risk is a quiet chip: a dot
+of its colour, then the word dim on the line's baseline, inside a faint line, at the
+right of its stat line at every width, so risks make a column down the list; when it
+doesn't fit there, the stat line breaks at its dot to make room ("Not toured yet …
+● high"), and then so do the other stat lines in its group, so they take one shape;
+or it starts a line of its own. It never takes a title's room. A group's
 name sits with its own tasks: there's more room over it than under, and room under
 it for a selected card's edge.
 
@@ -241,9 +242,10 @@ the list goes. With the bar, the chips on the line are only what needs you; the
 counts under the bar say the rest. The header is sent again only when a count
 changes, so the bar costs nothing while you move around. Then the message, and the
 keys each in a small rounded cap with what it does dim after it, on one baseline (a
-lowercase key's x-height and half a descender centred in its cap, so a `g` clears
+lowercase key's x-height and part of a descender centred in its cap, so a `g` clears
 its foot), dropping from the
-end on a narrow board as the text's do (`?` is never dropped); the rule over them
+end on a narrow board (`? keys` is never dropped and keeps its word, so the keys
+before it go first); the rule over them
 is above the message's row whether there's a message or not, and with no message
 the keys sit midway between the rule and the pane's bottom edge (with one, a little
 up in their rows, clear of that edge). The scroll marks are small chevrons
