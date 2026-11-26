@@ -155,14 +155,18 @@ One grid holds it: text starts a column and a half in from the pane's left edge
 and ends that far from its right, the rules and the status bar run between the two,
 and a card or a wash reaches a column past each, so type has clear room inside its
 edges and they're as far from one side of the pane as the other. The ages
-have a column of their own at the right, two figures wide, so the risks' chips before
-it line up down the list; a title's lines after its first stop short of it. A task
-is one block with a hanging indent: its mark and its ID are in a gutter at the left,
-and its title, every line the title wraps to and every line under it start at the
-title's left edge. The two are told apart by their type: a title is semibold, and
-the lines under it are regular, two sizes smaller, after a gap. The ID is a
-detail's size at every width; on a board under 44 columns the gap after it is
-narrower, so the gutter takes less of those lines.
+have a column of their own at the right, two figures wide, beside a title's first
+line; its other lines run to where text ends, as the lines under it do (short of an
+overdue age's pill, which reaches down toward them). A task is one block with a
+hanging indent: its mark and its ID are in a gutter at the left, and its title,
+every line the title wraps to and every line under it start at the title's left
+edge. On a board under 44 columns the ID is on the title's first line instead, a
+word before it, and the title's other lines and the lines under it start where the
+ID does, so only the mark hangs and the words get the pane's width. Title and lines
+are told apart by their type: a title is semibold, and the lines under it are
+regular, two sizes smaller, after a gap. The ID is a detail's size at every width,
+in tabular figures (each as wide as the others, a 1 with its foot), so IDs make a
+column; every figure in a task's lines is tabular too.
 
 The selected task sits on a card, and nothing else is boxed: a faint fill and a
 quiet edge two pixels wide, the terminal's blue mixed into the card's fill, its mark
@@ -175,13 +179,14 @@ view. The selected task's keys are the key line's at the bottom (mission control
 card has `⏎` at its lower right). A task that needs you, or whose agent stopped,
 stands out: it sits on a faint wash of amber (or red), the card's size, with a bar of
 that colour down its left edge, following its corners; selected, its fill is that
-colour stronger, inside the blue edge, with the bar inside the edge. An age that has
+colour stronger and its edge is that colour too, whole, so edge and bar are one
+frame, heavier at the left. An age that has
 waited too long is a pill of its task's colour, whole: amber at its brightest with
 dark type, red a step darker with light type, so each reads at 4:1 or more.
 
 A title is the loudest thing on a row: a task's ID (dim, on the title's baseline)
 and age, and the groups' names (a little dim), are a size under it. A title
-gets two lines at every width and size, selected or not, so a wider board never
+gets up to three lines at every width and size, selected or not, so a wider board never
 shows less of it (`p` and `⏎` show the task in full); one that isn't yours (it
 doesn't need you, stopped, or wait to be accepted) is the foreground a step back
 (the coordinator's, and a closed one's, a step further), so yours lead the list. A cut is
@@ -191,20 +196,23 @@ path). A detail line wraps where the type runs out of room, measured in pixels: 
 last line isn't left a word alone (the word before it comes down), a key isn't
 split from what it does ("`p` shows its screen" goes down whole), and a line of
 parts ("5 files, +96 −31 · Not toured yet") breaks between them, dropping the dot;
+a key whose phrase a break would split ("`p` shows / its screen") goes down with it;
 it's dim, but the selected task's and what a task that needs you says,
 which are a step under the title's foreground (each reads at 4.5:1 or more on what
 it's drawn on, a light theme's washes and cards too). What a task needs from you
 gets up to four lines, so a question isn't cut, and what a ready or finished task of
-yours says (its review, its risk's reason) up to three; any other task one, its stat
-line after. A Later item that asks for a yes, or that the coordinator skipped, has its
+yours says (its review, its risk's reason) up to three; what a working task's agent is
+doing two; any other task one. Its stat line comes last, set apart as facts: a little
+space over it, dim, the lines added in green and those taken out in red. A Later item that asks for a yes, or that the coordinator skipped, has its
 line whether it's selected or not.
 A key a line names ("Its agent exited. `r` resumes it.") is in a small cap, as the
-keys at the bottom, the letter's x-height in the middle of its cap. A ready task's
-risk is a quiet chip: a dot of its colour, then the word dim, inside a faint line,
-left of the age; on a board under 44 columns, where it would take the title's first
-line, it's at the right of the task's last line instead (which takes a line more for
-it if it must). A group's name sits with its own tasks: there's more room over it
-than under, and room under it for a selected card's edge.
+keys at the bottom, centred on its letter. A ready task's risk is a quiet chip, a
+line high: a dot of its colour, then the word dim, inside a faint line, after its
+stat line at every width ("14 files, +612 −148 · Not toured yet ● high"); when it
+doesn't fit there, the stat line breaks at its dot to make room ("Not toured yet ●
+high"), or it starts a line of its own. It never takes a title's room. A group's
+name sits with its own tasks: there's more room over it than under, and room under
+it for a selected card's edge.
 
 The marks move as the text board's do, at the same pace: a working task's is a faint
 ring with a quarter of it going round, a task in review's a blue ring with a filled
@@ -223,14 +231,18 @@ line, the header takes that row too for a status bar, in the rule's place: a seg
 for each open task, in its group's colour and the board's order (red for a task
 whose agent stopped and amber for the others that need you, a violet for the
 coordinator's (its tasks' mark is that violet too), green ready, teal finished (its
-tasks' diamond too, and its count's mark is a diamond), blue in review, greys for
-working and queued), and under it each group's count ("● 3 ready"), midway between
-the bar and the header's foot, but what needs you, which the chip says: as many as fit, then "+N more" for
-the tasks of the rest. The list doesn't lose a row for it: the text's ↓ row under
+tasks' diamond too), blue in review, greys for
+working and queued), and under it each group's count ("● 3 ready", a dot of its
+segments' colour, the number in tabular figures), midway between the bar and the
+header's foot, in the bar's order, so it keys the bar from its first segment ("● 1
+stopped ● 2 asking", what the chip's "3 need you" is made of): as many as fit, then
+"+N more" for the tasks of the rest. The list doesn't lose a row for it: the text's ↓ row under
 the list goes. With the bar, the chips on the line are only what needs you; the
 counts under the bar say the rest. The header is sent again only when a count
 changes, so the bar costs nothing while you move around. Then the message, and the
-keys each in a small rounded cap with what it does dim after it, dropping from the
+keys each in a small rounded cap with what it does dim after it, on one baseline (a
+lowercase key's x-height and half a descender centred in its cap, so a `g` clears
+its foot), dropping from the
 end on a narrow board as the text's do (`?` is never dropped); the rule over them
 is above the message's row whether there's a message or not, and with no message
 the keys sit midway between the rule and the pane's bottom edge (with one, a little

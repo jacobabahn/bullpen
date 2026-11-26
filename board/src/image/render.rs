@@ -5,11 +5,12 @@
 //! shapes (marks.rs) in the status colours (rings, a check, a diamond), the selected
 //! task sits on a card (a faint fill and a quiet edge, its mark inside; mission
 //! control's has ⏎ in a cap at its lower right when its last line leaves room), a task
-//! that needs you on a wash of its colour with a round bar at its left, and a risk is a
-//! chip (chip.rs), beside the age or, on a narrow board, at the right of the task's
-//! last line. A task is one block: its mark and ID in a gutter, its title's two lines
-//! and its details from the title's left edge, and under its last line the room its
-//! card has there. A block is laid out the same selected or not, so moving the
+//! that needs you on a wash of its colour with a round bar at its left (selected, its
+//! card's edge in that colour), and a risk is a chip (chip.rs) after the task's stat
+//! line. A task is one block: its mark and ID in a gutter, its title's lines (up to
+//! three) and its details from the title's left edge (on a board under 44 columns the
+//! ID is on the title's first line, and the rest start under it), and under its last
+//! line the room its card has there. A block is laid out the same selected or not, so moving the
 //! selection moves nothing else. The title is the loudest thing on a row: the ID, the
 //! age and the group's name are a detail's size. The marks that move are left out when
 //! the image look places them over the list (sprite.rs draws their frames with
