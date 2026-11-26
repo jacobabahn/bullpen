@@ -526,6 +526,10 @@ fn an_age_that_has_waited_too_long_is_a_chip_of_its_tasks_flags_colour() {
     let g = Geo { c, idw: 0.0, repow: 0.0 };
     assert_eq!(g.age_width(&aged(true, None), &fonts), chip::width(&fonts, "12m", c.m.label));
     assert!(g.age_width(&aged(true, None), &fonts) > g.age_width(&aged(false, None), &fonts));
+    // the title's other lines stop short of the pill, which reaches down toward them;
+    // beside a plain age they run to where text ends
+    assert_eq!(g.title_rest(&aged(true, None), &fonts), g.task_right(&aged(true, None), &fonts));
+    assert_eq!(g.title_rest(&aged(false, None), &fonts), c.right());
     // not while it's asked about: its age is the question's y / n
     assert!(!g.overdue(&TaskRow { asked: Some(false), ..aged(true, None) }));
 }
