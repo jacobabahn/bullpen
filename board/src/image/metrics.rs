@@ -71,7 +71,7 @@ impl Metrics {
             gap: (0.5 * ch).round(),
             title_gap: (0.22 * title).round(),
             inset: (ROOM * title).round(),
-            below: (ROOM * title).round() + (0.25 * title).round(),
+            below: (ROOM * title).round() + (0.32 * title).round(),
         }
     }
 }

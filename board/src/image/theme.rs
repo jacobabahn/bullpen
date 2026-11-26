@@ -21,10 +21,10 @@ pub trait Flags {
 
 impl Flags for Theme {
     /// The selected card's fill when its task needs you or stopped: its flag's colour,
-    /// twice as strong as its wash (more on a light pane, where amber is pale), under
-    /// an edge of that colour (render.rs's `card`).
+    /// three times as strong as its wash, under an edge of that colour (render.rs's
+    /// `card`).
     fn flag_tint(&self, flag: Flag) -> [u8; 4] {
-        faint(fill(self, flag), if luminance(self.bg) > luminance(self.fg) { 0.26 } else { 0.2 })
+        faint(fill(self, flag), 0.22)
     }
 
     /// A flag's colour: amber for a task that needs you, red for one whose agent stopped.
@@ -39,9 +39,13 @@ impl Flags for Theme {
     /// light theme's amber is dark, to read as text, and a wash of it is beige),
     /// faintly, so dim text on it still reads at 4.5:1 on a light theme's white.
     fn wash(&self, flag: Flag) -> [u8; 4] {
-        faint(fill(self, flag), 0.1)
+        faint(fill(self, flag), WASH)
     }
 }
+
+/// How strong a wash is: faint, so the selected card (three times as strong) is told
+/// from the washes round it.
+const WASH: f32 = 0.07;
 
 /// A flag's colour as a fill: amber a quarter of the way to red (a faint yellow on
 /// a dark pane is olive; this stays warm), at its brightest.

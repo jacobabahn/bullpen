@@ -132,19 +132,20 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
     let mut heights = Vec::new();
     // the room under a block's last row
     let under = |i: usize| if rows.rows.get(i + 1).is_some_and(Row::is_detail) { 0 } else { c.m.below as u32 };
+    let stacked = g.stacked(rows, fonts);
     for (i, row) in rows.rows.iter().enumerate() {
         let (title, most, weight, right, rest) = match row {
             Row::Task(t) => {
                 let most = TITLE_LINES;
                 // (its repository's name before it, on mission control, takes its first line's room)
-                (&t.title, most, title_weight(), g.task_right(t, fonts) - g.repo_width(t), g.title_rest(t, fonts))
+                (&t.title, most, title_weight(), g.task_right(t, fonts) - g.repo_width(t), c.right())
             }
             Row::Item(i) => (&i.title, 1, title_weight(), c.right(), c.right()),
             Row::Detail(d) => {
                 // a stale age is semibold: the first line has that much less room
                 let (age, _) = crate::model::split_at_width(&d.text, d.lead);
                 let bolder = if d.stale { fonts.width(&age, Weight::Bold, c.m.body) - fonts.width(&age, Weight::Regular, c.m.body) } else { 0.0 };
-                let lines = g.with_risk(d, bolder, fonts);
+                let lines = g.with_risk(d, bolder, stacked[i], fonts);
                 heights.push(g.height(row, lines.len()) + g.stat_gap(rows, i) as u32 + under(i));
                 all.push(lines);
                 continue;
@@ -180,7 +181,9 @@ pub fn lay(rows: &Rows, c: &Canvas, fonts: &Fonts) -> Laid {
         } else {
             vec![fonts.fit(title, weight, px, first)]
         };
-        heights.push(g.height(row, lines.len().max(1)) + under(i));
+        // (a task with no lines under it has no gap for them)
+        let bare = matches!(row, Row::Task(_) | Row::Item(_)) && !rows.rows.get(i + 1).is_some_and(Row::is_detail);
+        heights.push(g.height(row, lines.len().max(1)) + under(i) - if bare { c.m.title_gap as u32 } else { 0 });
         all.push(lines);
     }
     Laid { heights, lines: all, idw, repow }
@@ -221,6 +224,9 @@ const REPO_MOST: f32 = 0.2;
 
 /// The selected card's edge, in pixels.
 const RING: f32 = 2.0;
+
+/// A selected card's edge when its task needs you or stopped, in pixels.
+const FLAG_RING: f32 = 2.5;
 
 /// The pixels drawn past a window's edges, and cut off (render).
 const EDGE: u32 = 4;
@@ -282,7 +288,7 @@ pub fn render(rows: &Rows, laid: &Laid, cut: Cut, c: &Canvas, fonts: &mut Fonts)
             _ => {}
         }
         if let Some(f) = b.flag {
-            d.bar(b.top, b.bottom, f);
+            d.bar(b.top, b.bottom, f, b.selected);
         }
     }
     let at = |p: &Place| p.y as f32;
@@ -474,16 +480,13 @@ impl Geo {
         self.c.right() - self.body_x()
     }
 
-    /// The age column's width: an age of two figures', so titles end at one column
-    /// down the list whatever the ages are (a wider one, or an overdue one's chip,
-    /// takes its own).
+    /// The width a task's age takes at the right of its title's first line: its own
+    /// (an overdue one's chip's), so a short age leaves the title its room.
     fn age_width(&self, t: &TaskRow, fonts: &Fonts) -> f32 {
         if t.age.is_empty() {
             return 0.0;
         }
-        let px = self.c.m.detail;
-        let own = if self.overdue(t) { chip::width(fonts, &t.age, self.c.m.label) } else { fonts.width(&t.age, Weight::Bold, px) };
-        own.max(fonts.width("00m", Weight::Bold, px))
+        if self.overdue(t) { chip::width(fonts, &t.age, self.c.m.label) } else { fonts.width(&t.age, Weight::Bold, self.c.m.detail) }
     }
 
     /// A task whose age has waited too long, and isn't being asked about: its age is a chip.
@@ -494,13 +497,6 @@ impl Geo {
     /// How wide a task's risk is: its chip.
     fn risk_width(&self, level: &str, fonts: &Fonts) -> f32 {
         chip::risk_width(fonts, level, self.c.m.label)
-    }
-
-    /// Where a task's title's other lines end: where text ends, as its details' lines
-    /// do (the age is beside the first only); but short of an overdue age's pill,
-    /// which reaches down toward the second.
-    fn title_rest(&self, t: &TaskRow, fonts: &Fonts) -> f32 {
-        if self.overdue(t) { self.task_right(t, fonts) } else { self.c.right() }
     }
 
     /// The room a task's repository's name takes before its title's first line (mission
@@ -646,7 +642,8 @@ impl<'a> Draw<'a> {
         // (a task that needs you or stopped is edged in its flag's colour, its bar's)
         let edge = flag.map_or(self.theme.edge(), |f| solid(lit(self.theme.flag(f))));
         self.rounded_fill(x, y, w, h, r, fill);
-        self.rounded_edge(x, y, w, h, r, RING, edge);
+        // (a flag's edge a little heavier: it's told from the washes round it by more)
+        self.rounded_edge(x, y, w, h, r, if flag.is_some() { FLAG_RING } else { RING }, edge);
     }
 
     /// A card's and a wash's corners.
@@ -664,10 +661,10 @@ impl<'a> Draw<'a> {
 
     /// The bar at the left of a task that needs you or stopped, in its colour: its
     /// wash's left edge, following its corners (selected, its card's edge is that
-    /// colour too, so the two are one frame, heavier at the left).
-    fn bar(&mut self, top: f32, bottom: f32, flag: Flag) {
+    /// colour too, so the two are one frame, heavier at the left by the bar's width).
+    fn bar(&mut self, top: f32, bottom: f32, flag: Flag, selected: bool) {
         let (x, y, _, h) = self.panel(top, bottom);
-        let w = (0.25 * self.c()).max(3.0);
+        let w = (0.25 * self.c()).max(3.0) + if selected { FLAG_RING } else { 0.0 };
         let color = solid(lit(self.theme.flag(flag)));
         if let Some(p) = left_slice(x, y, w, h, self.radius()) {
             self.fill(&p, color);
@@ -835,7 +832,8 @@ impl<'a> Draw<'a> {
             None if t.quiet => self.theme.quiet(),
             None => self.theme.soft(),
         };
-        let (first, rest) = (self.g.task_right(t, self.fonts), self.g.title_rest(t, self.fonts));
+        // (its other lines run to where text ends, as its details do: the age is beside the first)
+        let (first, rest) = (self.g.task_right(t, self.fonts), self.right());
         // mission control's inbox: its repository's name first, regular and dim
         let lead = self.g.repo_width(t);
         if lead > 0.0 {

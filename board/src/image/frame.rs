@@ -169,23 +169,18 @@ fn key_row(d: &mut Draw, keys: &[(String, String)], left: f32, cy: f32, px: f32)
     draw_keys(d, &help, x, cy, px);
 }
 
-/// The keys that fit in `room` pixels, and `?`'s pair, as the text's: `?` is never
-/// dropped; with no room for "? keys" it goes bare, and then the last keys go first;
-/// but it keeps its word when dropping the keys for a bare `?` leaves room for it.
+/// The keys that fit in `room` pixels, and `? keys`, which is never dropped nor
+/// loses its word: the last keys go first. (With no room even for it alone, it's `?`.)
 fn fit_keys(fonts: &Fonts, keys: &[(String, String)], px: f32, room: f32) -> (Keys, Keys) {
     let width = |keys: &[(String, String)]| keys_width(fonts, keys, px);
     let gap = KEY_GAP * px;
     let mut keys = keys.to_vec();
     let mut help = vec![("?".to_string(), "keys".to_string())];
-    if !keys.is_empty() && width(&keys) + 1.5 * gap + width(&help) > room {
-        let worded = width(&help);
+    while !keys.is_empty() && width(&keys) + 1.5 * gap + width(&help) > room {
+        keys.pop();
+    }
+    if width(&help) > room {
         help = vec![("?".to_string(), String::new())];
-        while !keys.is_empty() && width(&keys) + gap + width(&help) > room {
-            keys.pop();
-        }
-        if width(&keys) + 1.5 * gap + worded <= room {
-            help = vec![("?".to_string(), "keys".to_string())];
-        }
     }
     (keys, help)
 }

@@ -180,7 +180,8 @@ fn a_title_is_laid_out_the_same_selected_or_not() {
     assert!(laid.lines[0][TITLE_LINES - 1].ends_with('…'));
     assert_eq!(laid.lines[1].len(), TITLE_LINES);
     let m = Metrics::of(TextSize::Medium, 20);
-    assert_eq!(laid.heights[1], (m.pad + TITLE_LINES as f32 * m.line + m.title_gap + m.below) as u32);
+    // (with no lines under it, no gap for them)
+    assert_eq!(laid.heights[1], (m.pad + TITLE_LINES as f32 * m.line + m.below) as u32);
     let joined = laid.lines[1].join(" ");
     assert!(long.starts_with(joined.trim_end_matches('…')));
 }
@@ -446,7 +447,8 @@ fn the_title_leads_its_row_the_id_and_age_are_a_details_size() {
     assert_eq!(lay(&r, &wide, &fonts).idw, fonts.width(&tabular("BP-123"), Weight::Bold, wide.m.detail));
     let g = Geo { c, idw: laid.idw, repow: 0.0 };
     let t = task("BP-123", "todo");
-    assert_eq!(g.age_width(&t, &fonts), fonts.width("00m", Weight::Bold, c.m.detail));
+    // its age its own width: a short one leaves the title its room
+    assert_eq!(g.age_width(&t, &fonts), fonts.width(&t.age, Weight::Bold, c.m.detail));
     // an unselected ID is dim, never the foreground
     let s = draw(&r);
     let id: Vec<_> = row_px(&s, 0).iter().enumerate().filter(|(i, _)| (30..52).contains(&(i % 400))).map(|(_, p)| *p).collect();
@@ -526,10 +528,6 @@ fn an_age_that_has_waited_too_long_is_a_chip_of_its_tasks_flags_colour() {
     let g = Geo { c, idw: 0.0, repow: 0.0 };
     assert_eq!(g.age_width(&aged(true, None), &fonts), chip::width(&fonts, "12m", c.m.label));
     assert!(g.age_width(&aged(true, None), &fonts) > g.age_width(&aged(false, None), &fonts));
-    // the title's other lines stop short of the pill, which reaches down toward them;
-    // beside a plain age they run to where text ends
-    assert_eq!(g.title_rest(&aged(true, None), &fonts), g.task_right(&aged(true, None), &fonts));
-    assert_eq!(g.title_rest(&aged(false, None), &fonts), c.right());
     // not while it's asked about: its age is the question's y / n
     assert!(!g.overdue(&TaskRow { asked: Some(false), ..aged(true, None) }));
 }
@@ -658,15 +656,25 @@ fn a_stat_line_that_hasnt_room_for_its_risk_breaks_at_its_dot_and_sets_its_figur
     let stat = DetailRow { risk: Some("medium".into()), stat: true, ..detail_row(text) };
     let r = rows(vec![Row::Task(task("BP-1", "ready")), Row::Detail(detail_row("PR #212, approved.")), Row::Detail(stat.clone())]);
     let g = Geo { c, idw: 0.0, repow: 0.0 };
-    let lines = g.with_risk(&stat, 0.0, &fonts);
+    let lines = g.with_risk(&stat, 0.0, false, &fonts);
     // its figures tabular; the chip after its second part
     assert_eq!(lines, vec![tabular("14 files, +612 −148"), "Not toured yet".to_string()]);
     assert!(fonts.width(&lines[1], Weight::Regular, c.m.body) + g.risk_room("medium", &fonts) <= g.detail_room());
     // set apart from the words over it by a gap, but not when it's a task's first line
     let laid = lay(&r, &c, &fonts);
     assert_eq!(laid.heights[2] as f32, 2.0 * c.m.body_line + (STAT_GAP * c.m.body_line).round() + c.m.below);
-    let alone = rows(vec![Row::Task(task("BP-1", "ready")), Row::Detail(stat)]);
+    let alone = rows(vec![Row::Task(task("BP-1", "ready")), Row::Detail(stat.clone())]);
     assert_eq!(g.stat_gap(&alone, 1), 0.0);
+    // a short one in the same group breaks at its dot too, so the group's facts take one shape
+    let short = DetailRow { risk: Some("low".into()), stat: true, ..detail_row("3 files, +1 −1 · Not toured yet") };
+    let head = || Row::Head { name: "Ready to accept".into(), count: 2 };
+    let alone = rows(vec![head(), Row::Task(task("BP-2", "ready")), Row::Detail(short.clone())]);
+    assert_eq!(lay(&alone, &c, &fonts).lines[2].len(), 1);
+    let group = rows(vec![head(), Row::Task(task("BP-1", "ready")), Row::Detail(stat), Row::Task(task("BP-2", "ready")), Row::Detail(short.clone())]);
+    assert_eq!(lay(&group, &c, &fonts).lines[4], vec![tabular("3 files, +1 −1"), "Not toured yet".to_string()]);
+    // another group's isn't
+    let apart = rows(vec![head(), Row::Task(task("BP-1", "ready")), Row::Detail(DetailRow { risk: Some("medium".into()), stat: true, ..detail_row(text) }), head(), Row::Task(task("BP-2", "ready")), Row::Detail(short)]);
+    assert_eq!(lay(&apart, &c, &fonts).lines[5].len(), 1);
 }
 
 /// Do two images differ in columns [x0, x1) of rows [y0, y1)?

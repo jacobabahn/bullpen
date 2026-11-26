@@ -40,12 +40,17 @@ impl Geo {
     /// A detail's lines with room for its task's risk's chip after the last: as they
     /// wrap when it fits there; else with the chip's room off every line, when that
     /// cuts no more (a stat line breaks at its dot: "Not toured yet ● high"); else the
-    /// chip on a line of its own. A stat line takes a second line when it must. Its
-    /// figures are tabular.
-    pub(super) fn with_risk(&self, d: &DetailRow, less: f32, fonts: &Fonts) -> Vec<String> {
+    /// chip on a line of its own. A stat line takes a second line when it must, and
+    /// one `stacked` is a part a line, broken at its dots. Its figures are tabular.
+    pub(super) fn with_risk(&self, d: &DetailRow, less: f32, stacked: bool, fonts: &Fonts) -> Vec<String> {
         // (every figure tabular: a stat line's line up, and a 1 keeps its space)
         let (text, most) = (tabular(&d.text), if d.stat { d.lines.max(2) } else { d.lines });
-        let lines = self.detail_lines(&text, most, less, self.caps(d), fonts);
+        let parts: Vec<&str> = text.split(" · ").collect();
+        let lines = if stacked && d.stat && parts.len() <= most {
+            parts.iter().map(|p| fonts.fit(p, Weight::Regular, self.c.m.body, self.detail_room())).collect()
+        } else {
+            self.detail_lines(&text, most, less, self.caps(d), fonts)
+        };
         let Some(level) = &d.risk else { return lines };
         let chip = self.risk_room(level, fonts);
         let ends = |l: &[String]| l.last().map_or(0.0, |l| fonts.width(l, Weight::Regular, self.c.m.body)) + self.caps(d);
@@ -60,6 +65,23 @@ impl Geo {
         let mut lines = lines;
         lines.push(String::new());
         lines
+    }
+
+    /// Which rows' stat lines are stacked, a part a line: every one in a group where
+    /// one must break at its dot to have room for its risk's chip, so the group's facts
+    /// take one shape.
+    pub(super) fn stacked(&self, rows: &Rows, fonts: &Fonts) -> Vec<bool> {
+        let mut out = vec![false; rows.rows.len()];
+        let mut start = 0;
+        for i in 0..=rows.rows.len() {
+            if i < rows.rows.len() && !matches!(rows.rows[i], Row::Head { .. }) {
+                continue;
+            }
+            let breaks = rows.rows[start..i].iter().any(|r| matches!(r, Row::Detail(d) if d.stat && d.risk.is_some() && self.with_risk(d, 0.0, false, fonts).len() > 1));
+            out[start..i].fill(breaks);
+            start = i;
+        }
+        out
     }
 
     /// The room a risk's chip takes after a line's text: its gap and its chip.

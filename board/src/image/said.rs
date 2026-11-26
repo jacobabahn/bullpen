@@ -48,7 +48,7 @@ impl Draw<'_> {
                     // in a small cap, as the key row's (lay left room for its sides),
                     // centred on the key's ink, which stays on the line's baseline
                     let (w, px) = (self.width(&run, weight), self.px());
-                    let (side, ch) = (KEY_SIDE * px, (1.3 * px).round());
+                    let (side, ch) = (KEY_SIDE * px, (1.36 * px).round());
                     let (up, down) = self.fonts().ink(&run, weight, px);
                     let top = (self.baseline(y) - (up - down) / 2.0 - ch / 2.0).round();
                     let (cap, edge) = (self.theme.cap(), self.theme.cap_edge());
@@ -73,14 +73,14 @@ impl Draw<'_> {
     /// whose top is y: in `color`, but the lines added in green and those taken out in
     /// red, a little dimmed, so its figures read as facts. Returns where it ends.
     pub(super) fn stat(&mut self, line: &str, x: f32, y: f32, color: [u8; 4]) -> f32 {
-        // (on a dark pane at their brightest and a third of the way to the foreground,
+        // (on a dark pane at their brightest and half way to the foreground, whole,
         // where a terminal's red is dark)
         let (dark, fg) = (luminance(self.theme.bg) < luminance(self.theme.fg), self.theme.fg);
         let lift = |c: Rgb| {
-            let (c, mix) = (bright(c), |a: u8, b: u8| ((a as u16 * 2 + b as u16) / 3) as u8);
+            let (c, mix) = (bright(c), |a: u8, b: u8| ((a as u16 + b as u16) / 2) as u8);
             Rgb(mix(c.0, fg.0), mix(c.1, fg.1), mix(c.2, fg.2))
         };
-        let tone = |c: Rgb| faint(if dark { lift(c) } else { c }, FIGURES);
+        let tone = |c: Rgb| if dark { faint(lift(c), 1.0) } else { faint(c, FIGURES) };
         let (green, red) = (tone(self.theme.green), tone(self.theme.red));
         let mut x = x;
         for (i, word) in line.split(' ').enumerate() {

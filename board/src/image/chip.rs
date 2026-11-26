@@ -61,7 +61,7 @@ pub fn risk(d: &mut Draw, text: &str, px: f32, (x, base): (f32, f32), color: [u8
 }
 
 /// A risk chip's room over its word's x-height and under its descenders, of its type.
-const RISK_PAD: f32 = 0.3;
+const RISK_PAD: f32 = 0.25;
 
 /// The baseline of lowercase words in a box `h` high whose top is y, in type `px`:
 /// their x-height and most of a descender centred, so a "g" clears the box's foot as
@@ -73,7 +73,7 @@ fn lower_base(d: &Draw, px: f32, top: f32, h: f32) -> f32 {
 }
 
 /// How much of a descender a lowercase word's centring counts.
-const HANG: f32 = 0.75;
+const HANG: f32 = 0.6;
 
 /// A risk's dot's width, in type `px`.
 fn dot_width(px: f32) -> f32 {
@@ -113,7 +113,7 @@ fn cap_width(fonts: &Fonts, key: &str, px: f32) -> f32 {
 /// letter's baseline. Returns where it ends.
 pub fn keycap(d: &mut Draw, key: &str, what: &str, px: f32, x: f32, cy: f32) -> f32 {
     let theme = d.theme();
-    let (w, h) = (cap_width(d.fonts(), key, px), (1.55 * px).round());
+    let (w, h) = (cap_width(d.fonts(), key, px), (1.7 * px).round());
     let top = (cy - h / 2.0).round();
     let r = 0.3 * px;
     d.rounded_fill(x, top, w, h, r, theme.cap());
