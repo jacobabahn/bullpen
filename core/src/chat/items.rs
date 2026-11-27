@@ -61,6 +61,8 @@ pub enum Kind {
         ms: u64,
     },
     Compacted,
+    /// The person pressed esc: Claude Code's "[Request interrupted by user]".
+    Interrupted,
     Error {
         text: String,
     },
@@ -115,6 +117,9 @@ const NEWS: &str = "bullpen · ";
 const COORDINATOR: &str = "Coordinator: ";
 /// bullpen's first message to every agent it starts begins so.
 const OPENING: &str = "You are the ";
+/// What Claude Code writes as a user's message when the person presses esc ("… for
+/// tool use" when it stopped a call).
+const INTERRUPTED: &str = "[Request interrupted by user";
 /// Typed text that is Claude Code's, not anyone's message: slash commands and their
 /// output, `!` commands, a subagent's report, reminders, notifications (a notice is
 /// read for its news; one queued waits unseen).
@@ -341,6 +346,9 @@ fn typed_kind(text: &str, first: bool) -> Option<Kind> {
     if HIDDEN_TAGS.iter().any(|tag| t.starts_with(tag)) {
         return None;
     }
+    if t.starts_with(INTERRUPTED) {
+        return Some(Kind::Interrupted);
+    }
     if t.starts_with(NEWS) {
         return Some(news(t));
     }
@@ -359,19 +367,57 @@ fn typed_kind(text: &str, first: bool) -> Option<Kind> {
 fn news(line: &str) -> Kind {
     let text = line.trim().strip_prefix(NEWS).unwrap_or(line.trim()).to_string();
     Kind::News {
-        task: task_named(&text),
+        task: task_named(text.lines().next().unwrap_or("")),
         text,
     }
 }
 
-/// The news lines in a notice: a monitor's `<event>bullpen · …</event>`, or a Stop
-/// hook's lines after "Stop hook blocking error from command …: ".
+/// The news in a notice: a monitor's `<event>…</event>`, or what a Stop hook hands a
+/// coordinator after "Stop hook blocking error from command …: ". In either, a news
+/// line starts where `bullpen · ` opens a line, and the lines after it, up to the
+/// next, are its own: once a diff starts (a guide change's), every line up to the
+/// block's end is the diff's, whatever it starts with.
 fn news_in(text: &str) -> Vec<String> {
-    let lines = text.lines().filter_map(|l| l.find(NEWS).map(|p| &l[p..]));
-    lines
-        .map(|l| unescape(l.trim_end().trim_end_matches("</event>")))
-        .collect()
+    let mut out: Vec<String> = vec![];
+    // in a block; its news line is the last one out; that line's diff has started
+    let (mut open, mut mine, mut diff) = (false, false, false);
+    for raw in text.lines() {
+        let mut line = raw;
+        if let Some(rest) = block_start(line) {
+            (open, mine, diff, line) = (true, false, false, rest);
+        } else if !open {
+            continue;
+        }
+        let (line, closes) = match BLOCK_ENDS.iter().find_map(|end| line.find(end)) {
+            Some(p) => (&line[..p], true),
+            None => (line, false),
+        };
+        if !diff && line.starts_with(NEWS) {
+            out.push(line.to_string());
+            mine = true;
+        } else if let Some(last) = out.last_mut().filter(|_| mine) {
+            diff |= ["--- ", "+++ ", "@@ "].iter().any(|d| line.starts_with(d));
+            last.push('\n');
+            last.push_str(line);
+        }
+        open &= !closes;
+    }
+    out.iter().map(|n| unescape(n.trim_end())).collect()
 }
+
+/// Where a block of news starts on this line: what follows `<event>`, or the Stop
+/// hook's "…from command "Stop": ".
+fn block_start(line: &str) -> Option<&str> {
+    if let Some(p) = line.find("<event>") {
+        return Some(&line[p + "<event>".len()..]);
+    }
+    let p = line.find(STOP_HOOK)?;
+    let after = &line[p + STOP_HOOK.len()..];
+    after.find(": ").map(|q| &after[q + 2..])
+}
+
+const STOP_HOOK: &str = "Stop hook blocking error from command ";
+const BLOCK_ENDS: [&str; 3] = ["</event>", "</system-reminder>", "</task-notification>"];
 
 /// A notification's text with its XML escapes undone.
 fn unescape(s: &str) -> String {
@@ -610,6 +656,7 @@ impl Item {
             }
             Kind::Worked { ms } => json!({"kind": "worked", "ms": ms, "text": format!("Worked for {}", span(*ms))}),
             Kind::Compacted => json!({"kind": "compacted", "text": "Conversation compacted"}),
+            Kind::Interrupted => json!({"kind": "interrupted", "text": "Interrupted"}),
             Kind::Error { text } => json!({"kind": "error", "text": text}),
             Kind::Queued { text, gone } => json!({"kind": "queued", "text": text, "gone": gone}),
         };

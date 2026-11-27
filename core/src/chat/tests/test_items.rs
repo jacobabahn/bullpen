@@ -471,3 +471,64 @@ fn the_task_a_news_line_names() {
     assert_eq!(task_named("L26 added, nothing else"), None);
     assert_eq!(task_named("a non-task-1 word"), None);
 }
+
+#[test]
+fn a_guide_changes_diff_stays_in_its_news_line_and_names_no_tasks() {
+    // as a monitor brought one (a coordinator's, 2026-11-17): the diff's lines start
+    // with `bullpen · ` too, its context lines without their space
+    let notice = "<task-notification>\n<task-id>b1</task-id>\n<summary>Monitor event: \"bullpen news\"</summary>\n\
+        <event>bullpen · After BP-128: BP-126 left alone (no overlap).\n\
+        bullpen · Your coordinator guide changed (section: News). Read the change below and follow it from now on:\n\
+        --- guide (yours)\n+++ guide (now)\n@@ -263,6 +263,7 @@\n\
+        bullpen · BP-9 dropped\n+bullpen · BP-4 and BP-6 both changed cli/src/accept/mod.rs\n\
+        +  are ready, suggest accepting the smaller one first (`bullpen show &lt;ID&gt;`).</event>\n\
+        </task-notification>";
+    let mut chat = Chat::new();
+    feed(&mut chat, &[user("n1", notice)]);
+    let news = of_kind(&chat, "news");
+    assert_eq!(news.len(), 2, "{news:#?}");
+    assert_eq!(news[0]["text"], "After BP-128: BP-126 left alone (no overlap).");
+    assert_eq!(news[0]["task"], "BP-128");
+    let guide = news[1]["text"].as_str().unwrap();
+    assert!(guide.starts_with("Your coordinator guide changed (section: News). Read the change below"));
+    assert!(guide.contains("\n--- guide (yours)\n+++ guide (now)\n@@ -263,6 +263,7 @@\nbullpen · BP-9 dropped\n"));
+    assert!(guide.ends_with("(`bullpen show <ID>`)."), "{guide}");
+    assert_eq!(news[1]["task"], Value::Null);
+}
+
+#[test]
+fn a_stop_hooks_news_lines_and_a_block_that_isnt_news() {
+    let hook = "<task-notification>\n<summary>Stop hook feedback</summary>\n</task-notification>\n<system-reminder>\n\
+        Stop hook blocking error from command \"Stop\": bullpen · BP-227 accepted (merged into main, rebase)\n\
+        bullpen · BP-231 is ready: Board polish\n  a line of its own\n\n</system-reminder>";
+    let expired = "<task-notification>\n<event>[Monitor expired after 30m.\nRe-arm it.]</event>\n</task-notification>";
+    let mut chat = Chat::new();
+    feed(&mut chat, &[user("n1", hook), user("n2", expired)]);
+    let news: Vec<Value> = of_kind(&chat, "news").iter().map(|n| n["text"].clone()).collect();
+    assert_eq!(
+        news,
+        [
+            json!("BP-227 accepted (merged into main, rebase)"),
+            json!("BP-231 is ready: Board polish\n  a line of its own")
+        ]
+    );
+}
+
+#[test]
+fn pressing_esc_is_an_interruption_not_a_message() {
+    let mut chat = Chat::new();
+    let stopped = json!({"type": "user", "uuid": "u2", "timestamp": "T", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "t1", "is_error": true, "content": "The user doesn't want to proceed"},
+        {"type": "text", "text": "[Request interrupted by user for tool use]"}]}});
+    feed(
+        &mut chat,
+        &[
+            call("a1", "m1", "t1", "Bash", json!({"command": "ls"}), "T"),
+            stopped,
+            user("u3", "[Request interrupted by user]"),
+        ],
+    );
+    assert_eq!(kinds(&chat), ["tools", "interrupted", "interrupted"]);
+    assert_eq!(chat.items()[1].json()["text"], "Interrupted");
+    assert_eq!(chat.items()[0].json()["calls"][0]["state"], "failed");
+}

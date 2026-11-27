@@ -226,7 +226,8 @@ per-launch title, mode and owner records. The reader keeps a whitelist:
 | `user`, text, other | your bubble; a `<pasted_content>` in it folds to "Pasted text, N lines" |
 | `user`, text with `isMeta` or `isCompactSummary` | hidden (image notes and the like; the summary after a compaction) |
 | `user`, text that is Claude Code's (`<command-…>`, `<local-command-…>`, `<bash-…>`, `<agent-message …>`, `<system-reminder>`) | hidden |
-| `user`, `<task-notification>` | hidden (a background job finishing; the tool line shows it), but for the news lines in it: a monitor's `<event>bullpen · …</event>`, and the lines a coordinator's Stop hook hands it ("Stop hook blocking error from command …: bullpen · …"), a news line each |
+| `user`, `<task-notification>` | hidden (a background job finishing; the tool line shows it), but for the news lines in it: a monitor's `<event>bullpen · …</event>`, and the lines a coordinator's Stop hook hands it ("Stop hook blocking error from command …: bullpen · …"): a news line where `bullpen · ` opens a line, with the lines after it up to the next its own (a guide change's diff, quoted news lines and all, stays in its line) |
+| `user`, text `[Request interrupted by user]` (or `… for tool use`) | a divider: "Interrupted" (the person pressed esc; Claude Code writes it as a message) |
 | `user`, `tool_result` | not an item: it completes its call (done, or the error's first lines) |
 | `assistant`, `text` | the agent's words, as Markdown (below) |
 | `assistant`, `thinking` | hidden (empty in practice: the text is withheld, only a signature kept) |
@@ -266,7 +267,7 @@ per-launch title, mode and owner records. The reader keeps a whitelist:
   `task`), `said` (`text`, Markdown), `tools` (`summary`, `doing` while a call in it
   runs, `ms`, and `calls`: `name`, `what`, `doing`, `state` (`running`, `done`,
   `failed`), `error`, `tail`), `question` (`questions`, then `answers` or `error`),
-  `worked` and `compacted` (`text`), `error` (`text`), `queued` (`text`, `gone`).
+  `worked`, `compacted` and `interrupted` (`text`), `error` (`text`), `queued` (`text`, `gone`).
 
 ### Prompt cards
 The one loud thing on a screen: an amber-edged card at the end of the chat, with
