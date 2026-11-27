@@ -44,12 +44,32 @@ class WebTest(BullpenTest):
     def serve(self):
         """Start `bullpen web`; returns it, and what it printed first, once it serves."""
         p = subprocess.Popen([str(BULLPEN), "web"], cwd=self.tmp, env=self.env, text=True,
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.addCleanup(lambda: (p.kill(), p.wait(), p.stdout.close(), p.stderr.close()))
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+        self.addCleanup(self.stop, p)
         said = [p.stdout.readline() for _ in range(4)]
         if not said[0]:
             self.fail(f"bullpen web didn't start: {p.stderr.read()}")
         return p, "".join(said)
+
+    def stop(self, p):
+        """Kill the server and what it started (a `bullpen repos --json` asking which
+        coordinators are alive), and wait for them all to go: one left would write into
+        the test's folder as it's removed."""
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        p.wait()
+        p.stdout.close()
+        p.stderr.close()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                os.killpg(p.pid, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.01)
+        self.fail("bullpen web's processes outlived it")
 
     def request(self, path, method="GET", headers=None, body=b""):
         """(status, headers, body); a header given as None isn't sent. The request goes
