@@ -69,6 +69,7 @@
     "c-working": RING("s-line2") + ARC("s-ink2", "M8 3a5 5 0 0 1 4.3 2.5"),
     "c-idle": '<circle cx="8" cy="8" r="5" class="s-ink3" stroke-width="1.6"/>',
     "c-blocked": '<circle cx="8" cy="8" r="5" class="f-amber"/>',
+    "c-unknown": '<circle cx="8" cy="8" r="5" class="s-ink3" stroke-width="1.6" stroke-dasharray="1.6 2.3"/>', // the board's: todo's dotted ring
     "c-gone": '<path d="M4.5 4.5l7 7M11.5 4.5l-7 7" class="s-amber" stroke-width="2" stroke-linecap="round"/>',
   };
   function mark(kind) {
@@ -236,8 +237,8 @@
     const model = who === "reviewer" ? hasReview && t.review.model : t.worker_model || t.model;
     const l3 = [h("span", { class: `status ${statusClass(st)}` }, r ? (isTask ? STATUS[st] || st : COORD[st]) : "Not running now")];
     if (st === "ready" || st === "finished") {
-      const where = t.pr ? `Pull request #${t.pr.number || t.pr}` : t.local ? "Local branch" : "";
-      if (where) l3.push(h("span", { class: "wh" }, where));
+      if (typeof t.pr === "string" && t.pr) l3.push(prLink(t.pr));
+      else if (t.local) l3.push(h("span", { class: "wh" }, "Local branch"));
       if (t.diffstat) l3.push(h("span", { class: "wh num" }, t.diffstat));
     }
     if (hasReview) {
@@ -255,6 +256,15 @@
         h("h1", { class: "head-title" }, r ? r.title : sel.id),
         h("div", { class: "head-l3" }, l3)),
       h("div", { class: "actions" }, actions(r)));
+  }
+
+  /** A task's pull request (its `pr` is the URL) as a link: "Pull request #16", as the
+   * board's pr_short reads the number. */
+  function prLink(url) {
+    const n = (url.match(/\/pull\/(\d+)/) || [])[1];
+    const safe = /^https?:\/\//.test(url);
+    return h(safe ? "a" : "span", { class: "wh", href: safe ? url : false, target: safe ? "_blank" : false, rel: safe ? "noreferrer" : false },
+      n ? `Pull request #${n}` : "Pull request");
   }
 
   function statusClass(st) {
