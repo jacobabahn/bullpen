@@ -3,6 +3,7 @@
 //! text, time and programs (bullpen was Python first), so the files it writes stay the same.
 
 pub mod backlog;
+pub mod chat;
 pub mod config;
 pub mod coordinators;
 pub mod fail;

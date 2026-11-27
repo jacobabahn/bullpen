@@ -173,7 +173,7 @@ What bullpen does today (checked in the code and in `~/.claude/projects/`):
   checkout with `-n "bullpen: <repo>"` (`cli/src/up.rs`). Nothing passes or records a
   session ID.
 - So a worktree's project folder (`~/.claude/projects/` and the worktree's path with
-  `/` and `.` as `-`) holds the worker's and the reviewer's transcripts side by side,
+  each character that isn't a letter or digit as `-`) holds the worker's and the reviewer's transcripts side by side,
   `<session id>.jsonl` each: BP-232's has three (the worker, two review rounds). The
   newest `.jsonl` isn't reliably the worker's. And `--continue` takes the newest
   conversation in the folder, which after a review is the reviewer's (in the backlog
@@ -205,7 +205,8 @@ The design:
     the worker's record. The page follows a recorded `chat` when the hook moves it.
     The coordinator's waiter keeps the path too.
 11. **Agents started before this ship** are matched by title: the newest `.jsonl` in
-    the agent's folder whose `custom-title` is its `-n` name. The chat says it was
+    the agent's folder whose `custom-title` is its `-n` name (a worker's by its `BP-3: `
+    alone, since the task's title may have changed since). The chat says it was
     matched by title (`source: "title"`), in small type under its first message.
 12. **A compacted conversation stays one file** (a `compact_boundary` record, then the
     summary and the rest): the chat shows "Conversation compacted" there and keeps what
@@ -219,12 +220,13 @@ per-launch title, mode and owner records. The reader keeps a whitelist:
 
 | Record | In the chat |
 | --- | --- |
-| `user`, text, the first | the brief: "Started from its brief", naming `BP-3.full.md` (or the review brief) |
+| `user`, text, the first, when it is bullpen's opening (`You are the …`) | the brief: "Started from its brief", naming `BP-3.full.md` (or the review brief; a coordinator's names none) |
 | `user`, text, starting `bullpen · ` | a news line, apart from your messages, its task a link |
 | `user`, text, starting `Coordinator: ` | the coordinator's bubble, labelled with its ID |
 | `user`, text, other | your bubble; a `<pasted_content>` in it folds to "Pasted text, N lines" |
-| `user`, text with `isMeta` | hidden (image notes and the like) |
-| `user`, `<task-notification>` | hidden (a background job finishing; the tool line shows it) |
+| `user`, text with `isMeta` or `isCompactSummary` | hidden (image notes and the like; the summary after a compaction) |
+| `user`, text that is Claude Code's (`<command-…>`, `<local-command-…>`, `<bash-…>`, `<agent-message …>`, `<system-reminder>`) | hidden |
+| `user`, `<task-notification>` | hidden (a background job finishing; the tool line shows it), but for the news lines in it: a monitor's `<event>bullpen · …</event>`, and the lines a coordinator's Stop hook hands it ("Stop hook blocking error from command …: bullpen · …"), a news line each |
 | `user`, `tool_result` | not an item: it completes its call (done, or the error's first lines) |
 | `assistant`, `text` | the agent's words, as Markdown (below) |
 | `assistant`, `thinking` | hidden (empty in practice: the text is withheld, only a signature kept) |
@@ -234,8 +236,9 @@ per-launch title, mode and owner records. The reader keeps a whitelist:
 | `system`, `compact_boundary` | a divider: "Conversation compacted" |
 | `system`, level `error` | a red line with its text |
 | `system`, other (`stop_hook_summary`, `away_summary`, `informational`) | hidden |
-| `queue-operation`, `enqueue` | a faint bubble, "waiting for its turn", until its `user` record comes |
-| `attachment`, `api-request*`, `data-flow-records`, `file-history-*`, `cost-state`, `tools-used`, `derived-from`, `custom-title`, `agent-name`, `mode`, `permission-mode`, `session-owner`, `atis-latch`, `last-prompt`, anything new | hidden; the title and permission mode feed the header |
+| `queue-operation`, `enqueue` | a faint bubble, "waiting for its turn", until its `user` record or `queued_command` comes, or a `remove` takes it back (not for notifications or news, which wait unseen) |
+| `attachment`, `queued_command` | what was typed while the agent worked, taken in mid-turn: Claude Code writes no `user` record for it, so it is read as one (your bubble, the coordinator's, a news line) |
+| any other `attachment`, `api-request*`, `data-flow-records`, `file-history-*`, `cost-state`, `tools-used`, `derived-from`, `custom-title`, `agent-name`, `mode`, `permission-mode`, `session-owner`, `atis-latch`, `last-prompt`, anything new | hidden; the title and permission mode feed the header |
 | `isSidechain: true` | hidden (subagents write files of their own) |
 
 - **An API message is several records**, one content block each, sharing
@@ -253,8 +256,17 @@ per-launch title, mode and owner records. The reader keeps a whitelist:
   `https` only). Everything is escaped first; no HTML from a transcript reaches the
   page, no image is fetched, and the page has no Markdown code of its own.
 - **Long chats**: the first read of a file parses it whole (once per file while the
-  server runs; how long a 20 MB one takes is W3's to measure), keeps its items and its
-  offset, and sends the last 200; "Earlier" pages back.
+  server runs), keeps its items and its offset, and sends the last 200; "Earlier" pages
+  back. Measured on a release build: BP-232's worker transcript (20 MB) reads whole in
+  about 105 ms, a coordinator's of 46 MB in about 280 ms.
+- **The items** (`core/src/chat/items.rs`, `Item::json`): each has `id` (the record it
+  started from, or a tool line's first call's ID; it stays the same as the item
+  changes), `at` and `kind`: `brief` (`text`, `file`), `you` and `coordinator` (`text`,
+  and `parts`: the words, and each paste as `{pasted, lines}`), `news` (`text`,
+  `task`), `said` (`text`, Markdown), `tools` (`summary`, `doing` while a call in it
+  runs, `ms`, and `calls`: `name`, `what`, `doing`, `state` (`running`, `done`,
+  `failed`), `error`, `tail`), `question` (`questions`, then `answers` or `error`),
+  `worked` and `compacted` (`text`), `error` (`text`), `queued` (`text`, `gone`).
 
 ### Prompt cards
 The one loud thing on a screen: an amber-edged card at the end of the chat, with
