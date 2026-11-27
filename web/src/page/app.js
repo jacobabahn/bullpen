@@ -566,7 +566,11 @@
       if (!chat || chat.key !== key) return;
       let data;
       try { data = JSON.parse(e.data); } catch (err) { return; }
-      if (chat.state === "loading") return void pending.push(data.items || []);
+      if (data.reset) {
+        // the chat drawn again from the start (it moved to another transcript): as /api/chat has it
+        Object.assign(chat, { state: "ok", items: [], more: !!data.more, source: data.source, agent: data.agent });
+        pending = [];
+      } else if (chat.state === "loading") return void pending.push(data.items || []);
       if (chat.state !== "ok") return;
       merge(data.items || []);
       drawItems(false);
