@@ -345,7 +345,7 @@ pub fn py_format(text: &str, fields: &[(&str, String)]) -> String {
 }
 
 /// Start the task's worker (in a new pane, on Rex), with first as its first message (resume:
-/// continuing its conversation), and save it as working.
+/// continuing its own conversation, chat_ids.rs), and save it as working.
 pub fn launch(repo: &Repo, t: &mut Obj, session: &str, first: &str, resume: bool) -> Res<()> {
     let worker: Vec<String> = bullpen_core::json::strs(&repo.cfg, "worker");
     let model = [t.get("worker_model"), repo.cfg.get("worker_model")]
@@ -358,9 +358,12 @@ pub fn launch(repo: &Repo, t: &mut Obj, session: &str, first: &str, resume: bool
     t.insert("model".into(), json!(running));
     crate::stop_hook::install(repo, t, &cmd); // Claude Code's: what it waits on when its turn ends
     let mut argv = resolve(&cmd);
-    if resume {
-        argv.push("--continue".into());
-    }
+    let (chat, flags) = match resume {
+        true => crate::chat_ids::resume(&cmd, t),
+        false => crate::chat_ids::start(&cmd).map_or((None, vec![]), |(id, f)| (Some(id), f)),
+    };
+    argv.extend(flags);
+    t.insert("chat".into(), json!(chat)); // its conversation (chat_ids.rs)
     argv.extend(["-n".into(), format!("{}: {}", s(t, "id"), s(t, "title")), first.into()]);
     unindex_block(s(t, "block"))?;
     let label = format!("bullpen: {}", s(t, "id"));

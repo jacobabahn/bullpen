@@ -196,7 +196,8 @@ The design:
     reviewer share the hook: a session ID that is the task's `chat` is the worker's,
     one that is its review's `chat` is the reviewer's, and an unknown one (a `/clear`
     starts a new conversation) is told by the transcript's `custom-title` (`BP-3: …`
-    the worker, `BP-3 review` the reviewer), else ignored. The worker's turn goes in
+    the worker, `BP-3 review` the reviewer), else ignored; one with no title to read
+    (no transcript) writes the turn record as before and moves no `chat`. The worker's turn goes in
     `turns/BP-3.json` as now; the reviewer's moves its review's `chat` and never touches
     the worker's record. The page follows a recorded `chat` when the hook moves it.
     The coordinator's waiter keeps the path too.

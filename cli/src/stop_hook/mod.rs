@@ -5,7 +5,8 @@
 //! the coordinator's news hook is; it goes with the worktree). On each Stop, Claude Code
 //! runs `bullpen _worker_stop <record>`, which writes the task's turn record
 //! (`turns/<ID>.json` in the repo's state folder, turn.rs): the background jobs the
-//! session still runs and the last thing the worker said. The worker's end of turn
+//! session still runs and the last thing the worker said. The reviewer, started in the
+//! same worktree, runs it too: its turns leave the record alone (whose.rs). The worker's end of turn
 //! (events/) reads it: a worker waiting on its own job isn't triage, and one that ended
 //! with a question has it in the triage line.
 //!
@@ -14,6 +15,7 @@
 //! waits on, while it does).
 
 pub mod turn;
+pub mod whose;
 
 use crate::news::hook::{read, write};
 use bullpen_core::json::{s, truthy, Obj};

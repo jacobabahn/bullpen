@@ -7,8 +7,10 @@
 //! and a Monitor are `"type": "shell"` with a `command` (both seen in a scratch session;
 //! the footer says "1 shell", "1 monitor"). A background subagent is `"type":
 //! "subagent"`, and Claude Code lists kinds of its own there too: only shells count, the
-//! ones the worker started and the footer counts (screen/). The record keeps
-//! `{"at", "session", "jobs": [{"command", "description"}], "said"}`.
+//! ones the worker started and the footer counts (screen/). It also gives
+//! `transcript_path`, the conversation's file. The record keeps
+//! `{"at", "session", "transcript", "jobs": [{"command", "description"}], "said"}`, for
+//! the worker's turns only (whose.rs).
 
 use bullpen_core::json::{obj, s, write_obj, Obj};
 use bullpen_core::task::clip;
@@ -26,7 +28,7 @@ const INPUT_MAX: u64 = 4 << 20;
 const QUESTION_MAX: usize = 160;
 
 /// `_worker_stop RECORD` (the worker's Stop hook): write the turn record from the hook's
-/// input. Fast, starts nothing, and exits 0 whatever happens: it must never block or fail
+/// input, when the turn was the worker's. Fast, starts nothing, and exits 0 whatever happens: it must never block or fail
 /// the worker's turn.
 pub fn cmd_worker_stop(argv: &[String]) -> Res<i32> {
     let _ = std::panic::catch_unwind(|| {
@@ -34,7 +36,10 @@ pub fn cmd_worker_stop(argv: &[String]) -> Res<i32> {
             let mut input = String::new();
             let _ = std::io::stdin().take(INPUT_MAX).read_to_string(&mut input);
             if let Ok(Value::Object(said)) = serde_json::from_str::<Value>(&input) {
-                let _ = write_obj(Path::new(path), &record(&said)); // by rename
+                // the reviewer runs this hook too: its turn moves only its review's `chat`
+                if super::whose::settle(Path::new(path), &said).is_some_and(|who| who.writes_record()) {
+                    let _ = write_obj(Path::new(path), &record(&said)); // by rename
+                }
             }
         }
     });
@@ -59,6 +64,7 @@ pub fn record(input: &Obj) -> Obj {
     let mut out = Obj::new();
     out.insert("at".into(), json!(iso_now_micro()));
     out.insert("session".into(), json!(s(input, "session_id")));
+    out.insert("transcript".into(), json!(s(input, "transcript_path")));
     out.insert("jobs".into(), json!(jobs));
     out.insert("said".into(), json!(said));
     out

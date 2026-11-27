@@ -7,12 +7,22 @@
   and tours with their drafts and logs as `<ID>.tour.json`, `<ID>.tour-comments.json` and
   `<ID>.tour.log` (see [Guided review tours](tours.md)).
 - Worktrees: `<repo>-bullpen/<ID>` next to the repository.
+- Each Claude Code agent's conversation: `~/.claude/projects/*/<session ID>.jsonl`. Bullpen
+  starts each with `--session-id` and keeps the ID as `chat`: the worker's on its task, the
+  reviewer's on the task's `review`, a coordinator's on its entry in the repo's
+  `config.json`. `resume`, and a hand-back to a worker whose pane is gone, take the worker's
+  own (`--resume <chat>`), never the reviewer's beside it in the worktree. When a `/clear`
+  starts a new conversation, the agent's Stop hook moves its `chat`: the worker's turn
+  record (`turns/<ID>.json` beside the tasks) keeps its `session` and `transcript`, and a
+  coordinator's `news-<id>.wait` keeps them as `chat`. An agent that isn't Claude Code has
+  none.
 - Each task's timeline, for `bullpen stats`: `timeline/<ID>.jsonl` beside the tasks.
   See [Stats](stats.md).
 - News: `news.log` beside the tasks (each line names the coordinators it is for,
   as `[c1]`), with `news-<id>.cursor` (how far each coordinator's `bullpen news`
   has read), `outbox-<id>.txt` (typed news waiting for an empty input) and
-  `news-<id>.wait` (a pause, the waiter that owns the wait, the last wake). With
+  `news-<id>.wait` (a pause, the waiter that owns the wait, the last wake, the
+  coordinator's conversation). With
   `config --news wake`, the hook that parks the waiter is in the repo's own
   `.claude/settings.local.json` (and that file in its `.git/info/exclude`). See [News](news.md).
 - The coordinator guides running coordinators were given, for the diff when it changes:

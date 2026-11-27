@@ -141,7 +141,7 @@ class FlowTest(BullpenTest):
         self.assertIn("stopped before saying ready", self.typed()[-1][1])
         self.bp("resume", tid)
         cmd = self.api("session.new_layer")[-1]["layout"]["block"]["options"]["command"]
-        self.assertIn("--continue", cmd)
+        self.assertIn("--resume", cmd)
         self.assertEqual(self.show(tid)["status"], "working")
 
     def test_events_from_panes_that_arent_a_tasks_are_ignored(self):
@@ -399,7 +399,7 @@ class FlowTest(BullpenTest):
         (self.fake / "alive" / self.block(tid)).unlink()
         self.verdict(tid, "changes", "Fix it.")
         cmd = self.api("session.new_layer")[-1]["layout"]["block"]["options"]["command"]
-        self.assertIn("--continue", cmd)
+        self.assertIn("--resume", cmd)
         self.assertTrue(any("findings" in x for x in cmd))
 
     def test_a_stuck_reviewer_needs_you(self):

@@ -680,7 +680,12 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
     );
     let model = review_model(repo, &kind);
     let reviewer = bullpen_core::json::strs(&repo.cfg, "reviewer");
-    let mut argv = resolve(&with_model(&reviewer, model.as_deref()));
+    let cmd = with_model(&reviewer, model.as_deref());
+    let mut argv = resolve(&cmd);
+    let chat = crate::chat_ids::start(&cmd).map(|(chat, flags)| {
+        argv.extend(flags);
+        chat
+    });
     argv.extend(["-n".into(), format!("{id} review"), first]);
     let session = match s(t, "session") {
         "" => session_for(repo, None)?,
@@ -699,6 +704,7 @@ pub fn start_review(repo: &Repo, t: &mut Obj, base_ref: &str, rebase: Option<Vec
     r.insert("kind".into(), json!(kind));
     r.insert("why".into(), json!(why));
     r.insert("model".into(), json!(model));
+    r.insert("chat".into(), json!(chat)); // the reviewer's conversation, never the worker's
     r.insert("prev".into(), prev.map_or(Value::Null, Value::Object));
     r.insert("scratch".into(), json!(scratch.display().to_string()));
     r.insert("brief".into(), json!(crate::brief::count(t))); // the changes of the brief this round sees

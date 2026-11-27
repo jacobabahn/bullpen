@@ -345,7 +345,7 @@ class StatusTest(BullpenTest):
         self.bp("_limit")
         self.assertIn((worker, "The usage limit has reset. Carry on where you stopped."), self.typed())
         cmd = self.api("session.new_layer")[-1]["layout"]["block"]["options"]["command"]
-        self.assertIn("--continue", cmd)  # BP-2, resumed in a new pane
+        self.assertIn("--resume", cmd)  # BP-2, resumed in a new pane
         self.assertEqual(self.news()[-1], "bullpen · the usage limit has reset: continued BP-1, "
                                           "BP-2 (its pane was gone: resumed in a new one): nothing to do")
         self.assertIn(" limit-continued: bullpen · the usage limit has reset", self.news_log())  # rides along

@@ -214,13 +214,13 @@ class WaiterTest(WakeCase):
         self.bp("config", "--news", "wake")  # one more typed line: the switch
         self.told = len(self.news())
 
-    def wake(self, block="blk1", event="Stop", *args):
+    def wake(self, block="blk1", event="Stop", *args, transcript="/t/sess-1.jsonl"):
         """Start `bullpen news --wake` as the hook of a pane's session would."""
         p = subprocess.Popen([str(BULLPEN), "news", "--wake", "--every", "0.05", *args], cwd=self.repo,
                              env={**self.env, "REX_BLOCK": block}, stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.addCleanup(lambda: (p.kill(), p.wait(), p.stdout.close(), p.stderr.close()))
-        give_input(p, json.dumps({"session_id": "sess-1", "hook_event_name": event}))
+        give_input(p, json.dumps({"session_id": "sess-1", "hook_event_name": event, "transcript_path": transcript}))
         return p
 
     def parked(self, p):
@@ -242,6 +242,8 @@ class WaiterTest(WakeCase):
         p = self.wake()
         self.parked(p)
         self.assertEqual(self.wait_json()["waiter"]["session"], "sess-1")
+        # the coordinator's conversation is kept, and stays when the waiter goes
+        self.assertEqual(self.wait_json()["chat"], {"session": "sess-1", "transcript": "/t/sess-1.jsonl"})
         self.bp("add", "Other", "--brief", "x")
         self.bp("start", "BP-2")
         self.bp("drop", "BP-2")  # rides along
@@ -256,6 +258,7 @@ class WaiterTest(WakeCase):
         self.assertEqual(p.stdout.read(), "")
         self.assertEqual(self.bp_in("blk1", "news").stdout, "")  # the cursor is past them
         self.assertNotIn("waiter", self.wait_json())
+        self.assertEqual(self.wait_json()["chat"]["session"], "sess-1")
         self.age_news(61)
         self.bp("_wake_check")
         self.assertEqual(self.unread_typed(), [])  # nothing left for the backstop
@@ -300,7 +303,7 @@ class WaiterTest(WakeCase):
         self.parked(p)
         self.bp_in("blk1", "news", "--pause")
         self.assertEqual(p.wait(timeout=10), 0)
-        self.assertEqual(list(self.wait_json()), ["paused"])
+        self.assertEqual(list(self.wait_json()), ["chat", "paused"])  # the waiter is gone; its conversation stays
 
     def test_switching_away_from_wake_ends_a_parked_waiter(self):
         p = self.wake()

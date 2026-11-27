@@ -135,7 +135,7 @@ class ConfigTest(BullpenTest):
         self.bp("_gone", blk)
         self.bp("resume", tid)
         cmd = self.last_command()
-        self.assertIn("--continue", cmd)
+        self.assertIn("--resume", cmd)
         self.assertEqual(self.models(cmd), ["opus"])
         self.commit_and_ready(tid)
         self.assertEqual(self.models(self.last_command()), ["sonnet"])

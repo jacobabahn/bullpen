@@ -23,6 +23,7 @@ fn the_record_keeps_the_running_jobs_and_the_end_of_what_it_said() {
     ]);
     let rec = record(&input("Waiting for the tests.", jobs));
     assert_eq!(rec["session"], "6047dc6f");
+    assert_eq!(rec["transcript"], "/x.jsonl");
     assert_eq!(
         rec["jobs"],
         json!([{"command": "cargo test", "description": "Run the tests"}])

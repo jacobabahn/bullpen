@@ -63,12 +63,18 @@ pub fn cmd_up(argv: &[String]) -> Res<i32> {
         live.iter().map(|(id, _)| id.clone()).collect()
     } else {
         let label = coordinator_label(&repo);
-        let mut argv = resolve(&strs(&repo.cfg, "coordinator_cmd"));
+        let cmd = strs(&repo.cfg, "coordinator_cmd");
+        let mut argv = resolve(&cmd);
+        let chat = crate::chat_ids::start(&cmd).map(|(chat, flags)| {
+            argv.extend(flags);
+            chat
+        });
         let prompt = first_message(&repo.root.display().to_string(), &me, monitor);
         argv.extend(["-n".into(), label.clone(), "--append-system-prompt-file".into()]);
         argv.extend([guide_file(&repo)?.display().to_string(), prompt]);
         let block = rex_run(&session, &repo.root, &label, &argv, true)?;
         let cid = add_coordinator(&mut repo, &block, &session)?;
+        keep_chat(&mut repo, &cid, chat);
         given_guide(&mut repo, &cid)?;
         said.push(("started".into(), "coordinator".into(), block));
         vec![cid]
@@ -166,11 +172,13 @@ fn here(repo: &mut Repo, session: &str, live: &[(String, String)], monitor: bool
                 c.insert("session".into(), Value::String(session.into()));
                 crate::copies::record(c); // its agent ran this copy's bullpen
             }
+            keep_chat(repo, &cid, own_chat());
             print!("coordinator {cid}: this pane ({block}), already. ");
             cid
         }
         None => {
             let cid = add_coordinator(repo, &block, session)?;
+            keep_chat(repo, &cid, own_chat());
             let others = if live.is_empty() {
                 String::new()
             } else {
@@ -240,6 +248,19 @@ pub fn up_line(said: &[(String, String, String)], fresh: bool) -> String {
         line += " Tell the coordinator what you want.";
     }
     line
+}
+
+/// Keep the coordinator's conversation (chat_ids.rs) on its entry, when it is known.
+fn keep_chat(repo: &mut Repo, cid: &str, chat: Option<String>) {
+    if let (Some(c), Some(chat)) = (coordinator_mut(repo, cid), chat) {
+        c.insert("chat".into(), Value::String(chat));
+    }
+}
+
+/// The conversation of the Claude Code agent running this command (`up --here` from its
+/// own pane), which Claude Code gives its commands as CLAUDE_CODE_SESSION_ID.
+fn own_chat() -> Option<String> {
+    std::env::var("CLAUDE_CODE_SESSION_ID").ok().filter(|id| !id.is_empty())
 }
 
 #[cfg(test)]

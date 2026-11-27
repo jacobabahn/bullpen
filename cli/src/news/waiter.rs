@@ -21,6 +21,7 @@
 //! - It ends a minute before the hook's timeout (a hook killed there loses its exit
 //!   2), delivering what waits, and on TERM, HUP and INT without moving the cursor.
 //! - It starts no child process: one would outlive the session.
+//! - It keeps its coordinator's conversation (session and transcript) in the wait file.
 
 use super::read::{news_cursor, news_size, set_news_cursor};
 use super::wake::{by_waiter, lock_path, unread, update_wait, wait_file, Unread};
@@ -439,6 +440,22 @@ fn hook_input() -> Obj {
         .unwrap_or_default()
 }
 
+/// Keep the conversation of the coordinator in pane block, whose turn just ended, as
+/// the wait file's `chat`: its session and transcript (the newest, after a `/clear`).
+fn keep_chat(block: &str, session: &str, transcript: &str) -> Res<()> {
+    let entry = bullpen_core::repo::block_entry(block);
+    if s(&entry, "role") != "coordinator" || s(&entry, "repo").is_empty() || session.is_empty() {
+        return Ok(());
+    }
+    let repo = Repo::new(s(&entry, "repo"))?;
+    let Some(cid) = coordinator_at(&repo, block, false).map(|c| s(c, "id").to_string()) else {
+        return Ok(());
+    };
+    update_wait(&repo, &cid, |w| {
+        w.insert("chat".into(), json!({"session": session, "transcript": transcript}));
+    })
+}
+
 /// `news --wake`: wait for this coordinator's news. Exit 2 with the lines on stderr
 /// wakes its session; exit 0 is quiet.
 pub fn cmd_wake(every: f64, timeout: f64) -> Res<i32> {
@@ -451,6 +468,7 @@ pub fn cmd_wake(every: f64, timeout: f64) -> Res<i32> {
         "" => std::env::var("CLAUDE_CODE_SESSION_ID").unwrap_or_default(),
         id => id.to_string(),
     };
+    let _ = keep_chat(&block, &session, s(&input, "transcript_path"));
     catch_signals();
     let Some(mut waiter) = Waiter::start(&block, s(&input, "hook_event_name"), &session, timeout, now())? else {
         return Ok(0);

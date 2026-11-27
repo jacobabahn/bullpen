@@ -212,6 +212,7 @@ class BullpenTest(unittest.TestCase):
                     "BULLPEN_CLAUDE_TMP": str(self.tmp / "ctmp"),
                     "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@example.com",
                     "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@example.com"}
+        self.env.pop("CLAUDE_CODE_SESSION_ID", None)  # the agent running the tests: not the test's coordinator
 
     def bp(self, *args, cwd=None, ok=True):
         p = subprocess.run([str(BULLPEN), *args], cwd=cwd or self.repo, env=self.env,

@@ -326,7 +326,7 @@ class LocalModeTest(unittest.TestCase):
         (self.fake / "alive" / self.show(tid)["block"]).unlink()
         self.bp("verdict", tid, "approve", "--summary", "Fine.", cwd=wt)
         cmd = self.api("session.new_layer")[-1]["layout"]["block"]["options"]["command"]
-        self.assertIn("--continue", cmd)
+        self.assertIn("--resume", cmd)
         self.assertTrue(any("conflicts in fix.txt" in x for x in cmd))
         self.assertEqual(self.show(tid)["status"], "working")
 
@@ -488,7 +488,7 @@ class LocalModeTest(unittest.TestCase):
         (self.fake / "alive" / self.show("BP-2")["block"]).unlink()
         self.bp("accept", tid)
         cmd = self.api("session.new_layer")[-1]["layout"]["block"]["options"]["command"]
-        self.assertIn("--continue", cmd)
+        self.assertIn("--resume", cmd)
         self.assertTrue(any("conflicts in fix.txt" in x for x in cmd))
         self.assertEqual(self.show("BP-2")["status"], "working")
 

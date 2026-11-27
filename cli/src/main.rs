@@ -17,6 +17,7 @@ mod board;
 mod brief;
 mod build;
 mod build_watch;
+mod chat_ids;
 mod check;
 mod claude_tmp;
 mod close;

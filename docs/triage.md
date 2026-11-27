@@ -21,7 +21,9 @@ worktree's `.claude/settings.local.json` (git ignores it, through the repository
 `.git/info/exclude`; it goes with the worktree, and your own Claude settings and the
 main checkout's file are left alone). At each end of the worker's turn the hook
 records, in the task's state (`turns/BP-3.json`), the background jobs the session
-still runs and the end of its last reply. It takes a few milliseconds, starts
+still runs and the end of its last reply. The reviewer, started in the same
+worktree, runs the hook too, but its turns leave that record alone: the hook tells
+them apart by session ID, or by the conversation's name (`BP-3 review`). It takes a few milliseconds, starts
 nothing, and exits 0 whatever happens, so it never holds up or fails the turn.
 Bullpen reads that record when the worker's turn ends:
 

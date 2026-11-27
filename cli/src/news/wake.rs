@@ -134,8 +134,9 @@ pub(super) fn unread(repo: &Repo, offset: u64, cid: &str, listed: &[String]) -> 
 }
 
 /// `news-<cid>.wait` holds what waking coordinator cid goes by: the pause (`paused`),
-/// the backstop's notes (`held`, `resumed`), the waiter that owns the wait (`waiter`)
-/// and the last wake (`woke`, `woke_for`: waiter.rs).
+/// the backstop's notes (`held`, `resumed`), the waiter that owns the wait (`waiter`),
+/// the last wake (`woke`, `woke_for`: waiter.rs) and the conversation whose turn last
+/// ended (`chat`: its `session` and `transcript`).
 fn wait_path(repo: &Repo, cid: &str) -> PathBuf {
     repo.dir.join(format!("news-{}.wait", safe(cid)))
 }
