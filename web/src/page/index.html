@@ -2,13 +2,39 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
 <title>bullpen</title>
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
 </head>
 <body>
-<h1>bullpen web is running</h1>
-<p>The page that shows your coordinators and tasks is still being built. Until then,
-<a href="/api/fleet">/api/fleet</a> is what it will show, and <a href="/events">/events</a>
-sends it again whenever it changes.</p>
+<div class="app list" id="app">
+  <nav class="side" id="side" aria-label="Coordinators and tasks">
+    <div class="side-top">
+      <span class="word">bullpen</span>
+      <span class="counts" id="counts"></span>
+    </div>
+    <button class="jump" id="jump" type="button">
+      <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.5 10.5l3.2 3.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <span>Jump to…</span><kbd>⌘K</kbd>
+    </button>
+    <div class="groups" id="groups"><div class="side-note">Reading what bullpen runs…</div></div>
+    <div class="side-foot">
+      <span class="live" id="live"></span><span id="live-words">Connecting…</span>
+      <button class="btn ghost icon-btn theme" id="theme" type="button" title="Light or dark" aria-label="Light or dark">
+        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M3 3l1.1 1.1M11.9 11.9L13 13M3 13l1.1-1.1M11.9 4.1L13 3"/></g></svg>
+      </button>
+    </div>
+  </nav>
+  <main class="main" id="main"></main>
+</div>
+<div class="veil" id="veil">
+  <div class="palette" role="dialog" aria-label="Jump to">
+    <input id="pal-in" placeholder="Jump to a task or coordinator" autocomplete="off" spellcheck="false" aria-label="Jump to a task or coordinator">
+    <div class="pal-list" id="pal-list"></div>
+    <div class="pal-foot"><span><span class="kbd">↑</span> <span class="kbd">↓</span> move</span><span><span class="kbd">⏎</span> open</span><span><span class="kbd">esc</span> close</span></div>
+  </div>
+</div>
 </body>
 </html>

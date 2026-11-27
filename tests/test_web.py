@@ -3,9 +3,11 @@ events. Every test talks to the socket in the test's own state folder, with web_
 and web_host set, so none calls `tailscale` or opens a port."""
 
 import datetime as dt
+import html.parser
 import http.client
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -30,6 +32,22 @@ class UnixConnection(http.client.HTTPConnection):
         s.settimeout(self.timeout)
         s.connect(self.unix)
         self.sock = s
+
+
+class Tags(html.parser.HTMLParser):
+    """Each tag in a page: (tag, attrs, the text up to the next tag)."""
+
+    def __init__(self):
+        super().__init__()
+        self.tags = []
+
+    def handle_starttag(self, tag, attrs):
+        self.tags.append((tag, attrs, ""))
+
+    def handle_data(self, data):
+        if self.tags:
+            tag, attrs, text = self.tags[-1]
+            self.tags[-1] = (tag, attrs, text + data)
 
 
 class WebTest(BullpenTest):
@@ -105,7 +123,7 @@ class WebTest(BullpenTest):
         self.assertIn(f"https://{HOST}/", said)
         status, headers, body = self.request("/")
         self.assertEqual(status, 200)
-        self.assertIn(b"bullpen web is running", body)
+        self.assertIn(b"<title>bullpen</title>", body)
         self.assertEqual(headers["Content-Security-Policy"], "default-src 'self'; frame-ancestors 'none'")
         self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
         self.assertEqual(headers["Referrer-Policy"], "no-referrer")
@@ -120,6 +138,43 @@ class WebTest(BullpenTest):
         self.assertTrue(self.sock.exists())
         self.serve()
         self.assertEqual(self.request("/")[0], 200)
+
+    def test_the_page_and_its_files_are_served_with_the_csp(self):
+        self.serve()
+        for path, kind in (("/", "text/html"), ("/app.js", "text/javascript"), ("/app.css", "text/css")):
+            status, headers, body = self.request(path)
+            self.assertEqual(status, 200, path)
+            self.assertEqual(headers["Content-Type"], f"{kind}; charset=utf-8", path)
+            self.assertEqual(headers["Content-Security-Policy"], "default-src 'self'; frame-ancestors 'none'", path)
+            self.assertEqual(headers["X-Content-Type-Options"], "nosniff", path)
+            self.assertTrue(body.strip(), path)
+        page = self.request("/")[2].decode()
+        self.assertIn('<script src="/app.js"', page)
+        self.assertIn('<link rel="stylesheet" href="/app.css">', page)
+
+    def test_the_page_runs_nothing_inline_and_names_no_other_origin(self):
+        """What the CSP would block (an inline script, an on…= handler, a style
+        attribute) isn't in the page, and nothing it loads comes from elsewhere."""
+        self.serve()
+        page = Tags()
+        page.feed(self.request("/")[2].decode())
+        for tag, attrs, text in page.tags:
+            names = [k for k, _ in attrs]
+            self.assertFalse([k for k in names if k.startswith("on")], (tag, attrs))
+            self.assertNotIn("style", names, tag)
+            self.assertNotEqual(tag, "style")
+            if tag == "script":
+                self.assertTrue(dict(attrs).get("src", "").startswith("/"), attrs)
+                self.assertEqual(text.strip(), "", "a script with a body")
+        js = self.request("/app.js")[2].decode()
+        css = self.request("/app.css")[2].decode()
+        for name, text in (("index.html", self.request("/")[2].decode()), ("app.js", js), ("app.css", css)):
+            self.assertIsNone(re.search(r"(https?:)?//[a-z0-9.-]+\.[a-z]{2,}", text, re.I), name)
+            self.assertNotIn("javascript:", text, name)
+        self.assertNotIn("@import", css)
+        self.assertNotIn("url(", css)
+        # nothing the script makes is a handler or a style attribute, and nothing runs text
+        self.assertIsNone(re.search(r"""(setAttribute\(\s*["'](on|style)|[\s"'(]on[a-z]+=|\beval\(|new Function)""", js), "app.js")
 
     def test_anyone_else_gets_a_bare_403_logged(self):
         self.serve()

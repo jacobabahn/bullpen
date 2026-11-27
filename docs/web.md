@@ -2,10 +2,10 @@
 
 `bullpen web` serves every coordinator and task bullpen runs, across repositories, as a
 page for a browser on your tailnet: on a Mac, or on an iPhone in Safari. It's being
-built in steps ([the design](prd/web.md)). For now the server is there with its checks:
-its page says it's running, `/api/fleet` is the snapshot the page will draw, and
-`/events` sends it again whenever it changes. The chats, prompt cards and actions come
-next.
+built in steps ([the design](prd/web.md)). For now the page shows the sidebar, with
+⌘K to jump, and each agent's chat once the server serves it ([The page](#the-page)).
+Typing to agents, answering prompts and the header's actions come next: they're drawn,
+but greyed out.
 
 ## Running it
 
@@ -77,7 +77,7 @@ it doesn't start and says which to set.
 
 | Route | Returns |
 | --- | --- |
-| `GET /` | a page that says it's running |
+| `GET /` | the page (and its `/app.js` and `/app.css`) |
 | `GET /api/fleet` | the snapshot: `bullpen repos --json`'s shape, with each task's and coordinator's `group`, and the tasks closed in the last two days after the open ones |
 | `GET /events` | the event stream: `fleet` (the snapshot, on connecting and whenever it changes; its `id` grows with each), and `ping` every 15 seconds |
 
@@ -85,3 +85,34 @@ A task's `group` is where the page's sidebar puts it: `needs` (it needs you, it
 stopped, or it's ready or finished, waiting on your accept or close), `done` (closed in
 the last two days) or `active` (the rest). A coordinator is `needs` when it's blocked
 at a prompt, else `active`.
+
+## The page
+
+The page is three files (`web/src/page/`: `index.html`, `app.js`, `app.css`), built into
+the program: plain JavaScript and the system's fonts, nothing fetched from anywhere
+else. It draws what the server sends and decides little itself.
+
+- **The sidebar** has every repository's coordinators and the tasks open or closed in
+  the last two days, in the server's three groups, each row with the board's mark, its
+  words and its repository. **Needs you**: what needs you or stopped, then what's ready
+  or finished, then a coordinator blocked at a prompt, the one waiting longest first;
+  one that has needed you over 5 minutes has its age in a filled pill. **Active**: a
+  repository at a time, its coordinators, then its tasks in review, working, with the
+  coordinator, queued. **Done**: closed in the last two days, newest first. The tab's
+  title counts what needs you. It updates with each `fleet` event.
+- **⌘K** (ctrl-K) finds any row by ID, title or repository; its first row is the next
+  that needs you. **n**, anywhere but a text box, goes straight there, and on to the
+  next each time.
+- **The address** names what's shown: `#bullpen/BP-3` (a task's worker),
+  `#bullpen/BP-3/reviewer` (its reviewer, once it has one: the header switches between
+  them), `#bullpen/c1` (a coordinator). A link to it opens it.
+- **The chat** reads `/api/chat/{repo}/{id}?who=` and then the `chat` events for it: your
+  messages and the coordinator's as bubbles (a paste folded to its line count), bullpen's
+  news lines (the task each names is a link), what the agent said, each run of tool calls
+  as one line that opens on a click, dividers ("Worked for 4 min 38 s", "Conversation
+  compacted", "Interrupted"), errors in red, and an AskUserQuestion as a card, read-only
+  for now. What the agent said is the item's `html` (escaped by the server), else its
+  text as plain text; everything else goes in as text. A server that doesn't serve
+  chats yet gets "Chat isn't served yet".
+- **Light and dark** follow the system; the sidebar's sun button switches, and the page
+  remembers it in that browser.
