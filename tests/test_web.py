@@ -148,6 +148,23 @@ class WebTest(BullpenTest):
         self.assertEqual([(c["id"], c["group"]) for c in repo["coordinators"]], [("c1", "active")])
         self.assertEqual(repo["counts"], {"needs": 1, "ready": 1, "running": 1})
 
+    def test_a_coordinators_liveness_comes_from_rex(self):
+        self.bp("up")
+        self.serve()
+        deadline = time.monotonic() + 5
+
+        def c1():
+            return json.loads(self.request("/api/fleet")[2])["repos"][0]["coordinators"][0]
+
+        while c1()["alive"] is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertEqual((c1()["alive"], c1()["word"]), (True, "idle"))
+        (self.fake / "alive" / c1()["block"]).unlink()  # its pane closed
+        deadline = time.monotonic() + 8  # asked every 5 seconds
+        while c1()["alive"] and time.monotonic() < deadline:
+            time.sleep(0.1)
+        self.assertEqual((c1()["alive"], c1()["word"]), (False, "gone"))
+
     def test_a_fleet_event_comes_within_a_second_of_a_task_changing(self):
         self.bp("up")
         self.bp("add", "Task", "--brief", "Do it.")
