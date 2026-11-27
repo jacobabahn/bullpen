@@ -83,6 +83,7 @@ impl Folders {
     }
 
     /// How many folders are watched.
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.count.lock().unwrap().len()
     }

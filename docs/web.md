@@ -159,9 +159,10 @@ line (a line still being written waits for the next read).
 ### The `chat` event
 
 `/events?watch=bullpen/BP-3` (or `…/BP-3/reviewer`, `…/c1`) watches that chat's
-transcript, and only that one: a change to it is read within about 30 ms (and every
-second in case a change was missed), and what the read made or changed comes as one
-`chat` event, `{items, cursor}`: new items, and items that changed, by their `id` (a
+transcript, and only that one. A change to it is read within about 30 ms (100 ms at
+most while writes keep coming), and every watched transcript is read once a second
+whatever was heard, in case a change was missed. What a read made or changed comes as
+one `chat` event, `{items, cursor}`: new items, and items that changed, by their `id` (a
 tool line whose call finished, a question answered, a queued message taken in). The
 page puts each where the item with its `id` is, or at the end.
 
@@ -170,5 +171,6 @@ stream first sends what changed since then, so nothing written between the two
 requests is missed. When the chat is to be drawn again from the start, the event is the
 whole chat as `/api/chat` answers it, with `reset: true`: its agent's conversation
 moved to another transcript (its Stop hook moved its `chat` after a `/clear`), one was
-found where there was none, the file was written anew, or the stream fell too far
-behind.
+found where there was none, the file was written anew, the stream fell too far behind,
+or its `cursor` is from before this server read the file (the page's stream reconnects
+after `bullpen web` restarts, on a rebuild) or past where it has read to.

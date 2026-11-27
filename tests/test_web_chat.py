@@ -212,22 +212,43 @@ class ChatTest(WebCase):
         self.assertEqual([(i["kind"], i["id"]) for i in e["items"]], [("tools", tools["id"]), ("said", e["items"][1]["id"])])
         self.assertEqual([c["state"] for c in e["items"][0]["calls"]], ["done", "done"])
         self.assertEqual(e["items"][1]["html"], "<p>All <strong>green</strong>.</p>")
-        # and nothing more: the next event within a second isn't another chat
+        self.no_more_chat(event, conn)  # and nothing more
+
+    def no_more_chat(self, event, conn):
+        """No chat event within a second."""
         conn.sock.settimeout(1)
         with self.assertRaises(TimeoutError):
             while True:
                 self.assertNotEqual(event().get("event"), "chat")
 
-    def test_a_stream_sends_what_changed_since_its_pages_cursor(self):
+    def test_a_stream_sends_what_changed_since_its_pages_cursor_once(self):
         path = self.worker_transcript()
         self.serve()
+        for read_between in (True, False):
+            chat = self.chat_of("/api/chat/proj/BP-1")
+            self.append(path, [said(f"Said before the stream opened ({read_between}).")])
+            if read_between:  # another read: the file is read on before the stream opens
+                time.sleep(0.2)
+                self.chat_of("/api/chat/proj/BP-1?before=" + chat["items"][0]["id"])
+            event, conn = self.events(f"watch=proj/BP-1&cursor={chat['cursor']}")
+            e = self.next_chat(event)
+            self.assertEqual([i.get("html") for i in e["items"]],
+                             [f"<p>Said before the stream opened ({read_between}).</p>"])
+            self.assertNotIn("reset", e)
+            self.no_more_chat(event, conn)
+
+    def test_a_cursor_from_before_the_server_restarted_gets_the_chat_whole(self):
+        path = self.transcript(self.chat, [*opening("BP-1: Task"), *(typed(f"message {n}") for n in range(1, 451))])
+        p, _ = self.serve()
         chat = self.chat_of("/api/chat/proj/BP-1")
-        self.append(path, [said("Said before the stream opened.")])
-        time.sleep(0.2)
-        self.chat_of("/api/chat/proj/BP-1?before=" + chat["items"][0]["id"])  # another read: the file is read on
+        self.stop(p)  # it's rebuilt, say: the page's stream reconnects to the new one
+        self.append(path, [typed("message 451")])
+        self.serve()
         event, _ = self.events(f"watch=proj/BP-1&cursor={chat['cursor']}")
         e = self.next_chat(event)
-        self.assertEqual([i.get("html") for i in e["items"]], ["<p>Said before the stream opened.</p>"])
+        texts = [i["text"] for i in e["items"]]
+        self.assertEqual((e["reset"], len(texts), texts[0], texts[-1], e["more"]),
+                         (True, 200, "message 252", "message 451", True))
 
     def test_a_chat_that_moves_is_sent_whole(self):
         self.worker_transcript()

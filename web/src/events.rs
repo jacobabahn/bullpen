@@ -7,7 +7,7 @@
 
 use crate::chat::{self, Target, Where};
 use crate::fleet::Latest;
-use crate::transcripts::{Open, Transcripts, Update, Watching};
+use crate::transcripts::{Missed, Open, Transcripts, Update, Watching};
 use axum::response::sse::{Event, Sse};
 use bullpen_core::chat::Source;
 use serde_json::Value;
@@ -64,16 +64,13 @@ async fn follow(mut latest: Latest, all: Arc<Transcripts>, w: Watch, tx: mpsc::S
     let mut place = locate(&latest, &w.target);
     let mut on = None;
     if let Some(p) = &place {
-        on = start(&all, p).await;
-        if let (Some(o), Some(cursor)) = (&on, w.cursor) {
-            let open = o.open.clone();
-            let missed = tokio::task::spawn_blocking(move || open.since(cursor))
-                .await
-                .ok()
-                .flatten();
-            if let Some(m) = missed {
-                send(&tx, &m).await;
+        if let Some((mut o, missed)) = start(&all, p, w.cursor).await {
+            match missed {
+                Missed::Nothing => {}
+                Missed::Items(m) => send(&tx, &m).await,
+                Missed::Whole => whole(&tx, &mut o, p).await,
             }
+            on = Some(o);
         }
     }
     let mut look = tokio::time::interval(LOOK_EVERY);
@@ -104,25 +101,29 @@ async fn follow(mut latest: Latest, all: Arc<Transcripts>, w: Watch, tx: mpsc::S
         };
         match (then, &place) {
             (Then::Wait, _) | (_, None) => continue,
-            (Then::Look, Some(p)) => match start(&all, p).await {
-                Some(f) if !on.as_ref().is_some_and(|o| o.path == f.path) => on = Some(f),
+            (Then::Look, Some(p)) => match start(&all, p, None).await {
+                Some((f, _)) if !on.as_ref().is_some_and(|o| o.path == f.path) => on = Some(f),
                 _ => continue, // none found, or the same: nothing to send
             },
             (Then::Whole, _) => {}
         }
-        let (Some(o), Some(p)) = (&mut on, &place) else {
-            continue;
-        };
-        o.rx = o.rx.resubscribe(); // what's queued is in the chat sent now
-        let (open, place, source) = (o.open.clone(), p.clone(), o.source);
-        let whole = tokio::task::spawn_blocking(move || {
-            let mut v = chat::answer(&place, Some(source), open.page(None));
-            v["reset"] = Value::Bool(true);
-            v
-        });
-        if let Ok(v) = whole.await {
-            send(&tx, &v).await;
+        if let (Some(o), Some(p)) = (&mut on, &place) {
+            whole(&tx, o, p).await;
         }
+    }
+}
+
+/// Send the chat whole, as `/api/chat` has it, with `reset: true`.
+async fn whole(tx: &mpsc::Sender<Event>, o: &mut On, place: &Where) {
+    o.rx = o.rx.resubscribe(); // what's queued is in the chat sent now
+    let (open, place, source) = (o.open.clone(), place.clone(), o.source);
+    let whole = tokio::task::spawn_blocking(move || {
+        let mut v = chat::answer(&place, Some(source), open.page(None));
+        v["reset"] = Value::Bool(true);
+        v
+    });
+    if let Ok(v) = whole.await {
+        send(tx, &v).await;
     }
 }
 
@@ -140,26 +141,26 @@ fn locate(latest: &Latest, t: &Target) -> Option<Where> {
     chat::locate(&snapshot, t).ok()
 }
 
-/// Find its transcript, read it, and start hearing its updates (before the read, so
-/// none is missed); None when there's none yet.
-async fn start(all: &Arc<Transcripts>, place: &Where) -> Option<On> {
+/// Find its transcript, read it, and start hearing its updates, with what a page read
+/// to `cursor` has missed; None when there's none yet.
+async fn start(all: &Arc<Transcripts>, place: &Where, cursor: Option<u64>) -> Option<(On, Missed)> {
     let (all, place) = (all.clone(), place.clone());
     let found = tokio::task::spawn_blocking(move || {
         let (path, source) = place.find()?;
         let watching = all.watch(&path);
         let open = all.open(&path, source);
-        let rx = open.subscribe();
-        open.read_on();
-        Some((path, source, open, rx, watching))
+        let (rx, missed) = open.join(cursor);
+        Some((path, source, open, rx, watching, missed))
     });
-    let (path, source, open, rx, watching) = found.await.ok()??;
-    Some(On {
+    let (path, source, open, rx, watching, missed) = found.await.ok()??;
+    let on = On {
         path,
         source,
         open,
         rx,
         _watching: watching,
-    })
+    };
+    Some((on, missed))
 }
 
 async fn next(on: &mut Option<On>) -> Result<Arc<Update>, broadcast::error::RecvError> {

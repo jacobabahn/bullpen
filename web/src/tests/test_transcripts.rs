@@ -57,12 +57,55 @@ fn a_read_sends_what_it_made_and_the_first_sends_nothing() {
     };
     assert_eq!(texts(v), ["two", "three"]);
     assert!(rx.try_recv().is_err(), "one update a read");
-    assert_eq!(texts(&open.since(cursor).unwrap()), ["two", "three"]);
-    assert_eq!(open.since(v["cursor"].as_u64().unwrap()), None);
+    let Missed::Items(m) = open.since(cursor) else {
+        panic!("nothing missed")
+    };
+    assert_eq!(texts(&m), ["two", "three"]);
+    assert_eq!(open.since(v["cursor"].as_u64().unwrap()), Missed::Nothing);
     assert!(
         v["cursor"].as_u64().unwrap() < std::fs::metadata(&path).unwrap().len(),
         "the half line waits"
     );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn joining_with_a_cursor_has_what_was_missed_once() {
+    let dir = folder();
+    let path = dir.join("s.jsonl");
+    append(&path, &typed("u1", "one"));
+    let all = Transcripts::start();
+    let open = all.read(&path, Source::Recorded);
+    let cursor = open.page(None).unwrap()["cursor"].as_u64().unwrap();
+    append(&path, &typed("u2", "two")); // written after the page, before the stream
+    let (mut rx, missed) = open.join(Some(cursor));
+    let Missed::Items(m) = missed else {
+        panic!("nothing missed")
+    };
+    assert_eq!(texts(&m), ["two"]);
+    assert!(rx.try_recv().is_err(), "what was missed isn't heard as well");
+    append(&path, &typed("u3", "three"));
+    open.read_on();
+    let Update::Items(v) = &*rx.try_recv().unwrap() else {
+        panic!("not items")
+    };
+    assert_eq!(texts(v), ["three"]);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_cursor_from_before_the_server_read_the_file_has_the_chat_whole() {
+    let dir = folder();
+    let path = dir.join("s.jsonl");
+    append(&path, &typed("u1", "one"));
+    let cursor = std::fs::metadata(&path).unwrap().len(); // a page from the server before this one
+    append(&path, &typed("u2", "two"));
+    let all = Transcripts::start();
+    let open = all.read(&path, Source::Recorded);
+    assert_eq!(open.since(cursor), Missed::Whole);
+    assert_eq!(open.since(cursor + 10_000), Missed::Whole, "past where it has read to");
+    let now = std::fs::metadata(&path).unwrap().len();
+    assert_eq!(open.since(now), Missed::Nothing);
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -96,4 +139,55 @@ fn a_transcript_is_watched_while_a_stream_watches_it() {
     assert!(all.watched.lock().unwrap().is_empty());
     assert_eq!(all.folders.len(), 0);
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn every_watched_transcript_is_read_each_second_whatever_is_heard() {
+    let dir = folder();
+    let (a, b) = (dir.join("a.jsonl"), dir.join("b.jsonl"));
+    append(&a, &typed("u1", "one"));
+    let (tx, rx) = channel();
+    let all = Arc::new(Transcripts {
+        open: Mutex::default(),
+        watched: Mutex::default(),
+        folders: crate::watch::Folders::new(channel().0),
+    });
+    let _w = all.watch(&a);
+    let mut heard = all.read(&a, Source::Recorded).subscribe();
+    append(&a, &typed("u2", "two")); // its change is missed: only b's is heard
+    tx.send(b.clone()).unwrap();
+    let mut swept = Instant::now();
+    assert!(all.read_changed(&rx, &mut swept));
+    assert!(heard.try_recv().is_err(), "b heard, a not due yet");
+    tx.send(b.clone()).unwrap();
+    swept = Instant::now() - EVERY;
+    assert!(all.read_changed(&rx, &mut swept));
+    let Update::Items(v) = &*heard.try_recv().unwrap() else {
+        panic!("not items")
+    };
+    assert_eq!(texts(v), ["two"]);
+    assert!(swept.elapsed() < EVERY, "the sweep's time is kept");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn hearing_writes_waits_a_tenth_of_a_second_at_most() {
+    let (tx, rx) = channel();
+    let all = Arc::new(Transcripts {
+        open: Mutex::default(),
+        watched: Mutex::default(),
+        folders: crate::watch::Folders::new(channel().0),
+    });
+    std::thread::spawn(move || {
+        while tx.send(PathBuf::from("/x")).is_ok() {
+            std::thread::sleep(Duration::from_millis(5)); // writes keep coming
+        }
+    });
+    let t = Instant::now();
+    assert!(all.read_changed(&rx, &mut Instant::now()));
+    assert!(
+        t.elapsed() < SETTLE_AT_MOST + Duration::from_millis(50),
+        "{:?}",
+        t.elapsed()
+    );
 }
