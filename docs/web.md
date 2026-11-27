@@ -3,9 +3,9 @@
 `bullpen web` serves every coordinator and task bullpen runs, across repositories, as a
 page for a browser on your tailnet: on a Mac, or on an iPhone in Safari. It's being
 built in steps ([the design](prd/web.md)). For now the page shows the sidebar, with
-⌘K to jump, and each agent's chat once the server serves it ([The page](#the-page)).
-Typing to agents, answering prompts and the header's actions come next: they're drawn,
-but greyed out.
+⌘K to jump, and each agent's chat, from its transcript ([The page](#the-page),
+[Chats](#chats)). Typing to agents, answering prompts and the header's actions come
+next: they're drawn, but greyed out.
 
 ## Running it
 
@@ -79,7 +79,8 @@ it doesn't start and says which to set.
 | --- | --- |
 | `GET /` | the page (and its `/app.js` and `/app.css`) |
 | `GET /api/fleet` | the snapshot: `bullpen repos --json`'s shape, with each task's and coordinator's `group`, and the tasks closed in the last two days after the open ones |
-| `GET /events` | the event stream: `fleet` (the snapshot, on connecting and whenever it changes; its `id` grows with each), and `ping` every 15 seconds |
+| `GET /api/chat/{repo}/{id}?who=&before=` | an agent's chat: `{agent, source, items, cursor, more}` (below) |
+| `GET /events?watch={repo}/{id}[/{who}]&cursor=N` | the event stream: `fleet` (the snapshot, on connecting and whenever it changes; its `id` grows with each), `chat` (the watched chat's new and changed items), and `ping` every 15 seconds |
 
 A task's `group` is where the page's sidebar puts it: `needs` (it needs you, it
 stopped, or it's ready or finished, waiting on your accept or close), `done` (closed in
@@ -116,3 +117,58 @@ else. It draws what the server sends and decides little itself.
   chats yet gets "Chat isn't served yet".
 - **Light and dark** follow the system; the sidebar's sun button switches, and the page
   remembers it in that browser.
+
+## Chats
+
+An agent's chat is read from its Claude Code transcript: a task's worker
+(`/api/chat/bullpen/BP-3`, or `?who=worker`), its reviewer (`?who=reviewer`), or a
+coordinator (`/api/chat/bullpen/c1`), named by its repository's name and its ID. The
+transcript is the one whose session ID bullpen recorded when it started the agent (the
+task's `chat`, its review's, the coordinator's entry's: see [Where things
+live](where-things-live.md)), else the newest in the agent's folder under
+`~/.claude/projects/` whose title is the agent's `-n` name (an agent started before
+bullpen recorded them).
+
+| Field | What it is |
+| --- | --- |
+| `agent` | `{repo, id, who, title, mode}`: `who` is `worker`, `reviewer` or `coordinator`; the transcript's title and permission mode, or `null` |
+| `source` | how the transcript was found: `recorded`, `title` (matched by title), or `none` (no transcript yet, or an agent that isn't Claude Code: no items) |
+| `items` | the last 200 items, oldest first; with `before=ID`, the 200 before that item (a 404 when it isn't one) |
+| `cursor` | the byte offset the transcript is read to |
+| `more` | whether there are items before these: "Earlier" asks for them with `before` set to the first one's `id` |
+
+An unknown repository, task or coordinator is a 404, and a `who` that isn't `worker` or
+`reviewer` (or a coordinator's reviewer) a 400, each with `{error}` saying why.
+
+The items are what [the design](prd/web.md#transcripts-into-chat) lists (`brief`,
+`you`, `coordinator`, `news`, `said`, `tools`, `question`, the dividers, `error`,
+`queued`), each with its `id`, `at` and `kind`. What the agent said (`said`) comes as
+`html`: its Markdown made into HTML by the server, with paragraphs, emphasis, inline
+and fenced code, lists, tables and links to `http` and `https` addresses only.
+Everything else in it is escaped text: raw HTML, a `<script>`, an image (its alt text
+alone, never fetched), a link to anything but a web page (its text alone). A heading is
+a paragraph in bold. The rest of an item's text is plain text, for the page to set as
+text. No record leaves the server: nothing from an attachment, the session's owner, a
+system prompt, an account or an e-mail address, and an AskUserQuestion's questions and
+answers carry their own fields alone.
+
+A transcript is read whole the first time anyone asks for it (about 100 ms for 20 MB),
+kept while the server runs, and read on from its offset after that, to its last whole
+line (a line still being written waits for the next read).
+
+### The `chat` event
+
+`/events?watch=bullpen/BP-3` (or `…/BP-3/reviewer`, `…/c1`) watches that chat's
+transcript, and only that one: a change to it is read within about 30 ms (and every
+second in case a change was missed), and what the read made or changed comes as one
+`chat` event, `{items, cursor}`: new items, and items that changed, by their `id` (a
+tool line whose call finished, a question answered, a queued message taken in). The
+page puts each where the item with its `id` is, or at the end.
+
+`cursor=N` is the `cursor` of the page of the chat the page has: on connecting, the
+stream first sends what changed since then, so nothing written between the two
+requests is missed. When the chat is to be drawn again from the start, the event is the
+whole chat as `/api/chat` answers it, with `reset: true`: its agent's conversation
+moved to another transcript (its Stop hook moved its `chat` after a `/clear`), one was
+found where there was none, the file was written anew, or the stream fell too far
+behind.

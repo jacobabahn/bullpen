@@ -150,6 +150,12 @@ impl Chat {
             .collect()
     }
 
+    /// Every item, oldest first, queued ones that are gone too (a reader that has one
+    /// needs to hear it went).
+    pub fn all(&self) -> &[Item] {
+        &self.items
+    }
+
     /// The items made or changed since the last call, oldest first.
     pub fn take_changed(&mut self) -> Vec<Item> {
         let changed = std::mem::take(&mut self.changed);

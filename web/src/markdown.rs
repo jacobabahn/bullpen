@@ -153,7 +153,11 @@ fn marker(line: &str) -> Option<Marker> {
         return None;
     }
     let spaces = rest.len() - rest.trim_start_matches(' ').len();
-    let gap = if rest.trim().is_empty() || spaces > 4 { 1 } else { spaces };
+    let gap = if rest.trim().is_empty() || spaces > 4 {
+        1
+    } else {
+        spaces
+    };
     Some(Marker {
         indent,
         number,
@@ -505,7 +509,11 @@ fn emphasis(c: &[char], i: usize, out: &mut String) -> Option<usize> {
     let close = opens.then(|| closing(c, i + width, d, width)).flatten();
     match close {
         Some(j) => {
-            let (open, shut) = if width == 2 { ("<strong>", "</strong>") } else { ("<em>", "</em>") };
+            let (open, shut) = if width == 2 {
+                ("<strong>", "</strong>")
+            } else {
+                ("<em>", "</em>")
+            };
             out.push_str(open);
             spans(&c[i + width..j], out);
             out.push_str(shut);

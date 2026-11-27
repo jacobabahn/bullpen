@@ -2,22 +2,34 @@ use super::html;
 
 #[test]
 fn paragraphs_are_split_by_blank_lines() {
-    assert_eq!(html("One line\nand its next.\n\nAnother."), "<p>One line\nand its next.</p><p>Another.</p>");
+    assert_eq!(
+        html("One line\nand its next.\n\nAnother."),
+        "<p>One line\nand its next.</p><p>Another.</p>"
+    );
     assert_eq!(html(""), "");
 }
 
 #[test]
 fn emphasis_strong_and_both() {
     assert_eq!(html("*a* and _b_"), "<p><em>a</em> and <em>b</em></p>");
-    assert_eq!(html("**a** and __b__"), "<p><strong>a</strong> and <strong>b</strong></p>");
+    assert_eq!(
+        html("**a** and __b__"),
+        "<p><strong>a</strong> and <strong>b</strong></p>"
+    );
     assert_eq!(html("***a***"), "<p><strong><em>a</em></strong></p>");
-    assert_eq!(html("**bold with *em* in it**"), "<p><strong>bold with <em>em</em> in it</strong></p>");
+    assert_eq!(
+        html("**bold with *em* in it**"),
+        "<p><strong>bold with <em>em</em> in it</strong></p>"
+    );
 }
 
 #[test]
 fn what_isnt_emphasis_stays_text() {
     assert_eq!(html("2 * 3 * 4"), "<p>2 * 3 * 4</p>");
-    assert_eq!(html("snake_case_name and __init__"), "<p>snake_case_name and <strong>init</strong></p>");
+    assert_eq!(
+        html("snake_case_name and __init__"),
+        "<p>snake_case_name and <strong>init</strong></p>"
+    );
     assert_eq!(html("a lone * star"), "<p>a lone * star</p>");
     assert_eq!(html(r"\*not em\*"), "<p>*not em*</p>");
 }
@@ -25,7 +37,10 @@ fn what_isnt_emphasis_stays_text() {
 #[test]
 fn inline_code_keeps_its_text_as_it_is() {
     assert_eq!(html("run `bullpen ls`"), "<p>run <code>bullpen ls</code></p>");
-    assert_eq!(html("`*not em*` and `<b>`"), "<p><code>*not em*</code> and <code>&lt;b&gt;</code></p>");
+    assert_eq!(
+        html("`*not em*` and `<b>`"),
+        "<p><code>*not em*</code> and <code>&lt;b&gt;</code></p>"
+    );
     assert_eq!(html("`` a ` b ``"), "<p><code>a ` b</code></p>");
     assert_eq!(html("an `unclosed span"), "<p>an `unclosed span</p>");
     assert_eq!(html("*see `a*b`*"), "<p><em>see <code>a*b</code></em></p>");
@@ -47,14 +62,20 @@ fn lists_bulleted_numbered_and_nested() {
     assert_eq!(html("- one\n- two"), "<ul><li>one</li><li>two</li></ul>");
     assert_eq!(html("* a\n+ b"), "<ul><li>a</li><li>b</li></ul>");
     assert_eq!(html("1. one\n2. two"), "<ol><li>one</li><li>two</li></ol>");
-    assert_eq!(html("3) three\n4) four"), "<ol start=\"3\"><li>three</li><li>four</li></ol>");
+    assert_eq!(
+        html("3) three\n4) four"),
+        "<ol start=\"3\"><li>three</li><li>four</li></ol>"
+    );
     assert_eq!(
         html("- outer\n  - inner **b**\n  - more\n- last"),
         "<ul><li>outer<ul><li>inner <strong>b</strong></li><li>more</li></ul></li><li>last</li></ul>"
     );
     assert_eq!(html("1. a\n   - b"), "<ol><li>a<ul><li>b</li></ul></li></ol>");
     assert_eq!(html("Text:\n- a\n- b"), "<p>Text:</p><ul><li>a</li><li>b</li></ul>");
-    assert_eq!(html("- a\ncarried on\n\nafter"), "<ul><li>a\ncarried on</li></ul><p>after</p>");
+    assert_eq!(
+        html("- a\ncarried on\n\nafter"),
+        "<ul><li>a\ncarried on</li></ul><p>after</p>"
+    );
 }
 
 #[test]
@@ -111,7 +132,10 @@ fn links_to_web_pages() {
 
 #[test]
 fn a_heading_is_a_paragraph_in_bold_and_a_rule_is_nothing() {
-    assert_eq!(html("## What changed ##\nText"), "<p><strong>What changed</strong></p><p>Text</p>");
+    assert_eq!(
+        html("## What changed ##\nText"),
+        "<p><strong>What changed</strong></p><p>Text</p>"
+    );
     assert_eq!(html("#hashtag"), "<p>#hashtag</p>");
     assert_eq!(html("a\n\n---\n\nb"), "<p>a</p><p>b</p>");
 }
@@ -131,9 +155,15 @@ fn inert(out: &str) {
         assert!(allowed.contains(&name), "<{tag}> in {out}");
         if name == "a" {
             assert!(tag.starts_with("a href=\"http"), "<{tag}> in {out}");
-            assert!(tag.ends_with(" rel=\"noopener noreferrer\" target=\"_blank\""), "<{tag}> in {out}");
+            assert!(
+                tag.ends_with(" rel=\"noopener noreferrer\" target=\"_blank\""),
+                "<{tag}> in {out}"
+            );
         } else {
-            assert!(name == tag || tag.starts_with("ol start=\""), "<{tag}> has attributes in {out}");
+            assert!(
+                name == tag || tag.starts_with("ol start=\""),
+                "<{tag}> has attributes in {out}"
+            );
         }
     }
 }
@@ -179,7 +209,12 @@ fn raw_html_and_attributes_are_text() {
     inert(&out);
     assert!(out.starts_with("<p>&lt;img src=x onerror=alert(1)&gt; &lt;a href=&quot;javascript:x&quot;&gt;"));
     let out = html("**<b onmouseover=\"alert(1)\">bold</b>**");
-    assert_eq!(out, "<p><strong>&lt;b onmouseover=&quot;alert(1)&quot;&gt;bold&lt;/b&gt;</strong></p>");
-    inert(&html("[<img src=x onerror=alert(1)>](https://x.example) &lt;b&gt; &#60;script&#62;"));
+    assert_eq!(
+        out,
+        "<p><strong>&lt;b onmouseover=&quot;alert(1)&quot;&gt;bold&lt;/b&gt;</strong></p>"
+    );
+    inert(&html(
+        "[<img src=x onerror=alert(1)>](https://x.example) &lt;b&gt; &#60;script&#62;",
+    ));
     assert_eq!(html("&lt;script&gt;"), "<p>&amp;lt;script&amp;gt;</p>");
 }

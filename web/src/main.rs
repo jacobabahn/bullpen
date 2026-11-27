@@ -5,9 +5,12 @@
 //! it from the tailnet; it prints that line and never runs it.
 
 mod auth;
+mod chat;
 mod events;
 mod fleet;
+mod markdown;
 mod routes;
+mod transcripts;
 mod watch;
 
 use std::os::unix::fs::PermissionsExt;
@@ -59,6 +62,7 @@ fn run(argv: &[String]) -> Result<(), String> {
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     say_how_to_reach(&sock, &gate);
     let snapshot = fleet::start(&args.state, &args.bullpen);
+    let transcripts = transcripts::Transcripts::start();
     reload_on_rebuild(sock.clone());
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -66,7 +70,7 @@ fn run(argv: &[String]) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     rt.block_on(async move {
         let listener = tokio::net::UnixListener::from_std(listener).map_err(|e| e.to_string())?;
-        let app = routes::app(gate, snapshot);
+        let app = routes::app(gate, snapshot, transcripts);
         axum::serve(listener, app).await.map_err(|e| e.to_string())
     })
 }

@@ -50,7 +50,9 @@ class Tags(html.parser.HTMLParser):
             self.tags[-1] = (tag, attrs, text + data)
 
 
-class WebTest(BullpenTest):
+class WebCase(BullpenTest):
+    """A test's own `bullpen web`, and requests to it (no tests of its own)."""
+
     def setUp(self):
         super().setUp()
         self.bp("config", "--global", "--web-users", f"someone@example.com, {ME}", "--web-host", HOST)
@@ -116,6 +118,8 @@ class WebTest(BullpenTest):
         since = (dt.datetime.now().astimezone() - dt.timedelta(seconds=ago)).isoformat()
         f.write_text(json.dumps({**json.loads(f.read_text()), "status": status, "since": since}))
 
+
+class WebTest(WebCase):
     def test_it_serves_on_a_socket_only_you_can_open_and_prints_how_to_reach_it(self):
         p, said = self.serve()
         self.assertEqual(self.sock.stat().st_mode & 0o777, 0o600)

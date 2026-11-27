@@ -118,7 +118,7 @@ bare 403. A task or coordinator is named by its repository's name and its ID
 | `GET /api/screen/{repo}/{id}?who=` | `{lines, at}`: the end of the pane's screen as HTML spans |
 | `GET /api/diff/{repo}/{id}` | `bullpen diff ID` as `{files: [{path, added, removed, hunks}]}` |
 | `GET /api/tour/{repo}/{id}[?step=N]` | `bullpen tour ID --show --json`, or `--step N --json` |
-| `GET /events?watch={repo}/{id}[/{who}]` | the event stream (below) |
+| `GET /events?watch={repo}/{id}[/{who}]&cursor=N` | the event stream (below); `cursor`, the chat page's, gets what changed since it first |
 | `POST /api/{repo}/{id}/tell` `{text}` | `bullpen tell` (a worker); for a coordinator, `bullpen say --coordinator` |
 | `POST /api/{repo}/{id}/answer` `{key, prompt}` | `bullpen answer ID KEY --prompt PID` |
 | `POST /api/{repo}/{id}/reply` `{text}` | `bullpen reply` (the coordinator asked) |
@@ -137,7 +137,7 @@ Each event has an `id`, so a stream that drops (a phone waking) resumes with
 | Event | When | Data |
 | --- | --- | --- |
 | `fleet` | on connecting, then whenever the snapshot changes | the whole snapshot (a few tens of KB; sent only when its hash changes) |
-| `chat` | the watched transcript grew | `{items, cursor}`: the new items, and items changed (a tool line whose call finished) by their `id` |
+| `chat` | the watched transcript grew | `{items, cursor}`: the new items, and items changed (a tool line whose call finished) by their `id`; or the whole chat as `/api/chat` has it, with `reset: true`, when it moved to another transcript, the file was written anew or the stream fell behind |
 | `prompt` | the watched agent is blocked, every second while it is | `{question, options, id, screen}`, or `null` when the prompt is gone |
 | `screen` | `>_` is open, every second while it changes | `{lines, at}` |
 | `done` | an action ran in the background finished | `{task, ok, said, error}` |
@@ -264,7 +264,7 @@ per-launch title, mode and owner records. The reader keeps a whitelist:
   started from, or a tool line's first call's ID; it stays the same as the item
   changes), `at` and `kind`: `brief` (`text`, `file`), `you` and `coordinator` (`text`,
   and `parts`: the words, and each paste as `{pasted, lines}`), `news` (`text`,
-  `task`), `said` (`text`, Markdown), `tools` (`summary`, `doing` while a call in it
+  `task`), `said` (`text`, Markdown; the server sends it as `html`), `tools` (`summary`, `doing` while a call in it
   runs, `ms`, and `calls`: `name`, `what`, `doing`, `state` (`running`, `done`,
   `failed`), `error`, `tail`), `question` (`questions`, then `answers` or `error`),
   `worked`, `compacted` and `interrupted` (`text`), `error` (`text`), `queued` (`text`, `gone`).
