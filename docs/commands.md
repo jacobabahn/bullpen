@@ -31,6 +31,8 @@ bullpen go BP-1       # focus its pane (`go` alone: the coordinator; --next: nex
                       #   --board: the board, started first if none runs)
 bullpen go --next --all-repos   # the next task needing you in any repository
 bullpen mission       # mission control: every repository on one screen, in its own Rex session (cmd+; m)
+bullpen web           # every coordinator and task as a page for your tailnet, on a Unix socket: prints the
+                      #   `tailscale serve` line that reaches it, never runs it (see web.md)
 bullpen go BP-1 --repo ~/shop   # a task of another repository
 bullpen go BP-1 --board         # its board, with BP-1 selected
 bullpen go BP-1 --switch        # and have the Rex app show its session (mission control's ⏎)
@@ -55,7 +57,7 @@ bullpen close BP-1 --keep-branch --as port  # end it unmerged, its branch kept a
 bullpen drop BP-1     # close its PR, pane and worktree without merging
 bullpen revert BP-1 --why "It broke login"   # take an accepted task back: a new task reverts its commits,
                       #   reviewed and accepted like any other (see accept.md)
-bullpen build         # build bullpen's command line and the board now (see Rebuilds)
+bullpen build         # build bullpen's command line, the board and bullpen web now (see Rebuilds)
 bullpen up            # start (or register) this repository's coordinator and the watcher
 bullpen config        # this repository's settings, and where each comes from (see settings.md)
 bullpen rules         # the rules every worker and reviewer gets, and where they're from (--edit: yours)

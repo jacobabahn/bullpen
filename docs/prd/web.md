@@ -1,7 +1,8 @@
 # PRD: bullpen web
 
-Status: proposed 2026-11-26 (BP-233). The decisions marked **yours** at the end are the
-person's; the rest are the design's, open to argument. Clickable mockups are in the
+Status: proposed 2026-11-26 (BP-233); the person's four decisions answered 2026-11-27,
+each with the recommended answer (see [Yours to decide](#yours-to-decide)). The rest are
+the design's, open to argument. Clickable mockups are in the
 state folder's `briefs/design-web/` (`index.html` links every screen), not in the repo.
 
 ## Problem
@@ -51,11 +52,12 @@ board runs. It updates by itself.
    nesting, no badges, titles cut at about 40 characters), and it can only show
    agents that run in T3. The web page shows the agents bullpen already runs, with the
    board's groups and words. BP-224's `Host` trait stays: it's how the commands the page
-   calls reach an agent, and a T3 host could still be added under it later. **Yours.**
+   calls reach an agent, and a T3 host could still be added under it later. **Yours:
+   yes, the T3 host is set aside.**
 2. **The page is mission control's rework.** Its sidebar is mission control's inbox
    and repositories, and the panels mission control still lacks (the coordinators,
    news) are the page's coordinators and their chats. Mission control in Rex stays as
-   it is, kept working, with no new panels. **Yours.**
+   it is, kept working, with no new panels. **Yours: yes.**
 
 ### Shape
 3. **A new crate, `web/` (`bullpen-web`), run by `bullpen web`**, as `bullpen board`
@@ -66,7 +68,8 @@ board runs. It updates by itself.
    `axum`, `tokio` (`rt-multi-thread`, `net`, `fs`, `sync`, `time`, `macros`),
    `tokio-stream` and `notify` (the board's already). A blocking server (`tiny_http`, a
    thread per connection) would add less, but its long-lived event streams need
-   hand-made plumbing, and the crate list needs the person's yes either way. **Yours.**
+   hand-made plumbing, and the crate list needs the person's yes either way. **Yours:
+   yes, these four.**
 5. **Server-sent events for pushes, POST for actions.** Updates only go one way; an
    action is a request with an answer. No WebSocket.
 6. **One static page with no build step**: `index.html`, `app.js` and `app.css`,
@@ -349,6 +352,7 @@ person. The rule: it must give nobody a power they don't already have.
     setting). Unset, it is the login of the Tailscale user this machine is logged in
     as (`tailscale status --json`), so it works for the person alone with nothing to
     set. A tagged device or a shared-in user has another login, or none, and is refused.
+    **Yours: yes, the machine's own login by default, `web_users` the override.**
 31. **Where.** The `Host` header must be the machine's tailnet name (`web_host`, else
     from `tailscale status --json`), which stops DNS rebinding.
 32. **What an unauthenticated request sees: nothing.** A bare 403 with no body, for the
@@ -362,7 +366,7 @@ person. The rule: it must give nobody a power they don't already have.
     nothing.
 34. **Headers.** `Content-Security-Policy: default-src 'self'; frame-ancestors 'none'`
     (no inline scripts), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
-    `Cache-Control: no-store` on the API.
+    `Cache-Control: no-store`, on every answer (the 403s too).
 35. **What's sent.** Chat items, never raw records; no attachment, system prompt or
     account record leaves the server.
 36. **Tests.** Every test talks to the socket in a temporary state folder, with the
@@ -473,11 +477,16 @@ Ten tasks. Wave 1 runs in parallel; each later wave needs the ones it names.
   gap; the rest is looked at on a phone.
 
 ## Yours to decide
-Ranked by how much they change what gets built:
+Ranked by how much they change what gets built. Answered 2026-11-27, each with the
+recommended answer:
 1. **The T3 host plan**: set aside (recommended), or build it after web v1.
+   *Answered: set aside.*
 2. **Mission control**: the page is its rework and it gets no new panels
-   (recommended), or both go on.
+   (recommended), or both go on. *Answered: the page is its rework; mission control in
+   Rex stays as it is, with no new panels.*
 3. **The crates for `web/`**: axum, tokio, tokio-stream and notify (recommended), or a
-   smaller blocking server with hand-made event streams.
+   smaller blocking server with hand-made event streams. *Answered: axum, tokio,
+   tokio-stream and notify.*
 4. **Who may connect**: the machine's own Tailscale login only (recommended), or a
-   list.
+   list. *Answered: the machine's own login by default, with `web_users` as the
+   override decision 30 describes.*

@@ -1,19 +1,20 @@
-//! Building bullpen's two programs from its own checkout: the command line and the
-//! board. `build` (install.sh runs it), `_build_board` (the background build `up` and
-//! accept start, given the build lock by fd), their rebuild_if_stale, and the catch-up
-//! of an internal command this build doesn't have yet (catch_up).
+//! Building bullpen's programs from its own checkout: the command line, the board and
+//! bullpen web's server. `build` (install.sh runs it), `_build_board` (the background
+//! build `up` and accept start, given the build lock by fd), their rebuild_if_stale,
+//! and the catch-up of an internal command this build doesn't have yet (catch_up).
 //!
 //! bullpen's own checkout (HOME) is one cargo workspace (Cargo.toml): core/, draw/ (what
-//! both draw images with), cli/ (the command line, bin/bullpen runs it) and board/. Each
-//! program's source has a hash (its crates', draw's among them), and its build records
-//! the hash it was built from (its stamp). `up`, and an accept in
+//! both draw images with), cli/ (the command line, bin/bullpen runs it), board/ and
+//! web/. Each program's source has a hash (its crates', draw's among them), and its
+//! build records the hash it was built from (its stamp). `up`, and an accept in
 //! HOME's own repo, start a build in the background when a source no longer matches. An
 //! accept that merged into another copy of bullpen that runs from its own build starts
-//! that copy's build the same way, run by that copy (rebuild_merged_into). A
-//! running board sees its program replaced and execs the new one; a command runs the
-//! new build from its next call. A build that fails, or one skipped because the source
-//! has uncommitted changes, is one news line per source hash, and the old program keeps
-//! running. The watcher's periodic check does the same for its own copy (build_watch.rs).
+//! that copy's build the same way, run by that copy (rebuild_merged_into). A running
+//! board, or `bullpen web`, sees its program replaced and execs the new one; a command
+//! runs the new build from its next call. A build that fails, or one skipped because the
+//! source has uncommitted changes, is one news line per source hash, and the old program
+//! keeps running. The watcher's periodic check does the same for its own copy
+//! (build_watch.rs).
 
 use crate::args::{usage_error, value, Arg, Args, SUPPRESS};
 use crate::jobs::{background, Job};
@@ -68,6 +69,15 @@ pub static BOARD: Program = Program {
     what: "the board",
     keeps: "Boards keep running the old one",
     news_as: ("board", Kind::Board),
+};
+
+pub static WEB: Program = Program {
+    name: "bullpen-web",
+    package: "bullpen-web",
+    crates: &["core", "web"],
+    what: "bullpen web",
+    keeps: "A running `bullpen web` keeps running the old one",
+    news_as: ("web", Kind::Build),
 };
 
 /// The cargo workspace's build folder.
@@ -244,7 +254,7 @@ fn programs_in(h: &Path, background: bool) -> Vec<&'static Program> {
         return vec![];
     }
     let own_board = std::env::var_os("BULLPEN_BOARD").is_some_and(|b| !b.is_empty());
-    [&CLI, &BOARD]
+    [&CLI, &BOARD, &WEB]
         .into_iter()
         .filter(|p| h.join(p.crates[p.crates.len() - 1]).join("Cargo.toml").exists())
         .filter(|p| !(background && own_board && **p == BOARD))
@@ -425,10 +435,11 @@ pub(crate) fn start_rebuild(repo: &Repo, root: &Path) -> Res<Option<String>> {
     }
     drop(lock); // the job keeps it; this command's copy closes here
     let their = if stale.len() > 1 { "their source" } else { "its source" };
-    let boards = if stale.contains(&&BOARD) {
-        "; running boards reload when it's done"
-    } else {
-        ""
+    let boards = match (stale.contains(&&BOARD), stale.contains(&&WEB)) {
+        (true, true) => "; running boards and `bullpen web` reload when it's done",
+        (true, false) => "; running boards reload when it's done",
+        (false, true) => "; a running `bullpen web` reloads when it's done",
+        (false, false) => "",
     };
     Ok(Some(format!(
         "rebuilding {} in the background ({their} changed){boards}",
@@ -579,7 +590,7 @@ pub fn build(progs: Vec<&'static Program>, background: bool, nice: bool) -> Res<
     })
 }
 
-/// `build`: build bullpen's command line and the board now, whatever their source
+/// `build`: build bullpen's command line, the board and bullpen web now, whatever their source
 /// holds (install.sh runs this).
 pub fn cmd_build(argv: &[String]) -> Res<i32> {
     Args::parse("build", argv, &[]);

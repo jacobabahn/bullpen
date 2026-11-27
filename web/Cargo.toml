@@ -1,0 +1,20 @@
+[package]
+name = "bullpen-web"
+version = "0.1.0"
+edition = "2021"
+description = "bullpen web: every coordinator and task as a page, served on a Unix socket for tailscale serve"
+
+[[bin]]
+name = "bullpen-web"
+path = "src/main.rs"
+
+[dependencies]
+# the fleet snapshot, settings and the board's words
+bullpen-core = { path = "../core" }
+serde_json = { version = "1", features = ["preserve_order"] }
+# the server: routes, server-sent events and middleware, on a Unix socket (docs/prd/web.md, decision 4)
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "fs", "sync", "time", "macros"] }
+tokio-stream = { version = "0.1", features = ["sync", "time"] }
+# the state folder's changes, as the board and mission control hear them
+notify = "6.1"

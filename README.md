@@ -95,6 +95,7 @@ Requirements:
 - [Several coordinators](docs/several-coordinators.md): running more than one coordinator in a repo
 - [Several repositories](docs/several-repositories.md): working across multiple repos
 - [Mission control](docs/mission.md): every repository on one screen (`cmd+;` `m`)
+- [bullpen web](docs/web.md): every coordinator and task as a page on your tailnet, through `tailscale serve`
 
 ### Workflows and automation
 

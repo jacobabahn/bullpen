@@ -218,6 +218,18 @@ pub fn cmd_config(argv: &[String]) -> Res<i32> {
     if a.flag("--global") {
         return config_global(&a);
     }
+    let everywhere: Vec<String> = flagged()
+        .filter(|s| s.global_only)
+        .map(Setting::flag)
+        .filter(|f| a.opt(f).is_some())
+        .collect();
+    if !everywhere.is_empty() {
+        return fail(format!(
+            "{} {} for every repository at once: set it with --global",
+            everywhere.join(", "),
+            if everywhere.len() == 1 { "is" } else { "are" }
+        ));
+    }
     let mut repo = Repo::new(repo_root()?)?;
     let ch = config_changes(&a)?;
     let unset = a.all("--unset");

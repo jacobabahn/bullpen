@@ -1,12 +1,14 @@
 # Rebuilds
 
-bullpen's command line (`target/bullpen`, which `bin/bullpen` runs) and every board
-(`target/bullpen-board`) are the programs `bullpen build` (and `install.sh`) builds
-from bullpen's own checkout, the one `bin/bullpen` is in: one cargo workspace, built
-in one cargo run. Each build records a hash of the program's source (its stamp,
-`target/bullpen.json` and `target/bullpen-board.json`): the command line's is `core/`
-and `cli/` (each crate's `Cargo.toml` and `src/`), the board's `core/` and `board/`,
-and both take in the workspace's `Cargo.toml` and `Cargo.lock`. When a source no
+bullpen's command line (`target/bullpen`, which `bin/bullpen` runs), every board
+(`target/bullpen-board`) and `bullpen web`'s server (`target/bullpen-web`) are the
+programs `bullpen build` (and `install.sh`) builds from bullpen's own checkout, the
+one `bin/bullpen` is in: one cargo workspace, built in one cargo run. Each build
+records a hash of the program's source (its stamp, `target/bullpen.json`,
+`target/bullpen-board.json` and `target/bullpen-web.json`): the command line's is
+`core/` and `cli/` (each crate's `Cargo.toml` and `src/`), the board's `core/` and
+`board/`, the server's `core/` and `web/`, and each takes in the workspace's
+`Cargo.toml` and `Cargo.lock`. When a source no
 longer matches, as after accepting a task that changes it or a `git pull`, bullpen
 builds that program again in the background:
 
@@ -26,7 +28,9 @@ builds that program again in the background:
   are settings already), and says "Reloaded: the board was rebuilt." It waits while
   a command it started is running, a y/n question is open, you're typing or
   answering, or the image look is asking the terminal something (its answers would
-  reach the new board as keys). No pane is reopened.
+  reach the new board as keys). No pane is reopened. A running `bullpen web` does the
+  same: it starts the new server in its place, and the page reconnects (see [bullpen
+  web](web.md)).
 - If a program's source has uncommitted changes, it isn't built, so half-finished
   work never goes out. One news line says so.
 - If the build fails (no cargo, a compile error), the old programs keep running. One

@@ -5,8 +5,9 @@
     python3 tests/run.py board tour      # only tests whose module, class or name has one of these
     python3 tests/run.py -j 4            # 4 processes (default: one per CPU)
 
-The tests run bin/bullpen, which runs the Rust build (target/bullpen), and the fake rex
-and gh in tests/fakes (target/fake-rex, target/fake-gh): they're built first (at low
+The tests run bin/bullpen, which runs the Rust build (target/bullpen), bullpen web's
+server (target/bullpen-web), and the fake rex and gh in tests/fakes (target/fake-rex,
+target/fake-gh): they're built first (at low
 priority), and the run stops with cargo's error if that fails. Each process
 runs a few tests at a time, in a temp folder of its own (setUpModule), so
 tests that share nothing but the machine run side by side. The processes run at low
@@ -104,33 +105,34 @@ def run_chunk(names):
 
 
 def build():
-    """Build the command line the tests run and their fake rex and gh (tests/fakes),
-    unless they're built from their source as it is, and put them in place with their
-    stamps, as `bullpen build` does (holding the build lock). Exits with cargo's error
-    when the build fails."""
+    """Build the command line the tests run, bullpen web, and their fake rex and gh
+    (tests/fakes), unless they're built from their source as it is, and put them in
+    place with their stamps, as `bullpen build` does (holding the build lock). Exits
+    with cargo's error when the build fails."""
     import fcntl
     import json
     import shutil
     import subprocess
     import support
-    if support.cli_built() and support.fakes_built():
+    if support.cli_built() and support.web_built() and support.fakes_built():
         return
     root = HERE.parent
     target = root / "target"
     target.mkdir(exist_ok=True)
     argv = [str(root / "bin" / "bullpen-cargo"), "build", "--release", "--manifest-path", str(root / "Cargo.toml"),
-            "-p", "bullpen-cli", "-p", "bullpen-fakes"]
+            "-p", "bullpen-cli", "-p", "bullpen-web", "-p", "bullpen-fakes"]
     with (target / "build.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        source, fakes = support.cli_source_hash(), support.fakes_source_hash()
+        source, web, fakes = support.cli_source_hash(), support.web_source_hash(), support.fakes_source_hash()
         p = subprocess.run(["nice", *argv], cwd=root, stdin=subprocess.DEVNULL, text=True, capture_output=True)
         if p.returncode != 0:
-            sys.exit(f"bullpen's command line, or the tests' fakes, didn't build:\n\n{p.stdout}{p.stderr}")
-        for name in ("bullpen", *support.FAKES):
+            sys.exit(f"bullpen's command line, bullpen web, or the tests' fakes, didn't build:\n\n{p.stdout}{p.stderr}")
+        for name in ("bullpen", "bullpen-web", *support.FAKES):
             tmp = target / f".{name}.{os.getpid()}"  # a copy, renamed into place
             shutil.copy2(target / "release" / name, tmp)
             os.replace(tmp, target / name)
         (target / "bullpen.json").write_text(json.dumps({"source": source}, indent=2) + "\n")
+        (target / "bullpen-web.json").write_text(json.dumps({"source": web}, indent=2) + "\n")
         (target / "fakes.json").write_text(json.dumps({"source": fakes}, indent=2) + "\n")
 
 

@@ -95,6 +95,8 @@ pub struct Setting {
     pub help: &'static str,
     /// It belongs to one repository: the global config.json can't hold it.
     pub repo_only: bool,
+    /// It is for every repository at once (`bullpen web`'s): set with --global only.
+    pub global_only: bool,
     pub choices: Option<&'static [&'static str]>,
     pub least: Option<i64>,
     pub says: Option<&'static str>,
@@ -113,6 +115,7 @@ const fn base(name: &'static str, default: Val, group: Option<&'static str>, kin
         kind,
         help: "",
         repo_only: false,
+        global_only: false,
         choices: None,
         least: None,
         says: None,
@@ -179,6 +182,8 @@ pub static SETTINGS: &[Setting] = &[
     Setting { help: "what bullpen writes back to an issue: the labels `bullpen: started` and `bullpen: declined` (labels), those and a comment at start and decline (comments), or nothing (off); unless off, an accepted issue's task closes it", choices: Some(&["labels", "comments", "off"]), ..base("issues_write", Str("labels"), Some("Issues"), Choice) },
     Setting { help: "GitHub logins whose issues are trusted besides the gh account's own, separated by commas (\"\" clears it)", metavar: Some("LOGINS"), none: Some("nobody else"), clears: true, ..base("issues_trusted", Null, Some("Issues"), Text) },
     Setting { help: "a label that makes an issue trusted when the gh account's own login added it", metavar: Some("LABEL"), ..base("issues_label", Str("bullpen"), Some("Issues"), Text) },
+    Setting { help: "the Tailscale logins `bullpen web` lets in, separated by commas (\"\" clears it)", global_only: true, metavar: Some("LOGINS"), none: Some("this machine's own Tailscale login"), clears: true, ..base("web_users", Null, Some("Web"), Text) },
+    Setting { help: "the host name `bullpen web` answers to (\"\" clears it)", global_only: true, metavar: Some("NAME"), none: Some("this machine's tailnet name, from Tailscale"), clears: true, ..base("web_host", Null, Some("Web"), Text) },
     Setting { repo_only: true, ..base("coordinators", List(&[]), None, File) },
     Setting { repo_only: true, ..base("next_coordinator", Int(1), None, File) },
 ];

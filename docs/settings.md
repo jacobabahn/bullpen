@@ -1,6 +1,6 @@
 # Settings
 
-`bullpen config` lists the settings in groups (tasks, agents, review, board, news, pickup, issues),
+`bullpen config` lists the settings in groups (tasks, agents, review, board, news, pickup, issues, web),
 each with its value and where that comes from:
 `repo` (this repository's `config.json`), `global` (the one for every repository,
 `~/.config/bullpen/config.json`, or `$XDG_CONFIG_HOME/bullpen/config.json`) or
@@ -20,7 +20,11 @@ bullpen config --global --unset merge    # and the global one back to the defaul
 `--unset` takes the setting's name as `config.json` has it (`worker_model`,
 `review_rounds`). `--global` works outside a repository too. The prefix, the base
 branch, the news mode, the push remote, the issues' repository and the coordinators belong to one repository,
-so `--global` refuses `--prefix`, `--base`, `--news`, `--push-remote`, `--issues-repo`, `--risk-path` and `--board-others`. The commands
+so `--global` refuses `--prefix`, `--base`, `--news`, `--push-remote`, `--issues-repo`, `--risk-path` and `--board-others`.
+`bullpen web`'s two are for every repository at once, so they need `--global`:
+`--web-users "ann@example.com, bob@example.com"`, the Tailscale logins it lets in (unset:
+this machine's own), and `--web-host NAME`, the host name it answers to (unset: this
+machine's tailnet name; see [bullpen web](web.md#who-can-use-it)). The commands
 (`worker`, `reviewer`, `coordinator_cmd`, `tour`) have no flags: set them in either
 `config.json` by hand. `risk_paths`, the paths whose change makes a ready task's
 risk high or medium, has its own flags, for one repository only: `bullpen config

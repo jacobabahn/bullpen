@@ -73,6 +73,7 @@ mod tours;
 mod triage;
 mod up;
 mod watcher;
+mod web;
 mod whose_pane;
 
 // the tests read no settings or state of this machine's (core's isolated.rs)

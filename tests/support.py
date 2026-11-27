@@ -42,6 +42,12 @@ def cli_source_hash():
                         "cli/Cargo.toml", "cli/src"))
 
 
+def web_source_hash():
+    """The hash of bullpen web's source that its build stamp (target/bullpen-web.json)
+    records: cli/src/build.rs's source_hash, for bullpen-web."""
+    return source_hash(("Cargo.toml", "Cargo.lock", "core/Cargo.toml", "core/src", "web/Cargo.toml", "web/src"))
+
+
 def source_hash(rels):
     files = []
     for rel in rels:
@@ -85,6 +91,11 @@ def cli_built():
     return stamped("bullpen", cli_source_hash(), ["bullpen"])
 
 
+def web_built():
+    """Is target/bullpen-web built from bullpen web's source as it is?"""
+    return stamped("bullpen-web", web_source_hash(), ["bullpen-web"])
+
+
 def fakes_built():
     """Are the fake rex and gh (target/fake-rex, target/fake-gh) built from their source as it is?"""
     return stamped("fakes", fakes_source_hash(), FAKES)
@@ -97,6 +108,9 @@ def check_build():
         return
     if not cli_built():
         raise RuntimeError("bullpen's command line isn't built from its source as it is: "
+                           "run the tests with tests/run.py (it builds first), or run `bin/bullpen build`")
+    if not web_built():
+        raise RuntimeError("bullpen web isn't built from its source as it is: "
                            "run the tests with tests/run.py (it builds first), or run `bin/bullpen build`")
     if not fakes_built():
         raise RuntimeError("the tests' fake rex and gh (tests/fakes) aren't built from their source as it is: "

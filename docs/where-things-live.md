@@ -40,3 +40,5 @@
 - What each worker, reviewer and coordinator is doing, for the board and mission control:
   `~/.local/state/bullpen/doing/<pane>.json`, written by the watcher (at most every 3
   seconds a pane, no news) and removed with the pane.
+- `bullpen web`'s socket and its log of refused requests: `~/.local/state/bullpen/web.sock`
+  and `web.log` beside it. See [bullpen web](web.md).

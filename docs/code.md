@@ -28,19 +28,20 @@ docs/tests.md); their fake Rex and fake gh are Rust (`tests/fakes/`, BP-138).
 - The Rust is one cargo workspace (`Cargo.toml`, one `Cargo.lock`, built into
   `target/`): `core/` (`bullpen-core`: tasks, config, wording, what the command line
   and the board share), `cli/` (`bullpen-cli`, the program `bullpen`), `board/`,
-  `draw/` (`bullpen-draw`: what the board's image look and the drawn tour draw with)
+  `web/` (`bullpen-web`, the server `bullpen web` runs: docs/web.md), `draw/` (`bullpen-draw`: what the board's image look and the drawn tour draw with)
   and `tests/fakes/` (`bullpen-fakes`, the tests' fake `rex` and `gh`; only
   `tests/run.py` builds it).
-  `core` never depends on `cli`; the board depends on `core`, the board and `cli` on
-  `draw`. The crates are `serde_json` (with `preserve_order`), `chrono`, `libc` and
+  `core` never depends on `cli`; the board and `web` depend on `core`, the board and
+  `cli` on `draw`. The crates are `serde_json` (with `preserve_order`), `chrono`, `libc` and
   `unicode-width` (the board's too, and ratatui's); ask before adding one. The board has
-  ratatui's and its own besides. `draw` has the image look's: `tiny-skia` (drawing),
+  ratatui's and its own besides, and `web` its server's: `axum`, `tokio`, `tokio-stream`
+  and `notify` (the board's too). `draw` has the image look's: `tiny-skia` (drawing),
   `ttf-parser` (fonts) and `miniz_oxide` (its PNGs' zlib), and its fonts in
   `draw/fonts/` with their licences (Inter, and JetBrains Mono for the tour's code,
   both SIL Open Font License; JetBrains Mono is 204 KB of the program). The board and
   `cli` use `tiny-skia` too. A module's Rust tests are in a `tests/` folder
   beside it, as `test_<module>.rs`. rustfmt with `max_width = 120` (`rustfmt.toml`)
-  for `core`, `cli` and `tests/fakes`; the board and `draw` aren't formatted yet.
+  for `core`, `cli`, `web` and `tests/fakes`; the board and `draw` aren't formatted yet.
 - The files bullpen writes (tasks, config, news, stamps) are as the Python wrote them:
   JSON as Python's `json` (indent 2, ASCII only, keys in order), stamps as `isoformat`,
   cuts as Python's. Comments that say "as Python's" name what's kept. The width of text
