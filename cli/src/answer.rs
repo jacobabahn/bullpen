@@ -114,6 +114,10 @@ pub fn cmd_prompt(argv: &[String]) -> Res<i32> {
 /// prompt (--prompt, its id from `prompt`).
 pub fn cmd_answer(argv: &[String]) -> Res<i32> {
     let a = Args::parse("answer", argv, ANSWER);
+    if a.arg("id").is_none() && a.opt("--coordinator").is_none() {
+        // a lone positional is taken as the key: the task's ID was given, its key wasn't
+        usage_error("answer", ANSWER, "the following arguments are required: key");
+    }
     let (_, whose, agent) = at_prompt("answer", ANSWER, &a)?;
     let p = agent.question()?;
     let Some(p) = p.filter(|p| a.opt("--prompt").is_none_or(|want| p.id == want)) else {

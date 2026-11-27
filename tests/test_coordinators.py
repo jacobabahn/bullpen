@@ -124,6 +124,7 @@ class CoordinatorsTest(BullpenTest):
         p = self.bp("prompt", "BP-1", "--coordinator", "c1", ok=False)
         self.assertIn("give a task's ID or --coordinator, not both", p.stderr)
         self.assertIn("required: id", self.bp("peek", ok=False).stderr)
+        self.assertIn("required: key", self.bp("answer", "BP-1", ok=False).stderr)  # its key forgotten
         (self.fake / "alive" / other).unlink()
         p = self.bp("prompt", "--coordinator", "c2", ok=False)
         self.assertIn("c2's pane in proj is gone", p.stderr)
