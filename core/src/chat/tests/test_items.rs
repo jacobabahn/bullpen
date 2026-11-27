@@ -532,3 +532,103 @@ fn pressing_esc_is_an_interruption_not_a_message() {
     assert_eq!(chat.items()[1].json()["text"], "Interrupted");
     assert_eq!(chat.items()[0].json()["calls"][0]["state"], "failed");
 }
+
+#[test]
+fn news_after_a_monitors_diff_is_news_where_the_hunks_end() {
+    // as a monitor brought it (a coordinator's, 2026-11-15): lines trimmed and blank
+    // ones dropped, so the first hunk is a line short; quoted news lines inside a
+    // hunk, and `- ` list items kept as context, stay in the diff
+    let notice = "<task-notification>\n<summary>Monitor event: \"bullpen news\"</summary>\n\
+        <event>bullpen · BP-136 accepted (merged into main, rebase)\n\
+        bullpen · Your coordinator guide changed (section: Review). Read the change below and follow it from now on:\n\
+        --- guide (yours)\n+++ guide (now)\n@@ -102,7 +102,8 @@\n\
+        moved\"): the news says so.\nconflicted, a change only in the conflicting files\n\
+        resolution (cheap, not a round).\n-resolution\". Conflicts where both sides\n\
+        +resolution\"; a bigger change after the rebase\n+checks only that it still fits.\n\
+        bullpen resolves itself by keeping both.\nA task whose result lives outside the repository\n\
+        bullpen · BP-137 accepted (merged into main, rebase)\n\
+        bullpen · Your coordinator guide changed (section: News). Read the change below and follow it from now on:\n\
+        --- guide (yours)\n+++ guide (now)\n@@ -237,6 +237,7 @@\n```\n\
+        bullpen · BP-3 is ready: Fix login redirect\n+bullpen · BP-10 is ready: Add a --json flag\n\
+        bullpen · BP-3 is ready again after a rebase\nbullpen · BP-4 is ready again after a rebase\n\
+        bullpen · BP-8 is ready: Tidy the README\n@@ -311,4 +312,5 @@\n\
+        - Ready: tell the person in one or two lines\n(`bullpen show &lt;ID&gt;` has the summary)\n\
+        +  \"approved by review with 2 notes\"\n- Finished (nothing to merge): tell the person\n\
+        waits for them to close it.\nbullpen · BP-138 is ready: Board polish</event>\n</task-notification>";
+    let mut chat = Chat::new();
+    feed(&mut chat, &[user("n1", notice)]);
+    let news = of_kind(&chat, "news");
+    let firsts: Vec<&str> = news
+        .iter()
+        .map(|n| n["text"].as_str().unwrap().lines().next().unwrap())
+        .collect();
+    assert_eq!(
+        firsts,
+        [
+            "BP-136 accepted (merged into main, rebase)",
+            "Your coordinator guide changed (section: Review). Read the change below and follow it from now on:",
+            "BP-137 accepted (merged into main, rebase)",
+            "Your coordinator guide changed (section: News). Read the change below and follow it from now on:",
+            "BP-138 is ready: Board polish",
+        ]
+    );
+    let tasks: Vec<&Value> = news.iter().map(|n| &n["task"]).collect();
+    assert_eq!(
+        tasks,
+        [
+            &json!("BP-136"),
+            &Value::Null,
+            &json!("BP-137"),
+            &Value::Null,
+            &json!("BP-138")
+        ]
+    );
+    let review = news[1]["text"].as_str().unwrap();
+    assert!(
+        review.ends_with("\nA task whose result lives outside the repository"),
+        "{review}"
+    );
+    let guide = news[3]["text"].as_str().unwrap();
+    assert!(guide.contains("\nbullpen · BP-8 is ready: Tidy the README\n@@ -311,4 +312,5 @@\n- Ready"));
+    assert!(guide.ends_with("\nwaits for them to close it."), "{guide}");
+}
+
+#[test]
+fn news_after_a_stop_hooks_diff_opens_its_line() {
+    // as a Stop hook handed it (a coordinator's, 2026-11-15): the diff's lines keep
+    // their leading ` `, `+` or `-`, so news opens a line only after the diff
+    let hook = "<task-notification>\n<summary>Stop hook feedback</summary>\n</task-notification>\n<system-reminder>\n\
+        Stop hook blocking error from command \"Stop\": bullpen · BP-174 accepted (merged into main, rebase)\n\
+        bullpen · Your coordinator guide changed (section: Triage). Read the change below and follow it from now on:\n\
+        --- guide (yours)\n+++ guide (now)\n@@ -176,4 +176,5 @@\n\
+        \x20  round with `changes`, `ready` ran and the findings didn't reach it\n\
+        -  A technical dead end you can resolve: `bullpen tell` it how.\n\
+        +  A technical dead end you can resolve: `bullpen tell` it how. A line that says\n\
+        +  it `ended its turn with a question: \"...\"` quotes the worker's own question\n\
+        \x20bullpen · BP-9 dropped\n\
+        \x20- A message didn't reach its worker\n\
+        bullpen · BP-176 accepted (merged into main, rebase)\n\
+        bullpen · After BP-176: BP-177 rebased; its approval carried over.\n\n</system-reminder>";
+    let mut chat = Chat::new();
+    feed(&mut chat, &[user("n1", hook)]);
+    let news = of_kind(&chat, "news");
+    let firsts: Vec<&str> = news
+        .iter()
+        .map(|n| n["text"].as_str().unwrap().lines().next().unwrap())
+        .collect();
+    assert_eq!(
+        firsts,
+        [
+            "BP-174 accepted (merged into main, rebase)",
+            "Your coordinator guide changed (section: Triage). Read the change below and follow it from now on:",
+            "BP-176 accepted (merged into main, rebase)",
+            "After BP-176: BP-177 rebased; its approval carried over.",
+        ]
+    );
+    let guide = news[1]["text"].as_str().unwrap();
+    assert!(
+        guide.ends_with("\n bullpen · BP-9 dropped\n - A message didn't reach its worker"),
+        "{guide}"
+    );
+    assert_eq!(news[3]["task"], "BP-176");
+}

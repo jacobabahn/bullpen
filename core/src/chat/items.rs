@@ -375,45 +375,115 @@ fn news(line: &str) -> Kind {
 /// The news in a notice: a monitor's `<event>…</event>`, or what a Stop hook hands a
 /// coordinator after "Stop hook blocking error from command …: ". In either, a news
 /// line starts where `bullpen · ` opens a line, and the lines after it, up to the
-/// next, are its own: once a diff starts (a guide change's), every line up to the
-/// block's end is the diff's, whatever it starts with.
+/// next, are its own. A guide change's diff is its line's until its hunks end, even
+/// where its lines quote news: the Stop hook keeps a diff line's leading ` `, `+` or
+/// `-`, so news there is any line that opens with `bullpen · `; a monitor trims its
+/// lines and drops blank ones, so there the hunks' line counts say where the diff
+/// ends, allowing for one dropped blank line.
 fn news_in(text: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.lines().collect();
     let mut out: Vec<String> = vec![];
-    // in a block; its news line is the last one out; that line's diff has started
-    let (mut open, mut mine, mut diff) = (false, false, false);
-    for raw in text.lines() {
-        let mut line = raw;
-        if let Some(rest) = block_start(line) {
-            (open, mine, diff, line) = (true, false, false, rest);
-        } else if !open {
-            continue;
+    // the block's form, while in one; its news line is the last one out
+    let (mut form, mut mine, mut diff) = (None, false, Diff::No);
+    for (i, raw) in lines.iter().enumerate() {
+        let mut line = *raw;
+        if let Some((f, rest)) = block_start(line) {
+            (form, mine, diff, line) = (Some(f), false, Diff::No, rest);
         }
+        let Some(f) = form else { continue };
         let (line, closes) = match BLOCK_ENDS.iter().find_map(|end| line.find(end)) {
             Some(p) => (&line[..p], true),
             None => (line, false),
         };
-        if !diff && line.starts_with(NEWS) {
+        let next = if closes {
+            ""
+        } else {
+            lines.get(i + 1).copied().unwrap_or("")
+        };
+        if opens_news(line, f, &diff, next) {
             out.push(line.to_string());
-            mine = true;
+            (mine, diff) = (true, Diff::No);
         } else if let Some(last) = out.last_mut().filter(|_| mine) {
-            diff |= ["--- ", "+++ ", "@@ "].iter().any(|d| line.starts_with(d));
+            diff = diff.after(line);
             last.push('\n');
             last.push_str(line);
         }
-        open &= !closes;
+        if closes {
+            form = None;
+        }
     }
     out.iter().map(|n| unescape(n.trim_end())).collect()
 }
 
-/// Where a block of news starts on this line: what follows `<event>`, or the Stop
-/// hook's "…from command "Stop": ".
-fn block_start(line: &str) -> Option<&str> {
+/// How a block brings its lines: a monitor's event trims each and drops blank ones;
+/// the Stop hook passes them as they are.
+#[derive(Clone, Copy)]
+enum Form {
+    Monitor,
+    Hook,
+}
+
+/// Where a news line's guide diff is.
+#[derive(Debug, PartialEq)]
+enum Diff {
+    /// none has started, or it has ended
+    No,
+    /// its `---` and `+++` lines, before a hunk
+    Header,
+    /// in a hunk, with this many lines of the old side (kept or removed) to come
+    Hunk(u32),
+}
+
+impl Diff {
+    fn after(self, line: &str) -> Diff {
+        if line.starts_with("@@ ") {
+            // a header that can't be read runs to the block's end
+            return Diff::Hunk(old_lines(line).unwrap_or(u32::MAX));
+        }
+        match self {
+            Diff::No if line.starts_with("--- ") || line.starts_with("+++ ") => Diff::Header,
+            Diff::No => Diff::No,
+            Diff::Header => Diff::Header,
+            Diff::Hunk(n) if line.starts_with('+') || line.starts_with('\\') => Diff::Hunk(n),
+            Diff::Hunk(0) => Diff::No.after(line),
+            Diff::Hunk(n) => Diff::Hunk(n - 1),
+        }
+    }
+}
+
+/// Whether this line opens a news line, `next` being the block's line after it.
+fn opens_news(line: &str, form: Form, diff: &Diff, next: &str) -> bool {
+    if !line.starts_with(NEWS) {
+        return false;
+    }
+    match (form, diff) {
+        (Form::Hook, _) | (_, Diff::No | Diff::Header | Diff::Hunk(0)) => true,
+        // one line to come may be a blank one the monitor dropped, unless the hunk
+        // plainly goes on
+        (Form::Monitor, Diff::Hunk(1)) => !(next.starts_with("@@ ") || next.starts_with('+')),
+        (Form::Monitor, Diff::Hunk(_)) => false,
+    }
+}
+
+/// The old side's line count in a hunk header: 7 in `@@ -102,7 +102,8 @@`, 1 in
+/// `@@ -5 +5 @@`.
+fn old_lines(header: &str) -> Option<u32> {
+    let old = header.strip_prefix("@@ -")?.split(' ').next()?;
+    match old.split_once(',') {
+        Some((_, n)) => n.parse().ok(),
+        None => old.parse::<u32>().ok().map(|_| 1),
+    }
+}
+
+/// Where a block of news starts on this line, and the block's form: what follows
+/// `<event>`, or the Stop hook's "…from command "Stop": ".
+fn block_start(line: &str) -> Option<(Form, &str)> {
     if let Some(p) = line.find("<event>") {
-        return Some(&line[p + "<event>".len()..]);
+        return Some((Form::Monitor, &line[p + "<event>".len()..]));
     }
     let p = line.find(STOP_HOOK)?;
     let after = &line[p + STOP_HOOK.len()..];
-    after.find(": ").map(|q| &after[q + 2..])
+    after.find(": ").map(|q| (Form::Hook, &after[q + 2..]))
 }
 
 const STOP_HOOK: &str = "Stop hook blocking error from command ";
