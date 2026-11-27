@@ -105,6 +105,7 @@ class TriageTest(BullpenTest):
         self.assertEqual(p["options"], [["1", "Yes"], ["2", "Yes, and always allow access to /tmp/x"],
                                         ["3", "No"]])
         self.assertIn(" touch hello.txt", p["screen"])
+        self.assertFalse(p["draft"])  # the menu's ❯ isn't a half-typed input
         self.assertIn("--format=vt", [a for a in self.rex_calls() if a[0] == "capture"][-1])
         # answered in its pane meanwhile: the screen shows no prompt now
         (self.fake / f"screen_{blk}").write_text("● Done.\n\n❯ \n")

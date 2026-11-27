@@ -33,18 +33,25 @@ pub fn cmd_say(argv: &[String]) -> Res<i32> {
         return fail("say what? give the words to type");
     }
     let block = std::env::var("REX_BLOCK").unwrap_or_default();
-    let mut repo = repo_or_here(a.opt("--repo").unwrap_or(""), &block)?;
+    let repo = repo_or_here(a.opt("--repo").unwrap_or(""), &block)?;
     let cid = which(&repo, a.opt("--coordinator").unwrap_or(""))?;
     if calling_coordinator(&repo).is_some_and(|c| s(c, "id") == cid) {
         return fail(format!("this is {cid}'s own pane: type it here"));
     }
-    if !alive(coordinator(&repo, &cid))? {
-        // after a Rex restart its ID changed (and maybe its session's)
-        let stored = coordinator(&repo, &cid).map(|c| s(c, "session").to_string());
+    let (repo, c) = running(repo, &cid)?;
+    say_to(&repo, &c, &text)
+}
+
+/// Coordinator cid's entry, its pane running: after a Rex restart its pane is found
+/// again first (its ID changed, and maybe its session's), so the repo comes back read
+/// anew. Fails when its pane is gone.
+pub fn running(mut repo: Repo, cid: &str) -> Res<(Repo, Obj)> {
+    if !alive(coordinator(&repo, cid))? {
+        let stored = coordinator(&repo, cid).map(|c| s(c, "session").to_string());
         relink(&mut repo, &stored.unwrap_or_default())?;
         repo = Repo::new(&repo.root)?;
     }
-    let c = match coordinator(&repo, &cid) {
+    let c = match coordinator(&repo, cid) {
         Some(c) if alive(Some(c))? => c.clone(),
         _ => {
             return fail(format!(
@@ -53,11 +60,11 @@ pub fn cmd_say(argv: &[String]) -> Res<i32> {
             ))
         }
     };
-    say_to(&repo, &c, &text)
+    Ok((repo, c))
 }
 
-/// The coordinator to say it to: the one named, else the repo's only one.
-fn which(repo: &Repo, named: &str) -> Res<String> {
+/// The coordinator named, else the repo's only one.
+pub fn which(repo: &Repo, named: &str) -> Res<String> {
     let ids: Vec<&str> = coordinators(repo).iter().map(|c| s(c, "id")).collect();
     let name = repo.name();
     if ids.is_empty() {

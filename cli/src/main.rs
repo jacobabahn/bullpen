@@ -72,6 +72,7 @@ mod tours;
 mod triage;
 mod up;
 mod watcher;
+mod whose_pane;
 
 // the tests read no settings or state of this machine's (core's isolated.rs)
 bullpen_core::isolate_tests!();

@@ -70,6 +70,64 @@ class CoordinatorsTest(BullpenTest):
         p = self.bp("say", "hi", ok=False)
         self.assertIn("c1's pane in proj is gone: `bullpen up` there starts a coordinator again", p.stderr)
 
+    COORDINATOR_PROMPT = "● Bash(git push)\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel\n"
+
+    def test_a_coordinator_at_a_prompt_is_read_and_answered_from_another_repo(self):
+        self.bp("up")
+        (self.fake / "screen_blk1").write_text(self.COORDINATOR_PROMPT)
+        shop = self.other_repo("shop")
+        on = ("--coordinator", "c1", "--repo", str(self.repo))
+        p = json.loads(self.bp("prompt", *on, cwd=shop).stdout)
+        self.assertEqual(list(p), ["who", "question", "options", "id", "screen", "draft"])
+        self.assertEqual((p["who"], p["question"], p["options"]),
+                         ("coordinator", "Do you want to proceed?", [["1", "Yes"], ["2", "No"]]))
+        self.assertIn("● Bash(git push)", p["screen"])
+        self.assertFalse(p["draft"])  # a menu's ❯ isn't the input box
+        self.assertIn("● Bash(git push)", self.bp("peek", *on, cwd=shop).stdout)
+        out = self.bp("answer", *on, "2", "--prompt", p["id"], cwd=shop).stdout
+        self.assertEqual(out, "answered c1 in proj: 2 (No)\n")
+        self.assertEqual(self.typed()[-1], ("blk1", "2"))
+
+    def test_a_coordinators_stale_prompt_is_refused(self):
+        self.bp("up")
+        (self.fake / "screen_blk1").write_text(self.COORDINATOR_PROMPT)
+        pid = json.loads(self.bp("prompt", "--coordinator", "c1").stdout)["id"]
+        sent = len(self.typed())
+        (self.fake / "screen_blk1").write_text(self.COORDINATOR_PROMPT.replace("git push", "git push -f"))
+        p = self.bp("answer", "--coordinator", "c1", "1", "--prompt", pid, ok=False)
+        self.assertIn("c1 in proj isn't at that prompt any more: nothing was sent", p.stderr)
+        (self.fake / "screen_blk1").write_text("● Done.\n\n❯ \n")
+        p = json.loads(self.bp("prompt", "--coordinator", "c1").stdout)
+        self.assertEqual((p["question"], p["options"], p["id"]), (None, [], None))
+        self.assertNotEqual(self.bp("answer", "--coordinator", "c1", "1", ok=False).returncode, 0)
+        self.assertEqual(len(self.typed()), sent)
+
+    def test_prompts_draft_is_what_is_typed_after_the_input_boxs_mark(self):
+        self.bp("up")
+        box = "● Done.\n\n────────\n{}\n────────\n  ? for shortcuts\n"
+
+        def draft(line):
+            (self.fake / "screen_blk1").write_text(box.format(line))
+            return json.loads(self.bp("prompt", "--coordinator", "c1").stdout)["draft"]
+        self.assertTrue(draft("❯ half a message"))
+        self.assertFalse(draft("❯ "))
+        self.assertFalse(draft("❯ \x1b[2mTry \"fix the tests\"\x1b[0m"))  # Claude Code's dim suggestion
+        self.assertTrue(draft("❯ more\x1b[2m than a suggestion\x1b[0m"))
+
+    def test_a_coordinators_pane_is_named_rightly(self):
+        other = self.two_coordinators()
+        self.assertEqual(json.loads(self.bp("prompt", "--coordinator", "c2").stdout)["who"], "coordinator")
+        p = self.bp("peek", "--coordinator", "c7", ok=False)
+        self.assertIn("proj has no coordinator c7; it has c1, c2", p.stderr)
+        p = self.bp("peek", "--coordinator", "c1", "--review", ok=False)
+        self.assertIn("--review is a task's reviewer: not with --coordinator", p.stderr)
+        p = self.bp("prompt", "BP-1", "--coordinator", "c1", ok=False)
+        self.assertIn("give a task's ID or --coordinator, not both", p.stderr)
+        self.assertIn("required: id", self.bp("peek", ok=False).stderr)
+        (self.fake / "alive" / other).unlink()
+        p = self.bp("prompt", "--coordinator", "c2", ok=False)
+        self.assertIn("c2's pane in proj is gone", p.stderr)
+
     def test_board_others_is_a_setting_per_board(self):
         other = self.two_coordinators()
         self.assertNotIn("board_others", self.coordinators()[0])  # off by default

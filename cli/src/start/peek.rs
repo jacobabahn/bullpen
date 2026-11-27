@@ -1,16 +1,18 @@
 //! `peek`: the end of a worker's screen (start.py's cmd_peek), or of its reviewer's
-//! (`peek --review`).
+//! (`peek --review`), or of a coordinator's (`peek --coordinator c1`).
 
 use crate::args::{flag, pos, usage_error, value, Arg, Args, Nargs};
+use crate::whose_pane::{named, Pane, COORDINATOR, REPO};
 use bullpen_core::json::s;
-use bullpen_core::repo::repo_root;
-use bullpen_core::{fail, Repo, Res};
+use bullpen_core::{fail, Res};
 
 const PEEK: &[Arg] = &[
-    pos("id", Nargs::One, "the task, like BP-3"),
+    pos("id", Nargs::Maybe, "the task, like BP-3 (none with --coordinator)"),
     value("--lines", "LINES", "how many lines (default 40)"),
     flag("--vt", "keep the screen's colours, as terminal escape codes"),
     flag("--review", "the task's reviewer, not its worker"),
+    COORDINATOR,
+    REPO,
 ];
 
 /// Python's int() of a str: digits (single underscores between them), a sign, and
@@ -34,7 +36,8 @@ pub fn py_int(text: &str) -> Option<i64> {
     Some(if neg { -n } else { n })
 }
 
-/// `peek`: print the end of a worker's screen, or with --review of its reviewer's.
+/// `peek`: print the end of a worker's screen, or with --review of its reviewer's, or
+/// with --coordinator of a coordinator's.
 pub fn cmd_peek(argv: &[String]) -> Res<i32> {
     let a = Args::parse("peek", argv, PEEK);
     let n = match a.opt("--lines") {
@@ -44,9 +47,15 @@ pub fn cmd_peek(argv: &[String]) -> Res<i32> {
             None => usage_error("peek", PEEK, &format!("argument --lines: invalid int value: '{v}'")),
         },
     };
-    let repo = Repo::new(repo_root()?)?;
-    let t = repo.task(a.arg("id").unwrap_or(""))?;
     let review = a.flag("--review");
+    if review && a.opt("--coordinator").is_some() {
+        usage_error("peek", PEEK, "--review is a task's reviewer: not with --coordinator");
+    }
+    let t = match named("peek", PEEK, &a)? {
+        (_, Pane::Task(t)) => t,
+        // running: named found it so
+        (_, Pane::Coordinator(_, agent)) => return show(&a, &agent, n),
+    };
     let agent = crate::agents::agent(&t, if review { "reviewer" } else { "worker" });
     if review && agent.id.is_empty() {
         return fail(format!("{} has no reviewer running", s(&t, "id")));
@@ -55,6 +64,11 @@ pub fn cmd_peek(argv: &[String]) -> Res<i32> {
         let whose = if review { "reviewer" } else { "agent" };
         return fail(format!("{}'s {whose} isn't running", s(&t, "id")));
     }
+    show(&a, &agent, n)
+}
+
+/// Print the last n lines of agent's screen.
+fn show(a: &Args, agent: &crate::host::Agent, n: i64) -> Res<i32> {
     println!("{}", agent.read_end(n, a.flag("--vt"))?.join("\n"));
     Ok(0)
 }

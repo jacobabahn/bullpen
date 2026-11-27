@@ -22,6 +22,7 @@ bullpen repos         # every repository, a line each: its coordinators (working
 bullpen peek BP-1     # the end of the worker's screen (`--review`: its reviewer's)
 bullpen prompt BP-1   # the prompt its worker (or reviewer) is at, and its screen, as JSON
 bullpen answer BP-1 2 # press option 2 of that prompt (or y, n), as you would in its pane
+bullpen prompt --coordinator c1 --repo ~/shop   # the same for a coordinator's own pane (peek and answer too)
 bullpen reply BP-1 "Postgres"   # answer the coordinator's `ask`: it goes to the coordinator
 bullpen say "Start BP-4 next"   # type a message to the coordinator (--repo PATH, --coordinator c2)
 bullpen diff BP-1     # its changes against its base, in a pager (--stat: just the files)
@@ -122,6 +123,18 @@ the title a commit's subject on the base, where `BP-3` means nothing. Its descri
 the worker's summary, and its last line, `Bullpen task BP-3.`, names the task. Bullpen
 finds a task's PR from the URL on the task's record, never from its title. A PR opened
 before this keeps the title it has (`<title> (BP-3)`): nothing renames an open one.
+
+`bullpen prompt BP-1` prints `{who, question, options, id, screen, draft}` as JSON:
+who is at the prompt (`worker` or `reviewer`), the question and its options as
+`[key, label]` pairs (null and `[]` when the screen shows none now), the prompt's
+`id`, the end of the screen in colour (`--lines`, 40 by default), and `draft`: true
+when something is typed after `❯` in the agent's input box, false when it's empty,
+shows only Claude Code's dim suggestion, or a question is up (there is no input box
+then). It refuses a task that isn't stopped at a prompt. `bullpen answer BP-1 2
+--prompt <id>` presses option 2, and sends nothing unless the screen still shows that
+prompt. `--coordinator c1` (with `--repo PATH` for another repository's) works on that
+coordinator's own pane in place of a task's: `prompt` reads it as it is (`who` is
+`coordinator`), and `peek` and `answer` as for a worker.
 
 `bullpen tell` says who is typing. Run from a coordinator's own pane it types
 `Coordinator: ` before the words; from anywhere else (your shell, the board, the

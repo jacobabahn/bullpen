@@ -111,7 +111,7 @@ bare 403. A task or coordinator is named by its repository's name and its ID
 | `GET /` | the page (and `/app.js`, `/app.css`) |
 | `GET /api/fleet` | the snapshot: `bullpen repos --json`'s shape, plus each task's group (`needs`, `active`, `done`) and the closed tasks of the last two days |
 | `GET /api/chat/{repo}/{id}?who=&before=` | `{agent, source, items, cursor, more}`: the last 200 items (`before`: the 200 before an item), the transcript's `source` (`recorded`, `title` or `none`), and `cursor`, the byte offset read to |
-| `GET /api/prompt/{repo}/{id}` | `bullpen prompt` (its JSON, with W2's `draft`): `{who, question, options, id, screen, draft}`; `who` is whichever agent is at the prompt |
+| `GET /api/prompt/{repo}/{id}` | `bullpen prompt` (its JSON, with W2's `draft`): `{who, question, options, id, screen, draft}`; `who` is whichever agent is at the prompt (`coordinator` for a coordinator's, with `--coordinator`) |
 | `GET /api/screen/{repo}/{id}?who=` | `{lines, at}`: the end of the pane's screen as HTML spans |
 | `GET /api/diff/{repo}/{id}` | `bullpen diff ID` as `{files: [{path, added, removed, hunks}]}` |
 | `GET /api/tour/{repo}/{id}[?step=N]` | `bullpen tour ID --show --json`, or `--step N --json` |
@@ -285,8 +285,10 @@ options that are buttons large enough for a thumb, each with its key.
     the composer still writes to the worker, as the board's `t` does. Text sent shows
     as a faint bubble until its `user` record (or Claude Code's queue record) arrives.
 18. **Never into a half-typed input.** `say` already waits for an empty input (the
-    outbox). `tell` doesn't look; the page asks `prompt`'s new `draft` first and, with
-    something half-typed in the pane, says so and sends nothing.
+    outbox). `tell` doesn't look, and `prompt` (with its new `draft`) refuses a task
+    that isn't stopped at a prompt, so W7 has `tell` look first (the host's
+    `has_draft`, as `say` does): with something half-typed in the pane, the page says
+    so and sends nothing.
 19. **One line.** A line break in what you type is sent as a space in v1 (as a paste on
     the board is), since typing a line break into the pane would send it early.
 
